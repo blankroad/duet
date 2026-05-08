@@ -7,17 +7,17 @@
 
 **완료 조건**: 로컬 파일시스템에서 듀얼 패널이 동작하고 디렉토리 탐색 가능.
 
-- [ ] Tauri 프로젝트 부트스트랩 (Vite + React + TypeScript)
-- [ ] Tailwind + shadcn/ui 셋업, 다크/라이트 모드
-- [ ] `FileSystem` trait + `LocalFs` 기본 구현
-- [ ] `commands/list_directory` 첫 IPC
-- [ ] 듀얼 패널 컴포넌트 (`<Pane>`)
-- [ ] 가상 스크롤 적용 (`@tanstack/react-virtual`)
-- [ ] 키보드 네비 (↑↓, Enter, Backspace, Tab)
-- [ ] 활성 패널 표시
-- [ ] 사이드바 토글 (Ctrl+B)
-- [ ] 상태바 (선택 정보)
-- [ ] Ctrl+Q 종료
+- [x] Tauri 프로젝트 부트스트랩 (Vite + React + TypeScript)
+- [x] Tailwind + shadcn/ui 셋업, 다크/라이트 모드
+- [x] `FileSystem` trait + `LocalFs` 기본 구현
+- [x] `commands/list_directory` 첫 IPC
+- [x] 듀얼 패널 컴포넌트 (`<Pane>`)
+- [x] 가상 스크롤 적용 (`@tanstack/react-virtual`)
+- [x] 키보드 네비 (↑↓, Enter, Backspace, Tab)
+- [x] 활성 패널 표시
+- [x] 사이드바 토글 (Ctrl+B)
+- [x] 상태바 (선택 정보)
+- [x] Ctrl+Q 종료
 
 **완료 시 일상 사용**: 로컬 파일 탐색용 (read-only).
 
@@ -122,7 +122,7 @@
 
 ## 현재 단계
 
-**MVP-0 시작 직전.** 스캐폴드 완료, 코드 작성 대기 중.
+**MVP-1 시작 직전.** MVP-0 완료, 본인 일상에서 read-only 탐색용으로 사용 가능.
 
 ## 단계 변경 규칙
 
