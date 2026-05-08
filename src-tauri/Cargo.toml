@@ -75,5 +75,8 @@ lto = true
 opt-level = 3
 strip = true
 
+[dev-dependencies]
+tempfile = "3"
+
 [profile.dev]
 opt-level = 1            # SSH/암호화 코드가 debug에서 너무 느림
