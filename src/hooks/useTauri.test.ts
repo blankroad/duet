@@ -42,5 +42,19 @@ describe("useTauri", () => {
       await result.current.call({ source: { kind: "local" }, path: "/nope" }).catch(() => {});
     });
     expect(result.current.error).toEqual({ kind: "NotFound", message: "nope" });
+    expect(result.current.data).toBeNull();
+  });
+
+  it("wraps IPC rejection as IpcError", async () => {
+    const { commands } = await import("@/types/bindings");
+    (commands.listDirectory as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error("channel closed"),
+    );
+    const { result } = renderHook(() => useTauri("listDirectory"));
+    await act(async () => {
+      await result.current.call({ source: { kind: "local" }, path: "/" }).catch(() => {});
+    });
+    expect(result.current.error?.kind).toBe("IpcError");
+    expect(result.current.error?.message).toContain("channel closed");
   });
 });
