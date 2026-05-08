@@ -1,9 +1,3 @@
-//! Tauri IPC 진입점. 프론트엔드와의 유일한 통신 채널.
+//! Tauri command 진입점. 얇게 유지 — 로직은 services/core/fs로 위임.
 
-// TODO:
-// pub mod connection;
-// pub mod pane;
-// pub mod fs;
-// pub mod task;
-// pub mod undo;
-// pub mod config;
+pub mod pane;

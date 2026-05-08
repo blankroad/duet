@@ -29,9 +29,8 @@ pub fn run() {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    let specta_builder = Builder::<tauri::Wry>::new()
-        // commands는 다음 Task에서 추가
-        .commands(collect_commands![]);
+    let specta_builder =
+        Builder::<tauri::Wry>::new().commands(collect_commands![commands::pane::list_directory,]);
 
     #[cfg(debug_assertions)]
     {
