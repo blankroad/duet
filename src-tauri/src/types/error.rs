@@ -10,6 +10,7 @@ use thiserror::Error;
 /// Tauri command에서 반환되는 최상위 에러 타입.
 #[derive(Debug, Error, Serialize, Type)]
 #[serde(tag = "kind", content = "message")]
+#[non_exhaustive]
 pub enum DuetError {
     #[error("not found: {0}")]
     NotFound(String),

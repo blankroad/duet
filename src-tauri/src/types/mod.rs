@@ -48,9 +48,13 @@ pub struct EntryRef {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "lowercase")]
 pub enum EntryKind {
+    /// 일반 파일.
     File,
+    /// 디렉토리.
     Dir,
+    /// 심볼릭 링크 (target 정보는 별도 메타데이터).
     Symlink,
+    /// 디바이스, FIFO, 소켓 등 위 셋이 아닌 것.
     Other,
 }
 
@@ -72,6 +76,8 @@ pub struct Entry {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "lowercase")]
 pub enum DeleteMode {
+    /// 휴지통 이동 (디폴트). undo 가능.
     Trash,
+    /// 영구 삭제. 설정에서 명시적으로 활성화 + 단어 타이핑 확인 필요. undo 불가.
     Permanent,
 }
