@@ -6,6 +6,7 @@ import { usePanes, type PaneId } from "@/stores/panes";
 import { useTauri } from "@/hooks/useTauri";
 import { useKeyboardNav } from "@/hooks/useKeyboardNav";
 import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
+import { commands } from "@/types/bindings";
 import type { Entry } from "@/types/bindings";
 
 /**
@@ -84,10 +85,14 @@ function App() {
   useKeyboardNav(onKeyboardActivate, onKeyboardUp);
   useGlobalShortcuts();
 
-  // 부트스트랩: 양쪽 패널 초기 로드
+  // 부트스트랩: 양쪽 패널 초기 로드 (home 디렉토리, Windows 호환)
   useEffect(() => {
-    navigate("left", "/");
-    navigate("right", "/");
+    (async () => {
+      const result = await commands.homeDirectory();
+      const home = result.status === "ok" ? result.data : "/";
+      await navigate("left", home);
+      await navigate("right", home);
+    })();
     // navigate가 deps에 들어가면 무한 루프 — 마운트 1회만
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

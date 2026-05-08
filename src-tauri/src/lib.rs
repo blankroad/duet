@@ -29,8 +29,10 @@ pub fn run() {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    let specta_builder =
-        Builder::<tauri::Wry>::new().commands(collect_commands![commands::pane::list_directory,]);
+    let specta_builder = Builder::<tauri::Wry>::new().commands(collect_commands![
+        commands::pane::list_directory,
+        commands::system::home_directory,
+    ]);
 
     #[cfg(debug_assertions)]
     {
