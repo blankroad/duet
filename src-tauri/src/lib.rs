@@ -16,6 +16,7 @@ pub mod fs;
 pub mod platform;
 pub mod services;
 pub mod ssh;
+pub mod types;
 
 use tauri_specta::{collect_commands, Builder};
 
@@ -34,12 +35,16 @@ pub fn run() {
 
     #[cfg(debug_assertions)]
     {
-        let _ = std::fs::create_dir_all("../src/types");
+        let bindings_path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/types/bindings.ts");
+        if let Some(parent) = bindings_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
         specta_builder
             .export(
                 specta_typescript::Typescript::default()
                     .formatter(specta_typescript::formatter::prettier),
-                "../src/types/bindings.ts",
+                &bindings_path,
             )
             .expect("failed to export specta bindings");
     }
