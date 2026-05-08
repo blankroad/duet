@@ -1,6 +1,7 @@
 import { useEffect, useCallback } from "react";
 import { Pane } from "@/components/pane/Pane";
 import { Sidebar } from "@/components/Sidebar";
+import { StatusBar } from "@/components/StatusBar";
 import { usePanes, type PaneId } from "@/stores/panes";
 import { useTauri } from "@/hooks/useTauri";
 import { useKeyboardNav } from "@/hooks/useKeyboardNav";
@@ -103,10 +104,7 @@ function App() {
         <Pane id="right" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} />
       </main>
 
-      <footer className="flex h-6 items-center border-t border-border px-3 text-meta text-fg-muted">
-        {/* TODO: <StatusBar /> — Task 14 */}
-        <span>0 items</span>
-      </footer>
+      <StatusBar />
     </div>
   );
 }
