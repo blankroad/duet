@@ -1,29 +1,85 @@
+import { useEffect, useCallback } from "react";
+import { Pane } from "@/components/pane/Pane";
+import { usePanes, type PaneId } from "@/stores/panes";
+import { useTauri } from "@/hooks/useTauri";
+import type { Entry } from "@/types/bindings";
+
 /**
- * App 루트 컴포넌트.
+ * App 루트.
  *
  * MVP-0:
- * - 듀얼 패널 + 사이드바 토글
- * - 키보드 단축키 글로벌 핸들러
- * - 다크/라이트 모드 부트스트랩
+ * - 듀얼 패널 + 사이드바(추후) + 상태바(추후)
+ * - IPC는 App에서 일괄 처리 → Pane은 dumb
+ * - 다크/라이트 모드는 CSS만 (Task 13에서 토글 추가 가능)
  */
 function App() {
+  const { call: listDirectory } = useTauri("listDirectory");
+
+  /** 디렉토리 정렬: dir 먼저, 같은 종류면 이름 오름차순 */
+  const sortEntries = useCallback((entries: Entry[]): Entry[] => {
+    return [...entries].sort((a, b) => {
+      if (a.kind !== b.kind) {
+        if (a.kind === "dir") return -1;
+        if (b.kind === "dir") return 1;
+      }
+      return a.name.localeCompare(b.name);
+    });
+  }, []);
+
+  const navigate = useCallback(
+    async (id: PaneId, path: string) => {
+      const state = usePanes.getState();
+      const location = { ...state.panes[id].location, path };
+      try {
+        const entries = await listDirectory(location);
+        state.setEntries(id, location, sortEntries(entries));
+      } catch {
+        // useTauri가 error state에 저장 — UI는 다음 렌더에서 반영
+      }
+    },
+    [listDirectory, sortEntries],
+  );
+
+  const onActivate = useCallback(
+    (id: PaneId, entry: Entry) => {
+      if (entry.kind !== "dir") return; // file open은 MVP-7
+      const pane = usePanes.getState().panes[id];
+      const sep = pane.location.path.endsWith("/") ? "" : "/";
+      navigate(id, pane.location.path + sep + entry.name);
+    },
+    [navigate],
+  );
+
+  const onRefresh = useCallback(
+    (id: PaneId) => {
+      const pane = usePanes.getState().panes[id];
+      navigate(id, pane.location.path);
+    },
+    [navigate],
+  );
+
+  // 부트스트랩: 양쪽 패널 초기 로드
+  useEffect(() => {
+    navigate("left", "/");
+    navigate("right", "/");
+    // navigate가 deps에 들어가면 무한 루프 — 마운트 1회만
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <div className="flex h-screen w-screen flex-col bg-base text-fg">
       <header className="flex h-9 items-center justify-between border-b border-border px-3">
         <span className="text-title font-medium">duet</span>
       </header>
 
-      <main className="flex flex-1">
-        {/* TODO: <Sidebar /> */}
-        {/* TODO: <Pane id="left" /> */}
-        {/* TODO: <Pane id="right" /> */}
-        <div className="flex flex-1 items-center justify-center text-fg-muted">
-          duet — not implemented yet. See ROADMAP.md
-        </div>
+      <main className="flex flex-1 gap-0">
+        {/* TODO: <Sidebar /> — Task 13 */}
+        <Pane id="left" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} />
+        <Pane id="right" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} />
       </main>
 
       <footer className="flex h-6 items-center border-t border-border px-3 text-meta text-fg-muted">
-        {/* TODO: <StatusBar /> */}
+        {/* TODO: <StatusBar /> — Task 14 */}
         <span>0 items</span>
       </footer>
     </div>
