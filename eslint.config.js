@@ -49,6 +49,15 @@ export default [
     },
   },
   {
-    ignores: ["dist/**", "src-tauri/**", "node_modules/**"],
+    ignores: [
+      "dist/**",
+      "src-tauri/**",
+      "node_modules/**",
+      // 루트 설정 파일들 — tsconfig.node 로 타입체크되며 별도 lint 가치 없음
+      "tailwind.config.ts",
+      "vite.config.ts",
+      "vitest.config.ts",
+      "postcss.config.js",
+    ],
   },
 ];
