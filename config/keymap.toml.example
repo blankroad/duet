@@ -1,0 +1,87 @@
+# duet 키맵 설정 예시
+# ~/.duet/keymap.toml 로 복사해서 사용
+#
+# 모든 키바인딩은 여기서 재정의 가능.
+# OS별 자동 매핑: macOS는 Cmd, 다른 OS는 Ctrl
+#
+# 키 표기:
+#   - 일반 키: "j", "k", "Enter", "Tab", "Esc", "Space"
+#   - 조합: "Ctrl+C", "Shift+Tab", "Alt+Up"
+#   - 함수키: "F1" .. "F12"
+#   - 시퀀스: ["g", "g"] (2 단계)
+#
+# 한 동작에 여러 키 매핑 가능. 첫 번째가 도움말에 표시됨.
+
+[global]
+# Navigation
+move_down       = ["Down", "j"]
+move_up         = ["Up", "k"]
+go_back         = ["Alt+Left", "Backspace"]
+go_forward      = ["Alt+Right"]
+go_up           = ["Alt+Up"]
+enter_dir       = ["Enter"]
+switch_pane     = ["Tab"]
+focus_pane_left = ["Ctrl+1"]
+focus_pane_right = ["Ctrl+2"]
+
+# Selection
+toggle_select   = ["Space"]
+select_all      = ["Ctrl+A"]
+clear_selection = ["Esc"]
+
+# File ops (TC 호환 + 모던 표준)
+view            = ["F3"]
+edit            = ["F4"]
+copy            = ["F5", "Ctrl+C"]
+paste           = ["Ctrl+V"]
+move            = ["F6", "Ctrl+X"]
+new_folder      = ["F7", "Ctrl+Shift+N"]
+new_file        = ["Ctrl+N"]
+delete_trash    = ["Delete", "F8"]
+delete_perm     = ["Shift+Delete", "Shift+F8"]
+rename          = ["F2", "Shift+F6"]
+
+# View
+refresh         = ["Ctrl+R"]
+toggle_hidden   = ["Ctrl+H"]
+toggle_preview  = ["F11"]
+toggle_sidebar  = ["Ctrl+B"]
+toggle_theme    = ["Ctrl+Shift+T"]
+sort_name       = ["Ctrl+1"]
+sort_size       = ["Ctrl+2"]
+sort_date       = ["Ctrl+3"]
+sort_type       = ["Ctrl+4"]
+
+# Search
+filter          = ["Ctrl+F"]
+search_global   = ["Ctrl+Shift+F"]
+
+# Tabs
+tab_new         = ["Ctrl+T"]
+tab_close       = ["Ctrl+W"]
+tab_next        = ["Ctrl+Tab"]
+tab_prev        = ["Ctrl+Shift+Tab"]
+
+# Connection
+connect         = ["Ctrl+K"]
+quick_connect   = ["Ctrl+Shift+K"]
+
+# Misc
+command_palette = ["Ctrl+P"]
+settings        = ["Ctrl+,"]
+undo            = ["Ctrl+Z"]
+edit_path       = ["Ctrl+L"]
+quit            = ["Ctrl+Q"]
+
+
+[in_dialog]
+# 다이얼로그 표시 중에 동작
+submit          = ["Enter"]
+cancel          = ["Esc"]
+confirm_yes     = ["y", "Y"]
+confirm_no      = ["n", "N"]
+confirm_all     = ["a", "A"]
+
+
+# 사용자 추가 매핑
+# my_action = ["F12"]

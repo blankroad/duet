@@ -1,0 +1,91 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * CSS variables — light/dark 테마 자동 전환
+ * Tailwind config 가 이 변수들을 색상으로 매핑함
+ * 자세한 색상 가이드는 DESIGN.md 참조
+ */
+
+:root {
+  /* light theme — 디폴트 */
+  --bg-base: 0 0% 100%;
+  --bg-subtle: 0 0% 97%;
+  --bg-active: 220 90% 95%;
+  --fg-base: 0 0% 10%;
+  --fg-muted: 0 0% 45%;
+  --accent: 220 90% 50%;
+  --danger: 0 80% 50%;
+  --border: 0 0% 90%;
+}
+
+[data-theme="dark"] {
+  --bg-base: 220 10% 10%;
+  --bg-subtle: 220 10% 14%;
+  --bg-active: 220 50% 25%;
+  --fg-base: 0 0% 95%;
+  --fg-muted: 0 0% 60%;
+  --accent: 220 90% 65%;
+  --danger: 0 80% 60%;
+  --border: 220 10% 20%;
+}
+
+/* 시스템 다크 모드 자동 감지 (data-theme이 명시 안 된 경우) */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg-base: 220 10% 10%;
+    --bg-subtle: 220 10% 14%;
+    --bg-active: 220 50% 25%;
+    --fg-base: 0 0% 95%;
+    --fg-muted: 0 0% 60%;
+    --accent: 220 90% 65%;
+    --danger: 0 80% 60%;
+    --border: 220 10% 20%;
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;       /* 데스크탑 앱 */
+  user-select: none;       /* 텍스트 드래그 방지 */
+}
+
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 모노 폰트 (파일명, 경로) */
+.mono {
+  font-family: ui-monospace, "Cascadia Code", "SF Mono", monospace;
+}
+
+/* 인풋 / 텍스트 영역에서는 select 허용 */
+input,
+textarea,
+[contenteditable="true"] {
+  user-select: text;
+}
+
+/* 커스텀 스크롤바 (모던 룩) */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--fg-muted));
+}

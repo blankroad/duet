@@ -1,0 +1,34 @@
+# Build outputs
+/dist
+/target
+/src-tauri/target
+
+# Node
+/node_modules
+
+# Tauri-specta 자동 생성 (devmode 에서만)
+/src/types/bindings.ts
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Env / 자격증명 (절대 커밋 금지 — CLAUDE.md §5)
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.pfx
+
+# Lock files for sub-projects (root 만 커밋)
+# (pnpm-lock.yaml, Cargo.lock 은 root 에서 커밋)

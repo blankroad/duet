@@ -1,0 +1,80 @@
+# duet 앱 설정 예시
+# ~/.duet/config.toml 로 복사해서 사용
+
+[general]
+# 시작 시 자동으로 마지막 세션 복원
+restore_session = true
+
+# 테마: "system" | "light" | "dark"
+theme = "system"
+
+# 행 높이: "compact" (24px) | "normal" (28px) | "comfortable" (32px)
+row_height = "normal"
+
+
+[panes]
+# 디폴트 레이아웃: "horizontal" (좌/우) | "vertical" (상/하) | "single"
+layout = "horizontal"
+
+# 좌측 패널 폭 (0.0 ~ 1.0)
+left_ratio = 0.5
+
+# 디렉토리를 항상 위에 표시
+dirs_first = true
+
+
+[safety]
+# !!! 영구 삭제 활성화 !!!
+# 디폴트: false (영구 삭제 메뉴/단축키 비활성화)
+# true 로 켜도 영구 삭제 시 단어 타이핑 확인 필수
+enable_permanent_delete = false
+
+# 휴지통 보관 기간 (일). 이보다 오래된 항목은 자동 정리.
+trash_retention_days = 30
+
+# 원격 서버의 휴지통 디렉토리 경로 ($HOME 기준 상대 경로)
+remote_trash_dir = ".duet-trash"
+
+# 덮어쓰기 시 .bak.<timestamp> 파일 생성
+backup_on_overwrite = true
+
+# 같은 호스트 복사가 불가능하면? "fail" | "relay" (본인 PC 거쳐서)
+# relay는 위험 — 큰 파일 시 매우 느림. 디폴트 fail.
+fallback_strategy = "fail"
+
+
+[ssh]
+# ~/.ssh/config 자동 로드
+load_ssh_config = true
+
+# 알려진 호스트 키 검증 ("strict" | "tofu" | "ignore")
+# strict = ~/.ssh/known_hosts 에 있어야만
+# tofu  = 처음 보는 호스트는 사용자 확인 후 추가
+# ignore = 검증 안 함 (개발용 only, 보안 위험)
+host_key_check = "tofu"
+
+# 동시 연결 수 제한 (호스트당)
+max_connections_per_host = 4
+
+# 연결 끊겼을 때 재연결 시도
+auto_reconnect = true
+
+
+[ui]
+# 사이드바 디폴트 표시
+sidebar_visible = true
+
+# 숨김 파일 디폴트 표시
+show_hidden = false
+
+# 정렬 디폴트
+default_sort = "name"  # "name" | "size" | "date" | "type"
+sort_descending = false
+
+
+[advanced]
+# 로그 레벨: "error" | "warn" | "info" | "debug" | "trace"
+log_level = "info"
+
+# 작업 큐 동시 실행 수
+concurrent_tasks = 3

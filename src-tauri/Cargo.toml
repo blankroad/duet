@@ -1,0 +1,77 @@
+[package]
+name = "duet"
+version = "0.1.0"
+edition = "2021"
+description = "Safe and fast dual-pane SSH/SFTP file manager"
+license = "Unlicense OR MIT"
+publish = false
+
+[lib]
+name = "duet_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+# === Tauri ===
+tauri = { version = "2.1", features = ["devtools"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-os = "2"
+
+# === Async ===
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+tokio-util = { version = "0.7", features = ["rt"] }
+futures = "0.3"
+
+# === SSH ===
+russh = "0.46"
+russh-sftp = "2.0"
+russh-keys = "0.46"
+ssh2-config = "0.4"      # ~/.ssh/config 파싱
+
+# === Filesystem ===
+trash = "5"              # 크로스 플랫폼 휴지통
+notify = "7"             # 파일 변경 감지
+ignore = "0.4"           # 디렉토리 워킹
+
+# === Encoding ===
+unicode-normalization = "0.1"
+unicode-width = "0.2"
+mime_guess = "2"
+
+# === Config & state ===
+dirs = "5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+keyring = "3"            # OS keychain (자격증명 저장)
+
+# === Errors / logging ===
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+
+# === Time / IDs ===
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# === Type sharing (Rust → TypeScript) ===
+ts-rs = { version = "10", features = ["chrono-impl", "serde-compat"] }
+
+[features]
+# default = ["custom-protocol"]
+# custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = 3
+strip = true
+
+[profile.dev]
+opt-level = 1            # SSH/암호화 코드가 debug에서 너무 느림
