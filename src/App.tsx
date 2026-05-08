@@ -1,8 +1,10 @@
 import { useEffect, useCallback } from "react";
 import { Pane } from "@/components/pane/Pane";
+import { Sidebar } from "@/components/Sidebar";
 import { usePanes, type PaneId } from "@/stores/panes";
 import { useTauri } from "@/hooks/useTauri";
 import { useKeyboardNav } from "@/hooks/useKeyboardNav";
+import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
 import type { Entry } from "@/types/bindings";
 
 /**
@@ -79,6 +81,7 @@ function App() {
   );
 
   useKeyboardNav(onKeyboardActivate, onKeyboardUp);
+  useGlobalShortcuts();
 
   // 부트스트랩: 양쪽 패널 초기 로드
   useEffect(() => {
@@ -95,7 +98,7 @@ function App() {
       </header>
 
       <main className="flex flex-1 gap-0">
-        {/* TODO: <Sidebar /> — Task 13 */}
+        <Sidebar />
         <Pane id="left" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} />
         <Pane id="right" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} />
       </main>
