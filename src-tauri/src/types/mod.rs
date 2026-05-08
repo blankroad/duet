@@ -1,4 +1,77 @@
 //! IPC 경계에서 공유되는 핵심 타입.
 //!
-//! 본격적인 타입은 Task 2 에서 채워짐. 이 파일은 lib.rs `pub mod types;` 선언과
-//! 짝을 이루는 빈 컴파일 단위.
+//! 모두 `specta::Type` derive — `tauri-specta`가 TS 자동 export.
+//! `ARCHITECTURE.md` 의 "IPC 데이터 타입" 섹션과 1:1 매칭.
+
+pub mod error;
+
+use serde::{Deserialize, Serialize};
+use specta::Type;
+use std::net::IpAddr;
+use std::path::PathBuf;
+
+pub use error::DuetError;
+
+/// 연결 식별자. 백엔드 ConnectionPool 키.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+pub struct ConnectionId(pub String);
+
+/// 파일시스템 식별자. 같은 머신(SSH host_ip 일치) 판정용.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum SourceId {
+    Local,
+    Ssh {
+        connection_id: ConnectionId,
+        /// 연결 소켓의 `getpeername()` IP. 같은-호스트 판정용.
+        /// specta는 IpAddr를 String으로 표현 (impls.rs `impl_as!` 참조).
+        host_ip: IpAddr,
+        user: String,
+    },
+}
+
+/// 위치 (소스 + 경로).
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct Location {
+    pub source: SourceId,
+    pub path: PathBuf,
+}
+
+/// 항목 참조 (위치 + 이름).
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct EntryRef {
+    pub location: Location,
+    pub name: String,
+}
+
+/// 파일시스템 항목 종류.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "lowercase")]
+pub enum EntryKind {
+    File,
+    Dir,
+    Symlink,
+    Other,
+}
+
+/// 디렉토리 항목 메타데이터.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct Entry {
+    pub name: String,
+    pub kind: EntryKind,
+    pub size: Option<u64>,
+    /// Unix epoch milliseconds. JS Date와 호환.
+    pub modified_ms: Option<i64>,
+    /// Unix permission bits (mode & 0o777). Windows에선 None.
+    pub permissions: Option<u32>,
+    /// 숨김 파일 여부 (`.` 시작 또는 OS hidden 속성).
+    pub hidden: bool,
+}
+
+/// 삭제 모드.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "lowercase")]
+pub enum DeleteMode {
+    Trash,
+    Permanent,
+}
