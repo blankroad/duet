@@ -33,13 +33,16 @@ pub fn run() {
         .commands(collect_commands![]);
 
     #[cfg(debug_assertions)]
-    specta_builder
-        .export(
-            specta_typescript::Typescript::default()
-                .formatter(specta_typescript::formatter::prettier),
-            "../src/types/bindings.ts",
-        )
-        .expect("failed to export specta bindings");
+    {
+        let _ = std::fs::create_dir_all("../src/types");
+        specta_builder
+            .export(
+                specta_typescript::Typescript::default()
+                    .formatter(specta_typescript::formatter::prettier),
+                "../src/types/bindings.ts",
+            )
+            .expect("failed to export specta bindings");
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
