@@ -2,6 +2,7 @@ import { useEffect, useCallback } from "react";
 import { Pane } from "@/components/pane/Pane";
 import { usePanes, type PaneId } from "@/stores/panes";
 import { useTauri } from "@/hooks/useTauri";
+import { useKeyboardNav } from "@/hooks/useKeyboardNav";
 import type { Entry } from "@/types/bindings";
 
 /**
@@ -57,6 +58,27 @@ function App() {
     },
     [navigate],
   );
+
+  const onKeyboardActivate = useCallback(
+    (id: PaneId) => {
+      const pane = usePanes.getState().panes[id];
+      const entry = pane.entries[pane.cursorIndex];
+      if (entry) onActivate(id, entry);
+    },
+    [onActivate],
+  );
+
+  const onKeyboardUp = useCallback(
+    (id: PaneId) => {
+      const path = usePanes.getState().panes[id].location.path;
+      if (path === "/" || path.length === 0) return;
+      const parent = path.replace(/\/[^/]+\/?$/, "") || "/";
+      navigate(id, parent);
+    },
+    [navigate],
+  );
+
+  useKeyboardNav(onKeyboardActivate, onKeyboardUp);
 
   // 부트스트랩: 양쪽 패널 초기 로드
   useEffect(() => {
