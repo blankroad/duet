@@ -32,6 +32,10 @@ pub fn run() {
     let specta_builder = Builder::<tauri::Wry>::new().commands(collect_commands![
         commands::pane::list_directory,
         commands::system::home_directory,
+        commands::connection::ssh_config_hosts,
+        commands::connection::connection_open,
+        commands::connection::connection_close,
+        commands::connection::connection_list,
     ]);
 
     #[cfg(debug_assertions)]
@@ -52,9 +56,12 @@ pub fn run() {
             .expect("failed to export specta bindings");
     }
 
+    let pool = services::connection_pool::ConnectionPool::new();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_os::init())
+        .manage(pool)
         .invoke_handler(specta_builder.invoke_handler())
         .setup(move |app| {
             specta_builder.mount_events(app);
