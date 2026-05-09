@@ -112,11 +112,12 @@ impl FileSystem for LocalFs {
             tokio::fs::remove_file(path).await.map_err(DuetError::from)
         }
     }
-    async fn read_full(&self, _: &Path) -> Result<Vec<u8>, DuetError> {
-        unimplemented!("Task 9")
+    async fn read_full(&self, path: &Path) -> Result<Vec<u8>, DuetError> {
+        tokio::fs::read(path).await.map_err(DuetError::from)
     }
-    async fn write_full(&self, _: &Path, _: &[u8]) -> Result<(), DuetError> {
-        unimplemented!("Task 9")
+
+    async fn write_full(&self, path: &Path, bytes: &[u8]) -> Result<(), DuetError> {
+        tokio::fs::write(path, bytes).await.map_err(DuetError::from)
     }
 
     async fn list(&self, path: &Path) -> Result<Vec<Entry>, DuetError> {
@@ -370,5 +371,38 @@ mod tests {
         let m = local.metadata(&dir.path().join("a")).await.unwrap();
         assert_eq!(m.kind, EntryKind::File);
         assert_eq!(m.size, Some(5));
+    }
+
+    #[tokio::test]
+    async fn copy_relay_local_to_local_file() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("a"), b"hello").await.unwrap();
+        let local = LocalFs::new();
+        crate::fs::copy_relay(&local, &dir.path().join("a"), &local, &dir.path().join("b"))
+            .await
+            .unwrap();
+        let b = fs::read(dir.path().join("b")).await.unwrap();
+        assert_eq!(b, b"hello");
+    }
+
+    #[tokio::test]
+    async fn copy_relay_local_to_local_dir_recursive() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join("src/sub"))
+            .await
+            .unwrap();
+        fs::write(dir.path().join("src/a"), b"A").await.unwrap();
+        fs::write(dir.path().join("src/sub/b"), b"B").await.unwrap();
+        let local = LocalFs::new();
+        crate::fs::copy_relay(
+            &local,
+            &dir.path().join("src"),
+            &local,
+            &dir.path().join("dst"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(fs::read(dir.path().join("dst/a")).await.unwrap(), b"A");
+        assert_eq!(fs::read(dir.path().join("dst/sub/b")).await.unwrap(), b"B");
     }
 }
