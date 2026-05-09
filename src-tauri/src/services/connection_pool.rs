@@ -3,24 +3,43 @@
 //! 한 ConnectionId 당 한 SSH session. `insert` 로 등록, `get` 으로 참조 획득.
 //! 연결 끊김 watcher / 자동 재연결은 Task 13 에서 추가.
 
+use crate::ssh::connection::AcceptAllHandler;
 use crate::types::{ConnectionId, DuetError, SourceId};
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-/// 활성 SSH 연결 한 개의 메타데이터.
+/// 활성 SSH 연결 한 개의 메타데이터 + 세션.
 ///
-/// MVP-1 Task 3 에서 `session: Mutex<russh::client::Handle>` 필드 추가됨.
-/// 지금은 metadata 만 — Task 7 의 connection_open command 작성 시점부터
-/// 의미 있는 라이프사이클 시작.
-#[derive(Debug, Clone)]
+/// Task 3 에서 `session: Option<Mutex<Handle>>` 추가.
+/// `None` 은 단위 테스트 전용 — 프로덕션 경로는 항상 `Some`.
+/// Task 7 의 connection_open command 에서 실제 세션 수명 주기 시작.
 pub struct ActiveConnection {
     pub id: ConnectionId,
     pub alias: String,
     pub host_ip: IpAddr,
     pub user: String,
+    /// SSH session. None 인 경우는 테스트만 — 프로덕션 경로는 항상 Some.
+    ///
+    /// `Mutex` 로 동시 접근 직렬화 (russh Handle 자체는 Send 이나 Sync 아님).
+    pub session: Option<tokio::sync::Mutex<russh::client::Handle<AcceptAllHandler>>>,
 }
+
+/// Debug 수동 구현 — session 내용은 절대 출력하지 않음 (CLAUDE.md §5, 자격증명 보호).
+impl std::fmt::Debug for ActiveConnection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ActiveConnection")
+            .field("id", &self.id)
+            .field("alias", &self.alias)
+            .field("host_ip", &self.host_ip)
+            .field("user", &self.user)
+            .field("session", &"<russh::Handle>")
+            .finish()
+    }
+}
+
+// Clone 제거 — russh::Handle 은 Clone 아님. Pool 안에서 Arc<ActiveConnection> 으로 공유.
 
 impl ActiveConnection {
     /// SourceId::Ssh 로 변환 — FileSystem trait 의 source_id() 구현용.
@@ -82,6 +101,7 @@ mod tests {
             alias: id.to_string(),
             host_ip: ip.parse().unwrap(),
             user: "test".to_string(),
+            session: None, // 단위 테스트 전용 — 실제 SSH 서버 불필요
         }
     }
 
