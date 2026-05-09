@@ -24,4 +24,10 @@ export default defineConfig({
     target: "esnext",
     sourcemap: true,
   },
+  // dependency scanner 가 root 의 모든 .html 을 entry 로 보지 않도록 명시.
+  // 안 그러면 src-tauri/target/doc/ (cargo doc 결과물) 의 HTML 들까지
+  // 스캔 대상이 되어 dev server 가 EPIPE 로 죽음.
+  optimizeDeps: {
+    entries: ["index.html"],
+  },
 });

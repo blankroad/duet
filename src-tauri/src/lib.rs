@@ -34,6 +34,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::system::home_directory,
             commands::connection::ssh_config_hosts,
             commands::connection::connection_open,
+            commands::connection::connection_open_adhoc,
             commands::connection::connection_close,
             commands::connection::connection_list,
             commands::settings::settings_get,

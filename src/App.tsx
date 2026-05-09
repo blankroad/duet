@@ -3,6 +3,7 @@ import { Pane } from "@/components/pane/Pane";
 import { Sidebar } from "@/components/Sidebar";
 import { StatusBar } from "@/components/StatusBar";
 import { ConnectionDialog } from "@/components/connection/ConnectionDialog";
+import { AdHocConnectDialog } from "@/components/connection/AdHocConnectDialog";
 import { RenameDialog } from "@/components/dialogs/RenameDialog";
 import { MkdirDialog } from "@/components/dialogs/MkdirDialog";
 import { ConfirmDialog } from "@/components/dialogs/ConfirmDialog";
@@ -196,10 +197,14 @@ function App() {
 
   // 새 연결 다이얼로그 — 호스트 더블클릭 시 alias 가 들어옴, 닫으면 null.
   const [dialogAlias, setDialogAlias] = useState<string | null>(null);
+  // ad-hoc connect 다이얼로그 (Sidebar + 버튼)
+  const [adHocOpen, setAdHocOpen] = useState(false);
 
   const onHostActivate = useCallback((alias: string) => {
     setDialogAlias(alias);
   }, []);
+
+  const onAdHocOpen = useCallback(() => setAdHocOpen(true), []);
 
   /** 연결 성공 후 해당 패널을 SSH 위치로 이동. */
   const onConnected = useCallback(
@@ -252,7 +257,7 @@ function App() {
       </header>
 
       <main className="flex flex-1 min-h-0 gap-0">
-        <Sidebar onHostActivate={onHostActivate} />
+        <Sidebar onHostActivate={onHostActivate} onAdHocOpen={onAdHocOpen} />
         <Pane id="left" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} />
         <Pane id="right" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} />
       </main>
@@ -262,6 +267,11 @@ function App() {
       <ConnectionDialog
         alias={dialogAlias}
         onClose={() => setDialogAlias(null)}
+        onConnected={onConnected}
+      />
+      <AdHocConnectDialog
+        open={adHocOpen}
+        onClose={() => setAdHocOpen(false)}
         onConnected={onConnected}
       />
 

@@ -5,6 +5,9 @@ edition = "2021"
 description = "Safe and fast dual-pane SSH/SFTP file manager"
 license = "Unlicense OR MIT"
 publish = false
+# `cargo run` 의 디폴트 binary — bin/export_bindings.rs 추가 후 모호해서
+# Tauri dev (`cargo run --no-default-features ...`) 가 어느 걸 실행할지 모름.
+default-run = "duet"
 
 [lib]
 name = "duet_lib"

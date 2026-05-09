@@ -14,6 +14,7 @@
 //! - DTO 에서 identity_files 절대경로 / proxy_jump alias 같은 자격증명 관련
 //!   디테일은 노출하지 않음. 표시 + 선택에 필요한 최소 정보만.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde::Serialize;
@@ -24,7 +25,7 @@ use crate::services::connection_events::{ConnectionStateChange, ConnectionStateE
 use crate::services::connection_pool::{ActiveConnection, ConnectionPool};
 use crate::services::connection_supervisor::spawn_supervisor;
 use crate::ssh::config::{load_ssh_hosts, SshHostEntry};
-use crate::ssh::connection::{connect, SshSession};
+use crate::ssh::connection::connect;
 use crate::types::{ConnectionId, DuetError};
 
 /// Sidebar 에 표시할 호스트 정보 DTO.
@@ -73,15 +74,48 @@ pub async fn ssh_config_hosts() -> Result<Vec<SshHostEntryDto>, DuetError> {
     Ok(entries.into_iter().map(SshHostEntryDto::from).collect())
 }
 
-/// 새 SSH 연결 open + ConnectionPool 등록.
+/// 공통 헬퍼: connect → pool.insert → emit Connected → spawn supervisor.
 ///
-/// 인증 시도 순서: identity_files → SSH agent → `AuthFailed` (비밀번호는
-/// 후속 Task 7b 의 secure prompt 후 별도 command 로).
-///
-/// 성공 시:
-/// 1. ConnectionPool 에 등록
-/// 2. `ConnectionStateEvent { state: Connected }` emit
-/// 3. 새 `ConnectionId` 반환
+/// `connection_open` (config alias 기반) 과 `connection_open_adhoc`
+/// (직접 입력 host/port/user) 가 공유.
+async fn open_and_register(
+    host: SshHostEntry,
+    all_hosts: &[SshHostEntry],
+    pool: &Arc<ConnectionPool>,
+    app: &tauri::AppHandle,
+) -> Result<ConnectionId, DuetError> {
+    // 키 → agent fallback. AuthFailed 면 비밀번호 prompt 가 필요한 호스트 —
+    // MVP-1 Task 7b 에서 secure prompt 추가 후 connect_with_password 분기.
+    let session = connect(&host, all_hosts).await?;
+
+    let id = ConnectionId(format!("{}:{}", host.alias, uuid::Uuid::new_v4()));
+    let host_ip = session.host_ip;
+    pool.insert(ActiveConnection {
+        id: id.clone(),
+        alias: host.alias.clone(),
+        host_ip,
+        user: host.user.clone(),
+        session: Some(tokio::sync::Mutex::new(session.handle)),
+    })
+    .await;
+
+    // emit 실패는 non-fatal — 연결 자체는 성공했으므로 Ok 로 반환.
+    let _ = ConnectionStateEvent {
+        id: id.clone(),
+        alias: host.alias.clone(),
+        host_ip: host_ip.to_string(),
+        user: host.user,
+        state: ConnectionStateChange::Connected,
+    }
+    .emit(app);
+
+    // 백그라운드 supervisor — 연결 끊김 감지 + 자동 재연결.
+    spawn_supervisor(pool.clone(), app.clone(), id.clone());
+
+    Ok(id)
+}
+
+/// 새 SSH 연결 open + ConnectionPool 등록 — `~/.ssh/config` 의 alias 기반.
 #[tauri::command]
 #[specta::specta]
 pub async fn connection_open(
@@ -97,36 +131,39 @@ pub async fn connection_open(
         .ok_or_else(|| {
             DuetError::ConnectionFailed(format!("alias not found in ssh config: {alias}"))
         })?;
+    open_and_register(host, &all_hosts, pool.inner(), &app).await
+}
 
-    // 키 → agent fallback. AuthFailed 면 비밀번호 prompt 가 필요한 호스트 —
-    // Task 7b 에서 secure prompt 추가 후 connect_with_password 호출 분기.
-    let session: SshSession = connect(&host, &all_hosts).await?;
-
-    let id = ConnectionId(format!("{}:{}", host.alias, uuid::Uuid::new_v4()));
-    let conn = ActiveConnection {
-        id: id.clone(),
-        alias: host.alias.clone(),
-        host_ip: session.host_ip,
-        user: host.user.clone(),
-        session: Some(tokio::sync::Mutex::new(session.handle)),
-    };
-    let host_ip = session.host_ip;
-    pool.insert(conn).await;
-
-    // emit 실패는 non-fatal — 연결 자체는 성공했으므로 Ok 로 반환.
-    let _ = ConnectionStateEvent {
-        id: id.clone(),
-        alias: host.alias.clone(),
-        host_ip: host_ip.to_string(),
-        user: host.user.clone(),
-        state: ConnectionStateChange::Connected,
+/// Ad-hoc SSH 연결 — `~/.ssh/config` 에 없는 host 에 직접 입력으로 접속.
+///
+/// `key_path` 가 None 이면 SSH agent 만 시도. 키파일/agent 둘 다 실패하면
+/// `AuthFailed` (비밀번호는 MVP-1 Task 7b 의 secure prompt 까지 미지원).
+/// `proxy_jump` 미지원 — config 기반 alias 가 필요.
+#[tauri::command]
+#[specta::specta]
+pub async fn connection_open_adhoc(
+    host: String,
+    port: u16,
+    user: String,
+    key_path: Option<PathBuf>,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+    app: tauri::AppHandle,
+) -> Result<ConnectionId, DuetError> {
+    if host.trim().is_empty() {
+        return Err(DuetError::Io("host required".into()));
     }
-    .emit(&app);
-
-    // 백그라운드 supervisor — 연결 끊김 감지 + 자동 재연결 (Task 13).
-    spawn_supervisor(pool.inner().clone(), app.clone(), id.clone());
-
-    Ok(id)
+    if user.trim().is_empty() {
+        return Err(DuetError::Io("user required".into()));
+    }
+    let entry = SshHostEntry {
+        alias: format!("{user}@{host}:{port}"),
+        hostname: host,
+        port,
+        user,
+        identity_files: key_path.into_iter().collect(),
+        proxy_jump: vec![],
+    };
+    open_and_register(entry, &[], pool.inner(), &app).await
 }
 
 /// 연결 종료 + ConnectionPool 에서 제거.
