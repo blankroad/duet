@@ -58,6 +58,8 @@ export default [
       "vite.config.ts",
       "vitest.config.ts",
       "postcss.config.js",
+      // tauri-specta 자동 생성 — 항상 unused symbol 포함 (이벤트 helper 등)
+      "src/types/bindings.ts",
     ],
   },
 ];

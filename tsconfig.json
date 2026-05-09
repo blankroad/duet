@@ -24,5 +24,6 @@
     }
   },
   "include": ["src"],
+  "exclude": ["src/types/bindings.ts"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

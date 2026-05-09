@@ -45,7 +45,8 @@ pub fn run() {
             .export(
                 specta_typescript::Typescript::default()
                     .formatter(specta_typescript::formatter::prettier)
-                    .bigint(specta_typescript::BigIntExportBehavior::Number),
+                    .bigint(specta_typescript::BigIntExportBehavior::Number)
+                    .header("// @ts-nocheck\n"),
                 &bindings_path,
             )
             .expect("failed to export specta bindings");

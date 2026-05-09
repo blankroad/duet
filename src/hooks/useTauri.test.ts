@@ -55,6 +55,9 @@ describe("useTauri", () => {
       await result.current.call({ source: { kind: "local" }, path: "/" }).catch(() => {});
     });
     expect(result.current.error?.kind).toBe("IpcError");
-    expect(result.current.error?.message).toContain("channel closed");
+    const err = result.current.error;
+    if (err && err.kind === "IpcError") {
+      expect(err.message).toContain("channel closed");
+    }
   });
 });

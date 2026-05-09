@@ -33,3 +33,4 @@ Thumbs.db
 
 # Lock files for sub-projects (root 만 커밋)
 # (pnpm-lock.yaml, Cargo.lock 은 root 에서 커밋)
+.gstack/
