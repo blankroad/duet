@@ -9,6 +9,7 @@ import { useKeyboardNav } from "@/hooks/useKeyboardNav";
 import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
 import { useSshHosts } from "@/hooks/useSshHosts";
 import { useConnectionEvents } from "@/hooks/useConnectionEvents";
+import { useFsChangedEvents } from "@/hooks/useFsChangedEvents";
 import { commands } from "@/types/bindings";
 import type { ConnectionId, Entry } from "@/types/bindings";
 
@@ -41,6 +42,9 @@ function App() {
       try {
         const entries = await listDirectory(location);
         state.setEntries(id, location, sortEntries(entries));
+        // navigate 성공 후 watcher 갱신. 실패는 silent — fs:changed 알림 안 옴
+        // 정도의 영향. (사용자가 명시 새로고침으로 우회 가능.)
+        void commands.paneWatchSet(id, location);
       } catch {
         // useTauri가 error state에 저장 — UI는 다음 렌더에서 반영
       }
@@ -89,6 +93,7 @@ function App() {
   useGlobalShortcuts();
   useSshHosts();
   useConnectionEvents();
+  useFsChangedEvents(onRefresh);
 
   // 새 연결 다이얼로그 — 호스트 더블클릭 시 alias 가 들어옴, 닫으면 null.
   const [dialogAlias, setDialogAlias] = useState<string | null>(null);

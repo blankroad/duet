@@ -18,6 +18,7 @@ pub mod services;
 pub mod ssh;
 pub mod types;
 
+use tauri::Manager as _;
 use tauri_specta::{collect_commands, collect_events, Builder};
 
 /// 모든 IPC command 가 등록된 specta `Builder` 를 만든다.
@@ -29,6 +30,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
         .commands(collect_commands![
             commands::pane::list_directory,
+            commands::pane::pane_watch_set,
             commands::system::home_directory,
             commands::connection::ssh_config_hosts,
             commands::connection::connection_open,
@@ -37,6 +39,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
         ])
         .events(collect_events![
             services::connection_events::ConnectionStateEvent,
+            services::fs_events::FsChangedEvent,
         ])
 }
 
@@ -89,6 +92,10 @@ pub fn run() {
         .invoke_handler(specta_builder.invoke_handler())
         .setup(move |app| {
             specta_builder.mount_events(app);
+            // FsWatcher 는 AppHandle 가 필요해 setup 에서 생성 → manage.
+            let watcher = services::fs_watcher::FsWatcher::new(app.handle().clone())
+                .expect("fs watcher init");
+            app.manage(watcher);
             Ok(())
         })
         .run(tauri::generate_context!())

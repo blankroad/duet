@@ -2,3 +2,5 @@
 
 pub mod connection_events;
 pub mod connection_pool;
+pub mod fs_events;
+pub mod fs_watcher;
