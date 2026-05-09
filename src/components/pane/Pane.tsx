@@ -26,7 +26,7 @@ export function Pane({ id, onNavigate, onActivate, onRefresh }: PaneProps) {
   return (
     <div
       className={clsx(
-        "flex flex-1 flex-col border border-border",
+        "flex flex-1 flex-col min-h-0 border border-border",
         isActive && "border-accent",
       )}
       onMouseDown={() => setActivePane(id)}

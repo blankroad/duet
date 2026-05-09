@@ -43,7 +43,7 @@ export function EntryList({
   }, [cursorIndex, virtualizer]);
 
   return (
-    <div ref={parentRef} className="flex-1 overflow-auto">
+    <div ref={parentRef} className="flex-1 min-h-0 overflow-auto">
       <div
         style={{
           height: `${virtualizer.getTotalSize()}px`,

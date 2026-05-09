@@ -103,7 +103,7 @@ function App() {
         <span className="text-title font-medium">duet</span>
       </header>
 
-      <main className="flex flex-1 gap-0">
+      <main className="flex flex-1 min-h-0 gap-0">
         <Sidebar />
         <Pane id="left" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} />
         <Pane id="right" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} />
