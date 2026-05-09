@@ -44,20 +44,21 @@
 
 **완료 조건**: 안전하게 복사/이동/삭제할 수 있다. 영구 삭제 사고 불가능.
 
-- [ ] `DeleteOp`, `CopyOp`, `MoveOp` trait + `Confirmed` 토큰
-- [ ] 휴지통 모델
-  - 로컬: `trash` crate (OS 휴지통)
-  - 원격: `~/.duet-trash/<timestamp>/<original-path>/` 로 mv
+- [x] `DeleteOp`, `CopyOp`, `MoveOp` — Confirmed 토큰은 plan/execute 두 단계 IPC 로 대체 (spec 참조)
+- [x] 휴지통 모델
+  - 로컬: `trash` crate (OS 휴지통). macOS 는 restore 미지원 (Finder 수동) — restore 시 NotSupported
+  - 원격: `~/.duet-trash/<batch-id>/<original-absolute-path>/` 로 mv (batch-id = UTC ts + uuid)
   - mv 실패 시 작업 abort + UI alert (영구삭제 폴백 금지)
-- [ ] 영구 삭제 디폴트 OFF, 켜져 있어도 단어 타이핑 확인
-- [ ] 확인 다이얼로그 컴포넌트 (Confirm / DangerConfirm)
-- [ ] Journal 시스템 (`~/.duet/journal.jsonl`)
-- [ ] Undo (`Ctrl+Z`) — 마지막 작업 되돌리기
-- [ ] 복사 (F5 / Ctrl+C → Ctrl+V)
-- [ ] 이동 (F6 / Ctrl+X → Ctrl+V)
-- [ ] 이름 변경 (F2)
-- [ ] 새 폴더 (F7)
-- [ ] 충돌 시 backup 파일 (`name.bak.<timestamp>`)
+- [x] 영구 삭제 디폴트 OFF, 켜져 있어도 단어 "delete" 타이핑 확인
+- [x] 확인 다이얼로그 컴포넌트 (Confirm / DangerConfirm) + Rename / Mkdir / Progress / Settings
+- [x] Journal 시스템 (`<config_dir>/duet/journal.jsonl`, JSONL append-only, uuid v7 정렬)
+- [x] Undo (`Ctrl+Z`) — N단계 스택, 세션 간 영속, 영구삭제는 Irreversible
+- [x] 복사 (F5)
+- [x] 이동 (F6)
+- [x] 이름 변경 (F2)
+- [x] 새 폴더 (F7)
+- [x] 충돌 시 backup 파일 (`name.bak.<UTC ts>` — timestamp 충돌 시 .<n> retry)
+- [x] 같은 호스트 SSH↔SSH copy 명시적 차단 (`NotSupported("MVP-3")`) — CLAUDE.md DON'T
 
 **완료 시 일상 사용**: TC 대체 가능 (단, 같은 호스트 복사는 아직 느림).
 
@@ -122,7 +123,7 @@
 
 ## 현재 단계
 
-**MVP-2 시작 직전.** MVP-1 거의 완료 (비밀번호 secure prompt = Task 7b 만 남음). 로컬 + 원격 한 곳씩 read-only 탐색 가능 — 키 인증 또는 SSH agent 호스트 한정.
+**MVP-3 시작 직전.** MVP-2 완료. 일상 사용 가능 — TC 대체 가능 (단, 같은 SSH 호스트 복사는 명시 차단 — MVP-3 에서). 비밀번호 secure prompt (MVP-1 Task 7b) 는 여전히 남아있어 비밀번호 인증 호스트는 제외.
 
 ## 단계 변경 규칙
 
