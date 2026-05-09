@@ -1,13 +1,18 @@
-import { Folder, Server, Star } from "lucide-react";
+import { Folder, Server, Star, Network } from "lucide-react";
 import { useUI } from "@/stores/ui";
+import { useConnections, type Host, type ConnectionState } from "@/stores/connections";
 import clsx from "clsx";
 import type { ReactNode } from "react";
 
 /**
- * MVP-0: placeholder. 토글만 동작.
- * MVP-1에서 호스트 목록, MVP-6에서 북마크 채워짐.
+ * 사이드바.
+ *
+ * - Local: home (MVP-0 placeholder)
+ * - Hosts: `~/.ssh/config` 의 호스트 목록 + 연결 상태 점.
+ *   더블클릭 핸들러는 Task 10 의 ConnectionDialog 가 추가.
+ * - Bookmarks: MVP-6 placeholder.
  */
-export function Sidebar() {
+export function Sidebar({ onHostActivate }: { onHostActivate: (alias: string) => void }) {
   const open = useUI((s) => s.sidebarOpen);
   if (!open) return null;
 
@@ -16,14 +21,69 @@ export function Sidebar() {
       <Section title="Local" icon={<Folder size={14} />}>
         <Item label="Home" />
       </Section>
-      <Section title="Hosts" icon={<Server size={14} />}>
-        <Item label="(MVP-1)" muted />
-      </Section>
+      <HostsSection onHostActivate={onHostActivate} />
       <Section title="Bookmarks" icon={<Star size={14} />}>
         <Item label="(MVP-6)" muted />
       </Section>
     </aside>
   );
+}
+
+function HostsSection({ onHostActivate }: { onHostActivate: (alias: string) => void }) {
+  const hosts = useConnections((s) => s.hosts);
+  const stateByAlias = useConnections((s) => s.stateByAlias)();
+
+  return (
+    <Section title="Hosts" icon={<Server size={14} />}>
+      {hosts.length === 0 ? (
+        <Item label="(no hosts in ~/.ssh/config)" muted />
+      ) : (
+        hosts.map((h) => (
+          <HostItem
+            key={h.alias}
+            host={h}
+            state={stateByAlias[h.alias] ?? { kind: "disconnected" }}
+            onActivate={() => onHostActivate(h.alias)}
+          />
+        ))
+      )}
+    </Section>
+  );
+}
+
+function HostItem({
+  host,
+  state,
+  onActivate,
+}: {
+  host: Host;
+  state: ConnectionState;
+  onActivate: () => void;
+}) {
+  return (
+    <div
+      onDoubleClick={onActivate}
+      title={`${host.user}@${host.hostname}:${host.port}${host.has_proxy_jump ? " (via jump)" : ""}`}
+      className="flex cursor-default items-center gap-1 rounded px-2 py-0.5 hover:bg-border"
+    >
+      <StateDot state={state} />
+      <span className="truncate">{host.alias}</span>
+      {host.has_proxy_jump && (
+        <Network size={11} className="ml-auto shrink-0 text-fg-muted" aria-label="ProxyJump" />
+      )}
+    </div>
+  );
+}
+
+function StateDot({ state }: { state: ConnectionState }) {
+  const cls = {
+    connected: "bg-green-500",
+    connecting: "bg-yellow-500 animate-pulse",
+    error: "bg-red-500",
+    disconnected: "bg-fg-muted/30",
+  }[state.kind];
+  const label = state.kind === "error" ? state.message : state.kind;
+  return <span aria-label={label} className={clsx("h-1.5 w-1.5 shrink-0 rounded-full", cls)} />;
 }
 
 function Section({ title, icon, children }: { title: string; icon: ReactNode; children: ReactNode }) {

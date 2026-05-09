@@ -6,6 +6,7 @@ import { usePanes, type PaneId } from "@/stores/panes";
 import { useTauri } from "@/hooks/useTauri";
 import { useKeyboardNav } from "@/hooks/useKeyboardNav";
 import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
+import { useSshHosts } from "@/hooks/useSshHosts";
 import { commands } from "@/types/bindings";
 import type { Entry } from "@/types/bindings";
 
@@ -84,6 +85,15 @@ function App() {
 
   useKeyboardNav(onKeyboardActivate, onKeyboardUp);
   useGlobalShortcuts();
+  useSshHosts();
+
+  // Sidebar 호스트 더블클릭 — Task 10 의 ConnectionDialog 가 추가될 때까지는
+  // 콘솔 로그만. (다이얼로그 없이 바로 connectionOpen 호출하면 비밀번호 prompt
+  // 가 필요한 호스트에서 사용자에게 피드백 없이 실패 — UX 깨짐.)
+  const onHostActivate = useCallback((alias: string) => {
+    // Task 10 의 ConnectionDialog 가 추가될 때까지 임시 stub.
+    console.log("[duet] host activated (dialog TODO):", alias);
+  }, []);
 
   // 부트스트랩: 양쪽 패널 초기 로드 (home 디렉토리, Windows 호환)
   useEffect(() => {
@@ -104,7 +114,7 @@ function App() {
       </header>
 
       <main className="flex flex-1 min-h-0 gap-0">
-        <Sidebar />
+        <Sidebar onHostActivate={onHostActivate} />
         <Pane id="left" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} />
         <Pane id="right" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} />
       </main>
