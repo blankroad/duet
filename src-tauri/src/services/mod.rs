@@ -5,3 +5,4 @@ pub mod connection_pool;
 pub mod connection_supervisor;
 pub mod fs_events;
 pub mod fs_watcher;
+pub mod settings;
