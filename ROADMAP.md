@@ -25,18 +25,18 @@
 
 **완료 조건**: SSH 호스트에 연결해서 한 패널을 SFTP로 띄울 수 있다.
 
-- [ ] `russh` 통합, `ssh/connection.rs`
-- [ ] `~/.ssh/config` 파싱, 호스트 자동완성
-- [ ] 키 인증 (key file, agent)
-- [ ] 비밀번호 인증 (백엔드 메모리 only)
-- [ ] ProxyJump 지원 (russh nested session, 시스템 ssh 명령 사용 X)
-- [ ] `SshFs` 구현 (`russh-sftp`)
-- [ ] 사이드바에 호스트 목록 + 연결 상태
-- [ ] 새 연결 다이얼로그
-- [ ] 연결 상태 이벤트 (`connection:state`)
-- [ ] 자동 재연결 + 백오프
-- [ ] `getpeername()` 으로 peer IP 캡처 → `SourceId::Ssh.host_ip` 채우기
-- [ ] fs:changed 이벤트 (로컬 `notify`, SSH 활성 패널 디렉토리 mtime 폴링 3-5s + 포커스 복귀 시 강제 갱신)
+- [x] `russh` 통합, `ssh/connection.rs`
+- [x] `~/.ssh/config` 파싱, 호스트 자동완성
+- [x] 키 인증 (key file, agent)
+- [ ] 비밀번호 인증 (백엔드 메모리 only) — 함수는 있으나 secure prompt 미연결 (Task 7b)
+- [x] ProxyJump 지원 (russh nested session, 시스템 ssh 명령 사용 X) — 1-hop
+- [x] `SshFs` 구현 (`russh-sftp`)
+- [x] 사이드바에 호스트 목록 + 연결 상태
+- [x] 새 연결 다이얼로그
+- [x] 연결 상태 이벤트 (`connection:state`)
+- [x] 자동 재연결 + 백오프
+- [x] `getpeername()` 으로 peer IP 캡처 → `SourceId::Ssh.host_ip` 채우기
+- [x] fs:changed 이벤트 (로컬 `notify`, SSH 활성 패널 디렉토리 mtime 폴링 3-5s + 포커스 복귀 시 강제 갱신)
 
 **완료 시 일상 사용**: 로컬 + 원격 한 곳씩 띄워서 read-only 탐색.
 
@@ -122,7 +122,7 @@
 
 ## 현재 단계
 
-**MVP-1 시작 직전.** MVP-0 완료, 본인 일상에서 read-only 탐색용으로 사용 가능.
+**MVP-2 시작 직전.** MVP-1 거의 완료 (비밀번호 secure prompt = Task 7b 만 남음). 로컬 + 원격 한 곳씩 read-only 탐색 가능 — 키 인증 또는 SSH agent 호스트 한정.
 
 ## 단계 변경 규칙
 
