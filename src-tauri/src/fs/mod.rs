@@ -4,12 +4,14 @@
 //! 모든 메서드는 `async` — Tauri tokio runtime 위에서 동작.
 
 pub mod local;
+pub mod ssh;
 
 use crate::types::{DuetError, Entry, SourceId};
 use async_trait::async_trait;
 use std::path::Path;
 
 pub use local::LocalFs;
+pub use ssh::SshFs;
 
 #[async_trait]
 pub trait FileSystem: Send + Sync {
