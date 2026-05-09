@@ -1197,16 +1197,363 @@ write_full. SshFs 의 read_full/write_full 은 Task 12.
 
 ---
 
-## Task 10-12 (SshFs 확장) — 별도 후속 메시지로 계속
+### Task 10: SshFs::{metadata, rename, mkdir, remove}
 
-Phase B 의 SSH 측 구현 (rename/mkdir/remove/trash/restore + read_full/write_full) 은 5개 메서드 분량이 많아 별도로 확장. 본 plan v1 에서는 LocalFs↔LocalFs 까지 검증된 후 SshFs 통합 과정에서 작성.
+**Files:**
+- Modify: `src-tauri/src/fs/ssh.rs`
 
-**SshFs Task 10 - 12 가이드라인:**
-- Task 10: `SshFs::{metadata, rename, mkdir, remove}` — sftp metadata / rename / create_dir / remove_file/remove_dir 사용
-- Task 11: `SshFs::{trash, restore_from_trash}` — `services::trash::remote_trash_path_for` 호출 + `~/.duet-trash` 가 없으면 mkdir_all (재귀) → 그 안으로 rename
-- Task 12: `SshFs::{read_full, write_full}` — `sftp.open` + `read_to_end` / `sftp.create` + `write_all`. 큰 파일은 8MB 청크 (메모리 폭주 방지) — 후속 task 에서 streaming 화
+**Why:** Phase C 의 op 레이어가 SshFs 통해 stat/rename/mkdir/remove 호출. SFTP 채널 매번 새로 열어서 단발 작업.
 
-각 Task 의 단위 테스트는 시그니처 sanity 만 (실제 SFTP 통합은 docker-based 후속).
+- [ ] **Step 1: 공용 SFTP open helper 추출**
+
+`src-tauri/src/fs/ssh.rs` 의 `list` 메서드에 있는 SFTP open 로직을 private 헬퍼로 추출 — 다른 메서드들이 같은 패턴을 재사용:
+
+```rust
+/// 활성 connection 위에 SFTP 채널 새로 열고 SftpSession 반환.
+/// 매 호출마다 새 채널 — 캐시는 후속 (Task 12 fs:changed 폴링과 함께).
+async fn open_sftp(&self) -> Result<russh_sftp::client::SftpSession, DuetError> {
+    let session_mutex = self.conn.session.as_ref().ok_or_else(|| {
+        DuetError::ConnectionFailed("connection has no live session (test stub?)".into())
+    })?;
+    let channel = {
+        let handle = session_mutex.lock().await;
+        let ch = handle
+            .channel_open_session()
+            .await
+            .map_err(|e| DuetError::Ssh(format!("open session: {e}")))?;
+        ch.request_subsystem(true, "sftp")
+            .await
+            .map_err(|e| DuetError::Ssh(format!("sftp subsystem: {e}")))?;
+        ch
+    };
+    russh_sftp::client::SftpSession::new(channel.into_stream())
+        .await
+        .map_err(|e| DuetError::Ssh(format!("sftp init: {e}")))
+}
+```
+
+기존 `list` 메서드의 inline open 로직을 `let sftp = self.open_sftp().await?;` 한 줄로 교체.
+
+- [ ] **Step 2: metadata 구현 — `unimplemented!` stub 교체**
+
+```rust
+async fn metadata(&self, path: &Path) -> Result<crate::types::EntryMeta, DuetError> {
+    let sftp = self.open_sftp().await?;
+    let path_str = path.to_str().ok_or_else(|| DuetError::Io("non-UTF8 path".into()))?;
+    let meta = sftp
+        .metadata(path_str.to_string())
+        .await
+        .map_err(|e| map_sftp_error(e, path_str))?;
+    let kind = if meta.is_dir() {
+        crate::types::EntryKind::Dir
+    } else if meta.is_regular() {
+        crate::types::EntryKind::File
+    } else if meta.is_symlink() {
+        crate::types::EntryKind::Symlink
+    } else {
+        crate::types::EntryKind::Other
+    };
+    Ok(crate::types::EntryMeta {
+        kind,
+        size: meta.size,
+        modified_ms: meta.mtime.map(|t| i64::from(t) * 1000),
+        permissions: meta.permissions.map(|p| p & 0o777),
+    })
+}
+```
+
+- [ ] **Step 3: rename 구현**
+
+```rust
+async fn rename(&self, from: &Path, to: &Path) -> Result<(), DuetError> {
+    let sftp = self.open_sftp().await?;
+    let from_s = from.to_str().ok_or_else(|| DuetError::Io("non-UTF8 from".into()))?;
+    let to_s = to.to_str().ok_or_else(|| DuetError::Io("non-UTF8 to".into()))?;
+    sftp.rename(from_s.to_string(), to_s.to_string())
+        .await
+        .map_err(|e| map_sftp_error(e, from_s))
+}
+```
+
+- [ ] **Step 4: mkdir 구현**
+
+```rust
+async fn mkdir(&self, path: &Path) -> Result<(), DuetError> {
+    let sftp = self.open_sftp().await?;
+    let path_str = path.to_str().ok_or_else(|| DuetError::Io("non-UTF8 path".into()))?;
+    sftp.create_dir(path_str.to_string())
+        .await
+        .map_err(|e| map_sftp_error(e, path_str))
+}
+```
+
+- [ ] **Step 5: remove 구현 — 디렉토리는 재귀**
+
+SFTP 는 `remove_dir` 가 비어있는 dir 만 지움. non-empty 면 재귀로 자식 삭제 후 dir 삭제.
+
+```rust
+async fn remove(&self, path: &Path) -> Result<(), DuetError> {
+    let sftp = self.open_sftp().await?;
+    Box::pin(remove_recursive(&sftp, path)).await
+}
+```
+
+같은 파일 끝에 free function 추가:
+
+```rust
+/// 디렉토리는 재귀, 파일/심볼릭 링크는 직접.
+/// SFTP 채널을 인자로 받아 한 op 동안 같은 채널 재사용 (성능).
+async fn remove_recursive(
+    sftp: &russh_sftp::client::SftpSession,
+    path: &Path,
+) -> Result<(), DuetError> {
+    let path_str = path.to_str().ok_or_else(|| DuetError::Io("non-UTF8 path".into()))?;
+    let meta = sftp
+        .metadata(path_str.to_string())
+        .await
+        .map_err(|e| map_sftp_error(e, path_str))?;
+
+    if meta.is_dir() {
+        let children = sftp
+            .read_dir(path_str.to_string())
+            .await
+            .map_err(|e| map_sftp_error(e, path_str))?;
+        for child in children {
+            let name = child.file_name();
+            if name == "." || name == ".." {
+                continue;
+            }
+            let child_path = path.join(&name);
+            Box::pin(remove_recursive(sftp, &child_path)).await?;
+        }
+        sftp.remove_dir(path_str.to_string())
+            .await
+            .map_err(|e| map_sftp_error(e, path_str))
+    } else {
+        sftp.remove_file(path_str.to_string())
+            .await
+            .map_err(|e| map_sftp_error(e, path_str))
+    }
+}
+```
+
+- [ ] **Step 6: 시그니처 sanity 테스트만 (실제 SFTP 통합은 docker 후속)**
+
+`fs/ssh.rs` 의 `mod tests` 에 추가:
+
+```rust
+#[test]
+fn ssh_fs_has_metadata_signature() {
+    fn _check<F: FileSystem>() {
+        let _: fn(&F, &Path) -> _ = F::metadata;
+    }
+}
+```
+
+(실제로는 trait method 체크는 컴파일러가 trait 구현 시 자동 검증 — 이 테스트는 문서화용.)
+
+- [ ] **Step 7: 컴파일 + 커밋**
+
+```bash
+cd src-tauri && cargo check --lib --tests
+git add src-tauri/src/fs/ssh.rs
+git commit -m "be/fs: SshFs::{metadata, rename, mkdir, remove}
+
+- open_sftp() 헬퍼 추출 — list 와 새 메서드들이 공유
+- metadata: sftp.metadata → FileAttributes → EntryMeta (LocalFs 와 일치)
+- rename / mkdir: sftp.rename / create_dir 직접
+- remove: 재귀 — dir 면 자식 삭제 후 remove_dir, 아니면 remove_file
+  (SFTP 의 remove_dir 는 빈 dir 만 지움)
+실제 SFTP 통합 테스트는 docker 후속."
+```
+
+---
+
+### Task 11: SshFs::{trash, restore_from_trash}
+
+**Files:**
+- Modify: `src-tauri/src/fs/ssh.rs`
+
+**Why:** 원격은 OS 휴지통이 없으므로 `~/.duet-trash/<batch-id>/<original-absolute-path>/` 로 mv. SFTP 의 mkdir 은 한 단계만 — 재귀 mkdir_all 헬퍼 필요.
+
+- [ ] **Step 1: 사용자 home 디렉토리 resolve 헬퍼**
+
+원격 사용자의 home 은 SFTP `canonicalize(".")` 으로 잡을 수 있음. `~/.duet-trash` 절대경로 계산용.
+
+```rust
+/// 원격 사용자의 home 디렉토리 절대경로. SFTP `canonicalize(".")` 결과.
+async fn remote_home(sftp: &russh_sftp::client::SftpSession) -> Result<std::path::PathBuf, DuetError> {
+    let home = sftp
+        .canonicalize(".".to_string())
+        .await
+        .map_err(|e| DuetError::Ssh(format!("canonicalize home: {e}")))?;
+    Ok(std::path::PathBuf::from(home))
+}
+```
+
+- [ ] **Step 2: SFTP mkdir_all 헬퍼 (재귀 — `~/.duet-trash/batch/.../parent` 생성)**
+
+```rust
+/// 재귀 mkdir — 이미 있는 dir 은 OK, 없는 부모 들 차례로 생성.
+async fn sftp_mkdir_all(
+    sftp: &russh_sftp::client::SftpSession,
+    path: &std::path::Path,
+) -> Result<(), DuetError> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() && parent != std::path::Path::new("/") {
+            Box::pin(sftp_mkdir_all(sftp, parent)).await?;
+        }
+    }
+    let path_str = path.to_str().ok_or_else(|| DuetError::Io("non-UTF8 path".into()))?;
+    // 이미 있으면 SFTP 가 보통 Failure(=4) 반환 — metadata 체크해 idempotent 처리.
+    if sftp.metadata(path_str.to_string()).await.is_ok() {
+        return Ok(());
+    }
+    sftp.create_dir(path_str.to_string())
+        .await
+        .map_err(|e| map_sftp_error(e, path_str))
+}
+```
+
+- [ ] **Step 3: trash 구현 — unimplemented stub 교체**
+
+```rust
+async fn trash(&self, path: &Path, batch_id: &str) -> Result<crate::types::TrashLocation, DuetError> {
+    let sftp = self.open_sftp().await?;
+    let home = remote_home(&sftp).await?;
+    let trash_base = crate::services::trash::remote_trash_base(&home);
+
+    // 절대경로 보장 — 상대경로면 home 기준으로 정규화 (사용자 입력 방어)
+    let abs_path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        home.join(path)
+    };
+
+    let target = crate::services::trash::remote_trash_path_for(&trash_base, batch_id, &abs_path);
+    // target 의 parent 까지 mkdir
+    if let Some(parent) = target.parent() {
+        sftp_mkdir_all(&sftp, parent).await?;
+    }
+    let abs_str = abs_path.to_str().ok_or_else(|| DuetError::Io("non-UTF8 path".into()))?;
+    let target_str = target.to_str().ok_or_else(|| DuetError::Io("non-UTF8 trash path".into()))?;
+    sftp.rename(abs_str.to_string(), target_str.to_string())
+        .await
+        .map_err(|e| map_sftp_error(e, abs_str))?;
+
+    Ok(crate::types::TrashLocation::Remote { trash_path: target })
+}
+```
+
+- [ ] **Step 4: restore_from_trash 구현**
+
+```rust
+async fn restore_from_trash(
+    &self,
+    location: &crate::types::TrashLocation,
+    original_path: &Path,
+) -> Result<(), DuetError> {
+    let crate::types::TrashLocation::Remote { trash_path } = location else {
+        return Err(DuetError::Io(
+            "restore_from_trash on ssh fs given non-remote location".into(),
+        ));
+    };
+    let sftp = self.open_sftp().await?;
+    let original_str = original_path
+        .to_str()
+        .ok_or_else(|| DuetError::Io("non-UTF8 original path".into()))?;
+    // 복원 대상 자리에 이미 있으면 명시 에러 (덮어쓰기 자동 안 함 — 사용자가 처리)
+    if sftp.metadata(original_str.to_string()).await.is_ok() {
+        return Err(DuetError::Io(format!("restore target exists: {original_str}")));
+    }
+    // 부모 dir 이 사라졌을 수 있음 — mkdir_all
+    if let Some(parent) = original_path.parent() {
+        sftp_mkdir_all(&sftp, parent).await?;
+    }
+    let trash_str = trash_path
+        .to_str()
+        .ok_or_else(|| DuetError::Io("non-UTF8 trash path".into()))?;
+    sftp.rename(trash_str.to_string(), original_str.to_string())
+        .await
+        .map_err(|e| map_sftp_error(e, trash_str))
+}
+```
+
+- [ ] **Step 5: 컴파일 + 커밋**
+
+```bash
+cargo check --lib --tests
+git add src-tauri/src/fs/ssh.rs
+git commit -m "be/fs: SshFs::{trash, restore_from_trash}
+
+- remote_home() — SFTP canonicalize('.') 로 사용자 home 절대경로
+- sftp_mkdir_all() — 재귀 mkdir, 이미 있으면 idempotent
+- trash: ~/.duet-trash/<batch>/<original-abs-path> 로 mv (CLAUDE.md §3,
+  rm 폴백 절대 X)
+- restore_from_trash: parent mkdir_all 후 mv 로 원위치"
+```
+
+---
+
+### Task 12: SshFs::{read_full, write_full}
+
+**Files:**
+- Modify: `src-tauri/src/fs/ssh.rs`
+
+**Why:** copy_relay 가 stream copy 시 호출. MVP-2 는 in-memory `Vec<u8>` 한 번에 — 큰 파일에서 메모리 폭주 (8MB+ 위험). 청크 streaming 화는 후속 task (MVP-4 TaskQueue 와 같이 검토). 본 task 는 메모리 일괄 방식.
+
+- [ ] **Step 1: read_full 구현**
+
+```rust
+async fn read_full(&self, path: &Path) -> Result<Vec<u8>, DuetError> {
+    use tokio::io::AsyncReadExt;
+    let sftp = self.open_sftp().await?;
+    let path_str = path.to_str().ok_or_else(|| DuetError::Io("non-UTF8 path".into()))?;
+    let mut file = sftp
+        .open(path_str.to_string())
+        .await
+        .map_err(|e| map_sftp_error(e, path_str))?;
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf)
+        .await
+        .map_err(|e| DuetError::Ssh(format!("sftp read: {e}")))?;
+    Ok(buf)
+}
+```
+
+- [ ] **Step 2: write_full 구현**
+
+```rust
+async fn write_full(&self, path: &Path, bytes: &[u8]) -> Result<(), DuetError> {
+    use tokio::io::AsyncWriteExt;
+    let sftp = self.open_sftp().await?;
+    let path_str = path.to_str().ok_or_else(|| DuetError::Io("non-UTF8 path".into()))?;
+    let mut file = sftp
+        .create(path_str.to_string())
+        .await
+        .map_err(|e| map_sftp_error(e, path_str))?;
+    file.write_all(bytes)
+        .await
+        .map_err(|e| DuetError::Ssh(format!("sftp write: {e}")))?;
+    file.shutdown()
+        .await
+        .map_err(|e| DuetError::Ssh(format!("sftp close: {e}")))?;
+    Ok(())
+}
+```
+
+- [ ] **Step 3: 컴파일 + 커밋**
+
+```bash
+cargo check --lib --tests
+cargo clippy --lib --tests -- -D warnings
+git add src-tauri/src/fs/ssh.rs
+git commit -m "be/fs: SshFs::{read_full, write_full}
+
+sftp.open + read_to_end / sftp.create + write_all + shutdown.
+in-memory 일괄 — 큰 파일 (>8MB) 메모리 폭주 위험은 후속 (streaming 청크화).
+SFTP 통합 테스트는 docker 후속."
+```
 
 ---
 
@@ -1852,6 +2199,9 @@ pub mod fs_ops;
 
 ```rust
 //! 파괴적 작업 IPC commands. plan/execute 두 단계 (CLAUDE.md §3, §4 준수).
+//!
+//! 모든 _execute 함수는 success 시 `JournalChangedEvent { change: "push" }` emit —
+//! 프론트 journal store 가 자동 동기화 (Ctrl+Z 가능 여부 등 갱신).
 
 use std::sync::Arc;
 
@@ -1861,8 +2211,10 @@ use crate::core::ops::{
 use crate::fs::{FileSystem, LocalFs, SshFs};
 use crate::services::connection_pool::ConnectionPool;
 use crate::services::journal::{Journal, JournalEntry, JournalId};
+use crate::services::journal_events::JournalChangedEvent;
 use crate::services::settings::SettingsStore;
 use crate::types::{DeleteMode, DuetError, EntryRef, Location, SourceId};
+use tauri_specta::Event;
 
 /// SourceId → FileSystem 동적 디스패치.
 /// SSH 면 ConnectionPool 에서 ActiveConnection 가져와 SshFs 빌드.
@@ -1878,6 +2230,13 @@ async fn fs_for(source: &SourceId, pool: &Arc<ConnectionPool>) -> Result<Box<dyn
 
 fn ctx(settings: Arc<SettingsStore>, journal: Arc<Journal>) -> OpCtx {
     OpCtx { settings, journal }
+}
+
+/// 새 JournalEntry 가 push 된 직후 호출 — JournalChangedEvent emit + id 반환.
+fn emit_pushed(app: &tauri::AppHandle, entry: JournalEntry) -> JournalId {
+    let id = entry.id;
+    let _ = JournalChangedEvent { entry, change: "push".into() }.emit(app);
+    id
 }
 
 #[tauri::command]
@@ -1900,10 +2259,11 @@ pub async fn fs_delete_execute(
     pool: tauri::State<'_, Arc<ConnectionPool>>,
     settings: tauri::State<'_, Arc<SettingsStore>>,
     journal: tauri::State<'_, Arc<Journal>>,
+    app: tauri::AppHandle,
 ) -> Result<JournalId, DuetError> {
     let fs = fs_for(&plan.source, pool.inner()).await?;
     let entry = ops::delete_execute(&*fs, plan, &ctx(settings.inner().clone(), journal.inner().clone())).await?;
-    Ok(entry.id)
+    Ok(emit_pushed(&app, entry))
 }
 
 #[tauri::command]
@@ -1927,11 +2287,12 @@ pub async fn fs_copy_execute(
     pool: tauri::State<'_, Arc<ConnectionPool>>,
     settings: tauri::State<'_, Arc<SettingsStore>>,
     journal: tauri::State<'_, Arc<Journal>>,
+    app: tauri::AppHandle,
 ) -> Result<JournalId, DuetError> {
     let src_fs = fs_for(&plan.src_source, pool.inner()).await?;
     let dst_fs = fs_for(&plan.dst.source, pool.inner()).await?;
     let entry = ops::copy_execute(&*src_fs, &*dst_fs, plan, &ctx(settings.inner().clone(), journal.inner().clone())).await?;
-    Ok(entry.id)
+    Ok(emit_pushed(&app, entry))
 }
 
 #[tauri::command]
@@ -1955,11 +2316,12 @@ pub async fn fs_move_execute(
     pool: tauri::State<'_, Arc<ConnectionPool>>,
     settings: tauri::State<'_, Arc<SettingsStore>>,
     journal: tauri::State<'_, Arc<Journal>>,
+    app: tauri::AppHandle,
 ) -> Result<JournalId, DuetError> {
     let src_fs = fs_for(&plan.src_source, pool.inner()).await?;
     let dst_fs = fs_for(&plan.dst.source, pool.inner()).await?;
     let entry = ops::move_execute(&*src_fs, &*dst_fs, plan, &ctx(settings.inner().clone(), journal.inner().clone())).await?;
-    Ok(entry.id)
+    Ok(emit_pushed(&app, entry))
 }
 
 #[tauri::command]
@@ -1970,10 +2332,11 @@ pub async fn fs_rename(
     pool: tauri::State<'_, Arc<ConnectionPool>>,
     settings: tauri::State<'_, Arc<SettingsStore>>,
     journal: tauri::State<'_, Arc<Journal>>,
+    app: tauri::AppHandle,
 ) -> Result<JournalId, DuetError> {
     let fs = fs_for(&target.location.source, pool.inner()).await?;
     let entry = ops::rename(&*fs, target, new_name, &ctx(settings.inner().clone(), journal.inner().clone())).await?;
-    Ok(entry.id)
+    Ok(emit_pushed(&app, entry))
 }
 
 #[tauri::command]
@@ -1984,12 +2347,15 @@ pub async fn fs_mkdir(
     pool: tauri::State<'_, Arc<ConnectionPool>>,
     settings: tauri::State<'_, Arc<SettingsStore>>,
     journal: tauri::State<'_, Arc<Journal>>,
+    app: tauri::AppHandle,
 ) -> Result<JournalId, DuetError> {
     let fs = fs_for(&parent.source, pool.inner()).await?;
     let entry = ops::mkdir(&*fs, parent, name, &ctx(settings.inner().clone(), journal.inner().clone())).await?;
-    Ok(entry.id)
+    Ok(emit_pushed(&app, entry))
 }
 ```
+
+NB: `JournalChangedEvent` 는 Task 18 에서 타입 정의 — Task 16 까지는 import 경로가 미존재. Task 16 완료 후 Task 18 까지 한 번에 진행하거나, Task 16 시점에는 emit_pushed 호출만 빼고 entry.id 직접 반환 (event 추가는 Task 18 에서). **권장: Task 16-18 한 세션에서 연속 처리.**
 
 - [ ] **Step 3: lib.rs make_specta_builder 에 8개 command 추가**
 
@@ -2473,16 +2839,7 @@ commands::undo::undo_last,
 commands::undo::undo_history,
 ```
 
-또한 fs_ops 의 `_execute` 함수들이 push 직후 JournalChangedEvent emit 하도록 수정 필요. `commands/fs_ops.rs` 의 각 execute 함수에서 `entry` 받은 직후:
-
-```rust
-let _ = crate::services::journal_events::JournalChangedEvent {
-    entry: entry.clone(),
-    change: "push".into(),
-}.emit(&app);
-```
-
-이를 위해 각 execute command 시그니처에 `app: tauri::AppHandle` 추가.
+Task 16 의 `commands/fs_ops.rs` 가 이미 `emit_pushed` 헬퍼로 `JournalChangedEvent` 를 emit 하도록 작성됨 — Task 18 시점엔 `JournalChangedEvent` 타입이 막 정의되므로 import 만 활성화되면 끝. Task 16-18 을 한 세션에서 연속 진행 권장.
 
 - [ ] **Step 6: bindings 재생성 + 테스트 + 커밋**
 
@@ -2716,29 +3073,389 @@ git commit -m "fe/hook: useJournalEvents — bootstrap history + live subscribe"
 - Create: `src/components/dialogs/ProgressModal.tsx`
 - Create: `src/components/SettingsDialog.tsx`
 
-각 컴포넌트는 ConnectionDialog (Phase E Task 10 참조) 와 같은 radix-ui/react-dialog 패턴 따라가기. 핵심 인터페이스만 명시:
+모두 radix-ui/react-dialog 패턴 — ConnectionDialog (`src/components/connection/ConnectionDialog.tsx`) 와 같은 구조 (`Dialog.Root` / `Portal` / `Overlay` / `Content`). 사용 색상은 tailwind theme 토큰 (`bg-base`/`bg-subtle`/`bg-active`/`text-fg`/`text-fg-muted`/`accent`/`danger`/`border`).
 
-**RenameDialog** — props: `{ target: EntryRef | null, onClose, onSubmit(newName) }`. 입력 자동 포커스. 확장자 빼고 select. Enter=submit.
+- [ ] **Step 1: RenameDialog**
 
-**MkdirDialog** — props: `{ parent: Location | null, onClose, onSubmit(name) }`.
+```tsx
+// src/components/dialogs/RenameDialog.tsx
+import { useEffect, useRef, useState } from "react";
+import * as Dialog from "@radix-ui/react-dialog";
+import { X } from "lucide-react";
+import type { EntryRef } from "@/types/bindings";
 
-**ConfirmDialog** — props: `{ title, body: ReactNode, ctaLabel, ctaTone: "neutral"|"danger", onCancel, onConfirm }`. delete-confirm/copy-confirm/move-confirm 공용.
+export interface RenameDialogProps {
+  target: EntryRef;
+  onClose: () => void;
+  onSubmit: (newName: string) => void;
+}
 
-**DangerConfirmDialog** — props: `{ title, body, requiredWord: "delete", onCancel, onConfirm }`. 입력란이 requiredWord 와 정확히 일치하기 전엔 confirm 버튼 disabled. 빨간 보더 + 빨간 confirm.
+export function RenameDialog({ target, onClose, onSubmit }: RenameDialogProps) {
+  const [name, setName] = useState(target.name);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-**ProgressModal** — props: `{ title }`. 스피너 + close 없음 (op 끝나면 부모가 닫음). cancel 버튼 없음 (MVP-2).
+  useEffect(() => {
+    // 확장자 앞까지만 select (basename)
+    const t = inputRef.current;
+    if (!t) return;
+    t.focus();
+    const dot = target.name.lastIndexOf(".");
+    if (dot > 0) t.setSelectionRange(0, dot);
+    else t.select();
+  }, [target.name]);
 
-**SettingsDialog** — `commands.settingsGet()` / `commands.settingsSet()` 호출. permanent_delete_enabled 토글 + "Permanent delete is irreversible" 경고 텍스트.
+  const submit = () => {
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === target.name) {
+      onClose();
+      return;
+    }
+    onSubmit(trimmed);
+  };
 
-각 컴포넌트는 ~60-100 줄. 커밋 단위로 분리해도 좋고 한 커밋도 OK:
+  return (
+    <Dialog.Root open onOpenChange={(o) => !o && onClose()}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none">
+          <div className="mb-3 flex items-start justify-between">
+            <Dialog.Title className="text-title font-medium">Rename</Dialog.Title>
+            <Dialog.Close className="rounded p-1 text-fg-muted hover:bg-border" aria-label="Close">
+              <X size={14} />
+            </Dialog.Close>
+          </div>
+          <input
+            ref={inputRef}
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") submit();
+              else if (e.key === "Escape") onClose();
+            }}
+            className="w-full rounded border border-border bg-subtle px-2 py-1 font-mono text-base focus:border-accent focus:outline-none"
+          />
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={submit}
+              className="rounded bg-accent px-3 py-1 text-base text-white"
+            >
+              Rename
+            </button>
+          </div>
+          <Dialog.Description className="sr-only">Rename {target.name}</Dialog.Description>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+```
+
+- [ ] **Step 2: MkdirDialog (RenameDialog 와 거의 동일 — 빈 input)**
+
+```tsx
+// src/components/dialogs/MkdirDialog.tsx
+import { useEffect, useRef, useState } from "react";
+import * as Dialog from "@radix-ui/react-dialog";
+import { X } from "lucide-react";
+import type { Location } from "@/types/bindings";
+
+export interface MkdirDialogProps {
+  parent: Location;
+  onClose: () => void;
+  onSubmit: (name: string) => void;
+}
+
+export function MkdirDialog({ parent, onClose, onSubmit }: MkdirDialogProps) {
+  const [name, setName] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const submit = () => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    onSubmit(trimmed);
+  };
+
+  return (
+    <Dialog.Root open onOpenChange={(o) => !o && onClose()}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none">
+          <div className="mb-3 flex items-start justify-between">
+            <Dialog.Title className="text-title font-medium">New folder</Dialog.Title>
+            <Dialog.Close className="rounded p-1 text-fg-muted hover:bg-border" aria-label="Close">
+              <X size={14} />
+            </Dialog.Close>
+          </div>
+          <div className="mb-2 truncate text-meta text-fg-muted" title={parent.path}>
+            in {parent.path}
+          </div>
+          <input
+            ref={inputRef}
+            type="text"
+            value={name}
+            placeholder="folder name"
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") submit();
+              else if (e.key === "Escape") onClose();
+            }}
+            className="w-full rounded border border-border bg-subtle px-2 py-1 font-mono text-base focus:border-accent focus:outline-none"
+          />
+          <div className="mt-4 flex justify-end gap-2">
+            <button type="button" onClick={onClose} className="rounded border border-border px-3 py-1 text-base hover:bg-subtle">Cancel</button>
+            <button type="button" onClick={submit} disabled={!name.trim()} className="rounded bg-accent px-3 py-1 text-base text-white disabled:opacity-50">Create</button>
+          </div>
+          <Dialog.Description className="sr-only">Create new folder in {parent.path}</Dialog.Description>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+```
+
+- [ ] **Step 3: ConfirmDialog**
+
+```tsx
+// src/components/dialogs/ConfirmDialog.tsx
+import * as Dialog from "@radix-ui/react-dialog";
+import { X } from "lucide-react";
+import type { ReactNode } from "react";
+
+export interface ConfirmDialogProps {
+  title: string;
+  body: ReactNode;
+  ctaLabel: string;
+  ctaTone: "neutral" | "danger";
+  onCancel: () => void;
+  onConfirm: () => void;
+}
+
+export function ConfirmDialog({ title, body, ctaLabel, ctaTone, onCancel, onConfirm }: ConfirmDialogProps) {
+  const ctaCls =
+    ctaTone === "danger"
+      ? "bg-danger text-white"
+      : "bg-accent text-white";
+  return (
+    <Dialog.Root open onOpenChange={(o) => !o && onCancel()}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none">
+          <div className="mb-3 flex items-start justify-between">
+            <Dialog.Title className="text-title font-medium">{title}</Dialog.Title>
+            <Dialog.Close className="rounded p-1 text-fg-muted hover:bg-border" aria-label="Close">
+              <X size={14} />
+            </Dialog.Close>
+          </div>
+          <div className="text-base">{body}</div>
+          <div className="mt-4 flex justify-end gap-2">
+            <button type="button" onClick={onCancel} className="rounded border border-border px-3 py-1 text-base hover:bg-subtle">Cancel</button>
+            <button type="button" onClick={onConfirm} className={`rounded px-3 py-1 text-base ${ctaCls}`}>{ctaLabel}</button>
+          </div>
+          <Dialog.Description className="sr-only">{title}</Dialog.Description>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+```
+
+- [ ] **Step 4: DangerConfirmDialog ("delete" 타이핑)**
+
+```tsx
+// src/components/dialogs/DangerConfirmDialog.tsx
+import { useEffect, useRef, useState } from "react";
+import * as Dialog from "@radix-ui/react-dialog";
+import { X, AlertTriangle } from "lucide-react";
+import type { ReactNode } from "react";
+
+export interface DangerConfirmDialogProps {
+  title: string;
+  body: ReactNode;
+  requiredWord: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}
+
+export function DangerConfirmDialog({ title, body, requiredWord, onCancel, onConfirm }: DangerConfirmDialogProps) {
+  const [typed, setTyped] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const enabled = typed === requiredWord;
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  return (
+    <Dialog.Root open onOpenChange={(o) => !o && onCancel()}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-md border-2 border-danger bg-base p-4 shadow-lg focus:outline-none">
+          <div className="mb-3 flex items-start justify-between">
+            <Dialog.Title className="flex items-center gap-2 text-title font-medium text-danger">
+              <AlertTriangle size={16} />
+              {title}
+            </Dialog.Title>
+            <Dialog.Close className="rounded p-1 text-fg-muted hover:bg-border" aria-label="Close">
+              <X size={14} />
+            </Dialog.Close>
+          </div>
+          <div className="text-base">{body}</div>
+          <div className="mt-3">
+            <div className="mb-1 text-meta text-fg-muted">
+              Type <span className="font-mono text-fg">{requiredWord}</span> to confirm:
+            </div>
+            <input
+              ref={inputRef}
+              type="text"
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && enabled) onConfirm();
+                else if (e.key === "Escape") onCancel();
+              }}
+              className="w-full rounded border border-border bg-subtle px-2 py-1 font-mono text-base focus:border-danger focus:outline-none"
+            />
+          </div>
+          <div className="mt-4 flex justify-end gap-2">
+            <button type="button" onClick={onCancel} className="rounded border border-border px-3 py-1 text-base hover:bg-subtle">Cancel</button>
+            <button
+              type="button"
+              onClick={onConfirm}
+              disabled={!enabled}
+              className="rounded bg-danger px-3 py-1 text-base text-white disabled:opacity-30"
+            >
+              Delete
+            </button>
+          </div>
+          <Dialog.Description className="sr-only">{title}</Dialog.Description>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+```
+
+- [ ] **Step 5: ProgressModal (cancel 없음, op 부모가 닫음)**
+
+```tsx
+// src/components/dialogs/ProgressModal.tsx
+import * as Dialog from "@radix-ui/react-dialog";
+import { Loader } from "lucide-react";
+
+export function ProgressModal({ title }: { title: string }) {
+  return (
+    <Dialog.Root open>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
+        <Dialog.Content
+          className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none"
+          onEscapeKeyDown={(e) => e.preventDefault()}
+          onPointerDownOutside={(e) => e.preventDefault()}
+        >
+          <Dialog.Title className="text-title font-medium">{title}</Dialog.Title>
+          <div className="mt-3 flex items-center gap-2 text-base text-fg-muted">
+            <Loader size={14} className="animate-spin" />
+            <span>Working…</span>
+          </div>
+          <Dialog.Description className="sr-only">{title}</Dialog.Description>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+```
+
+- [ ] **Step 6: SettingsDialog (commands.settingsGet/Set 호출)**
+
+```tsx
+// src/components/SettingsDialog.tsx
+import { useEffect, useState } from "react";
+import * as Dialog from "@radix-ui/react-dialog";
+import { X, AlertTriangle } from "lucide-react";
+import { commands } from "@/types/bindings";
+import type { Settings } from "@/types/bindings";
+
+export function SettingsDialog({ onClose }: { onClose: () => void }) {
+  const [settings, setSettings] = useState<Settings | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    commands.settingsGet().then((r) => {
+      if (cancelled) return;
+      if (r.status === "ok") setSettings(r.data);
+      setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  const togglePermanent = async () => {
+    if (!settings) return;
+    const next = !settings.permanent_delete_enabled;
+    const r = await commands.settingsSet({ permanent_delete_enabled: next });
+    if (r.status === "ok") setSettings(r.data);
+  };
+
+  return (
+    <Dialog.Root open onOpenChange={(o) => !o && onClose()}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none">
+          <div className="mb-3 flex items-start justify-between">
+            <Dialog.Title className="text-title font-medium">Settings</Dialog.Title>
+            <Dialog.Close className="rounded p-1 text-fg-muted hover:bg-border" aria-label="Close">
+              <X size={14} />
+            </Dialog.Close>
+          </div>
+          {loading || !settings ? (
+            <div className="text-base text-fg-muted">Loading…</div>
+          ) : (
+            <div className="space-y-3">
+              <label className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  checked={settings.permanent_delete_enabled}
+                  onChange={togglePermanent}
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="block text-base">Enable permanent delete (Shift+Delete)</span>
+                  <span className="mt-0.5 flex items-center gap-1 text-meta text-danger">
+                    <AlertTriangle size={11} />
+                    Permanent delete is irreversible. Word typing still required.
+                  </span>
+                </span>
+              </label>
+            </div>
+          )}
+          <Dialog.Description className="sr-only">Application settings</Dialog.Description>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+```
+
+- [ ] **Step 7: 컴파일 + tsc + lint + 커밋**
 
 ```bash
+pnpm tsc --noEmit
+pnpm lint
 git add src/components/dialogs/ src/components/SettingsDialog.tsx
 git commit -m "fe/ui: 6개 다이얼로그 컴포넌트
 
-RenameDialog, MkdirDialog, ConfirmDialog (neutral/danger tone),
-DangerConfirmDialog ('delete' 타이핑), ProgressModal, SettingsDialog.
-모두 radix-ui/react-dialog 위. ConnectionDialog 패턴 그대로."
+RenameDialog (확장자 빼고 select), MkdirDialog (parent path 표시),
+ConfirmDialog (neutral/danger tone), DangerConfirmDialog ('delete' 타이핑
+강제 + 빨간 보더), ProgressModal (ESC/outside-click 차단),
+SettingsDialog (settingsGet/Set + permanent_delete_enabled 토글).
+모두 radix-ui/react-dialog 위, theme 토큰만 사용."
 ```
 
 ---
@@ -3163,7 +3880,7 @@ git commit -m "docs: MVP-2 완료 표시"
 | Journal (storage) | 3 |
 | Trash (helpers) | 7 |
 | FileSystem 확장 (Local) | 5, 6, 8, 9 |
-| FileSystem 확장 (SSH) | 10-12 (가이드라인) |
+| FileSystem 확장 (SSH) | 10, 11, 12 |
 | Op trait + Delete | 13 |
 | Copy + Move + same-host block | 14 |
 | Rename + Mkdir | 15 |
@@ -3176,10 +3893,13 @@ git commit -m "docs: MVP-2 완료 표시"
 | 수동 검증 + ROADMAP | 25 |
 
 **위험 영역 / 미정:**
-- Task 10-12 (SSH 측 trait 구현) — 본 plan 은 가이드라인만, 실제 코드 작성 시 sftp API 정확한 시그니처 docs.rs 재확인 필요
-- 큰 파일 copy_relay: 현재 read_full → write_full (메모리 전체 적재) — 8MB+ 파일에서 메모리 폭주. 후속 task 에서 청크 streaming 화 (MVP-2 마무리 전후로 결정)
-- LocalFs::trash 의 trash crate cross-platform 동작 — Linux 일부 디스트로 (XDG trash 미지원) 에서 동작 확인 필요
-- 큰 파일 / 다수 파일 stress test 는 MVP-4 (TaskQueue) 와 함께
+- **trash crate 의 macOS 한계**: `trash::os_limited::list/restore_all` 은 Linux + Windows 만 지원. macOS 에서 Task 8 의 `trash` 메서드는 동작하지만 (OS Trash 로 mv) `restore_from_trash` 는 컴파일 안 됨 (cfg 가드 필요). Task 8 코드의 `cfg(any(target_os = "macos", ...))` 분기는 수정 필요 — 실제 작성 시 macOS 분기에서 `Err(DuetError::NotSupported("trash undo on macOS — manual restore via Finder"))` 반환하거나, 원격 SSH 와 같은 자체 `~/.duet-trash/` 사용 (소규모 디자인 변경, MVP-2 실행 시점에 결정).
+- Task 10-12 (SSH 측 trait 구현) — 코드는 plan 에 작성되어 있으나 `russh-sftp` 2.0 의 `metadata`/`rename`/`create_dir`/`remove_file`/`remove_dir`/`canonicalize`/`open`/`create` 정확한 시그니처는 실제 작성 시 docs.rs 재확인 필요. 시그니처 다르면 1-2줄 조정.
+- 큰 파일 copy_relay: 현재 read_full → write_full (메모리 전체 적재) — 8MB+ 파일에서 메모리 폭주. 후속 task 에서 청크 streaming 화 (MVP-2 마무리 전후로 결정).
+- LocalFs::trash 의 trash crate cross-platform 동작 — Linux 일부 디스트로 (XDG trash 미지원) 에서 동작 확인 필요. Phase F 수동 검증 단계에서 OS 별 확인.
+- `OpCtx` 의 `ctx()` helper 가 매 command 호출마다 `Arc::clone` 두 번 — 사실상 무비용이지만, 더 elegant 한 방법은 `OpCtx<'a>` 로 borrow 받기. MVP-2 는 일관성 우선.
+- core/ops 의 helper `fs_for` 와 commands/fs_ops 의 `fs_for` 가 중복 (다른 layer). 추출 안 함 — 의존 방향 (commands → core, core → fs) 을 깨지 않으려고. 정 필요하면 `fs/dispatch.rs` 신설.
+- 큰 파일 / 다수 파일 stress test 는 MVP-4 (TaskQueue) 와 함께.
 
 ---
 
