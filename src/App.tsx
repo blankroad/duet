@@ -1,14 +1,15 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useState } from "react";
 import { Pane } from "@/components/pane/Pane";
 import { Sidebar } from "@/components/Sidebar";
 import { StatusBar } from "@/components/StatusBar";
+import { ConnectionDialog } from "@/components/connection/ConnectionDialog";
 import { usePanes, type PaneId } from "@/stores/panes";
 import { useTauri } from "@/hooks/useTauri";
 import { useKeyboardNav } from "@/hooks/useKeyboardNav";
 import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
 import { useSshHosts } from "@/hooks/useSshHosts";
 import { commands } from "@/types/bindings";
-import type { Entry } from "@/types/bindings";
+import type { ConnectionId, Entry } from "@/types/bindings";
 
 /**
  * App 루트.
@@ -87,13 +88,44 @@ function App() {
   useGlobalShortcuts();
   useSshHosts();
 
-  // Sidebar 호스트 더블클릭 — Task 10 의 ConnectionDialog 가 추가될 때까지는
-  // 콘솔 로그만. (다이얼로그 없이 바로 connectionOpen 호출하면 비밀번호 prompt
-  // 가 필요한 호스트에서 사용자에게 피드백 없이 실패 — UX 깨짐.)
+  // 새 연결 다이얼로그 — 호스트 더블클릭 시 alias 가 들어옴, 닫으면 null.
+  const [dialogAlias, setDialogAlias] = useState<string | null>(null);
+
   const onHostActivate = useCallback((alias: string) => {
-    // Task 10 의 ConnectionDialog 가 추가될 때까지 임시 stub.
-    console.log("[duet] host activated (dialog TODO):", alias);
+    setDialogAlias(alias);
   }, []);
+
+  /** 연결 성공 후 해당 패널을 SSH 위치로 이동. */
+  const onConnected = useCallback(
+    async (paneId: PaneId, connectionId: ConnectionId, alias: string) => {
+      const state = usePanes.getState();
+      const ssh: import("@/types/bindings").SourceId = {
+        kind: "ssh",
+        connection_id: connectionId,
+        // host_ip 는 백엔드 권한 — 다음 connection_list 폴링 또는
+        // connection:state 이벤트(Task 11) 에서 갱신. UI 식별만 신경.
+        host_ip: "",
+        // user 는 connections store 에서 가져와야 정확하지만, 여기서는
+        // setEntries 호출 시 location 만 update — backend 가 connection_id 로
+        // 라우팅하므로 user 정확성은 same-host 판정에만 영향.
+        user: "",
+      };
+      // 초기 경로: "/" — SSH 호스트의 루트. 권한 없으면 사용자가 PathBar 로 이동.
+      // (사용자 home 자동 이동은 ssh_home_directory command 추가 후 — 후속.)
+      const location = { source: ssh, path: "/" };
+      try {
+        const entries = await listDirectory(location);
+        state.setEntries(paneId, location, sortEntries(entries));
+        state.setActivePane(paneId);
+      } catch {
+        // useTauri 가 error state 에 저장. 사용자는 빈 패널로 떨어지므로
+        // PathBar 로 다른 경로 시도 가능.
+      }
+      // alias 는 future debug 용으로만 받음 — store 업데이트는 dialog 가 이미.
+      void alias;
+    },
+    [listDirectory, sortEntries],
+  );
 
   // 부트스트랩: 양쪽 패널 초기 로드 (home 디렉토리, Windows 호환)
   useEffect(() => {
@@ -120,6 +152,12 @@ function App() {
       </main>
 
       <StatusBar />
+
+      <ConnectionDialog
+        alias={dialogAlias}
+        onClose={() => setDialogAlias(null)}
+        onConnected={onConnected}
+      />
     </div>
   );
 }
