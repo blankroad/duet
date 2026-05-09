@@ -36,6 +36,8 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::connection::connection_open,
             commands::connection::connection_close,
             commands::connection::connection_list,
+            commands::settings::settings_get,
+            commands::settings::settings_set,
         ])
         .events(collect_events![
             services::connection_events::ConnectionStateEvent,
@@ -84,11 +86,20 @@ pub fn run() {
     }
 
     let pool = services::connection_pool::ConnectionPool::new();
+    let settings = tauri::async_runtime::block_on(async {
+        services::settings::SettingsStore::load_default().await
+    })
+    .expect("settings load");
+    let journal =
+        tauri::async_runtime::block_on(async { services::journal::Journal::load_default().await })
+            .expect("journal load");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_os::init())
         .manage(pool)
+        .manage(settings)
+        .manage(journal)
         .invoke_handler(specta_builder.invoke_handler())
         .setup(move |app| {
             specta_builder.mount_events(app);

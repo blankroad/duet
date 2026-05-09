@@ -2,4 +2,5 @@
 
 pub mod connection;
 pub mod pane;
+pub mod settings;
 pub mod system;

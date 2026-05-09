@@ -125,10 +125,11 @@ pub struct MoveItem {
 }
 
 /// jsonl 한 줄. push 새 entry 또는 기존 entry undone 토글.
+/// `Push` variant 가 ~400B 라 enum 크기 차이가 커서 Box 로 indirect.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
 enum JsonlRecord {
-    Push(JournalEntry),
+    Push(Box<JournalEntry>),
     MarkUndone { id: JournalId },
 }
 
@@ -164,7 +165,8 @@ impl Journal {
             undo,
             undone: false,
         };
-        self.append(JsonlRecord::Push(entry.clone())).await?;
+        self.append(JsonlRecord::Push(Box::new(entry.clone())))
+            .await?;
         let mut lock = self.inner.lock().await;
         lock.push_back(entry.clone());
         if lock.len() > TAIL_LOAD_LIMIT {
@@ -231,7 +233,7 @@ async fn read_tail(path: &Path, limit: usize) -> Result<VecDeque<JournalEntry>, 
         let rec: JsonlRecord = serde_json::from_str(line)
             .map_err(|e| DuetError::Io(format!("journal line {} parse: {e}", i + 1)))?;
         match rec {
-            JsonlRecord::Push(e) => entries.push(e),
+            JsonlRecord::Push(e) => entries.push(*e),
             JsonlRecord::MarkUndone { id } => {
                 if let Some(found) = entries.iter_mut().find(|e| e.id == id) {
                     found.undone = true;
