@@ -1,3 +1,4 @@
 //! 앱 서비스 — 비동기 작업 큐, 저널, 연결 풀, 설정.
 
+pub mod connection_events;
 pub mod connection_pool;

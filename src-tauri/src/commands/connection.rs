@@ -18,7 +18,9 @@ use std::sync::Arc;
 
 use serde::Serialize;
 use specta::Type;
+use tauri_specta::Event;
 
+use crate::services::connection_events::{ConnectionStateChange, ConnectionStateEvent};
 use crate::services::connection_pool::{ActiveConnection, ConnectionPool};
 use crate::ssh::config::{load_ssh_hosts, SshHostEntry};
 use crate::ssh::connection::{connect, SshSession};
@@ -75,13 +77,16 @@ pub async fn ssh_config_hosts() -> Result<Vec<SshHostEntryDto>, DuetError> {
 /// 인증 시도 순서: identity_files → SSH agent → `AuthFailed` (비밀번호는
 /// 후속 Task 7b 의 secure prompt 후 별도 command 로).
 ///
-/// 성공 시 새로 발급된 `ConnectionId` 반환. 호출자(프론트엔드) 는 이 id 로
-/// `Location { source: SourceId::Ssh { connection_id, .. }, .. }` 구성.
+/// 성공 시:
+/// 1. ConnectionPool 에 등록
+/// 2. `ConnectionStateEvent { state: Connected }` emit
+/// 3. 새 `ConnectionId` 반환
 #[tauri::command]
 #[specta::specta]
 pub async fn connection_open(
     alias: String,
     pool: tauri::State<'_, Arc<ConnectionPool>>,
+    app: tauri::AppHandle,
 ) -> Result<ConnectionId, DuetError> {
     let all_hosts = load_ssh_hosts()?;
     let host = all_hosts
@@ -104,7 +109,19 @@ pub async fn connection_open(
         user: host.user.clone(),
         session: Some(tokio::sync::Mutex::new(session.handle)),
     };
+    let host_ip = session.host_ip;
     pool.insert(conn).await;
+
+    // emit 실패는 non-fatal — 연결 자체는 성공했으므로 Ok 로 반환.
+    let _ = ConnectionStateEvent {
+        id: id.clone(),
+        alias: host.alias.clone(),
+        host_ip: host_ip.to_string(),
+        user: host.user.clone(),
+        state: ConnectionStateChange::Connected,
+    }
+    .emit(&app);
+
     Ok(id)
 }
 
@@ -112,13 +129,17 @@ pub async fn connection_open(
 ///
 /// SSH disconnect 패킷 송신은 best-effort — 이미 끊긴 연결이라도 pool 정리는
 /// 진행. id 가 pool 에 없어도 에러 아님 (idempotent).
+///
+/// 종료 후 `ConnectionStateEvent { state: Disconnected }` emit.
 #[tauri::command]
 #[specta::specta]
 pub async fn connection_close(
     id: ConnectionId,
     pool: tauri::State<'_, Arc<ConnectionPool>>,
+    app: tauri::AppHandle,
 ) -> Result<(), DuetError> {
-    if let Ok(conn) = pool.get(&id).await {
+    let snapshot = pool.get(&id).await.ok();
+    if let Some(conn) = snapshot.as_ref() {
         if let Some(session_mutex) = conn.session.as_ref() {
             let handle = session_mutex.lock().await;
             // disconnect 결과는 무시 — 이미 끊겼을 수 있음.
@@ -128,6 +149,17 @@ pub async fn connection_close(
         }
     }
     pool.remove(&id).await;
+
+    if let Some(conn) = snapshot {
+        let _ = ConnectionStateEvent {
+            id: id.clone(),
+            alias: conn.alias.clone(),
+            host_ip: String::new(),
+            user: conn.user.clone(),
+            state: ConnectionStateChange::Disconnected,
+        }
+        .emit(&app);
+    }
     Ok(())
 }
 

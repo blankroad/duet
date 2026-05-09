@@ -8,6 +8,7 @@ import { useTauri } from "@/hooks/useTauri";
 import { useKeyboardNav } from "@/hooks/useKeyboardNav";
 import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
 import { useSshHosts } from "@/hooks/useSshHosts";
+import { useConnectionEvents } from "@/hooks/useConnectionEvents";
 import { commands } from "@/types/bindings";
 import type { ConnectionId, Entry } from "@/types/bindings";
 
@@ -87,6 +88,7 @@ function App() {
   useKeyboardNav(onKeyboardActivate, onKeyboardUp);
   useGlobalShortcuts();
   useSshHosts();
+  useConnectionEvents();
 
   // 새 연결 다이얼로그 — 호스트 더블클릭 시 alias 가 들어옴, 닫으면 null.
   const [dialogAlias, setDialogAlias] = useState<string | null>(null);

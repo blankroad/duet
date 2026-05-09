@@ -18,7 +18,7 @@ pub mod services;
 pub mod ssh;
 pub mod types;
 
-use tauri_specta::{collect_commands, Builder};
+use tauri_specta::{collect_commands, collect_events, Builder};
 
 /// 모든 IPC command 가 등록된 specta `Builder` 를 만든다.
 ///
@@ -26,14 +26,18 @@ use tauri_specta::{collect_commands, Builder};
 /// 가 같은 command 목록을 공유하도록 단일 진실. 새 command 추가 시 여기에만
 /// 등록.
 pub fn make_specta_builder() -> Builder<tauri::Wry> {
-    Builder::<tauri::Wry>::new().commands(collect_commands![
-        commands::pane::list_directory,
-        commands::system::home_directory,
-        commands::connection::ssh_config_hosts,
-        commands::connection::connection_open,
-        commands::connection::connection_close,
-        commands::connection::connection_list,
-    ])
+    Builder::<tauri::Wry>::new()
+        .commands(collect_commands![
+            commands::pane::list_directory,
+            commands::system::home_directory,
+            commands::connection::ssh_config_hosts,
+            commands::connection::connection_open,
+            commands::connection::connection_close,
+            commands::connection::connection_list,
+        ])
+        .events(collect_events![
+            services::connection_events::ConnectionStateEvent,
+        ])
 }
 
 /// `src/types/bindings.ts` 의 절대경로.
