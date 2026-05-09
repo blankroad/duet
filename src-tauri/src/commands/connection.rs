@@ -22,6 +22,7 @@ use tauri_specta::Event;
 
 use crate::services::connection_events::{ConnectionStateChange, ConnectionStateEvent};
 use crate::services::connection_pool::{ActiveConnection, ConnectionPool};
+use crate::services::connection_supervisor::spawn_supervisor;
 use crate::ssh::config::{load_ssh_hosts, SshHostEntry};
 use crate::ssh::connection::{connect, SshSession};
 use crate::types::{ConnectionId, DuetError};
@@ -121,6 +122,9 @@ pub async fn connection_open(
         state: ConnectionStateChange::Connected,
     }
     .emit(&app);
+
+    // 백그라운드 supervisor — 연결 끊김 감지 + 자동 재연결 (Task 13).
+    spawn_supervisor(pool.inner().clone(), app.clone(), id.clone());
 
     Ok(id)
 }

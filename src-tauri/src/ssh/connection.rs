@@ -75,6 +75,11 @@ pub struct SshSession {
 fn make_config() -> Arc<Config> {
     Arc::new(Config {
         inactivity_timeout: Some(Duration::from_secs(300)),
+        // 15초 무응답 시 keepalive 송신, 3회 누적 실패 시 connection close
+        // → 약 45초 안에 `Handle::is_closed()` 가 true 가 되어 supervisor (Task 13)
+        // 가 재연결을 시작.
+        keepalive_interval: Some(Duration::from_secs(15)),
+        keepalive_max: 3,
         ..Default::default()
     })
 }
