@@ -44,7 +44,8 @@ pub fn run() {
         specta_builder
             .export(
                 specta_typescript::Typescript::default()
-                    .formatter(specta_typescript::formatter::prettier),
+                    .formatter(specta_typescript::formatter::prettier)
+                    .bigint(specta_typescript::BigIntExportBehavior::Number),
                 &bindings_path,
             )
             .expect("failed to export specta bindings");
