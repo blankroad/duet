@@ -409,11 +409,11 @@ mod tests {
     use std::path::PathBuf;
     use tempfile::TempDir;
 
-    fn mk_target(parent: &PathBuf, name: &str) -> EntryRef {
+    fn mk_target(parent: &std::path::Path, name: &str) -> EntryRef {
         EntryRef {
             location: Location {
                 source: SourceId::Local,
-                path: parent.clone(),
+                path: parent.to_path_buf(),
             },
             name: name.to_string(),
         }

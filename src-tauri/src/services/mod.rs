@@ -6,5 +6,6 @@ pub mod connection_supervisor;
 pub mod fs_events;
 pub mod fs_watcher;
 pub mod journal;
+pub mod journal_events;
 pub mod settings;
 pub mod trash;

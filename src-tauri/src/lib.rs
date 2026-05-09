@@ -38,10 +38,21 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::connection::connection_list,
             commands::settings::settings_get,
             commands::settings::settings_set,
+            commands::fs_ops::fs_delete_plan,
+            commands::fs_ops::fs_delete_execute,
+            commands::fs_ops::fs_copy_plan,
+            commands::fs_ops::fs_copy_execute,
+            commands::fs_ops::fs_move_plan,
+            commands::fs_ops::fs_move_execute,
+            commands::fs_ops::fs_rename,
+            commands::fs_ops::fs_mkdir,
+            commands::undo::undo_last,
+            commands::undo::undo_history,
         ])
         .events(collect_events![
             services::connection_events::ConnectionStateEvent,
             services::fs_events::FsChangedEvent,
+            services::journal_events::JournalChangedEvent,
         ])
 }
 
