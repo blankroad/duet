@@ -70,8 +70,34 @@ impl FileSystem for LocalFs {
         tokio::fs::create_dir(path).await.map_err(DuetError::from)
     }
 
-    async fn trash(&self, _: &Path, _: &str) -> Result<crate::types::TrashLocation, DuetError> {
-        unimplemented!("Task 8")
+    async fn trash(
+        &self,
+        path: &Path,
+        _batch_id: &str,
+    ) -> Result<crate::types::TrashLocation, DuetError> {
+        let path = path.to_path_buf();
+        // trash crate 는 sync — spawn_blocking
+        let trash_id = tokio::task::spawn_blocking(move || trash_delete_capture_id(&path))
+            .await
+            .map_err(|e| DuetError::Io(format!("spawn_blocking: {e}")))??;
+        Ok(crate::types::TrashLocation::Local { trash_id })
+    }
+
+    async fn restore_from_trash(
+        &self,
+        location: &crate::types::TrashLocation,
+        original_path: &Path,
+    ) -> Result<(), DuetError> {
+        let crate::types::TrashLocation::Local { trash_id } = location else {
+            return Err(DuetError::Io(
+                "restore_from_trash on local fs given non-local location".into(),
+            ));
+        };
+        let trash_id = trash_id.clone();
+        let original = original_path.to_path_buf();
+        tokio::task::spawn_blocking(move || trash_restore(&trash_id, &original))
+            .await
+            .map_err(|e| DuetError::Io(format!("spawn_blocking: {e}")))?
     }
 
     async fn remove(&self, path: &Path) -> Result<(), DuetError> {
@@ -85,13 +111,6 @@ impl FileSystem for LocalFs {
         } else {
             tokio::fs::remove_file(path).await.map_err(DuetError::from)
         }
-    }
-    async fn restore_from_trash(
-        &self,
-        _: &crate::types::TrashLocation,
-        _: &Path,
-    ) -> Result<(), DuetError> {
-        unimplemented!("Task 8")
     }
     async fn read_full(&self, _: &Path) -> Result<Vec<u8>, DuetError> {
         unimplemented!("Task 9")
@@ -166,6 +185,65 @@ fn is_os_hidden(meta: &std::fs::Metadata) -> bool {
 #[cfg(not(windows))]
 fn is_os_hidden(_meta: &std::fs::Metadata) -> bool {
     false
+}
+
+// === Trash helpers (sync — spawn_blocking 안에서 호출) ===
+
+/// OS 휴지통으로 보내고 복원에 쓸 native id 반환.
+/// Linux/Windows: trash crate 의 native TrashItem id.
+/// macOS: 원본 절대경로 string (restore 는 NotSupported — undo 시도 시 명시 거부).
+#[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
+fn trash_delete_capture_id(path: &Path) -> Result<String, DuetError> {
+    use trash::os_limited;
+    let items_before: std::collections::HashSet<_> = os_limited::list()
+        .map_err(|e| DuetError::Io(format!("trash list before: {e}")))?
+        .into_iter()
+        .map(|i| i.id)
+        .collect();
+    trash::delete(path).map_err(|e| DuetError::Io(format!("trash delete: {e}")))?;
+    let after = os_limited::list().map_err(|e| DuetError::Io(format!("trash list after: {e}")))?;
+    let new = after
+        .into_iter()
+        .find(|i| !items_before.contains(&i.id) && i.original_path() == path)
+        .ok_or_else(|| DuetError::Io("trash item not found after delete".into()))?;
+    Ok(new.id.to_string_lossy().into_owned())
+}
+
+#[cfg(target_os = "macos")]
+fn trash_delete_capture_id(path: &Path) -> Result<String, DuetError> {
+    // macOS 에서 trash crate 의 os_limited::list/restore_all 미지원.
+    // delete 는 OS Trash 로 mv 됨 — 동작. id 는 원본 절대경로 string 으로
+    // 기록 (현재 restore 미지원이지만 후속에서 ~/.Trash/<basename> 기반 mv
+    // 추가 가능).
+    trash::delete(path).map_err(|e| DuetError::Io(format!("trash delete: {e}")))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+#[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
+fn trash_restore(trash_id: &str, original: &Path) -> Result<(), DuetError> {
+    use trash::os_limited;
+    if original.exists() {
+        return Err(DuetError::Io(format!(
+            "restore target exists: {}",
+            original.display()
+        )));
+    }
+    let items = os_limited::list().map_err(|e| DuetError::Io(format!("trash list: {e}")))?;
+    let item = items
+        .into_iter()
+        .find(|i| i.id.to_string_lossy() == trash_id)
+        .ok_or_else(|| DuetError::Io(format!("trash item not found: {trash_id}")))?;
+    os_limited::restore_all([item]).map_err(|e| DuetError::Io(format!("restore: {e:?}")))
+}
+
+#[cfg(target_os = "macos")]
+fn trash_restore(_trash_id: &str, _original: &Path) -> Result<(), DuetError> {
+    // MVP-2: macOS undo-from-trash 미지원 (trash crate os_limited 가 macOS 에서
+    // restore_all 제공 안 함). 사용자는 Finder 에서 수동 복원 필요.
+    // 후속에서 ~/.Trash/<basename> 기반 mv 로 best-effort 복원 추가 검토.
+    Err(DuetError::NotSupported(
+        "trash undo on macOS — restore manually via Finder".into(),
+    ))
 }
 
 #[cfg(test)]
