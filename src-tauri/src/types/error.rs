@@ -24,6 +24,8 @@ pub enum DuetError {
     NotPermitted,
     #[error("cancelled")]
     Cancelled,
+    #[error("not supported: {0}")]
+    NotSupported(String),
     #[error("io: {0}")]
     Io(String),
     #[error("ssh: {0}")]
