@@ -81,3 +81,22 @@ pub enum DeleteMode {
     /// 영구 삭제. 설정에서 명시적으로 활성화 + 단어 타이핑 확인 필요. undo 불가.
     Permanent,
 }
+
+/// 단일 항목의 stat — list 의 Entry 와 분리 (이름은 호출자가 알고 있음).
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct EntryMeta {
+    pub kind: EntryKind,
+    pub size: Option<u64>,
+    pub modified_ms: Option<i64>,
+    pub permissions: Option<u32>,
+}
+
+/// `trash()` 결과 — 어디로 갔는지. undo 시 복원 정보.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TrashLocation {
+    /// 로컬 trash crate 의 native id (OS 휴지통). MVP-2 macOS 는 빈 문자열 가능.
+    Local { trash_id: String },
+    /// 원격 ~/.duet-trash/<batch>/<original-path>/
+    Remote { trash_path: PathBuf },
+}

@@ -21,4 +21,65 @@ pub trait FileSystem: Send + Sync {
 
     /// 디렉토리 항목 나열. 정렬은 호출자 책임.
     async fn list(&self, path: &Path) -> Result<Vec<Entry>, DuetError>;
+
+    // === MVP-2 신규 ===
+    async fn metadata(&self, path: &Path) -> Result<crate::types::EntryMeta, DuetError>;
+    async fn rename(&self, from: &Path, to: &Path) -> Result<(), DuetError>;
+    async fn mkdir(&self, path: &Path) -> Result<(), DuetError>;
+    async fn trash(
+        &self,
+        path: &Path,
+        batch_id: &str,
+    ) -> Result<crate::types::TrashLocation, DuetError>;
+    async fn remove(&self, path: &Path) -> Result<(), DuetError>;
+    /// trash 의 역동작 — undo 용. local/remote 구분 필요.
+    async fn restore_from_trash(
+        &self,
+        location: &crate::types::TrashLocation,
+        original_path: &Path,
+    ) -> Result<(), DuetError>;
+    /// 단일 파일 전체 읽기. 큰 파일은 메모리 폭주 위험 — 후속에서 streaming 화.
+    async fn read_full(&self, path: &Path) -> Result<Vec<u8>, DuetError>;
+    /// 단일 파일 전체 쓰기.
+    async fn write_full(&self, path: &Path, bytes: &[u8]) -> Result<(), DuetError>;
+}
+
+/// 본인 PC 통한 stream copy. local↔ssh 양방향 OK; ssh↔ssh 는 호출 전에
+/// `core::ops` 가 same-host 검사 하고 차단.
+///
+/// 디렉토리는 재귀: src 가 dir 이면 dst 에 mkdir 후 자식 entries 차례로 복사.
+pub async fn copy_relay(
+    src_fs: &dyn FileSystem,
+    src: &std::path::Path,
+    dst_fs: &dyn FileSystem,
+    dst: &std::path::Path,
+) -> Result<(), DuetError> {
+    let meta = src_fs.metadata(src).await?;
+    match meta.kind {
+        crate::types::EntryKind::Dir => {
+            dst_fs.mkdir(dst).await?;
+            let entries = src_fs.list(src).await?;
+            for e in entries {
+                let child_src = src.join(&e.name);
+                let child_dst = dst.join(&e.name);
+                Box::pin(copy_relay(src_fs, &child_src, dst_fs, &child_dst)).await?;
+            }
+            Ok(())
+        }
+        crate::types::EntryKind::File => copy_file_bytes(src_fs, src, dst_fs, dst).await,
+        crate::types::EntryKind::Symlink | crate::types::EntryKind::Other => {
+            // MVP-2 는 symlink 따라가서 복사 (target 의 내용 복사).
+            copy_file_bytes(src_fs, src, dst_fs, dst).await
+        }
+    }
+}
+
+async fn copy_file_bytes(
+    src_fs: &dyn FileSystem,
+    src: &std::path::Path,
+    dst_fs: &dyn FileSystem,
+    dst: &std::path::Path,
+) -> Result<(), DuetError> {
+    let bytes = src_fs.read_full(src).await?;
+    dst_fs.write_full(dst, &bytes).await
 }

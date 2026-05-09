@@ -27,6 +27,35 @@ impl FileSystem for LocalFs {
         SourceId::Local
     }
 
+    async fn metadata(&self, _path: &Path) -> Result<crate::types::EntryMeta, DuetError> {
+        unimplemented!("Task 6")
+    }
+    async fn rename(&self, _: &Path, _: &Path) -> Result<(), DuetError> {
+        unimplemented!("Task 6")
+    }
+    async fn mkdir(&self, _: &Path) -> Result<(), DuetError> {
+        unimplemented!("Task 6")
+    }
+    async fn trash(&self, _: &Path, _: &str) -> Result<crate::types::TrashLocation, DuetError> {
+        unimplemented!("Task 8")
+    }
+    async fn remove(&self, _: &Path) -> Result<(), DuetError> {
+        unimplemented!("Task 6")
+    }
+    async fn restore_from_trash(
+        &self,
+        _: &crate::types::TrashLocation,
+        _: &Path,
+    ) -> Result<(), DuetError> {
+        unimplemented!("Task 8")
+    }
+    async fn read_full(&self, _: &Path) -> Result<Vec<u8>, DuetError> {
+        unimplemented!("Task 9")
+    }
+    async fn write_full(&self, _: &Path, _: &[u8]) -> Result<(), DuetError> {
+        unimplemented!("Task 9")
+    }
+
     async fn list(&self, path: &Path) -> Result<Vec<Entry>, DuetError> {
         let mut read_dir = tokio::fs::read_dir(path).await.map_err(DuetError::from)?;
         let mut entries = Vec::new();

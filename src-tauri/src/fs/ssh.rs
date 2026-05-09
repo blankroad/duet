@@ -34,6 +34,35 @@ impl FileSystem for SshFs {
         self.conn.source_id()
     }
 
+    async fn metadata(&self, _path: &Path) -> Result<crate::types::EntryMeta, DuetError> {
+        unimplemented!("Task 10")
+    }
+    async fn rename(&self, _: &Path, _: &Path) -> Result<(), DuetError> {
+        unimplemented!("Task 10")
+    }
+    async fn mkdir(&self, _: &Path) -> Result<(), DuetError> {
+        unimplemented!("Task 10")
+    }
+    async fn trash(&self, _: &Path, _: &str) -> Result<crate::types::TrashLocation, DuetError> {
+        unimplemented!("Task 11")
+    }
+    async fn remove(&self, _: &Path) -> Result<(), DuetError> {
+        unimplemented!("Task 10")
+    }
+    async fn restore_from_trash(
+        &self,
+        _: &crate::types::TrashLocation,
+        _: &Path,
+    ) -> Result<(), DuetError> {
+        unimplemented!("Task 11")
+    }
+    async fn read_full(&self, _: &Path) -> Result<Vec<u8>, DuetError> {
+        unimplemented!("Task 12")
+    }
+    async fn write_full(&self, _: &Path, _: &[u8]) -> Result<(), DuetError> {
+        unimplemented!("Task 12")
+    }
+
     async fn list(&self, path: &Path) -> Result<Vec<Entry>, DuetError> {
         let session_mutex = self.conn.session.as_ref().ok_or_else(|| {
             DuetError::ConnectionFailed("connection has no live session (test stub?)".into())
