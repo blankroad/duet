@@ -1,5 +1,5 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import type { Entry } from "@/types/bindings";
 import { EntryRow } from "./EntryRow";
 
@@ -24,7 +24,7 @@ export function EntryList({
   selected,
   onCursorMove,
   onActivate,
-  onToggleSelect,
+  onToggleSelect: _onToggleSelect,
 }: EntryListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
 
@@ -34,6 +34,13 @@ export function EntryList({
     estimateSize: () => ROW_HEIGHT,
     overscan: 8,
   });
+
+  // 키보드 네비게이션 시 커서가 viewport 밖으로 나가지 않도록 스크롤
+  useEffect(() => {
+    if (cursorIndex >= 0) {
+      virtualizer.scrollToIndex(cursorIndex, { align: "auto" });
+    }
+  }, [cursorIndex, virtualizer]);
 
   return (
     <div ref={parentRef} className="flex-1 overflow-auto">
@@ -64,7 +71,6 @@ export function EntryList({
                 isSelected={selected.has(entry.name)}
                 onClick={() => {
                   onCursorMove(vi.index);
-                  onToggleSelect(entry.name);
                 }}
                 onDoubleClick={() => onActivate(entry, vi.index)}
               />

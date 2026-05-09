@@ -3,6 +3,14 @@ import { commands } from "@/types/bindings";
 import type { DuetError } from "@/types/bindings";
 
 /**
+ * Frontend 에러 표현. 백엔드의 DuetError + IPC 통신 자체 실패 케이스.
+ *
+ * specta가 DuetError를 closed discriminated union으로 재생성한 이후에도
+ * IpcError variant를 유지하기 위해 FrontendError를 별도로 정의한다.
+ */
+export type FrontendError = DuetError | { kind: "IpcError"; message: string };
+
+/**
  * Tauri command 호출용 hook.
  *
  * - command 함수와 인자 타입을 그대로 받아서 호출
@@ -16,7 +24,7 @@ import type { DuetError } from "@/types/bindings";
  * @example
  * ```tsx
  * const { data, loading, error, call } = useTauri("listDirectory");
- * // data: Entry[] | null, loading: boolean, error: DuetError | null
+ * // data: Entry[] | null, loading: boolean, error: FrontendError | null
  * await call({ source: { kind: "local" }, path: "/tmp" });
  * ```
  */
@@ -32,8 +40,8 @@ type SuccessData<K extends CommandName> = Awaited<
 export interface UseTauriResult<K extends CommandName> {
   data: SuccessData<K> | null;
   loading: boolean;
-  error: DuetError | null;
-  /** Invoke the command. Throws the DuetError on status: "error" or IPC rejection. */
+  error: FrontendError | null;
+  /** Invoke the command. Throws the FrontendError on status: "error" or IPC rejection. */
   call: (...args: Parameters<CommandsApi[K]>) => Promise<SuccessData<K>>;
 }
 
@@ -47,7 +55,7 @@ export interface UseTauriResult<K extends CommandName> {
 export function useTauri<K extends CommandName>(cmd: K): UseTauriResult<K> {
   const [data, setData] = useState<SuccessData<K> | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<DuetError | null>(null);
+  const [error, setError] = useState<FrontendError | null>(null);
 
   const call = useCallback(
     async (...args: Parameters<CommandsApi[K]>): Promise<SuccessData<K>> => {
@@ -67,7 +75,7 @@ export function useTauri<K extends CommandName>(cmd: K): UseTauriResult<K> {
         // status:"error" 분기에서 throw한 경우엔 이미 DuetError 형태.
         // 네트워크/IPC 자체 reject (채널 끊김 등)는 별도로 IpcError로 변환.
         if (!isDuetError(raw)) {
-          const ipcErr: DuetError = {
+          const ipcErr: FrontendError = {
             kind: "IpcError",
             message: String(raw),
           };
