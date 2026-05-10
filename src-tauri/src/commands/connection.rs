@@ -88,7 +88,7 @@ async fn open_and_register(
     password: Option<String>,
     pool: &Arc<ConnectionPool>,
     app: &tauri::AppHandle,
-) -> Result<ConnectionId, DuetError> {
+) -> Result<ConnectionDto, DuetError> {
     // 키 → agent fallback. AuthFailed 면 password 가 있을 때만 마지막 시도.
     let session: SshSession = match connect(&host, all_hosts).await {
         Ok(s) => s,
@@ -116,7 +116,7 @@ async fn open_and_register(
         id: id.clone(),
         alias: host.alias.clone(),
         host_ip: host_ip.to_string(),
-        user: host.user,
+        user: host.user.clone(),
         state: ConnectionStateChange::Connected,
     }
     .emit(app);
@@ -124,7 +124,12 @@ async fn open_and_register(
     // 백그라운드 supervisor — 연결 끊김 감지 + 자동 재연결.
     spawn_supervisor(pool.clone(), app.clone(), id.clone());
 
-    Ok(id)
+    Ok(ConnectionDto {
+        id,
+        alias: host.alias,
+        host_ip: host_ip.to_string(),
+        user: host.user,
+    })
 }
 
 /// 새 SSH 연결 open + ConnectionPool 등록 — `~/.ssh/config` 의 alias 기반.
@@ -139,7 +144,7 @@ pub async fn connection_open(
     password: Option<String>,
     pool: tauri::State<'_, Arc<ConnectionPool>>,
     app: tauri::AppHandle,
-) -> Result<ConnectionId, DuetError> {
+) -> Result<ConnectionDto, DuetError> {
     let all_hosts = load_ssh_hosts()?;
     let host = all_hosts
         .iter()
@@ -166,7 +171,7 @@ pub async fn connection_open_adhoc(
     password: Option<String>,
     pool: tauri::State<'_, Arc<ConnectionPool>>,
     app: tauri::AppHandle,
-) -> Result<ConnectionId, DuetError> {
+) -> Result<ConnectionDto, DuetError> {
     if host.trim().is_empty() {
         return Err(DuetError::Io("host required".into()));
     }

@@ -32,6 +32,13 @@ impl SshFs {
         Self { conn }
     }
 
+    /// 원격 사용자 home 디렉토리 절대경로 (SFTP `canonicalize(".")`).
+    /// 연결 직후 시작 위치로 사용 — `/` 권한 없는 호스트 일반적이라 home 으로.
+    pub async fn home(&self) -> Result<PathBuf, DuetError> {
+        let sftp = self.open_sftp().await?;
+        remote_home(&sftp).await
+    }
+
     /// 활성 connection 위에 SFTP 채널 새로 열고 SftpSession 반환.
     /// 매 호출마다 새 채널 — 캐시는 후속.
     async fn open_sftp(&self) -> Result<russh_sftp::client::SftpSession, DuetError> {
