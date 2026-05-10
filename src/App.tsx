@@ -12,7 +12,9 @@ import { DangerConfirmDialog } from "@/components/dialogs/DangerConfirmDialog";
 import { ProgressModal } from "@/components/dialogs/ProgressModal";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { Toast } from "@/components/Toast";
+import { SearchPanel } from "@/components/SearchPanel";
 import { usePanes, type PaneId } from "@/stores/panes";
+import { useSearch } from "@/stores/search";
 import { useUIDialogs } from "@/stores/ui-dialogs";
 import { useToast } from "@/stores/toast";
 import { bootstrapSavedHosts } from "@/stores/savedHosts";
@@ -28,7 +30,7 @@ import { useTaskEvents } from "@/hooks/useTaskEvents";
 import { formatErr } from "@/lib/error";
 import { formatSize } from "@/lib/format";
 import { commands } from "@/types/bindings";
-import type { ConnectionDto, CopyStrategy, DuetError, Entry, Location } from "@/types/bindings";
+import type { ConnectionDto, CopyStrategy, DuetError, Entry, Location, SearchHit } from "@/types/bindings";
 
 /**
  * App 루트.
@@ -97,6 +99,21 @@ function App() {
       if (path === "/" || path.length === 0) return;
       const parent = path.replace(/\/[^/]+\/?$/, "") || "/";
       navigate(id, parent);
+    },
+    [navigate],
+  );
+
+  const onPickHit = useCallback(
+    (hit: SearchHit) => {
+      const rootPaneId = useSearch.getState().rootPaneId;
+      if (!rootPaneId) return;
+      void (async () => {
+        await navigate(rootPaneId, hit.location.path);
+        const pane = usePanes.getState().panes[rootPaneId];
+        const idx = pane.entries.findIndex((e) => e.name === hit.name);
+        if (idx >= 0) usePanes.getState().setCursor(rootPaneId, idx);
+        useSearch.getState().close();
+      })();
     },
     [navigate],
   );
@@ -284,6 +301,7 @@ function App() {
       <header className="flex h-9 items-center justify-between border-b border-border px-3">
         <span className="text-title font-medium">duet</span>
       </header>
+      <SearchPanel onPickHit={onPickHit} />
 
       <main className="flex flex-1 min-h-0 gap-0">
         <Sidebar
