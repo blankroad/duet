@@ -7,5 +7,6 @@ pub mod fs_events;
 pub mod fs_watcher;
 pub mod journal;
 pub mod journal_events;
+pub mod progress_events;
 pub mod settings;
 pub mod trash;

@@ -54,6 +54,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             services::connection_events::ConnectionStateEvent,
             services::fs_events::FsChangedEvent,
             services::journal_events::JournalChangedEvent,
+            services::progress_events::ProgressEvent,
         ])
 }
 
