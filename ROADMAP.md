@@ -97,12 +97,12 @@
   - 원격: SSH `find -iname` exec
   - 내용 검색 (grep) 은 후속 (SearchBackend trait 확장 가능)
 
-## MVP-6: 탭 + 북마크
+## MVP-6: 탭 + 북마크 + 히스토리
 
-- [ ] 패널당 탭 (Ctrl+T, Ctrl+W)
-- [ ] 북마크 (사이드바)
-- [ ] 최근 디렉토리 (Alt+←/→ 히스토리)
-- [ ] 호스트별 즐겨찾기
+- [x] 패널당 탭 (Ctrl+T 새 탭, Ctrl+W 닫기, Ctrl+Tab/Shift+Tab 전환) — 세션 내만
+- [x] 사이드바 북마크 (any location, ⭐ 섹션) — Sidebar + 클릭 시 활성 탭 navigate
+- [x] 최근 디렉토리 (Alt+←/→) — 탭당 back/forward 스택, cap 100
+- [x] 호스트별 즐겨찾기 (💖 섹션, 활성 connection 의 alias 만 표시)
 
 ## MVP-7: 커맨드 팔레트 + 설정
 
@@ -124,7 +124,7 @@
 
 ## 현재 단계
 
-**MVP-6 시작 직전.** MVP-5 완료 — 정렬/숨김/필터/새로고침 + 글로벌 파일명 검색 (local: ignore, ssh: find).
+**MVP-7 시작 직전.** MVP-6 완료 — 탭/히스토리/북마크/호스트 즐겨찾기.
 
 ## 단계 변경 규칙
 
