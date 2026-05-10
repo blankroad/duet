@@ -113,7 +113,7 @@ function App() {
   );
 
   useKeyboardNav(onKeyboardActivate, onKeyboardUp);
-  useGlobalShortcuts();
+  useGlobalShortcuts({ onRefresh });
   useSshHosts();
   useConnectionEvents();
   useFsChangedEvents(onRefresh);
