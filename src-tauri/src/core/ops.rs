@@ -3,6 +3,7 @@
 //! plan() 결과는 IPC 노출 — UI 다이얼로그가 사용자에게 보여줌.
 //! execute() 는 백엔드에서 settings/journal 갱신.
 
+use crate::core::copy_strategy::{decide as decide_strategy, CopyStrategy};
 use crate::fs::FileSystem;
 use crate::services::journal::{
     BackupRestore, Journal, JournalEntry, MoveItem, OpKind, TrashItem, UndoAction,
@@ -38,6 +39,8 @@ pub struct CopyPlan {
     pub items: Vec<EntryRef>,
     pub conflicts: Vec<Conflict>,
     pub total_size_bytes: u64,
+    /// MVP-3: 어느 경로로 복사할지 — UI 가 confirm dialog 에 표시.
+    pub strategy: CopyStrategy,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -49,6 +52,9 @@ pub struct MovePlan {
     /// true 면 단순 rename (같은 fs). false 면 copy + trash.
     pub is_same_fs: bool,
     pub total_size_bytes: u64,
+    /// MVP-3: 어느 경로로 복사할지 — UI 가 confirm dialog 에 표시.
+    /// (execute 분기는 Task 7 에서 추가 예정.)
+    pub strategy: CopyStrategy,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -174,17 +180,6 @@ pub async fn copy_plan(
         }
     }
 
-    // 같은 호스트 SSH↔SSH 차단 (CLAUDE.md DON'T list)
-    if let (SourceId::Ssh { host_ip: a, .. }, SourceId::Ssh { host_ip: b, .. }) =
-        (&src_source, &dst.source)
-    {
-        if a == b {
-            return Err(DuetError::NotSupported(
-                "same-host SSH copy: MVP-3 에서 지원".into(),
-            ));
-        }
-    }
-
     let mut conflicts = Vec::new();
     let mut total = 0u64;
     for it in &items {
@@ -202,12 +197,14 @@ pub async fn copy_plan(
         }
     }
 
+    let strategy = decide_strategy(&src_source, &dst.source);
     Ok(CopyPlan {
         src_source,
         dst,
         items,
         conflicts,
         total_size_bytes: total,
+        strategy,
     })
 }
 
@@ -217,6 +214,14 @@ pub async fn copy_execute(
     plan: CopyPlan,
     ctx: &OpCtx,
 ) -> Result<JournalEntry, DuetError> {
+    // MVP-3 Task 7 까지 임시 guard — same-host SSH 는 silent relay 안 됨
+    // (CLAUDE.md DON'T list). Task 7 의 same_host_copy 가 이 분기 처리.
+    if plan.strategy == CopyStrategy::SshSameHost {
+        return Err(DuetError::NotSupported(
+            "same-host SSH copy: Task 7 (same_host_copy) 진행 중".into(),
+        ));
+    }
+
     let mut copied = Vec::new();
     let mut backups = Vec::new();
     for it in &plan.items {
@@ -267,6 +272,7 @@ pub async fn move_plan(
         conflicts: copy.conflicts,
         is_same_fs,
         total_size_bytes: copy.total_size_bytes,
+        strategy: copy.strategy,
     })
 }
 
@@ -276,6 +282,13 @@ pub async fn move_execute(
     plan: MovePlan,
     ctx: &OpCtx,
 ) -> Result<JournalEntry, DuetError> {
+    // MVP-3 Task 7 까지 임시 guard — same-host SSH 는 silent relay 안 됨.
+    if plan.strategy == CopyStrategy::SshSameHost {
+        return Err(DuetError::NotSupported(
+            "same-host SSH move: Task 7 진행 중".into(),
+        ));
+    }
+
     let mut moved = Vec::new();
     let mut backups = Vec::new();
     for it in &plan.items {
@@ -478,7 +491,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn copy_plan_blocks_same_host_ssh() {
+    async fn copy_plan_same_host_ssh_now_uses_ssh_same_host_strategy() {
+        use crate::core::copy_strategy::CopyStrategy;
         use crate::types::ConnectionId;
         use std::net::Ipv4Addr;
 
@@ -502,12 +516,10 @@ mod tests {
             path: PathBuf::from("/y"),
         };
 
-        let result = copy_plan(&local, &local, vec![item], dst).await;
-        match result {
-            Err(DuetError::NotSupported(msg)) => assert!(msg.contains("MVP-3")),
-            Err(other) => panic!("expected NotSupported, got {other:?}"),
-            Ok(_) => panic!("expected NotSupported, got Ok"),
-        }
+        // metadata 호출은 LocalFs 가 받지만 path 가 존재 안 해서 unwrap_or(0).
+        // strategy 결정만 검증.
+        let plan = copy_plan(&local, &local, vec![item], dst).await.unwrap();
+        assert_eq!(plan.strategy, CopyStrategy::SshSameHost);
     }
 
     #[tokio::test]

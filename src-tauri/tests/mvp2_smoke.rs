@@ -275,12 +275,13 @@ async fn smoke_trash_then_undo_restores_on_linux_windows() {
     let _ = trash::delete(&target_path);
 }
 
-// === scenario 7: same-host SSH copy block ===
+// === scenario 7: same-host SSH copy now uses SshSameHost strategy ===
 
 #[tokio::test]
-async fn smoke_same_host_ssh_copy_blocked() {
+async fn smoke_same_host_ssh_copy_uses_ssh_same_host_strategy() {
     let env = setup().await;
     let local = LocalFs::new();
+    use duet_lib::core::copy_strategy::CopyStrategy;
     use duet_lib::types::ConnectionId;
     use std::net::Ipv4Addr;
     let src = SourceId::Ssh {
@@ -302,11 +303,11 @@ async fn smoke_same_host_ssh_copy_blocked() {
         path: PathBuf::from("/y"),
     };
 
-    let result = copy_plan(&local, &local, vec![item], dst).await;
-    match result {
-        Err(DuetError::NotSupported(msg)) => assert!(msg.contains("MVP-3")),
-        other => panic!("expected NotSupported(MVP-3), got {other:?}"),
-    }
+    // MVP-3: same-host SSH copy is now allowed — strategy = SshSameHost.
+    let plan = copy_plan(&local, &local, vec![item], dst)
+        .await
+        .expect("same-host SSH copy should now succeed");
+    assert_eq!(plan.strategy, CopyStrategy::SshSameHost);
 
     let _ = env; // suppress unused
 }
