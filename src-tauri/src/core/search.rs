@@ -10,7 +10,7 @@ use crate::types::{DuetError, EntryKind, Location, SourceId};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -140,6 +140,101 @@ fn matches_substring(name: &str, pattern: &str, case_sensitive: bool) -> bool {
     } else {
         name.to_lowercase().contains(&pattern.to_lowercase())
     }
+}
+
+/// SSH 호스트의 `find` 명령으로 파일명 검색.
+/// pattern 은 shell-escape 후 `-iname '*<p>*'` 로 사용.
+pub struct SshFilenameSearch {
+    pub conn: std::sync::Arc<crate::services::connection_pool::ActiveConnection>,
+}
+
+#[async_trait]
+impl SearchBackend for SshFilenameSearch {
+    async fn search(
+        &self,
+        root: &Path,
+        pattern: &str,
+        opts: &SearchOpts,
+        cancel: CancellationToken,
+    ) -> Result<Vec<SearchHit>, DuetError> {
+        use crate::core::copy_strategy::shell_escape_path;
+        use crate::ssh::remote_exec::exec;
+
+        let root_arg = shell_escape_path(root)?;
+        let pat_escaped = pattern.replace('\\', "\\\\").replace('\'', "\\'");
+        let name_flag = if opts.case_sensitive {
+            "-name"
+        } else {
+            "-iname"
+        };
+        let hidden_clause = if opts.include_hidden {
+            ""
+        } else {
+            r"-not -path '*/.*'"
+        };
+        let cmd = format!(
+            "find {root_arg} {hidden_clause} \\( -type f -o -type d -o -type l \\) {name_flag} '*{pat_escaped}*' 2>/dev/null | head -n {max}",
+            max = opts.max_results
+        );
+
+        let session_mutex = self
+            .conn
+            .session
+            .as_ref()
+            .ok_or_else(|| DuetError::ConnectionFailed("no live session".into()))?;
+        if cancel.is_cancelled() {
+            return Err(DuetError::Cancelled);
+        }
+        let result = {
+            let handle = session_mutex.lock().await;
+            exec(&handle, &cmd).await?
+        };
+        if cancel.is_cancelled() {
+            return Err(DuetError::Cancelled);
+        }
+        let stdout = String::from_utf8_lossy(&result.stdout);
+        let conn_id = self.conn.id.clone();
+        Ok(parse_find_output(
+            &stdout,
+            &conn_id,
+            self.conn.host_ip,
+            &self.conn.user,
+        ))
+    }
+}
+
+/// `find` stdout 라인을 SearchHit 으로. 절대경로 한 줄 = 한 항목.
+/// metadata (size/mtime) 는 별도 stat 비용 비싸 placeholder (0/None).
+pub fn parse_find_output(
+    stdout: &str,
+    conn_id: &crate::types::ConnectionId,
+    host_ip: std::net::IpAddr,
+    user: &str,
+) -> Vec<SearchHit> {
+    stdout
+        .lines()
+        .filter(|l| !l.is_empty())
+        .filter_map(|line| {
+            let path = PathBuf::from(line);
+            let name = path.file_name().and_then(|n| n.to_str())?.to_string();
+            let parent = path.parent()?.to_path_buf();
+            Some(SearchHit {
+                location: Location {
+                    source: SourceId::Ssh {
+                        connection_id: conn_id.clone(),
+                        host_ip,
+                        user: user.to_string(),
+                    },
+                    path: parent,
+                },
+                name,
+                // find 는 type 정보 stdout 에 없음 — file 가정
+                kind: EntryKind::File,
+                size: 0,
+                modified_ms: None,
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -291,5 +386,32 @@ mod tests {
             .search(dir.path(), "alpha", &SearchOpts::default(), cancel)
             .await;
         assert!(matches!(res, Err(DuetError::Cancelled)));
+    }
+
+    #[test]
+    fn parse_find_basic() {
+        use std::net::Ipv4Addr;
+        let conn_id = crate::types::ConnectionId("test".into());
+        let ip = std::net::IpAddr::V4(Ipv4Addr::new(192, 168, 0, 1));
+        let stdout = "/home/u/alpha.txt\n/home/u/sub/beta.md\n\n/home/u/gamma.rs\n";
+        let hits = parse_find_output(stdout, &conn_id, ip, "u");
+        assert_eq!(hits.len(), 3);
+        assert_eq!(hits[0].name, "alpha.txt");
+        assert_eq!(hits[0].location.path, std::path::PathBuf::from("/home/u"));
+        assert_eq!(hits[1].name, "beta.md");
+        assert_eq!(
+            hits[1].location.path,
+            std::path::PathBuf::from("/home/u/sub")
+        );
+    }
+
+    #[test]
+    fn parse_find_skips_empty_lines() {
+        use std::net::Ipv4Addr;
+        let conn_id = crate::types::ConnectionId("t".into());
+        let ip = std::net::IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+        let stdout = "\n\n\n";
+        let hits = parse_find_output(stdout, &conn_id, ip, "x");
+        assert_eq!(hits.len(), 0);
     }
 }
