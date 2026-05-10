@@ -33,7 +33,7 @@ interface PanesState {
   closeTab: (id: PaneId, index: number) => void;
   selectTab: (id: PaneId, index: number) => void;
   // existing — 활성 탭에 dispatch
-  setEntries: (id: PaneId, location: Location, entries: Entry[]) => void;
+  setEntries: (id: PaneId, location: Location, entries: Entry[], opts?: { pushHistory?: boolean }) => void;
   setActivePane: (id: PaneId) => void;
   moveCursor: (id: PaneId, delta: number) => void;
   setCursor: (id: PaneId, index: number) => void;
@@ -44,6 +44,9 @@ interface PanesState {
   toggleShowHidden: (id: PaneId) => void;
   setFilter: (id: PaneId, filter: string) => void;
   setFilterFocused: (id: PaneId, focused: boolean) => void;
+  // NEW
+  back: (id: PaneId) => Location | null;
+  forward: (id: PaneId) => Location | null;
 }
 
 const home = (): Location => ({
@@ -95,7 +98,7 @@ function withActiveTab(p: PaneState, fn: (t: TabState) => TabState): PaneState {
   return { ...p, tabs };
 }
 
-export const usePanes = create<PanesState>((set) => ({
+export const usePanes = create<PanesState>((set, get) => ({
   panes: {
     left: initialPane(),
     right: initialPane(),
@@ -132,17 +135,19 @@ export const usePanes = create<PanesState>((set) => ({
       if (index < 0 || index >= p.tabs.length) return s;
       return { panes: { ...s.panes, [id]: { ...p, activeTabIndex: index } } };
     }),
-  setEntries: (id, location, entries) =>
+  setEntries: (id, location, entries, opts) =>
     set((s) => {
       const p = s.panes[id];
       const cur = p.tabs[p.activeTabIndex];
       if (!cur) return s;
       const navigated = cur.location.path !== location.path;
+      const pushHistory = opts?.pushHistory ?? true;
       let history = cur.history;
-      if (navigated) {
+      if (navigated && pushHistory) {
         const stack = history.stack.slice(0, history.index + 1);
         stack.push(location);
-        history = { stack, index: stack.length - 1 };
+        const trimmed = stack.length > 100 ? stack.slice(stack.length - 100) : stack;
+        history = { stack: trimmed, index: trimmed.length - 1 };
       }
       const nextTab: TabState = {
         ...cur,
@@ -221,6 +226,40 @@ export const usePanes = create<PanesState>((set) => ({
     set((s) => ({
       panes: { ...s.panes, [id]: withActiveTab(s.panes[id], (t) => ({ ...t, filterFocused: focused })) },
     })),
+  back: (id) => {
+    const p = get().panes[id];
+    const cur = p.tabs[p.activeTabIndex];
+    if (!cur || cur.history.index <= 0) return null;
+    const newIndex = cur.history.index - 1;
+    const loc = cur.history.stack[newIndex]!;
+    set((s) => ({
+      panes: {
+        ...s.panes,
+        [id]: withActiveTab(s.panes[id], (t) => ({
+          ...t,
+          history: { ...t.history, index: newIndex },
+        })),
+      },
+    }));
+    return loc;
+  },
+  forward: (id) => {
+    const p = get().panes[id];
+    const cur = p.tabs[p.activeTabIndex];
+    if (!cur || cur.history.index >= cur.history.stack.length - 1) return null;
+    const newIndex = cur.history.index + 1;
+    const loc = cur.history.stack[newIndex]!;
+    set((s) => ({
+      panes: {
+        ...s.panes,
+        [id]: withActiveTab(s.panes[id], (t) => ({
+          ...t,
+          history: { ...t.history, index: newIndex },
+        })),
+      },
+    }));
+    return loc;
+  },
 }));
 
 /** 표시 entries — 활성 탭 기준. raw → filter → hidden → sort. */

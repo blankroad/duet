@@ -5,12 +5,15 @@ import type { Entry } from "@/types/bindings";
 const mk = (name: string, kind: "dir" | "file" = "file", size = 100, mtime = 0, hidden = false): Entry =>
   ({ name, kind, size, modified_ms: mtime, permissions: null, hidden }) as Entry;
 
+const homeLocation = { source: { kind: "local" as const }, path: "/" };
+
 const reset = () => {
   usePanes.setState((s) => {
     const fresh = (id: "left" | "right") => ({
       tabs: [
         {
           ...s.panes[id].tabs[0]!,
+          location: homeLocation,
           entries: [],
           cursorIndex: -1,
           selected: new Set<string>(),
@@ -19,7 +22,7 @@ const reset = () => {
           showHidden: false,
           filter: "",
           filterFocused: false,
-          history: { stack: [s.panes[id].tabs[0]!.location], index: 0 },
+          history: { stack: [homeLocation], index: 0 },
         },
       ],
       activeTabIndex: 0,
@@ -147,5 +150,61 @@ describe("panes — cursor & selection (legacy)", () => {
     expect(activeTab(usePanes.getState(), "left").selected.has("x")).toBe(true);
     usePanes.getState().toggleSelected("left", "x");
     expect(activeTab(usePanes.getState(), "left").selected.has("x")).toBe(false);
+  });
+});
+
+describe("panes — history", () => {
+  beforeEach(reset);
+
+  it("setEntries pushes history on path change", () => {
+    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/a" }, []);
+    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/b" }, []);
+    const t = activeTab(usePanes.getState(), "left");
+    expect(t.history.stack.map((l) => l.path)).toEqual(["/", "/a", "/b"]);
+    expect(t.history.index).toBe(2);
+  });
+
+  it("setEntries same path does not push", () => {
+    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/a" }, []);
+    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/a" }, []);
+    const t = activeTab(usePanes.getState(), "left");
+    expect(t.history.stack.length).toBe(2);
+  });
+
+  it("setEntries pushHistory=false skips", () => {
+    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/a" }, []);
+    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/b" }, [], { pushHistory: false });
+    const t = activeTab(usePanes.getState(), "left");
+    expect(t.history.stack.map((l) => l.path)).toEqual(["/", "/a"]);
+  });
+
+  it("back returns previous location", () => {
+    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/a" }, []);
+    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/b" }, []);
+    const prev = usePanes.getState().back("left");
+    expect(prev?.path).toBe("/a");
+    expect(activeTab(usePanes.getState(), "left").history.index).toBe(1);
+  });
+
+  it("back at index 0 returns null", () => {
+    expect(usePanes.getState().back("left")).toBeNull();
+  });
+
+  it("forward after back", () => {
+    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/a" }, []);
+    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/b" }, []);
+    usePanes.getState().back("left");
+    const next = usePanes.getState().forward("left");
+    expect(next?.path).toBe("/b");
+  });
+
+  it("navigate after back truncates forward stack", () => {
+    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/a" }, []);
+    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/b" }, []);
+    usePanes.getState().back("left");
+    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/c" }, []);
+    const t = activeTab(usePanes.getState(), "left");
+    expect(t.history.stack.map((l) => l.path)).toEqual(["/", "/a", "/c"]);
+    expect(t.history.index).toBe(2);
   });
 });
