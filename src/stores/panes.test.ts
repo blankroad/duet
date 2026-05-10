@@ -5,15 +5,46 @@ import type { Entry } from "@/types/bindings";
 const mk = (name: string, kind: "dir" | "file" = "file", size = 100, mtime = 0, hidden = false): Entry =>
   ({ name, kind, size, modified_ms: mtime, permissions: null, hidden }) as Entry;
 
-describe("panes store sort/hidden", () => {
-  beforeEach(() => {
-    usePanes.setState((s) => ({
-      panes: {
-        ...s.panes,
-        left: { ...s.panes.left, entries: [], sortKey: "name", sortOrder: "asc", showHidden: false, filter: "", filterFocused: false },
-      },
-    }));
+const resetLeft = () => {
+  usePanes.setState((s) => ({
+    panes: {
+      ...s.panes,
+      left: { ...s.panes.left, entries: [], cursorIndex: -1, selected: new Set(), sortKey: "name", sortOrder: "asc", showHidden: false, filter: "", filterFocused: false, loadedAt: 0 },
+    },
+  }));
+};
+
+describe("panes store — cursor & selection", () => {
+  beforeEach(resetLeft);
+
+  it("setEntries resets cursor and selection", () => {
+    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/tmp" }, [mk("a"), mk("b")]);
+    const p = usePanes.getState().panes.left;
+    expect(p.entries).toHaveLength(2);
+    expect(p.cursorIndex).toBe(0);
+    expect(p.selected.size).toBe(0);
+    expect(p.location.path).toBe("/tmp");
   });
+
+  it("moveCursor clamps to range", () => {
+    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/" }, [mk("a"), mk("b")]);
+    usePanes.getState().moveCursor("left", -5);
+    expect(usePanes.getState().panes.left.cursorIndex).toBe(0);
+    usePanes.getState().moveCursor("left", 100);
+    expect(usePanes.getState().panes.left.cursorIndex).toBe(1);
+  });
+
+  it("toggleSelected adds and removes", () => {
+    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/" }, [mk("a")]);
+    usePanes.getState().toggleSelected("left", "a");
+    expect(usePanes.getState().panes.left.selected.has("a")).toBe(true);
+    usePanes.getState().toggleSelected("left", "a");
+    expect(usePanes.getState().panes.left.selected.has("a")).toBe(false);
+  });
+});
+
+describe("panes store sort/hidden", () => {
+  beforeEach(resetLeft);
 
   it("sort by name asc — dirs first", () => {
     usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/" }, [
