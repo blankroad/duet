@@ -1,19 +1,23 @@
 import * as Dialog from "@radix-ui/react-dialog";
-import { Loader } from "lucide-react";
+import { Loader, X } from "lucide-react";
 import { formatSize } from "@/lib/format";
-import type { ProgressInfo } from "@/stores/ui-dialogs";
+import { useTasks } from "@/stores/tasks";
+import type { ProgressInfo } from "@/types/bindings";
 
 export function ProgressModal({
   title,
-  progress,
+  taskId,
+  onBackground,
 }: {
   title: string;
-  /** undefined = spinner; ProgressInfo = bar 표시. exactOptionalPropertyTypes
-   *  하에서 dialog.progress (optional 필드) 를 그대로 넘기기 위해 explicit union. */
-  progress: ProgressInfo | undefined;
+  taskId: string;
+  onBackground: () => void;
 }) {
+  const task = useTasks((s) => s.tasks.get(taskId));
+  const progress = task?.progress ?? null;
+
   return (
-    <Dialog.Root open>
+    <Dialog.Root open onOpenChange={(o) => !o && onBackground()}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
         <Dialog.Content
@@ -21,9 +25,30 @@ export function ProgressModal({
           onEscapeKeyDown={(e) => e.preventDefault()}
           onPointerDownOutside={(e) => e.preventDefault()}
         >
-          <Dialog.Title className="text-title font-medium">{title}</Dialog.Title>
+          <div className="mb-3 flex items-start justify-between gap-2">
+            <Dialog.Title className="text-title font-medium">{title}</Dialog.Title>
+            <button
+              type="button"
+              onClick={onBackground}
+              className="rounded p-1 text-fg-muted hover:bg-border"
+              aria-label="Background"
+              title="Run in background"
+            >
+              <X size={14} />
+            </button>
+          </div>
 
           {progress ? <ProgressBody p={progress} /> : <SpinnerBody />}
+
+          <div className="mt-4 flex justify-end">
+            <button
+              type="button"
+              onClick={onBackground}
+              className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
+            >
+              Background
+            </button>
+          </div>
 
           <Dialog.Description className="sr-only">{title}</Dialog.Description>
         </Dialog.Content>
@@ -53,12 +78,12 @@ function ProgressBody({ p }: { p: ProgressInfo }) {
       </div>
       <div className="flex justify-between text-meta text-fg-muted">
         <span>
-          {formatSize(p.bytesDone)}
-          {p.bytesTotal ? ` / ${formatSize(p.bytesTotal)}` : ""}
+          {formatSize(p.bytes_done)}
+          {p.bytes_total ? ` / ${formatSize(p.bytes_total)}` : ""}
         </span>
         <span>
-          {p.speedBps ? `${formatSize(p.speedBps)}/s` : ""}
-          {p.etaSec != null ? ` · ETA ${formatEta(p.etaSec)}` : ""}
+          {p.speed_bps ? `${formatSize(p.speed_bps)}/s` : ""}
+          {p.eta_sec != null ? ` · ETA ${formatEta(p.eta_sec)}` : ""}
         </span>
       </div>
     </div>

@@ -2,6 +2,7 @@ import { useEffect, useCallback, useState } from "react";
 import { Pane } from "@/components/pane/Pane";
 import { Sidebar } from "@/components/Sidebar";
 import { StatusBar } from "@/components/StatusBar";
+import { TasksBar } from "@/components/TasksBar";
 import { ConnectionDialog } from "@/components/connection/ConnectionDialog";
 import { AdHocConnectDialog } from "@/components/connection/AdHocConnectDialog";
 import { RenameDialog } from "@/components/dialogs/RenameDialog";
@@ -22,7 +23,7 @@ import { useConnectionEvents } from "@/hooks/useConnectionEvents";
 import { useFsChangedEvents } from "@/hooks/useFsChangedEvents";
 import { useDestructiveKeys } from "@/hooks/useDestructiveKeys";
 import { useJournalEvents } from "@/hooks/useJournalEvents";
-import { useProgressEvents } from "@/hooks/useProgressEvents";
+import { useTaskEvents } from "@/hooks/useTaskEvents";
 import { formatErr } from "@/lib/error";
 import { formatSize } from "@/lib/format";
 import { commands } from "@/types/bindings";
@@ -111,7 +112,6 @@ function App() {
   useFsChangedEvents(onRefresh);
   useDestructiveKeys();
   useJournalEvents();
-  useProgressEvents();
 
   const dialog = useUIDialogs((s) => s.dialog);
   const closeDialog = useUIDialogs((s) => s.close);
@@ -138,6 +138,8 @@ function App() {
     },
     [onRefresh],
   );
+
+  useTaskEvents(refreshAffected);
 
   const onRenameSubmit = useCallback(
     async (newName: string) => {
@@ -166,36 +168,35 @@ function App() {
   const onDeleteConfirm = useCallback(async () => {
     if (dialog.kind !== "delete-confirm" && dialog.kind !== "delete-danger") return;
     const plan = dialog.plan;
-    openDialog({ kind: "progress", title: "Deleting…" });
-    const r = await commands.fsDeleteExecute(plan);
     closeDialog();
+    const r = await commands.fsDeleteExecute(plan);
     if (r.status === "ok") refreshAffected([plan.source_location]);
     else showToast(`Delete failed: ${formatErr(r.error)}`);
-  }, [dialog, openDialog, closeDialog, refreshAffected, showToast]);
+  }, [dialog, closeDialog, refreshAffected, showToast]);
 
   const onCopyConfirm = useCallback(async () => {
     if (dialog.kind !== "copy-confirm") return;
     const plan = dialog.plan;
-    openDialog({ kind: "progress", title: "Copying…" });
     const r = await commands.fsCopyExecute(plan);
-    closeDialog();
-    if (r.status === "ok") refreshAffected([plan.dst]);
-    else showToast(`Copy failed: ${formatErr(r.error)}`);
-  }, [dialog, openDialog, closeDialog, refreshAffected, showToast]);
+    if (r.status === "ok") {
+      openDialog({ kind: "progress", title: "Copying…", taskId: r.data });
+    } else {
+      closeDialog();
+      showToast(`Copy failed: ${formatErr(r.error)}`);
+    }
+  }, [dialog, openDialog, closeDialog, showToast]);
 
   const onMoveConfirm = useCallback(async () => {
     if (dialog.kind !== "move-confirm") return;
     const plan = dialog.plan;
-    openDialog({ kind: "progress", title: "Moving…" });
     const r = await commands.fsMoveExecute(plan);
-    closeDialog();
     if (r.status === "ok") {
-      const srcLoc = plan.items[0]?.location;
-      refreshAffected(srcLoc ? [srcLoc, plan.dst] : [plan.dst]);
+      openDialog({ kind: "progress", title: "Moving…", taskId: r.data });
     } else {
+      closeDialog();
       showToast(`Move failed: ${formatErr(r.error)}`);
     }
-  }, [dialog, openDialog, closeDialog, refreshAffected, showToast]);
+  }, [dialog, openDialog, closeDialog, showToast]);
 
   // 새 연결 다이얼로그 — 호스트 더블클릭 시 alias 가 들어옴, 닫으면 null.
   const [dialogAlias, setDialogAlias] = useState<string | null>(null);
@@ -264,6 +265,7 @@ function App() {
         <Pane id="right" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} />
       </main>
 
+      <TasksBar />
       <StatusBar />
 
       <ConnectionDialog
@@ -347,7 +349,11 @@ function App() {
         />
       )}
       {dialog.kind === "progress" && (
-        <ProgressModal title={dialog.title} progress={dialog.progress} />
+        <ProgressModal
+          title={dialog.title}
+          taskId={dialog.taskId}
+          onBackground={closeDialog}
+        />
       )}
       {dialog.kind === "settings" && <SettingsDialog onClose={closeDialog} />}
       <Toast />
