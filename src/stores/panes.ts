@@ -5,25 +5,34 @@ export type PaneId = "left" | "right";
 export type SortKey = "name" | "size" | "mtime" | "kind" | "ext";
 export type SortOrder = "asc" | "desc";
 
-export interface PaneState {
+export interface TabState {
+  id: string;
   location: Location;
   entries: Entry[];
-  /** 현재 커서 위치 (키보드 네비). -1이면 선택 없음 */
   cursorIndex: number;
-  /** 다중 선택 (Space로 토글). cursor와 별개 */
   selected: Set<string>;
-  /** 마지막 갱신 시각 (refetch 트리거 디버깅용) */
   loadedAt: number;
   sortKey: SortKey;
   sortOrder: SortOrder;
   showHidden: boolean;
   filter: string;
   filterFocused: boolean;
+  history: { stack: Location[]; index: number };
+}
+
+export interface PaneState {
+  tabs: TabState[];
+  activeTabIndex: number;
 }
 
 interface PanesState {
   panes: Record<PaneId, PaneState>;
   activePane: PaneId;
+  // tab management
+  openTab: (id: PaneId, location?: Location) => void;
+  closeTab: (id: PaneId, index: number) => void;
+  selectTab: (id: PaneId, index: number) => void;
+  // existing — 활성 탭에 dispatch
   setEntries: (id: PaneId, location: Location, entries: Entry[]) => void;
   setActivePane: (id: PaneId) => void;
   moveCursor: (id: PaneId, delta: number) => void;
@@ -39,14 +48,18 @@ interface PanesState {
 
 const home = (): Location => ({
   source: { kind: "local" },
-  // 백엔드가 절대경로 받음. 초기는 OS home directory가 이상적이지만
-  // 그건 백엔드 platform 모듈 도움이 필요. MVP-0은 "/" 또는 CWD로 시작.
-  // TODO: MVP-7에서 설정에 last-visited-path 저장
   path: "/",
 });
 
-const initialPane = (): PaneState => ({
-  location: home(),
+let _idSeq = 0;
+function newTabId(): string {
+  _idSeq += 1;
+  return `t${_idSeq}`;
+}
+
+const initialTab = (location: Location = home()): TabState => ({
+  id: newTabId(),
+  location,
   entries: [],
   cursorIndex: -1,
   selected: new Set(),
@@ -56,7 +69,31 @@ const initialPane = (): PaneState => ({
   showHidden: false,
   filter: "",
   filterFocused: false,
+  history: { stack: [location], index: 0 },
 });
+
+const initialPane = (): PaneState => ({
+  tabs: [initialTab()],
+  activeTabIndex: 0,
+});
+
+/** active tab 반환 — 외부 helper. */
+export function activeTab(state: PanesState, id: PaneId): TabState {
+  const p = state.panes[id];
+  return p.tabs[p.activeTabIndex] ?? p.tabs[0]!;
+}
+
+/** 액션 안에서 active tab 만 변경하는 헬퍼. */
+function withActiveTab(p: PaneState, fn: (t: TabState) => TabState): PaneState {
+  const i = p.activeTabIndex;
+  const cur = p.tabs[i];
+  if (!cur) return p;
+  const next = fn(cur);
+  if (next === cur) return p;
+  const tabs = p.tabs.slice();
+  tabs[i] = next;
+  return { ...p, tabs };
+}
 
 export const usePanes = create<PanesState>((set) => ({
   panes: {
@@ -64,104 +101,144 @@ export const usePanes = create<PanesState>((set) => ({
     right: initialPane(),
   },
   activePane: "left",
+  openTab: (id, location) =>
+    set((s) => {
+      const p = s.panes[id];
+      const cur = p.tabs[p.activeTabIndex] ?? p.tabs[0]!;
+      const loc = location ?? cur.location;
+      const nt = initialTab(loc);
+      const tabs = [...p.tabs, nt];
+      return {
+        panes: { ...s.panes, [id]: { tabs, activeTabIndex: tabs.length - 1 } },
+      };
+    }),
+  closeTab: (id, index) =>
+    set((s) => {
+      const p = s.panes[id];
+      if (p.tabs.length <= 1) return s;
+      const tabs = p.tabs.slice();
+      tabs.splice(index, 1);
+      let next = p.activeTabIndex;
+      if (index === p.activeTabIndex) {
+        next = Math.max(0, index - 1);
+      } else if (index < p.activeTabIndex) {
+        next = p.activeTabIndex - 1;
+      }
+      return { panes: { ...s.panes, [id]: { tabs, activeTabIndex: next } } };
+    }),
+  selectTab: (id, index) =>
+    set((s) => {
+      const p = s.panes[id];
+      if (index < 0 || index >= p.tabs.length) return s;
+      return { panes: { ...s.panes, [id]: { ...p, activeTabIndex: index } } };
+    }),
   setEntries: (id, location, entries) =>
     set((s) => {
-      const prevPath = s.panes[id].location.path;
-      const navigated = prevPath !== location.path;
-      return {
-        panes: {
-          ...s.panes,
-          [id]: {
-            ...s.panes[id],
-            location,
-            entries,
-            cursorIndex: entries.length > 0 ? 0 : -1,
-            selected: new Set(),
-            loadedAt: Date.now(),
-            filter: navigated ? "" : s.panes[id].filter,
-            filterFocused: navigated ? false : s.panes[id].filterFocused,
-          },
-        },
+      const p = s.panes[id];
+      const cur = p.tabs[p.activeTabIndex];
+      if (!cur) return s;
+      const navigated = cur.location.path !== location.path;
+      let history = cur.history;
+      if (navigated) {
+        const stack = history.stack.slice(0, history.index + 1);
+        stack.push(location);
+        history = { stack, index: stack.length - 1 };
+      }
+      const nextTab: TabState = {
+        ...cur,
+        location,
+        entries,
+        cursorIndex: entries.length > 0 ? 0 : -1,
+        selected: new Set(),
+        loadedAt: Date.now(),
+        filter: navigated ? "" : cur.filter,
+        filterFocused: navigated ? false : cur.filterFocused,
+        history,
       };
+      return { panes: { ...s.panes, [id]: withActiveTab(p, () => nextTab) } };
     }),
   setActivePane: (id) => set({ activePane: id }),
   moveCursor: (id, delta) =>
     set((s) => {
       const p = s.panes[id];
-      const visible = computeDisplayed(p);
-      const next = Math.max(0, Math.min(visible.length - 1, p.cursorIndex + delta));
-      return { panes: { ...s.panes, [id]: { ...p, cursorIndex: next } } };
+      const cur = p.tabs[p.activeTabIndex];
+      if (!cur) return s;
+      const visible = computeDisplayed(cur);
+      const next = Math.max(0, Math.min(visible.length - 1, cur.cursorIndex + delta));
+      return { panes: { ...s.panes, [id]: withActiveTab(p, (t) => ({ ...t, cursorIndex: next })) } };
     }),
   setCursor: (id, index) =>
     set((s) => ({
-      panes: { ...s.panes, [id]: { ...s.panes[id], cursorIndex: index } },
+      panes: { ...s.panes, [id]: withActiveTab(s.panes[id], (t) => ({ ...t, cursorIndex: index })) },
     })),
   toggleSelected: (id, name) =>
-    set((s) => {
-      const p = s.panes[id];
-      const next = new Set(p.selected);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
-      return { panes: { ...s.panes, [id]: { ...p, selected: next } } };
-    }),
+    set((s) => ({
+      panes: {
+        ...s.panes,
+        [id]: withActiveTab(s.panes[id], (t) => {
+          const sel = new Set(t.selected);
+          if (sel.has(name)) sel.delete(name);
+          else sel.add(name);
+          return { ...t, selected: sel };
+        }),
+      },
+    })),
   clearSelection: (id) =>
     set((s) => ({
-      panes: { ...s.panes, [id]: { ...s.panes[id], selected: new Set() } },
+      panes: { ...s.panes, [id]: withActiveTab(s.panes[id], (t) => ({ ...t, selected: new Set() })) },
     })),
   setSort: (id, key, order) =>
     set((s) => ({
       panes: {
         ...s.panes,
-        [id]: { ...s.panes[id], sortKey: key, sortOrder: order, cursorIndex: 0 },
+        [id]: withActiveTab(s.panes[id], (t) => ({ ...t, sortKey: key, sortOrder: order, cursorIndex: 0 })),
       },
     })),
   toggleSortKey: (id, key) =>
-    set((s) => {
-      const p = s.panes[id];
-      if (p.sortKey === key) {
-        return {
-          panes: {
-            ...s.panes,
-            [id]: { ...p, sortOrder: p.sortOrder === "asc" ? "desc" : "asc" },
-          },
-        };
-      }
-      return {
-        panes: { ...s.panes, [id]: { ...p, sortKey: key, sortOrder: "asc", cursorIndex: 0 } },
-      };
-    }),
+    set((s) => ({
+      panes: {
+        ...s.panes,
+        [id]: withActiveTab(s.panes[id], (t) => {
+          if (t.sortKey === key) {
+            return { ...t, sortOrder: t.sortOrder === "asc" ? "desc" : "asc" };
+          }
+          return { ...t, sortKey: key, sortOrder: "asc", cursorIndex: 0 };
+        }),
+      },
+    })),
   toggleShowHidden: (id) =>
     set((s) => ({
       panes: {
         ...s.panes,
-        [id]: { ...s.panes[id], showHidden: !s.panes[id].showHidden, cursorIndex: 0 },
+        [id]: withActiveTab(s.panes[id], (t) => ({ ...t, showHidden: !t.showHidden, cursorIndex: 0 })),
       },
     })),
   setFilter: (id, filter) =>
     set((s) => ({
-      panes: { ...s.panes, [id]: { ...s.panes[id], filter, cursorIndex: 0 } },
+      panes: { ...s.panes, [id]: withActiveTab(s.panes[id], (t) => ({ ...t, filter, cursorIndex: 0 })) },
     })),
   setFilterFocused: (id, focused) =>
     set((s) => ({
-      panes: { ...s.panes, [id]: { ...s.panes[id], filterFocused: focused } },
+      panes: { ...s.panes, [id]: withActiveTab(s.panes[id], (t) => ({ ...t, filterFocused: focused })) },
     })),
 }));
 
-/** 표시 entries 계산 — raw → filter → hidden → sort. */
+/** 표시 entries — 활성 탭 기준. raw → filter → hidden → sort. */
 export function selectDisplayedEntries(id: PaneId, state: PanesState): Entry[] {
-  return computeDisplayed(state.panes[id]);
+  const t = activeTab(state, id);
+  return computeDisplayed(t);
 }
 
-function computeDisplayed(p: PaneState): Entry[] {
-  let arr = p.entries;
-  if (p.filter.length > 0) {
-    const q = p.filter.toLowerCase();
+function computeDisplayed(t: TabState): Entry[] {
+  let arr = t.entries;
+  if (t.filter.length > 0) {
+    const q = t.filter.toLowerCase();
     arr = arr.filter((e) => e.name.toLowerCase().includes(q));
   }
-  if (!p.showHidden) {
+  if (!t.showHidden) {
     arr = arr.filter((e) => !e.hidden);
   }
-  return sortEntries(arr, p.sortKey, p.sortOrder);
+  return sortEntries(arr, t.sortKey, t.sortOrder);
 }
 
 function sortEntries(entries: Entry[], key: SortKey, order: SortOrder): Entry[] {
