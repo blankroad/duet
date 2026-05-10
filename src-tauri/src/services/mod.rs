@@ -9,4 +9,5 @@ pub mod journal;
 pub mod journal_events;
 pub mod progress_events;
 pub mod settings;
+pub mod task_events;
 pub mod trash;
