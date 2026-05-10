@@ -28,8 +28,18 @@ async fn fs_for(
     }
 }
 
-fn ctx(settings: Arc<SettingsStore>, journal: Arc<Journal>) -> OpCtx {
-    OpCtx { settings, journal }
+fn ctx(
+    settings: Arc<SettingsStore>,
+    journal: Arc<Journal>,
+    pool: Arc<ConnectionPool>,
+    app: tauri::AppHandle,
+) -> OpCtx {
+    OpCtx {
+        settings,
+        journal,
+        pool: Some(pool),
+        app: Some(app),
+    }
 }
 
 /// 새 JournalEntry 가 push 된 직후 호출 — JournalChangedEvent emit + id 반환.
@@ -71,7 +81,12 @@ pub async fn fs_delete_execute(
     let entry = ops::delete_execute(
         &*fs,
         plan,
-        &ctx(settings.inner().clone(), journal.inner().clone()),
+        &ctx(
+            settings.inner().clone(),
+            journal.inner().clone(),
+            pool.inner().clone(),
+            app.clone(),
+        ),
     )
     .await?;
     Ok(emit_pushed(&app, entry))
@@ -108,7 +123,12 @@ pub async fn fs_copy_execute(
         &*src_fs,
         &*dst_fs,
         plan,
-        &ctx(settings.inner().clone(), journal.inner().clone()),
+        &ctx(
+            settings.inner().clone(),
+            journal.inner().clone(),
+            pool.inner().clone(),
+            app.clone(),
+        ),
     )
     .await?;
     Ok(emit_pushed(&app, entry))
@@ -145,7 +165,12 @@ pub async fn fs_move_execute(
         &*src_fs,
         &*dst_fs,
         plan,
-        &ctx(settings.inner().clone(), journal.inner().clone()),
+        &ctx(
+            settings.inner().clone(),
+            journal.inner().clone(),
+            pool.inner().clone(),
+            app.clone(),
+        ),
     )
     .await?;
     Ok(emit_pushed(&app, entry))
@@ -166,7 +191,12 @@ pub async fn fs_rename(
         &*fs,
         target,
         new_name,
-        &ctx(settings.inner().clone(), journal.inner().clone()),
+        &ctx(
+            settings.inner().clone(),
+            journal.inner().clone(),
+            pool.inner().clone(),
+            app.clone(),
+        ),
     )
     .await?;
     Ok(emit_pushed(&app, entry))
@@ -187,7 +217,12 @@ pub async fn fs_mkdir(
         &*fs,
         parent,
         name,
-        &ctx(settings.inner().clone(), journal.inner().clone()),
+        &ctx(
+            settings.inner().clone(),
+            journal.inner().clone(),
+            pool.inner().clone(),
+            app.clone(),
+        ),
     )
     .await?;
     Ok(emit_pushed(&app, entry))

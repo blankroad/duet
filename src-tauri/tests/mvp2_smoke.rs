@@ -51,6 +51,8 @@ impl Env {
         OpCtx {
             settings: self.settings.clone(),
             journal: self.journal.clone(),
+            pool: None,
+            app: None,
         }
     }
     fn dir(&self) -> &std::path::Path {

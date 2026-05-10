@@ -19,6 +19,10 @@ use std::sync::Arc;
 pub struct OpCtx {
     pub journal: Arc<Journal>,
     pub settings: Arc<SettingsStore>,
+    /// MVP-3 same-host copy 가 SSH session 접근에 필요. Local-only op 는 None.
+    pub pool: Option<Arc<crate::services::connection_pool::ConnectionPool>>,
+    /// MVP-3 progress emit 에 필요. Local-only op 는 None.
+    pub app: Option<tauri::AppHandle>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -214,14 +218,25 @@ pub async fn copy_execute(
     plan: CopyPlan,
     ctx: &OpCtx,
 ) -> Result<JournalEntry, DuetError> {
-    // MVP-3 Task 7 까지 임시 guard — same-host SSH 는 silent relay 안 됨
-    // (CLAUDE.md DON'T list). Task 7 의 same_host_copy 가 이 분기 처리.
-    if plan.strategy == CopyStrategy::SshSameHost {
-        return Err(DuetError::NotSupported(
-            "same-host SSH copy: Task 7 (same_host_copy) 진행 중".into(),
-        ));
+    match plan.strategy {
+        CopyStrategy::LocalToLocal | CopyStrategy::Relay => {
+            copy_execute_relay(src_fs, dst_fs, plan, ctx).await
+        }
+        CopyStrategy::SshSameHost => copy_execute_same_host(plan, ctx).await,
     }
+}
 
+/// 기존 relay 경로 (LocalToLocal + Relay 공통).
+/// 충돌 시 dst 파일을 .bak.<ts> 로 mv 후 src 를 복사.
+async fn copy_execute_relay(
+    src_fs: &dyn FileSystem,
+    dst_fs: &dyn FileSystem,
+    plan: CopyPlan,
+    ctx: &OpCtx,
+) -> Result<JournalEntry, DuetError> {
+    if plan.items.is_empty() {
+        return Err(DuetError::Io("plan has no items".into()));
+    }
     let mut copied = Vec::new();
     let mut backups = Vec::new();
     for it in &plan.items {
@@ -282,10 +297,14 @@ pub async fn move_execute(
     plan: MovePlan,
     ctx: &OpCtx,
 ) -> Result<JournalEntry, DuetError> {
-    // MVP-3 Task 7 까지 임시 guard — same-host SSH 는 silent relay 안 됨.
+    if plan.items.is_empty() {
+        return Err(DuetError::Io("plan has no items".into()));
+    }
+    // MVP-3 v1: same-host SSH move 는 미지원 (다른 user 에서 rename 안 되는 케이스 등).
+    // 후속에서 same_host_copy + trash 헬퍼 분리 후 지원.
     if plan.strategy == CopyStrategy::SshSameHost {
         return Err(DuetError::NotSupported(
-            "same-host SSH move: Task 7 진행 중".into(),
+            "same-host SSH move: MVP-3 v2 후속".into(),
         ));
     }
 
@@ -415,6 +434,162 @@ async fn pick_backup_path(
     )))
 }
 
+/// Same-host SSH copy — server-side rsync 또는 cp exec.
+///
+/// 1. ConnectionPool 에서 active session 가져옴 — src 측 connection 사용.
+///    (user 가 다를 수 있는데 src 의 권한으로 dst 까지 읽기/쓰기 되어야 함;
+///    안 되면 cp/rsync 가 자연 실패)
+/// 2. rsync 캐시 확인 → 없으면 exec("command -v rsync") detect
+/// 3. SFTP rename 으로 dst 충돌 backup (MVP-2 와 동일)
+/// 4. exec_streaming 으로 rsync/cp 실행 + progress 파싱 emit
+/// 5. exit !=0 → DuetError::Ssh(stderr) hard error
+///
+/// 락 획득 순서: rsync_available → session (역방향 금지 — 데드락 회피).
+async fn copy_execute_same_host(plan: CopyPlan, ctx: &OpCtx) -> Result<JournalEntry, DuetError> {
+    if plan.items.is_empty() {
+        return Err(DuetError::Io("plan has no items".into()));
+    }
+    use crate::core::copy_progress::parse_rsync_progress2_line;
+    use crate::core::copy_strategy::shell_escape_path;
+    use crate::services::progress_events::ProgressEvent;
+    use crate::ssh::remote_exec::{exec, exec_streaming};
+    use tauri_specta::Event;
+
+    // src_source 에서 connection_id 추출
+    let SourceId::Ssh { connection_id, .. } = &plan.src_source else {
+        return Err(DuetError::Io("same_host_copy on non-ssh source".into()));
+    };
+    let pool = ctx
+        .pool
+        .as_ref()
+        .ok_or_else(|| DuetError::Io("OpCtx.pool required for same-host copy".into()))?;
+    let app = ctx
+        .app
+        .as_ref()
+        .ok_or_else(|| DuetError::Io("OpCtx.app required for same-host copy".into()))?;
+
+    let conn = pool.get(connection_id).await?;
+    let session_mutex = conn
+        .session
+        .as_ref()
+        .ok_or_else(|| DuetError::ConnectionFailed("no live session".into()))?;
+
+    // rsync detect (캐시) — 락 순서: rsync_available → session
+    let use_rsync = {
+        let mut cache = conn.rsync_available.lock().await;
+        match *cache {
+            Some(v) => v,
+            None => {
+                let handle = session_mutex.lock().await;
+                let detected = match exec(&handle, "command -v rsync").await {
+                    Ok(out) => out.exit_status == 0,
+                    Err(_) => false,
+                };
+                *cache = Some(detected);
+                detected
+            }
+        }
+    };
+
+    // dst 측 충돌 감지 + backup (SFTP)
+    let dst_conn = pool.get(connection_id).await?;
+    let dst_fs = crate::fs::SshFs::new(dst_conn);
+
+    let mut backups = Vec::new();
+    for it in &plan.items {
+        let dst_path = plan.dst.path.join(&it.name);
+        if dst_fs.metadata(&dst_path).await.is_ok() {
+            let backup = pick_backup_path(&dst_fs, &plan.dst.path, &it.name).await?;
+            dst_fs.rename(&dst_path, &backup).await?;
+            backups.push(BackupRestore {
+                backup_path: backup,
+                original_path: dst_path,
+            });
+        }
+    }
+
+    // op_id (MVP-3 단일 active op 가정 — UUID 임시)
+    let op_id = uuid::Uuid::now_v7().to_string();
+    let mut copied = Vec::new();
+
+    for it in &plan.items {
+        let src_path = it.location.path.join(&it.name);
+        let dst_path = plan.dst.path.join(&it.name);
+        let src_arg = shell_escape_path(&src_path)?;
+        let dst_arg = shell_escape_path(&dst_path)?;
+
+        let cmd = if use_rsync {
+            format!("rsync -a --info=progress2 -- {src_arg} {dst_arg}")
+        } else {
+            format!("cp -a -- {src_arg} {dst_arg}")
+        };
+
+        // progress emit throttle: 1초
+        let mut last_emit = std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_secs(2))
+            .unwrap_or_else(std::time::Instant::now);
+        let total_bytes = plan.total_size_bytes;
+        let app_for_cb = app.clone();
+        let op_id_cb = op_id.clone();
+
+        // TODO(perf): session_mutex 가 rsync 전체 동안 잡혀 다른 SFTP op (list,
+        // metadata 등) 가 블락됨. 후속에서 exec_streaming 을 두 단계로 분리:
+        // (1) lock 잡고 channel_open_session 만 → (2) lock 풀고 channel 위에
+        // wait loop. MVP-3 v1 은 modal 안에서 사용자 대기라 acceptable.
+        let (exit, stderr) = {
+            let handle = session_mutex.lock().await;
+            exec_streaming(&handle, &cmd, |line| {
+                if let Some(p) = parse_rsync_progress2_line(line) {
+                    let now = std::time::Instant::now();
+                    let is_final = p.percent == 100;
+                    if is_final
+                        || now.duration_since(last_emit) >= std::time::Duration::from_secs(1)
+                    {
+                        last_emit = now;
+                        let _ = ProgressEvent {
+                            op_id: op_id_cb.clone(),
+                            bytes_done: p.bytes_done,
+                            bytes_total: if total_bytes > 0 {
+                                Some(total_bytes)
+                            } else {
+                                None
+                            },
+                            speed_bps: Some(p.speed_bps),
+                            eta_sec: Some(p.eta_sec),
+                            percent: Some(p.percent),
+                        }
+                        .emit(&app_for_cb);
+                    }
+                }
+            })
+            .await?
+        };
+
+        if exit != 0 {
+            return Err(DuetError::Ssh(format!(
+                "{} failed (exit {}): {}",
+                if use_rsync { "rsync" } else { "cp" },
+                exit,
+                String::from_utf8_lossy(&stderr).trim()
+            )));
+        }
+        copied.push(dst_path);
+    }
+
+    // Journal push (기존 schema 그대로)
+    let undo = UndoAction::UndoCopy {
+        target_source: plan.dst.source.clone(),
+        copied,
+        backups_to_restore: backups,
+    };
+    let op = OpKind::Copy {
+        count: plan.items.len() as u32,
+        src: plan.items[0].location.clone(),
+        dst: plan.dst.clone(),
+    };
+    ctx.journal.push(op, undo).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -441,7 +616,15 @@ mod tests {
         let journal = crate::services::journal::Journal::load_from(&dir.path().join("j.jsonl"))
             .await
             .unwrap();
-        (OpCtx { settings, journal }, dir)
+        (
+            OpCtx {
+                settings,
+                journal,
+                pool: None,
+                app: None,
+            },
+            dir,
+        )
     }
 
     #[tokio::test]
