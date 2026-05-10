@@ -1,6 +1,6 @@
 import { PathBar } from "./PathBar";
 import { EntryList } from "./EntryList";
-import { usePanes, type PaneId } from "@/stores/panes";
+import { usePanes, selectDisplayedEntries, type PaneId } from "@/stores/panes";
 import type { Entry } from "@/types/bindings";
 import clsx from "clsx";
 
@@ -13,8 +13,8 @@ interface PaneProps {
 
 /**
  * 좌/우 패널 한 쪽.
- * dumb component — IPC 호출은 App.tsx가 일괄 처리, 여기는 props로 받아 store 표시만.
- * active 패널은 border-accent 로 강조 (DESIGN.md).
+ * dumb component — IPC 호출은 App.tsx 가 일괄 처리.
+ * displayed entries 는 store selector (raw → filter → hidden → sort) 결과.
  */
 export function Pane({ id, onNavigate, onActivate, onRefresh }: PaneProps) {
   const pane = usePanes((s) => s.panes[id]);
@@ -22,6 +22,8 @@ export function Pane({ id, onNavigate, onActivate, onRefresh }: PaneProps) {
   const setActivePane = usePanes((s) => s.setActivePane);
   const setCursor = usePanes((s) => s.setCursor);
   const toggleSelected = usePanes((s) => s.toggleSelected);
+  const toggleSortKey = usePanes((s) => s.toggleSortKey);
+  const displayed = usePanes((s) => selectDisplayedEntries(id, s));
 
   return (
     <div
@@ -43,12 +45,15 @@ export function Pane({ id, onNavigate, onActivate, onRefresh }: PaneProps) {
         onRefresh={() => onRefresh(id)}
       />
       <EntryList
-        entries={pane.entries}
+        entries={displayed}
         cursorIndex={pane.cursorIndex}
         selected={pane.selected}
+        sortKey={pane.sortKey}
+        sortOrder={pane.sortOrder}
         onCursorMove={(i) => setCursor(id, i)}
         onActivate={(entry) => onActivate(id, entry)}
         onToggleSelect={(name) => toggleSelected(id, name)}
+        onSortClick={(k) => toggleSortKey(id, k)}
       />
     </div>
   );

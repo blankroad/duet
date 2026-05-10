@@ -42,24 +42,13 @@ function App() {
   const { call: listDirectory } = useTauri("listDirectory");
   const showToast = useToast((s) => s.show);
 
-  /** 디렉토리 정렬: dir 먼저, 같은 종류면 이름 오름차순 */
-  const sortEntries = useCallback((entries: Entry[]): Entry[] => {
-    return [...entries].sort((a, b) => {
-      if (a.kind !== b.kind) {
-        if (a.kind === "dir") return -1;
-        if (b.kind === "dir") return 1;
-      }
-      return a.name.localeCompare(b.name);
-    });
-  }, []);
-
   const navigate = useCallback(
     async (id: PaneId, path: string) => {
       const state = usePanes.getState();
       const location = { ...state.panes[id].location, path };
       try {
         const entries = await listDirectory(location);
-        state.setEntries(id, location, sortEntries(entries));
+        state.setEntries(id, location, entries);
         // navigate 성공 후 watcher 갱신. 실패는 silent — fs:changed 알림 안 옴
         // 정도의 영향. (사용자가 명시 새로고침으로 우회 가능.)
         void commands.paneWatchSet(id, location);
@@ -72,7 +61,7 @@ function App() {
         showToast(`Cannot open ${path} — ${msg}`);
       }
     },
-    [listDirectory, sortEntries, showToast],
+    [listDirectory, showToast],
   );
 
   const onActivate = useCallback(
@@ -256,7 +245,7 @@ function App() {
         const loc = { source: ssh, path };
         try {
           const entries = await listDirectory(loc);
-          state.setEntries(paneId, loc, sortEntries(entries));
+          state.setEntries(paneId, loc, entries);
           state.setActivePane(paneId);
           showToast(`Connected: ${alias} → ${paneId} pane (${path})`);
           succeeded = true;
@@ -274,7 +263,7 @@ function App() {
         showToast(`Connected ${alias}, but list failed:\n${failures.join("\n")}`);
       }
     },
-    [listDirectory, sortEntries, showToast],
+    [listDirectory, showToast],
   );
 
   // 부트스트랩: 양쪽 패널 초기 로드 (home 디렉토리, Windows 호환) + saved hosts
