@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Loader, X } from "lucide-react";
 import { formatSize } from "@/lib/format";
@@ -15,6 +16,10 @@ export function ProgressModal({
 }) {
   const task = useTasks((s) => s.tasks.get(taskId));
   const progress = task?.progress ?? null;
+
+  useEffect(() => {
+    if (task === undefined) onBackground();
+  }, [task, onBackground]);
 
   return (
     <Dialog.Root open onOpenChange={(o) => !o && onBackground()}>

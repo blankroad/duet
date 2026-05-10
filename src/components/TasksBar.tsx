@@ -38,7 +38,7 @@ export function TasksBar() {
           className="ml-auto flex items-center gap-1 rounded px-2 py-0.5 hover:bg-border"
         >
           {active.length} tasks
-          {expanded ? <ChevronDown size={11} /> : <ChevronUp size={11} />}
+          {expanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
         </button>
       </div>
       {expanded && (
