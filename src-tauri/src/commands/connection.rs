@@ -25,7 +25,7 @@ use crate::services::connection_events::{ConnectionStateChange, ConnectionStateE
 use crate::services::connection_pool::{ActiveConnection, ConnectionPool};
 use crate::services::connection_supervisor::spawn_supervisor;
 use crate::ssh::config::{load_ssh_hosts, SshHostEntry};
-use crate::ssh::connection::connect;
+use crate::ssh::connection::{connect, connect_with_password, SshSession};
 use crate::types::{ConnectionId, DuetError};
 
 /// Sidebar 에 표시할 호스트 정보 DTO.
@@ -78,15 +78,26 @@ pub async fn ssh_config_hosts() -> Result<Vec<SshHostEntryDto>, DuetError> {
 ///
 /// `connection_open` (config alias 기반) 과 `connection_open_adhoc`
 /// (직접 입력 host/port/user) 가 공유.
+///
+/// `password` 가 `Some` 이면 키/agent 실패 시 마지막 fallback 으로 사용.
+/// password 는 이 함수 내에서만 사용되고, 호출자 스택 프레임을 벗어나면 drop —
+/// CLAUDE.md §5 완화 조건 준수 (메모리 안에만, 로그/디스크 X).
 async fn open_and_register(
     host: SshHostEntry,
     all_hosts: &[SshHostEntry],
+    password: Option<String>,
     pool: &Arc<ConnectionPool>,
     app: &tauri::AppHandle,
 ) -> Result<ConnectionId, DuetError> {
-    // 키 → agent fallback. AuthFailed 면 비밀번호 prompt 가 필요한 호스트 —
-    // MVP-1 Task 7b 에서 secure prompt 추가 후 connect_with_password 분기.
-    let session = connect(&host, all_hosts).await?;
+    // 키 → agent fallback. AuthFailed 면 password 가 있을 때만 마지막 시도.
+    let session: SshSession = match connect(&host, all_hosts).await {
+        Ok(s) => s,
+        Err(DuetError::AuthFailed) => match password {
+            Some(pw) => connect_with_password(&host.hostname, host.port, &host.user, &pw).await?,
+            None => return Err(DuetError::AuthFailed),
+        },
+        Err(e) => return Err(e),
+    };
 
     let id = ConnectionId(format!("{}:{}", host.alias, uuid::Uuid::new_v4()));
     let host_ip = session.host_ip;
@@ -116,10 +127,15 @@ async fn open_and_register(
 }
 
 /// 새 SSH 연결 open + ConnectionPool 등록 — `~/.ssh/config` 의 alias 기반.
+///
+/// `password` 가 `Some` 이면 키/agent 실패 시 마지막 fallback. ProxyJump
+/// 호스트는 password fallback 시 jump 단계 인증은 키/agent 만 — target 단만
+/// password 시도 (jump 호스트 password 는 미지원).
 #[tauri::command]
 #[specta::specta]
 pub async fn connection_open(
     alias: String,
+    password: Option<String>,
     pool: tauri::State<'_, Arc<ConnectionPool>>,
     app: tauri::AppHandle,
 ) -> Result<ConnectionId, DuetError> {
@@ -131,13 +147,13 @@ pub async fn connection_open(
         .ok_or_else(|| {
             DuetError::ConnectionFailed(format!("alias not found in ssh config: {alias}"))
         })?;
-    open_and_register(host, &all_hosts, pool.inner(), &app).await
+    open_and_register(host, &all_hosts, password, pool.inner(), &app).await
 }
 
 /// Ad-hoc SSH 연결 — `~/.ssh/config` 에 없는 host 에 직접 입력으로 접속.
 ///
-/// `key_path` 가 None 이면 SSH agent 만 시도. 키파일/agent 둘 다 실패하면
-/// `AuthFailed` (비밀번호는 MVP-1 Task 7b 의 secure prompt 까지 미지원).
+/// `key_path` 가 None 이면 SSH agent 시도. `password` 가 Some 이면 키/agent
+/// 둘 다 실패 시 fallback. 모두 실패면 `AuthFailed`.
 /// `proxy_jump` 미지원 — config 기반 alias 가 필요.
 #[tauri::command]
 #[specta::specta]
@@ -146,6 +162,7 @@ pub async fn connection_open_adhoc(
     port: u16,
     user: String,
     key_path: Option<PathBuf>,
+    password: Option<String>,
     pool: tauri::State<'_, Arc<ConnectionPool>>,
     app: tauri::AppHandle,
 ) -> Result<ConnectionId, DuetError> {
@@ -163,7 +180,7 @@ pub async fn connection_open_adhoc(
         identity_files: key_path.into_iter().collect(),
         proxy_jump: vec![],
     };
-    open_and_register(entry, &[], pool.inner(), &app).await
+    open_and_register(entry, &[], password, pool.inner(), &app).await
 }
 
 /// 연결 종료 + ConnectionPool 에서 제거.

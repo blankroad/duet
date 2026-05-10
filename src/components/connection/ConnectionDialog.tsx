@@ -13,9 +13,8 @@ import type { PaneId } from "@/stores/panes";
  * `commands.connectionOpen` → 성공 시 connections store 갱신 + onConnected
  * 콜백 (App 이 해당 패널을 SSH 로 navigate).
  *
- * **CLAUDE.md §5 (자격증명 보호)**: 비밀번호 입력은 IPC 로 전달 X. 현재
- * (Task 7b 미구현) 는 키/agent fallback 만; 비밀번호 필요한 호스트는
- * AuthFailed 표시 + Task 7b TODO 안내. secure prompt 추가 후 분기.
+ * **CLAUDE.md §5 (2026-05 완화)**: 비밀번호 input 은 local state 에만,
+ * command 호출 직후 clear. store/localStorage 저장 금지.
  */
 export interface ConnectionDialogProps {
   /** 열려있는 호스트 alias (null 이면 닫힘). */
@@ -38,17 +37,24 @@ export function ConnectionDialog({ alias, onClose, onConnected }: ConnectionDial
   const open = host !== undefined;
 
   const [target, setTarget] = useState<PaneId>("left");
+  const [password, setPassword] = useState("");
   const [phase, setPhase] = useState<DialogPhase>({ kind: "idle" });
 
-  // 다이얼로그가 새 호스트로 다시 열릴 때마다 phase 초기화.
+  // 다이얼로그가 새 호스트로 다시 열릴 때마다 phase + password 초기화.
   useEffect(() => {
-    if (open) setPhase({ kind: "idle" });
+    if (open) {
+      setPhase({ kind: "idle" });
+      setPassword("");
+    }
   }, [open, alias]);
 
   const handleConnect = async () => {
     if (!host) return;
     setPhase({ kind: "connecting" });
-    const result = await commands.connectionOpen(host.alias);
+    // password 는 command 호출 직후 local state 에서 clear (CLAUDE.md §5).
+    const pw = password ? password : null;
+    const result = await commands.connectionOpen(host.alias, pw);
+    setPassword(""); // 즉시 clear — 성공/실패 무관
     if (result.status === "ok") {
       const id: ConnectionId = result.data;
       upsertActive({
@@ -88,6 +94,20 @@ export function ConnectionDialog({ alias, onClose, onConnected }: ConnectionDial
               <PaneRadio value="left" current={target} onChange={setTarget} label="Left" />
               <PaneRadio value="right" current={target} onChange={setTarget} label="Right" />
             </div>
+          </div>
+
+          <div className="mt-3">
+            <label htmlFor="conn-pw" className="block text-meta text-fg-muted">
+              Password (optional — 키/agent 실패 시 fallback)
+            </label>
+            <input
+              id="conn-pw"
+              type="password"
+              autoComplete="off"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="mt-1 w-full rounded border border-border bg-subtle px-2 py-1 font-mono text-base focus:border-accent focus:outline-none"
+            />
           </div>
 
           {phase.kind === "error" && <ErrorBox error={phase.error} />}
@@ -175,7 +195,7 @@ function ErrorBox({ error }: { error: DuetError }) {
       <div className="text-fg-muted">{message}</div>
       {isAuth && (
         <div className="mt-1 text-fg-muted">
-          (password prompt 는 Task 7b — 현재는 key/agent 만 시도)
+          키/agent + (입력했으면) password 모두 실패. password 확인 후 다시 시도.
         </div>
       )}
     </div>

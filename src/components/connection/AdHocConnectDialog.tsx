@@ -10,8 +10,9 @@ import { formatErr } from "@/lib/error";
 /**
  * `~/.ssh/config` 에 없는 host 에 직접 입력으로 연결.
  *
- * **CLAUDE.md §5**: 비밀번호 IPC 송신 금지 — 키파일 경로 또는 SSH agent 만.
- * 비밀번호 인증은 MVP-1 Task 7b (secure prompt) 완성 후 추가.
+ * **CLAUDE.md §5 (2026-05 완화)**: 비밀번호 input 은 local state 에만, command
+ * 호출 직후 clear. store/localStorage 저장 금지. backend 도 메모리에만 사용 후
+ * drop, 로그 X.
  */
 export interface AdHocConnectDialogProps {
   open: boolean;
@@ -31,6 +32,7 @@ export function AdHocConnectDialog({ open, onClose, onConnected }: AdHocConnectD
   const [port, setPort] = useState("22");
   const [user, setUser] = useState("");
   const [keyPath, setKeyPath] = useState("");
+  const [password, setPassword] = useState("");
   const [target, setTarget] = useState<PaneId>("left");
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
 
@@ -39,6 +41,7 @@ export function AdHocConnectDialog({ open, onClose, onConnected }: AdHocConnectD
     setPort("22");
     setUser("");
     setKeyPath("");
+    setPassword(""); // CLAUDE.md §5: clear from memory after submit
     setTarget("left");
     setPhase({ kind: "idle" });
   };
@@ -58,12 +61,17 @@ export function AdHocConnectDialog({ open, onClose, onConnected }: AdHocConnectD
       return;
     }
     setPhase({ kind: "connecting" });
+    // password 는 command 호출 직후 local state 에서 clear (CLAUDE.md §5).
+    // 호출 인자로만 전달, store/localStorage 에 저장 안 함.
+    const pw = password ? password : null;
     const r = await commands.connectionOpenAdhoc(
       host.trim(),
       portNum,
       user.trim(),
       keyPath.trim() ? keyPath.trim() : null,
+      pw,
     );
+    setPassword(""); // 즉시 clear — 성공/실패 무관
     if (r.status === "ok") {
       const id: ConnectionId = r.data;
       const alias = `${user.trim()}@${host.trim()}:${portNum}`;
@@ -141,7 +149,19 @@ export function AdHocConnectDialog({ open, onClose, onConnected }: AdHocConnectD
               type="text"
               value={keyPath}
               onChange={(e) => setKeyPath(e.target.value)}
-              placeholder="~/.ssh/id_ed25519 (optional — agent 만 쓰면 비워둠)"
+              placeholder="~/.ssh/id_ed25519 (optional)"
+              className="rounded border border-border bg-subtle px-2 py-1 font-mono focus:border-accent focus:outline-none"
+            />
+            <label htmlFor="adhoc-pw" className="self-center text-fg-muted">
+              Password
+            </label>
+            <input
+              id="adhoc-pw"
+              type="password"
+              autoComplete="off"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="(optional — 키/agent 실패 시 fallback)"
               className="rounded border border-border bg-subtle px-2 py-1 font-mono focus:border-accent focus:outline-none"
             />
           </div>
@@ -160,7 +180,7 @@ export function AdHocConnectDialog({ open, onClose, onConnected }: AdHocConnectD
               <div className="text-fg-muted">{formatErr(phase.error)}</div>
               {phase.error.kind === "AuthFailed" && (
                 <div className="mt-1 text-fg-muted">
-                  Password 인증은 MVP-1 Task 7b 까지 미지원 — 키 또는 agent 필요.
+                  키/agent 실패. password 입력 후 다시 시도하거나 키파일 경로 확인.
                 </div>
               )}
             </div>

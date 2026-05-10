@@ -40,11 +40,18 @@ commands → services → core → fs → platform
 
 ### 5. SSH 자격증명은 메모리/로그에 노출 금지
 
-- 비밀번호/passphrase는 백엔드 메모리에서만, **프론트엔드로 절대 전달 안 함**
-- SSH agent (`SSH_AUTH_SOCK`) 또는 `~/.ssh/config` IdentityFile 우선
-- 비밀번호 입력 다이얼로그는 백엔드가 OS native dialog 또는 secure prompt 사용
+- SSH agent (`SSH_AUTH_SOCK`) 또는 `~/.ssh/config` IdentityFile 우선 — 가능한 비밀번호 사용 자체를 회피
 - `tracing` 로그에 자격증명 출력 금지 (`Debug` derive 시 주의)
 - 자격증명을 디스크에 저장하려면 OS keychain (`keyring` crate) 사용
+
+**비밀번호 IPC 전달 (2026-05 완화):** 사용자가 dialog 의 password input 에 직접 입력한 경우는 IPC 로 backend 에 전달 가능. 단 다음 모두 충족:
+- input 은 `<input type="password">` (DOM 표시 마스킹)
+- frontend store / localStorage / sessionStorage 에 저장 절대 금지 — 컴포넌트 local state 에만, command 호출 직후 clear
+- backend command 인자 외 어디에도 영구화 금지, drop 시 zeroize 노력 (러스트 소멸 시점)
+- 로그 출력 금지 (위 § 동일)
+- OS-native secure prompt 가 불가능한 환경 (web/embed 등) 의 fallback 으로 정의 — 가능하면 keyring 캐시 후 재사용
+
+이 완화는 "프론트엔드로 절대 전달 안 함" 의 원칙을 약화하지만, 실용성을 위한 의도된 trade-off. 이전 strict 정책으로 회귀 가능 (Task 7b: OS-native dialog).
 
 ### 6. 의존성 추가는 명시적 승인 필요
 
