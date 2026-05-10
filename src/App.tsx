@@ -40,6 +40,7 @@ import type { ConnectionDto, CopyStrategy, DuetError, Entry, Location } from "@/
  */
 function App() {
   const { call: listDirectory } = useTauri("listDirectory");
+  const showToast = useToast((s) => s.show);
 
   /** 디렉토리 정렬: dir 먼저, 같은 종류면 이름 오름차순 */
   const sortEntries = useCallback((entries: Entry[]): Entry[] => {
@@ -62,11 +63,16 @@ function App() {
         // navigate 성공 후 watcher 갱신. 실패는 silent — fs:changed 알림 안 옴
         // 정도의 영향. (사용자가 명시 새로고침으로 우회 가능.)
         void commands.paneWatchSet(id, location);
-      } catch {
-        // useTauri가 error state에 저장 — UI는 다음 렌더에서 반영
+      } catch (e) {
+        // 사용자가 더블클릭해도 silent fail 면 무반응으로 인식. toast 로 노출.
+        const msg =
+          e && typeof e === "object" && "kind" in e
+            ? `${(e as { kind: string }).kind}: ${formatErr(e as DuetError)}`
+            : String(e);
+        showToast(`Cannot open ${path} — ${msg}`);
       }
     },
-    [listDirectory, sortEntries],
+    [listDirectory, sortEntries, showToast],
   );
 
   const onActivate = useCallback(
@@ -117,7 +123,6 @@ function App() {
   const dialog = useUIDialogs((s) => s.dialog);
   const closeDialog = useUIDialogs((s) => s.close);
   const openDialog = useUIDialogs((s) => s.open);
-  const showToast = useToast((s) => s.show);
 
   /** 영향받은 location 들이 현재 패널과 매칭되면 refresh. */
   const refreshAffected = useCallback(
