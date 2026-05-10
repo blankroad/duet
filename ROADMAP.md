@@ -79,12 +79,12 @@
 
 **완료 조건**: 큰 작업 중에도 UI 반응. 동시 여러 작업.
 
-- [ ] `TaskQueue` 서비스
-- [ ] 진행률 바 컴포넌트 (Toast 위)
-- [ ] 작업 목록 패널 (확장)
-- [ ] 작업 취소 (`CancellationToken`)
-- [ ] 동시 작업 제한 (호스트당 N개)
-- [ ] 실패 시 재시도 (네트워크 오류만)
+- [x] `TaskQueue` 서비스 (per-host_key FIFO worker)
+- [x] 진행률 바 컴포넌트 (TasksBar — StatusBar 위)
+- [x] 작업 목록 (TasksBar dropdown 2+ active)
+- [x] 작업 취소 (`CancellationToken` — 항목 경계 단위)
+- [x] 동시 작업 제한 (호스트당 1, N개 사용자 설정은 후속 MVP-7)
+- [x] 실패 시 재시도 (연결 끊김만 1회, 3초 sleep)
 
 ## MVP-5: 검색과 정렬
 
@@ -123,7 +123,7 @@
 
 ## 현재 단계
 
-**MVP-4 시작 직전.** MVP-3 핵심 완료 — same-host SSH 복사가 server-side rsync/cp 로 실행됨 (silent relay 차단). 큰 파일 stress test 는 docker 환경 마련 후 후속.
+**MVP-5 시작 직전.** MVP-4 완료 — copy/move 가 background TaskQueue 에서, TasksBar 가 진행률 표시, 항목 단위 cancel + 연결 끊김 1회 retry.
 
 ## 단계 변경 규칙
 
