@@ -1,8 +1,10 @@
-import { Folder, Server, Star, Network, Plus, X, Bookmark } from "lucide-react";
+import { Folder, Server, Star, Network, Plus, X, Bookmark, Heart } from "lucide-react";
 import { useUI } from "@/stores/ui";
 import { useConnections, type Host, type ConnectionState } from "@/stores/connections";
 import { useSavedHosts, removeSavedHost } from "@/stores/savedHosts";
-import type { SavedHost } from "@/types/bindings";
+import { useBookmarks, removeBookmark } from "@/stores/bookmarks";
+import { useHostFavorites, removeHostFavorite } from "@/stores/hostFavorites";
+import type { SavedHost, Bookmark as BookmarkType, HostFavorite, Location } from "@/types/bindings";
 import clsx from "clsx";
 import type { ReactNode } from "react";
 
@@ -14,16 +16,25 @@ import type { ReactNode } from "react";
  *   호스트 더블클릭 → ConnectionDialog. + 버튼 → AdHocConnectDialog.
  * - Saved hosts: 사용자가 ad-hoc dialog 에서 "Save host" 체크해서 저장한 호스트.
  *   더블클릭 → AdHocConnectDialog 가 저장값 prefill 로 열림.
- * - Bookmarks: MVP-6 placeholder.
+ * - Bookmarks: 사용자가 북마크한 위치 (로컬/SSH). 더블클릭 → 해당 위치로 이동.
+ * - Favorites: 활성 SSH 연결의 즐겨찾기 경로. alias 별 그룹화.
  */
 export function Sidebar({
   onHostActivate,
   onAdHocOpen,
   onSavedActivate,
+  onBookmarkActivate,
+  onFavoriteActivate,
+  onAddBookmark,
+  onAddFavorite,
 }: {
   onHostActivate: (alias: string) => void;
   onAdHocOpen: () => void;
   onSavedActivate: (host: SavedHost) => void;
+  onBookmarkActivate: (location: Location) => void;
+  onFavoriteActivate: (favorite: HostFavorite) => void;
+  onAddBookmark: () => void;
+  onAddFavorite: () => void;
 }) {
   const open = useUI((s) => s.sidebarOpen);
   if (!open) return null;
@@ -35,9 +46,8 @@ export function Sidebar({
       </Section>
       <HostsSection onHostActivate={onHostActivate} onAdHocOpen={onAdHocOpen} />
       <SavedHostsSection onActivate={onSavedActivate} />
-      <Section title="Bookmarks" icon={<Star size={14} />}>
-        <Item label="(MVP-6)" muted />
-      </Section>
+      <BookmarksSection onActivate={onBookmarkActivate} onAdd={onAddBookmark} />
+      <HostFavoritesSection onActivate={onFavoriteActivate} onAdd={onAddFavorite} />
     </aside>
   );
 }
@@ -83,6 +93,154 @@ function SavedHostItem({
         className="ml-auto shrink-0 rounded p-0.5 text-fg-muted opacity-0 hover:bg-border hover:text-danger group-hover:opacity-100"
         aria-label={`Remove saved host ${host.alias}`}
         title="Remove"
+      >
+        <X size={11} />
+      </button>
+    </div>
+  );
+}
+
+function BookmarksSection({
+  onActivate,
+  onAdd,
+}: {
+  onActivate: (location: Location) => void;
+  onAdd: () => void;
+}) {
+  const items = useBookmarks((s) => s.items);
+  return (
+    <SectionWithAction
+      title="Bookmarks"
+      icon={<Star size={14} />}
+      action={
+        <button
+          type="button"
+          onClick={onAdd}
+          className="rounded p-0.5 text-fg-muted hover:bg-border hover:text-fg"
+          aria-label="Add bookmark"
+          title="Add active tab to bookmarks"
+        >
+          <Plus size={11} />
+        </button>
+      }
+    >
+      {items.length === 0 ? (
+        <Item label="(none — + to add active tab)" muted />
+      ) : (
+        items.map((b) => (
+          <BookmarkItem key={b.id} bookmark={b} onActivate={onActivate} />
+        ))
+      )}
+    </SectionWithAction>
+  );
+}
+
+function BookmarkItem({
+  bookmark,
+  onActivate,
+}: {
+  bookmark: BookmarkType;
+  onActivate: (location: Location) => void;
+}) {
+  const sshPrefix = bookmark.location.source.kind === "ssh" ? "ssh:" : "";
+  return (
+    <div
+      onDoubleClick={() => onActivate(bookmark.location)}
+      title={`${sshPrefix}${bookmark.location.path}`}
+      className="group flex cursor-default items-center gap-1 rounded px-2 py-0.5 hover:bg-border"
+    >
+      <Star size={11} className="shrink-0 text-fg-muted" />
+      <span className="truncate">{bookmark.name}</span>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          void removeBookmark(bookmark.id);
+        }}
+        className="ml-auto shrink-0 rounded p-0.5 text-fg-muted opacity-0 hover:bg-border hover:text-danger group-hover:opacity-100"
+        aria-label="Remove bookmark"
+      >
+        <X size={11} />
+      </button>
+    </div>
+  );
+}
+
+function HostFavoritesSection({
+  onActivate,
+  onAdd,
+}: {
+  onActivate: (favorite: HostFavorite) => void;
+  onAdd: () => void;
+}) {
+  const items = useHostFavorites((s) => s.items);
+  // 활성 connection 들을 Record 에서 배열로 변환
+  const activeRecord = useConnections((s) => s.active);
+  const actives = Object.values(activeRecord);
+  const activeAliases = actives.map((c) => c.alias);
+  const visible = items.filter((f) => activeAliases.includes(f.host_alias));
+  // alias 별 그룹화
+  const groups: Record<string, HostFavorite[]> = {};
+  for (const f of visible) {
+    (groups[f.host_alias] ??= []).push(f);
+  }
+  const groupKeys = Object.keys(groups).sort();
+
+  return (
+    <SectionWithAction
+      title="Favorites"
+      icon={<Heart size={14} />}
+      action={
+        <button
+          type="button"
+          onClick={onAdd}
+          className="rounded p-0.5 text-fg-muted hover:bg-border hover:text-fg"
+          aria-label="Add favorite"
+          title="Add active tab path (SSH only)"
+        >
+          <Plus size={11} />
+        </button>
+      }
+    >
+      {groupKeys.length === 0 ? (
+        <Item label="(none — connect to host first)" muted />
+      ) : (
+        groupKeys.map((alias) => (
+          <div key={alias}>
+            <div className="px-2 text-meta text-fg-muted">{alias}</div>
+            {groups[alias]!.map((f) => (
+              <FavoriteItem key={f.id} fav={f} onActivate={onActivate} />
+            ))}
+          </div>
+        ))
+      )}
+    </SectionWithAction>
+  );
+}
+
+function FavoriteItem({
+  fav,
+  onActivate,
+}: {
+  fav: HostFavorite;
+  onActivate: (favorite: HostFavorite) => void;
+}) {
+  return (
+    <div
+      onDoubleClick={() => onActivate(fav)}
+      title={String(fav.path)}
+      className="group flex cursor-default items-center gap-1 rounded py-0.5 pl-4 pr-2 hover:bg-border"
+    >
+      <Heart size={11} className="shrink-0 text-fg-muted" />
+      <span className="truncate">{fav.name}</span>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          void removeHostFavorite(fav.id);
+        }}
+        className="ml-auto shrink-0 rounded p-0.5 text-fg-muted opacity-0 hover:bg-border hover:text-danger group-hover:opacity-100"
+        aria-label="Remove favorite"
       >
         <X size={11} />
       </button>

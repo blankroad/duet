@@ -18,6 +18,9 @@ import { useSearch } from "@/stores/search";
 import { useUIDialogs } from "@/stores/ui-dialogs";
 import { useToast } from "@/stores/toast";
 import { bootstrapSavedHosts } from "@/stores/savedHosts";
+import { bootstrapBookmarks, addBookmark } from "@/stores/bookmarks";
+import { bootstrapHostFavorites, addHostFavorite } from "@/stores/hostFavorites";
+import { useConnections } from "@/stores/connections";
 import { useTauri } from "@/hooks/useTauri";
 import { useKeyboardNav } from "@/hooks/useKeyboardNav";
 import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
@@ -30,7 +33,7 @@ import { useTaskEvents } from "@/hooks/useTaskEvents";
 import { formatErr } from "@/lib/error";
 import { formatSize } from "@/lib/format";
 import { commands } from "@/types/bindings";
-import type { ConnectionDto, CopyStrategy, DuetError, Entry, Location, SearchHit } from "@/types/bindings";
+import type { ConnectionDto, CopyStrategy, DuetError, Entry, HostFavorite, Location, SearchHit } from "@/types/bindings";
 
 /**
  * App 루트.
@@ -61,6 +64,24 @@ function App() {
             ? `${(e as { kind: string }).kind}: ${formatErr(e as DuetError)}`
             : String(e);
         showToast(`Cannot open ${path} — ${msg}`);
+      }
+    },
+    [listDirectory, showToast],
+  );
+
+  /** location 전체를 받아 해당 패널을 이동 — Bookmark(SSH 포함) 에서 사용. */
+  const navigateTo = useCallback(
+    async (id: PaneId, location: Location, opts: { pushHistory?: boolean } = {}) => {
+      try {
+        const entries = await listDirectory(location);
+        usePanes.getState().setEntries(id, location, entries, { pushHistory: opts.pushHistory ?? true });
+        void commands.paneWatchSet(id, location);
+      } catch (e) {
+        const msg =
+          e && typeof e === "object" && "kind" in e
+            ? `${(e as { kind: string }).kind}: ${formatErr(e as DuetError)}`
+            : String(e);
+        showToast(`Cannot open ${location.path} — ${msg}`);
       }
     },
     [listDirectory, showToast],
@@ -226,6 +247,64 @@ function App() {
     }
   }, [dialog, openDialog, closeDialog, showToast]);
 
+  const onBookmarkActivate = useCallback(
+    (location: Location) => {
+      const id = usePanes.getState().activePane;
+      void navigateTo(id, location);
+    },
+    [navigateTo],
+  );
+
+  const onFavoriteActivate = useCallback(
+    (fav: HostFavorite) => {
+      const activeRecord = useConnections.getState().active;
+      const conn = Object.values(activeRecord).find((c) => c.alias === fav.host_alias);
+      if (!conn) {
+        showToast(`Connect to ${fav.host_alias} first`);
+        return;
+      }
+      const id = usePanes.getState().activePane;
+      const location: Location = {
+        source: { kind: "ssh", connection_id: conn.id, host_ip: conn.host_ip, user: conn.user },
+        path: fav.path,
+      };
+      void navigateTo(id, location);
+    },
+    [navigateTo, showToast],
+  );
+
+  const onAddBookmark = useCallback(() => {
+    const id = usePanes.getState().activePane;
+    const tab = activeTab(usePanes.getState(), id);
+    const defaultName =
+      String(tab.location.path)
+        .split("/")
+        .filter(Boolean)
+        .pop() ?? "/";
+    const name = window.prompt("Bookmark name", defaultName);
+    if (name) void addBookmark(name, tab.location);
+  }, []);
+
+  const onAddFavorite = useCallback(() => {
+    const id = usePanes.getState().activePane;
+    const tab = activeTab(usePanes.getState(), id);
+    if (tab.location.source.kind !== "ssh") {
+      showToast("Favorites: switch to SSH pane first");
+      return;
+    }
+    const connId = tab.location.source.connection_id;
+    const activeRecord = useConnections.getState().active;
+    const conn = Object.values(activeRecord).find((c) => c.id === connId);
+    if (!conn) {
+      showToast("Active connection not found");
+      return;
+    }
+    const path = String(tab.location.path);
+    const defaultName = path.split("/").filter(Boolean).pop() ?? "/";
+    const name = window.prompt("Favorite name", defaultName);
+    if (name) void addHostFavorite(conn.alias, name, path);
+  }, [showToast]);
+
   // 새 연결 다이얼로그 — 호스트 더블클릭 시 alias 가 들어옴, 닫으면 null.
   const [dialogAlias, setDialogAlias] = useState<string | null>(null);
   // ad-hoc connect 다이얼로그 (Sidebar + 버튼 또는 saved host 더블클릭)
@@ -299,7 +378,7 @@ function App() {
     [listDirectory, showToast],
   );
 
-  // 부트스트랩: 양쪽 패널 초기 로드 (home 디렉토리, Windows 호환) + saved hosts
+  // 부트스트랩: 양쪽 패널 초기 로드 (home 디렉토리, Windows 호환) + saved hosts + bookmarks + hostFavorites
   useEffect(() => {
     (async () => {
       const result = await commands.homeDirectory();
@@ -307,6 +386,8 @@ function App() {
       await navigate("left", home);
       await navigate("right", home);
       void bootstrapSavedHosts();
+      void bootstrapBookmarks();
+      void bootstrapHostFavorites();
     })();
     // navigate가 deps에 들어가면 무한 루프 — 마운트 1회만
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -324,6 +405,10 @@ function App() {
           onHostActivate={onHostActivate}
           onAdHocOpen={onAdHocOpen}
           onSavedActivate={onSavedActivate}
+          onBookmarkActivate={onBookmarkActivate}
+          onFavoriteActivate={onFavoriteActivate}
+          onAddBookmark={onAddBookmark}
+          onAddFavorite={onAddFavorite}
         />
         <Pane id="left" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} onBack={onBack} onForward={onForward} />
         <Pane id="right" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} onBack={onBack} onForward={onForward} />
