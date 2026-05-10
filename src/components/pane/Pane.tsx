@@ -1,4 +1,5 @@
 import { PathBar } from "./PathBar";
+import { PaneFilterBar } from "./PaneFilterBar";
 import { EntryList } from "./EntryList";
 import { usePanes, selectDisplayedEntries, type PaneId } from "@/stores/panes";
 import type { Entry } from "@/types/bindings";
@@ -44,6 +45,7 @@ export function Pane({ id, onNavigate, onActivate, onRefresh }: PaneProps) {
         onSegmentClick={(p) => onNavigate(id, p)}
         onRefresh={() => onRefresh(id)}
       />
+      <PaneFilterBar id={id} />
       <EntryList
         entries={displayed}
         cursorIndex={pane.cursorIndex}

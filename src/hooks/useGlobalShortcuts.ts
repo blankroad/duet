@@ -51,6 +51,12 @@ export function useGlobalShortcuts(opts: { onRefresh: (id: "left" | "right") => 
             void getCurrentWindow().close();
           }
           break;
+        case "f":
+          if (!isInput) {
+            e.preventDefault();
+            usePanes.getState().setFilterFocused(usePanes.getState().activePane, true);
+          }
+          break;
         case "h":
           if (!isInput) {
             e.preventDefault();
