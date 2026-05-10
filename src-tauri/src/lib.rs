@@ -47,6 +47,8 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::secret_vault::vault_get,
             commands::secret_vault::vault_set,
             commands::secret_vault::vault_remove,
+            commands::search::search_global,
+            commands::search::search_cancel,
             commands::settings::settings_get,
             commands::settings::settings_set,
             commands::fs_ops::fs_delete_plan,
@@ -144,6 +146,8 @@ pub fn run() {
             app.manage(watcher);
             let task_queue = services::task_queue::TaskQueue::new(app.handle().clone());
             app.manage(task_queue);
+            let active_search = commands::search::ActiveSearch::new();
+            app.manage(active_search);
             Ok(())
         })
         .run(tauri::generate_context!())
