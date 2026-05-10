@@ -41,6 +41,12 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::saved_hosts::saved_hosts_list,
             commands::saved_hosts::saved_hosts_upsert,
             commands::saved_hosts::saved_hosts_remove,
+            commands::secret_vault::vault_status,
+            commands::secret_vault::vault_unlock,
+            commands::secret_vault::vault_lock,
+            commands::secret_vault::vault_get,
+            commands::secret_vault::vault_set,
+            commands::secret_vault::vault_remove,
             commands::settings::settings_get,
             commands::settings::settings_set,
             commands::fs_ops::fs_delete_plan,
@@ -116,6 +122,10 @@ pub fn run() {
         services::saved_hosts::SavedHostsStore::load_default().await
     })
     .expect("saved hosts load");
+    let secret_vault = tauri::async_runtime::block_on(async {
+        services::secret_vault::SecretVault::load_default().await
+    })
+    .expect("secret vault load");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -124,6 +134,7 @@ pub fn run() {
         .manage(settings)
         .manage(journal)
         .manage(saved_hosts)
+        .manage(secret_vault)
         .invoke_handler(specta_builder.invoke_handler())
         .setup(move |app| {
             specta_builder.mount_events(app);
