@@ -32,11 +32,15 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::pane::list_directory,
             commands::pane::pane_watch_set,
             commands::system::home_directory,
+            commands::system::ssh_home_directory,
             commands::connection::ssh_config_hosts,
             commands::connection::connection_open,
             commands::connection::connection_open_adhoc,
             commands::connection::connection_close,
             commands::connection::connection_list,
+            commands::saved_hosts::saved_hosts_list,
+            commands::saved_hosts::saved_hosts_upsert,
+            commands::saved_hosts::saved_hosts_remove,
             commands::settings::settings_get,
             commands::settings::settings_set,
             commands::fs_ops::fs_delete_plan,
@@ -108,6 +112,10 @@ pub fn run() {
     let journal =
         tauri::async_runtime::block_on(async { services::journal::Journal::load_default().await })
             .expect("journal load");
+    let saved_hosts = tauri::async_runtime::block_on(async {
+        services::saved_hosts::SavedHostsStore::load_default().await
+    })
+    .expect("saved hosts load");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -115,6 +123,7 @@ pub fn run() {
         .manage(pool)
         .manage(settings)
         .manage(journal)
+        .manage(saved_hosts)
         .invoke_handler(specta_builder.invoke_handler())
         .setup(move |app| {
             specta_builder.mount_events(app);

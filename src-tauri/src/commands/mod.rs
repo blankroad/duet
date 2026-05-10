@@ -3,6 +3,7 @@
 pub mod connection;
 pub mod fs_ops;
 pub mod pane;
+pub mod saved_hosts;
 pub mod settings;
 pub mod system;
 pub mod tasks;

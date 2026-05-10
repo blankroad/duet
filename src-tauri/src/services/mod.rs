@@ -8,6 +8,7 @@ pub mod fs_watcher;
 pub mod journal;
 pub mod journal_events;
 pub mod retry;
+pub mod saved_hosts;
 pub mod settings;
 pub mod task_events;
 pub mod task_queue;
