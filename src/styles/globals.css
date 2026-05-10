@@ -58,6 +58,10 @@ body,
 body {
   font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
   font-size: 13px;
+  /* Radix Portal (dialog 등) 이 <App> 밖에 렌더되어 text-fg 상속 못 받음 —
+   * body 에 기본 색 명시해서 portal 도 dark/light 모드 따라가게 */
+  color: hsl(var(--fg-base));
+  background-color: hsl(var(--bg-base));
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
