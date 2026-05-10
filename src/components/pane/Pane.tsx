@@ -11,6 +11,8 @@ interface PaneProps {
   onNavigate: (id: PaneId, path: string) => void;
   onActivate: (id: PaneId, entry: Entry) => void;
   onRefresh: (id: PaneId) => void;
+  onBack: (id: PaneId) => void;
+  onForward: (id: PaneId) => void;
 }
 
 /**
@@ -18,7 +20,7 @@ interface PaneProps {
  * dumb component — IPC 호출은 App.tsx 가 일괄 처리.
  * displayed entries 는 store selector (raw → filter → hidden → sort) 결과.
  */
-export function Pane({ id, onNavigate, onActivate, onRefresh }: PaneProps) {
+export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward }: PaneProps) {
   const isActive = usePanes((s) => s.activePane === id);
   const setActivePane = usePanes((s) => s.setActivePane);
   const setCursor = usePanes((s) => s.setCursor);
@@ -38,6 +40,10 @@ export function Pane({ id, onNavigate, onActivate, onRefresh }: PaneProps) {
       <TabBar id={id} />
       <PathBar
         location={tab.location}
+        canBack={tab.history.index > 0}
+        canForward={tab.history.index < tab.history.stack.length - 1}
+        onBack={() => onBack(id)}
+        onForward={() => onForward(id)}
         onUp={() => {
           const path = tab.location.path;
           if (path === "/" || path.length === 0) return;

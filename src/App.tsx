@@ -45,12 +45,12 @@ function App() {
   const showToast = useToast((s) => s.show);
 
   const navigate = useCallback(
-    async (id: PaneId, path: string) => {
+    async (id: PaneId, path: string, opts: { pushHistory?: boolean } = {}) => {
       const state = usePanes.getState();
       const location = { ...activeTab(state, id).location, path };
       try {
         const entries = await listDirectory(location);
-        state.setEntries(id, location, entries);
+        state.setEntries(id, location, entries, { pushHistory: opts.pushHistory ?? true });
         // navigate 성공 후 watcher 갱신. 실패는 silent — fs:changed 알림 안 옴
         // 정도의 영향. (사용자가 명시 새로고침으로 우회 가능.)
         void commands.paneWatchSet(id, location);
@@ -80,6 +80,22 @@ function App() {
     (id: PaneId) => {
       const tab = activeTab(usePanes.getState(), id);
       navigate(id, tab.location.path);
+    },
+    [navigate],
+  );
+
+  const onBack = useCallback(
+    (id: PaneId) => {
+      const loc = usePanes.getState().back(id);
+      if (loc) void navigate(id, loc.path, { pushHistory: false });
+    },
+    [navigate],
+  );
+
+  const onForward = useCallback(
+    (id: PaneId) => {
+      const loc = usePanes.getState().forward(id);
+      if (loc) void navigate(id, loc.path, { pushHistory: false });
     },
     [navigate],
   );
@@ -119,7 +135,7 @@ function App() {
   );
 
   useKeyboardNav(onKeyboardActivate, onKeyboardUp);
-  useGlobalShortcuts({ onRefresh });
+  useGlobalShortcuts({ onRefresh, onBack, onForward });
   useSshHosts();
   useConnectionEvents();
   useFsChangedEvents(onRefresh);
@@ -309,8 +325,8 @@ function App() {
           onAdHocOpen={onAdHocOpen}
           onSavedActivate={onSavedActivate}
         />
-        <Pane id="left" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} />
-        <Pane id="right" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} />
+        <Pane id="left" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} onBack={onBack} onForward={onForward} />
+        <Pane id="right" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} onBack={onBack} onForward={onForward} />
       </main>
 
       <TasksBar />

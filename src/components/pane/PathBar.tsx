@@ -3,8 +3,10 @@ import type { Location } from "@/types/bindings";
 
 interface PathBarProps {
   location: Location;
-  onBack?: () => void;
-  onForward?: () => void;
+  canBack: boolean;
+  canForward: boolean;
+  onBack: () => void;
+  onForward: () => void;
   onUp?: () => void;
   onRefresh?: () => void;
   onSegmentClick?: (path: string) => void;
@@ -16,17 +18,31 @@ interface PathBarProps {
  *
  * MVP-0: breadcrumb 표시 + 새로고침. 직접 입력 모드(Ctrl+L)는 추후.
  */
-export function PathBar({ location, onBack, onForward, onUp, onRefresh, onSegmentClick }: PathBarProps) {
+export function PathBar({ location, canBack, canForward, onBack, onForward, onUp, onRefresh, onSegmentClick }: PathBarProps) {
   const sourceLabel = location.source.kind === "local" ? "Local" : `${location.source.user}@${location.source.host_ip}`;
   const segments = location.path.split("/").filter(Boolean);
 
   return (
     <div className="flex h-8 items-center gap-1 border-b border-border bg-subtle px-2 text-base">
-      <button onClick={onBack} className="rounded p-1 hover:bg-border" disabled={!onBack} aria-label="Back">
-        <ArrowLeft size={14} />
+      <button
+        type="button"
+        onClick={onBack}
+        disabled={!canBack}
+        className="rounded p-1 text-fg-muted hover:bg-border hover:text-fg disabled:opacity-30"
+        aria-label="Back"
+        title="Back (Alt+←)"
+      >
+        <ArrowLeft size={12} />
       </button>
-      <button onClick={onForward} className="rounded p-1 hover:bg-border" disabled={!onForward} aria-label="Forward">
-        <ArrowRight size={14} />
+      <button
+        type="button"
+        onClick={onForward}
+        disabled={!canForward}
+        className="rounded p-1 text-fg-muted hover:bg-border hover:text-fg disabled:opacity-30"
+        aria-label="Forward"
+        title="Forward (Alt+→)"
+      >
+        <ArrowRight size={12} />
       </button>
       <button onClick={onUp} className="rounded p-1 hover:bg-border" disabled={!onUp} aria-label="Up">
         <ArrowUp size={14} />

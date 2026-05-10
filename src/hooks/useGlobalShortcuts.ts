@@ -21,9 +21,13 @@ import { useSearch } from "@/stores/search";
  *
  * input/textarea 포커스 시 패널 단축키 무시.
  */
-export function useGlobalShortcuts(opts: { onRefresh: (id: "left" | "right") => void }) {
+export function useGlobalShortcuts(opts: {
+  onRefresh: (id: "left" | "right") => void;
+  onBack: (id: "left" | "right") => void;
+  onForward: (id: "left" | "right") => void;
+}) {
   const toggleSidebar = useUI((s) => s.toggleSidebar);
-  const { onRefresh } = opts;
+  const { onRefresh, onBack, onForward } = opts;
 
   useEffect(() => {
     const isMac = typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
@@ -34,6 +38,19 @@ export function useGlobalShortcuts(opts: { onRefresh: (id: "left" | "right") => 
       const isMod = isMac ? e.metaKey : e.ctrlKey;
 
       if (!isMod) {
+        if (e.altKey) {
+          if (isInput) return;
+          if (e.key === "ArrowLeft") {
+            e.preventDefault();
+            onBack(usePanes.getState().activePane);
+            return;
+          }
+          if (e.key === "ArrowRight") {
+            e.preventDefault();
+            onForward(usePanes.getState().activePane);
+            return;
+          }
+        }
         if (e.key === "F5" && !isInput) {
           e.preventDefault();
           onRefresh(usePanes.getState().activePane);
@@ -128,5 +145,5 @@ export function useGlobalShortcuts(opts: { onRefresh: (id: "left" | "right") => 
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [toggleSidebar, onRefresh]);
+  }, [toggleSidebar, onRefresh, onBack, onForward]);
 }
