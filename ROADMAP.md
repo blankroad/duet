@@ -88,13 +88,14 @@
 
 ## MVP-5: 검색과 정렬
 
-- [ ] 빠른 필터 (Ctrl+F, 현재 패널 내)
-- [ ] 정렬 (이름/크기/날짜/타입), 컬럼 헤더 클릭
-- [ ] 숨김 토글 (Ctrl+H)
-- [ ] 새로고침 (Ctrl+R)
-- [ ] 글로벌 검색 (Ctrl+Shift+F)
-  - 로컬: `ignore` crate
-  - 원격: SSH 통해 ripgrep 또는 find
+- [x] 빠른 필터 (Ctrl+F, 현재 패널 내) — substring case-insensitive
+- [x] 정렬 (이름/크기/날짜/타입/확장자), 컬럼 헤더 클릭 / Ctrl+1..5
+- [x] 숨김 토글 (Ctrl+H) — dotfiles 디폴트 숨김
+- [x] 새로고침 (Ctrl+R / F5)
+- [x] 글로벌 검색 (Ctrl+Shift+F) — **파일명 only** v1
+  - 로컬: `ignore` crate (`.gitignore` 자동 존중)
+  - 원격: SSH `find -iname` exec
+  - 내용 검색 (grep) 은 후속 (SearchBackend trait 확장 가능)
 
 ## MVP-6: 탭 + 북마크
 
@@ -123,7 +124,7 @@
 
 ## 현재 단계
 
-**MVP-5 시작 직전.** MVP-4 완료 — copy/move 가 background TaskQueue 에서, TasksBar 가 진행률 표시, 항목 단위 cancel + 연결 끊김 1회 retry.
+**MVP-6 시작 직전.** MVP-5 완료 — 정렬/숨김/필터/새로고침 + 글로벌 파일명 검색 (local: ignore, ssh: find).
 
 ## 단계 변경 규칙
 
