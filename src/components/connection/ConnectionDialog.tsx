@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Network, X } from "lucide-react";
 import { commands } from "@/types/bindings";
-import type { ConnectionId, DuetError } from "@/types/bindings";
+import type { ConnectionDto, DuetError } from "@/types/bindings";
 import { useConnections, type Host } from "@/stores/connections";
 import type { PaneId } from "@/stores/panes";
 
@@ -21,7 +21,7 @@ export interface ConnectionDialogProps {
   alias: string | null;
   onClose: () => void;
   /** 연결 성공 시 호출 — App 이 이 pane 의 location 을 SSH 로 navigate. */
-  onConnected: (pane: PaneId, connectionId: ConnectionId, alias: string) => void;
+  onConnected: (pane: PaneId, dto: ConnectionDto) => void;
 }
 
 type DialogPhase =
@@ -56,15 +56,15 @@ export function ConnectionDialog({ alias, onClose, onConnected }: ConnectionDial
     const result = await commands.connectionOpen(host.alias, pw);
     setPassword(""); // 즉시 clear — 성공/실패 무관
     if (result.status === "ok") {
-      const id: ConnectionId = result.data;
+      const dto = result.data;
       upsertActive({
-        id,
-        alias: host.alias,
-        host_ip: "", // connection_list 에서 채워질 예정 — 우선 빈 문자열
-        user: host.user,
+        id: dto.id,
+        alias: dto.alias,
+        host_ip: dto.host_ip,
+        user: dto.user,
         state: { kind: "connected" },
       });
-      onConnected(target, id, host.alias);
+      onConnected(target, dto);
       onClose();
     } else {
       setPhase({ kind: "error", error: result.error });

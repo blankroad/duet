@@ -1,6 +1,8 @@
-import { Folder, Server, Star, Network, Plus } from "lucide-react";
+import { Folder, Server, Star, Network, Plus, X, Bookmark } from "lucide-react";
 import { useUI } from "@/stores/ui";
 import { useConnections, type Host, type ConnectionState } from "@/stores/connections";
+import { useSavedHosts, removeSavedHost } from "@/stores/savedHosts";
+import type { SavedHost } from "@/types/bindings";
 import clsx from "clsx";
 import type { ReactNode } from "react";
 
@@ -10,14 +12,18 @@ import type { ReactNode } from "react";
  * - Local: home (MVP-0 placeholder)
  * - Hosts: `~/.ssh/config` 의 호스트 목록 + 연결 상태 점 + ad-hoc + 버튼.
  *   호스트 더블클릭 → ConnectionDialog. + 버튼 → AdHocConnectDialog.
+ * - Saved hosts: 사용자가 ad-hoc dialog 에서 "Save host" 체크해서 저장한 호스트.
+ *   더블클릭 → AdHocConnectDialog 가 저장값 prefill 로 열림.
  * - Bookmarks: MVP-6 placeholder.
  */
 export function Sidebar({
   onHostActivate,
   onAdHocOpen,
+  onSavedActivate,
 }: {
   onHostActivate: (alias: string) => void;
   onAdHocOpen: () => void;
+  onSavedActivate: (host: SavedHost) => void;
 }) {
   const open = useUI((s) => s.sidebarOpen);
   if (!open) return null;
@@ -28,10 +34,59 @@ export function Sidebar({
         <Item label="Home" />
       </Section>
       <HostsSection onHostActivate={onHostActivate} onAdHocOpen={onAdHocOpen} />
+      <SavedHostsSection onActivate={onSavedActivate} />
       <Section title="Bookmarks" icon={<Star size={14} />}>
         <Item label="(MVP-6)" muted />
       </Section>
     </aside>
+  );
+}
+
+function SavedHostsSection({
+  onActivate,
+}: {
+  onActivate: (host: SavedHost) => void;
+}) {
+  const hosts = useSavedHosts((s) => s.hosts);
+  return (
+    <Section title="Saved hosts" icon={<Bookmark size={14} />}>
+      {hosts.length === 0 ? (
+        <Item label="(none — Save host on connect)" muted />
+      ) : (
+        hosts.map((h) => <SavedHostItem key={h.alias} host={h} onActivate={onActivate} />)
+      )}
+    </Section>
+  );
+}
+
+function SavedHostItem({
+  host,
+  onActivate,
+}: {
+  host: SavedHost;
+  onActivate: (host: SavedHost) => void;
+}) {
+  return (
+    <div
+      onDoubleClick={() => onActivate(host)}
+      title={`${host.user}@${host.host}:${host.port}${host.key_path ? ` (key: ${host.key_path})` : ""}`}
+      className="group flex cursor-default items-center gap-1 rounded px-2 py-0.5 hover:bg-border"
+    >
+      <Bookmark size={11} className="shrink-0 text-fg-muted" />
+      <span className="truncate">{host.alias}</span>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          void removeSavedHost(host.alias);
+        }}
+        className="ml-auto shrink-0 rounded p-0.5 text-fg-muted opacity-0 hover:bg-border hover:text-danger group-hover:opacity-100"
+        aria-label={`Remove saved host ${host.alias}`}
+        title="Remove"
+      >
+        <X size={11} />
+      </button>
+    </div>
   );
 }
 

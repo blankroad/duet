@@ -15,6 +15,7 @@ import { Toast } from "@/components/Toast";
 import { usePanes, type PaneId } from "@/stores/panes";
 import { useUIDialogs } from "@/stores/ui-dialogs";
 import { useToast } from "@/stores/toast";
+import { bootstrapSavedHosts } from "@/stores/savedHosts";
 import { useTauri } from "@/hooks/useTauri";
 import { useKeyboardNav } from "@/hooks/useKeyboardNav";
 import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
@@ -27,7 +28,7 @@ import { useTaskEvents } from "@/hooks/useTaskEvents";
 import { formatErr } from "@/lib/error";
 import { formatSize } from "@/lib/format";
 import { commands } from "@/types/bindings";
-import type { ConnectionId, CopyStrategy, Entry, Location } from "@/types/bindings";
+import type { ConnectionDto, CopyStrategy, DuetError, Entry, Location } from "@/types/bindings";
 
 /**
  * App 루트.
@@ -200,54 +201,85 @@ function App() {
 
   // 새 연결 다이얼로그 — 호스트 더블클릭 시 alias 가 들어옴, 닫으면 null.
   const [dialogAlias, setDialogAlias] = useState<string | null>(null);
-  // ad-hoc connect 다이얼로그 (Sidebar + 버튼)
+  // ad-hoc connect 다이얼로그 (Sidebar + 버튼 또는 saved host 더블클릭)
   const [adHocOpen, setAdHocOpen] = useState(false);
+  const [adHocPrefill, setAdHocPrefill] = useState<
+    import("@/types/bindings").SavedHost | null
+  >(null);
 
   const onHostActivate = useCallback((alias: string) => {
     setDialogAlias(alias);
   }, []);
 
-  const onAdHocOpen = useCallback(() => setAdHocOpen(true), []);
+  const onAdHocOpen = useCallback(() => {
+    setAdHocPrefill(null);
+    setAdHocOpen(true);
+  }, []);
+
+  const onSavedActivate = useCallback(
+    (host: import("@/types/bindings").SavedHost) => {
+      setAdHocPrefill(host);
+      setAdHocOpen(true);
+    },
+    [],
+  );
 
   /** 연결 성공 후 해당 패널을 SSH 위치로 이동. */
   const onConnected = useCallback(
-    async (paneId: PaneId, connectionId: ConnectionId, alias: string) => {
+    async (paneId: PaneId, dto: ConnectionDto) => {
       const state = usePanes.getState();
       const ssh: import("@/types/bindings").SourceId = {
         kind: "ssh",
-        connection_id: connectionId,
-        // host_ip 는 백엔드 권한 — 다음 connection_list 폴링 또는
-        // connection:state 이벤트(Task 11) 에서 갱신. UI 식별만 신경.
-        host_ip: "",
-        // user 는 connections store 에서 가져와야 정확하지만, 여기서는
-        // setEntries 호출 시 location 만 update — backend 가 connection_id 로
-        // 라우팅하므로 user 정확성은 same-host 판정에만 영향.
-        user: "",
+        connection_id: dto.id,
+        // backend 가 getpeername() 으로 캡처한 실제 peer IP — IpAddr deserialize
+        // 위해 반드시 valid IP 문자열이어야 함 (이전엔 빈 문자열 보내서 IPC reject).
+        host_ip: dto.host_ip,
+        user: dto.user,
       };
-      // 초기 경로: "/" — SSH 호스트의 루트. 권한 없으면 사용자가 PathBar 로 이동.
-      // (사용자 home 자동 이동은 ssh_home_directory command 추가 후 — 후속.)
-      const location = { source: ssh, path: "/" };
-      try {
-        const entries = await listDirectory(location);
-        state.setEntries(paneId, location, sortEntries(entries));
-        state.setActivePane(paneId);
-      } catch {
-        // useTauri 가 error state 에 저장. 사용자는 빈 패널로 떨어지므로
-        // PathBar 로 다른 경로 시도 가능.
+      const alias = dto.alias;
+      // 초기 경로 후보 우선순위: SFTP canonicalize(".") → "~" → "/"
+      // 첫번째 성공한 listDirectory 가 패널에 적용됨.
+      const homeRes = await commands.sshHomeDirectory(dto.id);
+      const candidates: string[] = [];
+      if (homeRes.status === "ok") candidates.push(homeRes.data);
+      else showToast(`ssh_home_directory failed: ${formatErr(homeRes.error)}`);
+      candidates.push("~", "/");
+
+      let succeeded = false;
+      const failures: string[] = [];
+      for (const path of candidates) {
+        const loc = { source: ssh, path };
+        try {
+          const entries = await listDirectory(loc);
+          state.setEntries(paneId, loc, sortEntries(entries));
+          state.setActivePane(paneId);
+          showToast(`Connected: ${alias} → ${paneId} pane (${path})`);
+          succeeded = true;
+          break;
+        } catch (e) {
+          // useTauri throws DuetError 또는 IpcError; formatErr 가 양쪽 처리.
+          const msg =
+            e && typeof e === "object" && "kind" in e
+              ? formatErr(e as DuetError)
+              : String(e);
+          failures.push(`${path}: ${msg}`);
+        }
       }
-      // alias 는 future debug 용으로만 받음 — store 업데이트는 dialog 가 이미.
-      void alias;
+      if (!succeeded) {
+        showToast(`Connected ${alias}, but list failed:\n${failures.join("\n")}`);
+      }
     },
-    [listDirectory, sortEntries],
+    [listDirectory, sortEntries, showToast],
   );
 
-  // 부트스트랩: 양쪽 패널 초기 로드 (home 디렉토리, Windows 호환)
+  // 부트스트랩: 양쪽 패널 초기 로드 (home 디렉토리, Windows 호환) + saved hosts
   useEffect(() => {
     (async () => {
       const result = await commands.homeDirectory();
       const home = result.status === "ok" ? result.data : "/";
       await navigate("left", home);
       await navigate("right", home);
+      void bootstrapSavedHosts();
     })();
     // navigate가 deps에 들어가면 무한 루프 — 마운트 1회만
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -260,7 +292,11 @@ function App() {
       </header>
 
       <main className="flex flex-1 min-h-0 gap-0">
-        <Sidebar onHostActivate={onHostActivate} onAdHocOpen={onAdHocOpen} />
+        <Sidebar
+          onHostActivate={onHostActivate}
+          onAdHocOpen={onAdHocOpen}
+          onSavedActivate={onSavedActivate}
+        />
         <Pane id="left" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} />
         <Pane id="right" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} />
       </main>
@@ -277,6 +313,7 @@ function App() {
         open={adHocOpen}
         onClose={() => setAdHocOpen(false)}
         onConnected={onConnected}
+        prefill={adHocPrefill}
       />
 
       {dialog.kind === "rename" && (

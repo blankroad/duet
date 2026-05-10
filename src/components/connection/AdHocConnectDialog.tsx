@@ -1,11 +1,14 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { X } from "lucide-react";
+import { Lock, Unlock, X } from "lucide-react";
 import { commands } from "@/types/bindings";
-import type { ConnectionId, DuetError } from "@/types/bindings";
+import type { ConnectionDto, DuetError, SavedHost } from "@/types/bindings";
 import { useConnections } from "@/stores/connections";
+import { saveHost } from "@/stores/savedHosts";
+import { useVault, vaultGet, vaultSet } from "@/stores/vault";
 import type { PaneId } from "@/stores/panes";
 import { formatErr } from "@/lib/error";
+import { MasterPasswordDialog } from "@/components/dialogs/MasterPasswordDialog";
 
 /**
  * `~/.ssh/config` 에 없는 host 에 직접 입력으로 연결.
@@ -13,11 +16,14 @@ import { formatErr } from "@/lib/error";
  * **CLAUDE.md §5 (2026-05 완화)**: 비밀번호 input 은 local state 에만, command
  * 호출 직후 clear. store/localStorage 저장 금지. backend 도 메모리에만 사용 후
  * drop, 로그 X.
+ *
+ * `prefill` 가 주어지면 Saved hosts 에서 더블클릭한 host 의 정보로 입력 채워서 연다.
  */
 export interface AdHocConnectDialogProps {
   open: boolean;
   onClose: () => void;
-  onConnected: (pane: PaneId, connectionId: ConnectionId, alias: string) => void;
+  onConnected: (pane: PaneId, dto: ConnectionDto) => void;
+  prefill?: SavedHost | null;
 }
 
 type Phase =
@@ -25,7 +31,12 @@ type Phase =
   | { kind: "connecting" }
   | { kind: "error"; error: DuetError };
 
-export function AdHocConnectDialog({ open, onClose, onConnected }: AdHocConnectDialogProps) {
+export function AdHocConnectDialog({
+  open,
+  onClose,
+  onConnected,
+  prefill,
+}: AdHocConnectDialogProps) {
   const upsertActive = useConnections((s) => s.upsertActive);
 
   const [host, setHost] = useState("");
@@ -35,6 +46,39 @@ export function AdHocConnectDialog({ open, onClose, onConnected }: AdHocConnectD
   const [password, setPassword] = useState("");
   const [target, setTarget] = useState<PaneId>("left");
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
+  const [save, setSave] = useState(false);
+  const [savePassword, setSavePassword] = useState(false);
+  const [alias, setAlias] = useState("");
+
+  // master-pw dialog 상태. mode === "post-unlock" 시 unlock 후 자동 fetch.
+  const [masterDialog, setMasterDialog] = useState<
+    | { open: false }
+    | { open: true; mode: "create" | "unlock"; after: "fetch" | "save" }
+  >({ open: false });
+
+  const vault = useVault();
+  /** master unlock 후 자동 실행할 작업 (vault_set 등). */
+  const saveAfterUnlock = useRef<(() => Promise<void>) | null>(null);
+
+  // 다이얼로그가 열릴 때 prefill 적용 (한 번만 — open false→true edge).
+  useEffect(() => {
+    if (!open) return;
+    if (prefill) {
+      setHost(prefill.host);
+      setPort(String(prefill.port));
+      setUser(prefill.user);
+      setKeyPath(prefill.key_path ?? "");
+      setAlias(prefill.alias);
+      setSave(false); // 이미 저장된 호스트 — 재저장 default off
+      setSavePassword(false);
+      // vault 가 unlocked 면 저장된 password 가져와서 prefill.
+      if (vault.unlocked) {
+        void vaultGet(prefill.alias).then((pw) => {
+          if (pw) setPassword(pw);
+        });
+      }
+    }
+  }, [open, prefill, vault.unlocked]);
 
   const reset = () => {
     setHost("");
@@ -44,11 +88,36 @@ export function AdHocConnectDialog({ open, onClose, onConnected }: AdHocConnectD
     setPassword(""); // CLAUDE.md §5: clear from memory after submit
     setTarget("left");
     setPhase({ kind: "idle" });
+    setSave(false);
+    setSavePassword(false);
+    setAlias("");
+    setMasterDialog({ open: false });
+  };
+
+  /** 저장된 password 를 vault 에서 가져와서 password input 에 채움. vault unlocked 가정. */
+  const fetchSavedPassword = async () => {
+    if (!prefill) return;
+    const pw = await vaultGet(prefill.alias);
+    if (pw) setPassword(pw);
   };
 
   const handleClose = () => {
     reset();
     onClose();
+  };
+
+  /** Master unlock 성공 후 호출됨 — saveAfterUnlock 콜백 실행. */
+  const handleMasterUnlocked = async () => {
+    if (saveAfterUnlock.current) {
+      const cb = saveAfterUnlock.current;
+      saveAfterUnlock.current = null;
+      await cb();
+    }
+    // save 흐름이었으면 AdHoc 자체도 닫기 (connect 완료 후 보류된 상태).
+    if (masterDialog.open && masterDialog.after === "save") {
+      reset();
+      onClose();
+    }
   };
 
   const handleConnect = async () => {
@@ -73,18 +142,51 @@ export function AdHocConnectDialog({ open, onClose, onConnected }: AdHocConnectD
     );
     setPassword(""); // 즉시 clear — 성공/실패 무관
     if (r.status === "ok") {
-      const id: ConnectionId = r.data;
-      const alias = `${user.trim()}@${host.trim()}:${portNum}`;
+      const dto = r.data;
       upsertActive({
-        id,
-        alias,
-        host_ip: "",
-        user: user.trim(),
+        id: dto.id,
+        alias: dto.alias,
+        host_ip: dto.host_ip,
+        user: dto.user,
         state: { kind: "connected" },
       });
-      onConnected(target, id, alias);
-      reset();
-      onClose();
+      // Save host (CLAUDE.md §5 — password 는 vault 에 별도 저장).
+      let needsMasterFlow = false;
+      if (save) {
+        const savedAlias = alias.trim() || dto.alias;
+        await saveHost({
+          alias: savedAlias,
+          host: host.trim(),
+          port: portNum,
+          user: user.trim(),
+          key_path: keyPath.trim() ? keyPath.trim() : null,
+        });
+        // password 도 저장 옵션 — vault 에 암호화 저장.
+        if (savePassword && pw) {
+          if (!vault.unlocked) {
+            // master prompt 후 vault_set 호출. saveAfterUnlock callback
+            // 으로 연결, vault unlocked 되면 자동 실행.
+            const pwToSave = pw;
+            saveAfterUnlock.current = async () => {
+              await vaultSet(savedAlias, pwToSave);
+            };
+            setMasterDialog({
+              open: true,
+              mode: vault.exists ? "unlock" : "create",
+              after: "save",
+            });
+            needsMasterFlow = true;
+          } else {
+            await vaultSet(savedAlias, pw);
+          }
+        }
+      }
+      onConnected(target, dto);
+      // master dialog 가 떠있으면 reset/close 는 unlock 끝난 후 (handleMasterUnlocked).
+      if (!needsMasterFlow) {
+        reset();
+        onClose();
+      }
     } else {
       setPhase({ kind: "error", error: r.error });
     }
@@ -174,6 +276,70 @@ export function AdHocConnectDialog({ open, onClose, onConnected }: AdHocConnectD
             </div>
           </div>
 
+          {/* Saved password 가 vault 에 있고 vault 잠겨있으면 unlock 안내. */}
+          {prefill && vault.exists && !vault.unlocked && (
+            <button
+              type="button"
+              onClick={() => {
+                saveAfterUnlock.current = async () => {
+                  await fetchSavedPassword();
+                };
+                setMasterDialog({ open: true, mode: "unlock", after: "fetch" });
+              }}
+              className="mt-2 flex w-full items-center justify-center gap-1 rounded border border-border px-2 py-1 text-meta text-fg-muted hover:bg-subtle hover:text-fg"
+            >
+              <Lock size={11} />
+              Unlock vault to autofill saved password
+            </button>
+          )}
+          {prefill && vault.unlocked && (
+            <div className="mt-2 flex items-center gap-1 text-meta text-fg-muted">
+              <Unlock size={11} />
+              Vault unlocked — saved password (if any) loaded
+            </div>
+          )}
+
+          <div className="mt-3">
+            <label className="flex cursor-pointer items-center gap-2 text-base">
+              <input
+                type="checkbox"
+                checked={save}
+                onChange={(e) => setSave(e.target.checked)}
+              />
+              <span>Save host</span>
+            </label>
+            {save && (
+              <div className="mt-2 space-y-2">
+                <div className="grid grid-cols-[5rem_1fr] gap-x-3 gap-y-2 text-base">
+                  <label htmlFor="adhoc-alias" className="self-center text-fg-muted">
+                    Alias
+                  </label>
+                  <input
+                    id="adhoc-alias"
+                    type="text"
+                    value={alias}
+                    onChange={(e) => setAlias(e.target.value)}
+                    placeholder={`${user.trim() || "user"}@${host.trim() || "host"}:${port}`}
+                    className="rounded border border-border bg-subtle px-2 py-1 font-mono focus:border-accent focus:outline-none"
+                  />
+                </div>
+                {password.length > 0 && (
+                  <label className="flex cursor-pointer items-center gap-2 pl-2 text-base">
+                    <input
+                      type="checkbox"
+                      checked={savePassword}
+                      onChange={(e) => setSavePassword(e.target.checked)}
+                    />
+                    <Lock size={11} className="text-fg-muted" />
+                    <span>
+                      Save password too (encrypted with master — age scrypt+ChaCha20)
+                    </span>
+                  </label>
+                )}
+              </div>
+            )}
+          </div>
+
           {phase.kind === "error" && (
             <div className="mt-3 rounded border border-danger/50 bg-danger/10 p-2 text-meta">
               <div className="font-medium text-danger">{phase.error.kind}</div>
@@ -209,6 +375,15 @@ export function AdHocConnectDialog({ open, onClose, onConnected }: AdHocConnectD
           </Dialog.Description>
         </Dialog.Content>
       </Dialog.Portal>
+
+      {masterDialog.open && (
+        <MasterPasswordDialog
+          open
+          mode={masterDialog.mode}
+          onClose={() => setMasterDialog({ open: false })}
+          onUnlocked={handleMasterUnlocked}
+        />
+      )}
     </Dialog.Root>
   );
 }
