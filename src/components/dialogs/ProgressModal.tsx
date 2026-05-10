@@ -8,7 +8,9 @@ export function ProgressModal({
   progress,
 }: {
   title: string;
-  progress?: ProgressInfo;
+  /** undefined = spinner; ProgressInfo = bar 표시. exactOptionalPropertyTypes
+   *  하에서 dialog.progress (optional 필드) 를 그대로 넘기기 위해 explicit union. */
+  progress: ProgressInfo | undefined;
 }) {
   return (
     <Dialog.Root open>

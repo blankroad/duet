@@ -22,10 +22,11 @@ import { useConnectionEvents } from "@/hooks/useConnectionEvents";
 import { useFsChangedEvents } from "@/hooks/useFsChangedEvents";
 import { useDestructiveKeys } from "@/hooks/useDestructiveKeys";
 import { useJournalEvents } from "@/hooks/useJournalEvents";
+import { useProgressEvents } from "@/hooks/useProgressEvents";
 import { formatErr } from "@/lib/error";
 import { formatSize } from "@/lib/format";
 import { commands } from "@/types/bindings";
-import type { ConnectionId, Entry, Location } from "@/types/bindings";
+import type { ConnectionId, CopyStrategy, Entry, Location } from "@/types/bindings";
 
 /**
  * App 루트.
@@ -110,6 +111,7 @@ function App() {
   useFsChangedEvents(onRefresh);
   useDestructiveKeys();
   useJournalEvents();
+  useProgressEvents();
 
   const dialog = useUIDialogs((s) => s.dialog);
   const closeDialog = useUIDialogs((s) => s.close);
@@ -317,6 +319,7 @@ function App() {
               totalSize={dialog.plan.total_size_bytes}
               dstPath={dialog.plan.dst.path}
               conflicts={dialog.plan.conflicts.length}
+              strategy={dialog.plan.strategy}
             />
           }
           ctaLabel="Copy"
@@ -334,6 +337,7 @@ function App() {
               totalSize={dialog.plan.total_size_bytes}
               dstPath={dialog.plan.dst.path}
               conflicts={dialog.plan.conflicts.length}
+              strategy={dialog.plan.strategy}
             />
           }
           ctaLabel="Move"
@@ -342,7 +346,9 @@ function App() {
           onConfirm={onMoveConfirm}
         />
       )}
-      {dialog.kind === "progress" && <ProgressModal title={dialog.title} />}
+      {dialog.kind === "progress" && (
+        <ProgressModal title={dialog.title} progress={dialog.progress} />
+      )}
       {dialog.kind === "settings" && <SettingsDialog onClose={closeDialog} />}
       <Toast />
     </div>
@@ -354,16 +360,22 @@ function CopyOrMovePlanBody({
   totalSize,
   dstPath,
   conflicts,
+  strategy,
 }: {
   count: number;
   totalSize: number;
   dstPath: string;
   conflicts: number;
+  strategy: CopyStrategy;
 }) {
   return (
     <div className="space-y-1">
       <div>
-        {count} item(s), {formatSize(totalSize)} → <span className="font-mono">{dstPath}</span>
+        {count} item(s), {formatSize(totalSize)} →{" "}
+        <span className="font-mono">{dstPath}</span>
+      </div>
+      <div className="text-meta text-fg-muted">
+        Strategy: {strategyLabel(strategy)}
       </div>
       {conflicts > 0 && (
         <div className="text-meta text-fg-muted">
@@ -373,6 +385,17 @@ function CopyOrMovePlanBody({
       )}
     </div>
   );
+}
+
+function strategyLabel(s: CopyStrategy): string {
+  switch (s.kind) {
+    case "local_to_local":
+      return "local";
+    case "relay":
+      return "relay (via this PC)";
+    case "ssh_same_host":
+      return "same-host (fast, server-side)";
+  }
 }
 
 export default App;
