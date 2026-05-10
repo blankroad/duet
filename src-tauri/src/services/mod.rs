@@ -11,4 +11,5 @@ pub mod progress_events;
 pub mod retry;
 pub mod settings;
 pub mod task_events;
+pub mod task_queue;
 pub mod trash;
