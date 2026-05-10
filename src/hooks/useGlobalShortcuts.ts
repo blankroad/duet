@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useUI } from "@/stores/ui";
-import { usePanes, type SortKey } from "@/stores/panes";
+import { usePanes, activeTab, type SortKey } from "@/stores/panes";
 import { useSearch } from "@/stores/search";
 
 /**
@@ -58,7 +58,7 @@ export function useGlobalShortcuts(opts: { onRefresh: (id: "left" | "right") => 
           if (e.shiftKey) {
             // Ctrl+Shift+F: 글로벌 검색 — 활성 패널의 location 을 root 로
             const active = usePanes.getState().activePane;
-            const root = usePanes.getState().panes[active].location;
+            const root = activeTab(usePanes.getState(), active).location;
             useSearch.getState().open(active, root);
           } else {
             // Ctrl+F: 활성 패널 빠른 필터

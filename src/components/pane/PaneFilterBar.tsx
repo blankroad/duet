@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Search, X } from "lucide-react";
-import { usePanes, type PaneId } from "@/stores/panes";
+import { usePanes, activeTab, type PaneId } from "@/stores/panes";
 
 /**
  * 패널 빠른 필터 input. PathBar 와 EntryList 사이.
@@ -11,8 +11,8 @@ import { usePanes, type PaneId } from "@/stores/panes";
  * - Enter: filterFocused=false (필터 텍스트 유지)
  */
 export function PaneFilterBar({ id }: { id: PaneId }) {
-  const filter = usePanes((s) => s.panes[id].filter);
-  const filterFocused = usePanes((s) => s.panes[id].filterFocused);
+  const filter = usePanes((s) => activeTab(s, id).filter);
+  const filterFocused = usePanes((s) => activeTab(s, id).filterFocused);
   const setFilter = usePanes((s) => s.setFilter);
   const setFilterFocused = usePanes((s) => s.setFilterFocused);
   const inputRef = useRef<HTMLInputElement>(null);

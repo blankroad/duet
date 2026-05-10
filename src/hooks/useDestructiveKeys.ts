@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { commands } from "@/types/bindings";
 import type { EntryRef, DeleteMode, Location } from "@/types/bindings";
-import { usePanes, type PaneId } from "@/stores/panes";
+import { usePanes, activeTab, type PaneId } from "@/stores/panes";
 import { useUIDialogs } from "@/stores/ui-dialogs";
 import { useToast } from "@/stores/toast";
 import { formatErr } from "@/lib/error";
@@ -24,18 +24,18 @@ export function useDestructiveKeys() {
 
       const state = usePanes.getState();
       const active: PaneId = state.activePane;
-      const pane = state.panes[active];
+      const tab = activeTab(state, active);
       const opposite: PaneId = active === "left" ? "right" : "left";
 
-      const cursorEntry = pane.entries[pane.cursorIndex];
+      const cursorEntry = tab.entries[tab.cursorIndex];
       const selectedNames =
-        pane.selected.size > 0
-          ? Array.from(pane.selected)
+        tab.selected.size > 0
+          ? Array.from(tab.selected)
           : cursorEntry
             ? [cursorEntry.name]
             : [];
       const targets: EntryRef[] = selectedNames.map((name) => ({
-        location: pane.location,
+        location: tab.location,
         name,
       }));
 
@@ -49,14 +49,14 @@ export function useDestructiveKeys() {
       // F7 — new folder (parent = active pane current dir)
       if (e.key === "F7") {
         e.preventDefault();
-        open({ kind: "mkdir", parent: pane.location });
+        open({ kind: "mkdir", parent: tab.location });
         return;
       }
 
       // F5 — copy → 반대 패널
       if (e.key === "F5" && targets.length > 0) {
         e.preventDefault();
-        const dst: Location = state.panes[opposite].location;
+        const dst: Location = activeTab(state, opposite).location;
         const r = await commands.fsCopyPlan(targets, dst);
         if (r.status === "ok") open({ kind: "copy-confirm", plan: r.data });
         else showToast(`Copy plan failed: ${formatErr(r.error)}`);
@@ -66,7 +66,7 @@ export function useDestructiveKeys() {
       // F6 — move → 반대 패널
       if (e.key === "F6" && targets.length > 0) {
         e.preventDefault();
-        const dst: Location = state.panes[opposite].location;
+        const dst: Location = activeTab(state, opposite).location;
         const r = await commands.fsMovePlan(targets, dst);
         if (r.status === "ok") open({ kind: "move-confirm", plan: r.data });
         else showToast(`Move plan failed: ${formatErr(r.error)}`);

@@ -1,5 +1,5 @@
 import { Settings as SettingsIcon } from "lucide-react";
-import { usePanes } from "@/stores/panes";
+import { usePanes, activeTab } from "@/stores/panes";
 import { useUIDialogs } from "@/stores/ui-dialogs";
 import { formatSize } from "@/lib/format";
 
@@ -13,19 +13,19 @@ import { formatSize } from "@/lib/format";
  */
 export function StatusBar() {
   const activeId = usePanes((s) => s.activePane);
-  const pane = usePanes((s) => s.panes[activeId]);
+  const tab = usePanes((s) => activeTab(s, activeId));
   const openDialog = useUIDialogs((s) => s.open);
 
   const sourceLabel =
-    pane.location.source.kind === "local"
+    tab.location.source.kind === "local"
       ? "Local"
-      : `${pane.location.source.user}@${pane.location.source.host_ip}`;
+      : `${tab.location.source.user}@${tab.location.source.host_ip}`;
 
-  const totalCount = pane.entries.length;
-  const selectedCount = pane.selected.size;
-  const selectedSize = pane.entries
-    .filter((e) => pane.selected.has(e.name) && e.size != null)
-    .reduce((sum, e) => sum + (e.size ?? 0), 0);
+  const totalCount = tab.entries.length;
+  const selectedCount = tab.selected.size;
+  const selectedSize = tab.entries
+    .filter((e: { name: string; size?: number | null }) => tab.selected.has(e.name) && e.size != null)
+    .reduce((sum: number, e: { size?: number | null }) => sum + (e.size ?? 0), 0);
 
   return (
     <footer className="flex h-6 items-center justify-between border-t border-border px-3 text-meta text-fg-muted">

@@ -1,7 +1,8 @@
+import { TabBar } from "./TabBar";
 import { PathBar } from "./PathBar";
 import { PaneFilterBar } from "./PaneFilterBar";
 import { EntryList } from "./EntryList";
-import { usePanes, selectDisplayedEntries, type PaneId } from "@/stores/panes";
+import { usePanes, activeTab, selectDisplayedEntries, type PaneId } from "@/stores/panes";
 import type { Entry } from "@/types/bindings";
 import clsx from "clsx";
 
@@ -18,12 +19,12 @@ interface PaneProps {
  * displayed entries 는 store selector (raw → filter → hidden → sort) 결과.
  */
 export function Pane({ id, onNavigate, onActivate, onRefresh }: PaneProps) {
-  const pane = usePanes((s) => s.panes[id]);
   const isActive = usePanes((s) => s.activePane === id);
   const setActivePane = usePanes((s) => s.setActivePane);
   const setCursor = usePanes((s) => s.setCursor);
   const toggleSelected = usePanes((s) => s.toggleSelected);
   const toggleSortKey = usePanes((s) => s.toggleSortKey);
+  const tab = usePanes((s) => activeTab(s, id));
   const displayed = usePanes((s) => selectDisplayedEntries(id, s));
 
   return (
@@ -34,10 +35,11 @@ export function Pane({ id, onNavigate, onActivate, onRefresh }: PaneProps) {
       )}
       onMouseDown={() => setActivePane(id)}
     >
+      <TabBar id={id} />
       <PathBar
-        location={pane.location}
+        location={tab.location}
         onUp={() => {
-          const path = pane.location.path;
+          const path = tab.location.path;
           if (path === "/" || path.length === 0) return;
           const parent = path.replace(/\/[^/]+\/?$/, "") || "/";
           onNavigate(id, parent);
@@ -48,10 +50,10 @@ export function Pane({ id, onNavigate, onActivate, onRefresh }: PaneProps) {
       <PaneFilterBar id={id} />
       <EntryList
         entries={displayed}
-        cursorIndex={pane.cursorIndex}
-        selected={pane.selected}
-        sortKey={pane.sortKey}
-        sortOrder={pane.sortOrder}
+        cursorIndex={tab.cursorIndex}
+        selected={tab.selected}
+        sortKey={tab.sortKey}
+        sortOrder={tab.sortOrder}
         onCursorMove={(i) => setCursor(id, i)}
         onActivate={(entry) => onActivate(id, entry)}
         onToggleSelect={(name) => toggleSelected(id, name)}

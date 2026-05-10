@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { usePanes } from "@/stores/panes";
+import { usePanes, activeTab } from "@/stores/panes";
 import type { PaneId } from "@/stores/panes";
 
 /**
@@ -27,7 +27,7 @@ export function useKeyboardNav(
 
       const state = usePanes.getState();
       const id = state.activePane;
-      const pane = state.panes[id];
+      const tab = activeTab(state, id);
 
       switch (e.key) {
         case "ArrowDown":
@@ -40,7 +40,7 @@ export function useKeyboardNav(
           break;
         case "Enter":
           e.preventDefault();
-          if (pane.cursorIndex >= 0) onActivate(id);
+          if (tab.cursorIndex >= 0) onActivate(id);
           break;
         case "Backspace":
           e.preventDefault();
@@ -52,8 +52,8 @@ export function useKeyboardNav(
           break;
         case " ":
           e.preventDefault();
-          if (pane.cursorIndex >= 0) {
-            const entry = pane.entries[pane.cursorIndex];
+          if (tab.cursorIndex >= 0) {
+            const entry = tab.entries[tab.cursorIndex];
             if (entry) state.toggleSelected(id, entry.name);
           }
           break;

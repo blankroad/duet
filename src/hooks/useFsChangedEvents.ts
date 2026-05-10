@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { events } from "@/types/bindings";
-import { usePanes, type PaneId } from "@/stores/panes";
+import { usePanes, activeTab, type PaneId } from "@/stores/panes";
 
 /**
  * 백엔드의 `fs-changed-event` 를 구독해서, 변경된 path 를 보고 있는 패널을
@@ -15,10 +15,10 @@ import { usePanes, type PaneId } from "@/stores/panes";
 export function useFsChangedEvents(refresh: (paneId: PaneId) => void) {
   useEffect(() => {
     const unlistenP = events.fsChangedEvent.listen(({ payload }) => {
-      const panes = usePanes.getState().panes;
+      const state = usePanes.getState();
       for (const id of ["left", "right"] as const) {
-        const pane = panes[id];
-        if (!matchesLocation(pane.location, payload.source, payload.path)) continue;
+        const loc = activeTab(state, id).location;
+        if (!matchesLocation(loc, payload.source, payload.path)) continue;
         refresh(id);
       }
     });

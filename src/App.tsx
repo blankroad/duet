@@ -13,7 +13,7 @@ import { ProgressModal } from "@/components/dialogs/ProgressModal";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { Toast } from "@/components/Toast";
 import { SearchPanel } from "@/components/SearchPanel";
-import { usePanes, type PaneId } from "@/stores/panes";
+import { usePanes, activeTab, type PaneId } from "@/stores/panes";
 import { useSearch } from "@/stores/search";
 import { useUIDialogs } from "@/stores/ui-dialogs";
 import { useToast } from "@/stores/toast";
@@ -47,7 +47,7 @@ function App() {
   const navigate = useCallback(
     async (id: PaneId, path: string) => {
       const state = usePanes.getState();
-      const location = { ...state.panes[id].location, path };
+      const location = { ...activeTab(state, id).location, path };
       try {
         const entries = await listDirectory(location);
         state.setEntries(id, location, entries);
@@ -69,25 +69,25 @@ function App() {
   const onActivate = useCallback(
     (id: PaneId, entry: Entry) => {
       if (entry.kind !== "dir") return; // file open은 MVP-7
-      const pane = usePanes.getState().panes[id];
-      const sep = pane.location.path.endsWith("/") ? "" : "/";
-      navigate(id, pane.location.path + sep + entry.name);
+      const tab = activeTab(usePanes.getState(), id);
+      const sep = tab.location.path.endsWith("/") ? "" : "/";
+      navigate(id, tab.location.path + sep + entry.name);
     },
     [navigate],
   );
 
   const onRefresh = useCallback(
     (id: PaneId) => {
-      const pane = usePanes.getState().panes[id];
-      navigate(id, pane.location.path);
+      const tab = activeTab(usePanes.getState(), id);
+      navigate(id, tab.location.path);
     },
     [navigate],
   );
 
   const onKeyboardActivate = useCallback(
     (id: PaneId) => {
-      const pane = usePanes.getState().panes[id];
-      const entry = pane.entries[pane.cursorIndex];
+      const tab = activeTab(usePanes.getState(), id);
+      const entry = tab.entries[tab.cursorIndex];
       if (entry) onActivate(id, entry);
     },
     [onActivate],
@@ -95,7 +95,7 @@ function App() {
 
   const onKeyboardUp = useCallback(
     (id: PaneId) => {
-      const path = usePanes.getState().panes[id].location.path;
+      const path = activeTab(usePanes.getState(), id).location.path;
       if (path === "/" || path.length === 0) return;
       const parent = path.replace(/\/[^/]+\/?$/, "") || "/";
       navigate(id, parent);
@@ -109,8 +109,8 @@ function App() {
       if (!rootPaneId) return;
       void (async () => {
         await navigate(rootPaneId, hit.location.path);
-        const pane = usePanes.getState().panes[rootPaneId];
-        const idx = pane.entries.findIndex((e) => e.name === hit.name);
+        const tab = activeTab(usePanes.getState(), rootPaneId);
+        const idx = tab.entries.findIndex((e: Entry) => e.name === hit.name);
         if (idx >= 0) usePanes.getState().setCursor(rootPaneId, idx);
         useSearch.getState().close();
       })();
@@ -133,17 +133,17 @@ function App() {
   /** 영향받은 location 들이 현재 패널과 매칭되면 refresh. */
   const refreshAffected = useCallback(
     (locations: Location[]) => {
-      const panes = usePanes.getState().panes;
+      const state = usePanes.getState();
       for (const id of ["left", "right"] as const) {
+        const loc = activeTab(state, id).location;
         const matches = locations.some(
-          (loc) =>
-            loc.source.kind === panes[id].location.source.kind &&
-            (loc.source.kind === "local" ||
-              ("connection_id" in loc.source &&
-                "connection_id" in panes[id].location.source &&
-                loc.source.connection_id ===
-                  panes[id].location.source.connection_id)) &&
-            loc.path === panes[id].location.path,
+          (l) =>
+            l.source.kind === loc.source.kind &&
+            (l.source.kind === "local" ||
+              ("connection_id" in l.source &&
+                "connection_id" in loc.source &&
+                l.source.connection_id === loc.source.connection_id)) &&
+            l.path === loc.path,
         );
         if (matches) onRefresh(id);
       }
