@@ -66,12 +66,12 @@
 
 **완료 조건**: 같은 SSH 호스트 내에서 복사하면 본인 PC를 거치지 않는다.
 
-- [ ] `core::CopyStrategy` 결정 로직
-- [ ] 같은 호스트 감지 (`host_ip` 일치 시 same-host, user 달라도 OK)
-- [ ] SSH exec 채널로 `cp -r` 실행
-- [ ] 진행률 파싱 (rsync `--info=progress2` 또는 자체)
-- [ ] 큰 파일 / 많은 파일에서 검증 (10GB+, 1만개 파일+)
-- [ ] 실패 시 폴백 정책 (Relay로 갈지, 에러 낼지)
+- [x] `core::CopyStrategy` 결정 로직 (Local/Relay/SshSameHost)
+- [x] 같은 호스트 감지 (`host_ip` 일치 시 same-host, user 달라도 OK)
+- [x] SSH exec 채널로 `rsync` 또는 `cp -a` 실행 (russh exec, 시스템 ssh X)
+- [x] 진행률 파싱 (rsync `--info=progress2`) + ProgressEvent + ProgressModal
+- [ ] 큰 파일 / 많은 파일에서 검증 (10GB+, 1만개 파일+) — docker compose 후속
+- [x] 실패 시 폴백 정책: hard error (silent relay 절대 X — CLAUDE.md DON'T)
 
 **완료 시 일상 사용**: TC보다 명백히 빠른 일상 도구.
 
@@ -123,7 +123,7 @@
 
 ## 현재 단계
 
-**MVP-3 시작 직전.** MVP-2 완료. 일상 사용 가능 — TC 대체 가능 (단, 같은 SSH 호스트 복사는 명시 차단 — MVP-3 에서). 비밀번호 secure prompt (MVP-1 Task 7b) 는 여전히 남아있어 비밀번호 인증 호스트는 제외.
+**MVP-4 시작 직전.** MVP-3 핵심 완료 — same-host SSH 복사가 server-side rsync/cp 로 실행됨 (silent relay 차단). 큰 파일 stress test 는 docker 환경 마련 후 후속.
 
 ## 단계 변경 규칙
 
