@@ -29,6 +29,9 @@ use tauri_specta::{collect_commands, collect_events, Builder};
 pub fn make_specta_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
         .commands(collect_commands![
+            commands::bookmarks::bookmarks_list,
+            commands::bookmarks::bookmarks_add,
+            commands::bookmarks::bookmarks_remove,
             commands::pane::list_directory,
             commands::pane::pane_watch_set,
             commands::system::home_directory,
@@ -38,6 +41,9 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::connection::connection_open_adhoc,
             commands::connection::connection_close,
             commands::connection::connection_list,
+            commands::host_favorites::host_favorites_list,
+            commands::host_favorites::host_favorites_add,
+            commands::host_favorites::host_favorites_remove,
             commands::saved_hosts::saved_hosts_list,
             commands::saved_hosts::saved_hosts_upsert,
             commands::saved_hosts::saved_hosts_remove,
@@ -128,6 +134,14 @@ pub fn run() {
         services::secret_vault::SecretVault::load_default().await
     })
     .expect("secret vault load");
+    let bookmarks = tauri::async_runtime::block_on(async {
+        services::bookmarks::BookmarksStore::load_default().await
+    })
+    .expect("bookmarks load");
+    let host_favorites = tauri::async_runtime::block_on(async {
+        services::host_favorites::HostFavoritesStore::load_default().await
+    })
+    .expect("host favorites load");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -137,6 +151,8 @@ pub fn run() {
         .manage(journal)
         .manage(saved_hosts)
         .manage(secret_vault)
+        .manage(bookmarks)
+        .manage(host_favorites)
         .invoke_handler(specta_builder.invoke_handler())
         .setup(move |app| {
             specta_builder.mount_events(app);
