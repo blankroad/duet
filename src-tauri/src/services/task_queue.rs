@@ -187,7 +187,7 @@ impl TaskQueue {
         }
         let change = match &status {
             TaskStatus::Completed { journal_id } => TaskChange::Completed {
-                journal_id: journal_id.clone(),
+                journal_id: *journal_id,
             },
             TaskStatus::Cancelled => TaskChange::Cancelled,
             TaskStatus::Failed { message } => TaskChange::Failed {
