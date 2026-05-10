@@ -119,6 +119,7 @@ pub async fn fs_copy_execute(
 ) -> Result<JournalId, DuetError> {
     let src_fs = fs_for(&plan.src_source, pool.inner()).await?;
     let dst_fs = fs_for(&plan.dst.source, pool.inner()).await?;
+    // TODO(MVP-4 Task 5): replace with TaskQueue closure
     let entry = ops::copy_execute(
         &*src_fs,
         &*dst_fs,
@@ -129,6 +130,7 @@ pub async fn fs_copy_execute(
             pool.inner().clone(),
             app.clone(),
         ),
+        tokio_util::sync::CancellationToken::new(),
     )
     .await?;
     Ok(emit_pushed(&app, entry))
@@ -161,6 +163,7 @@ pub async fn fs_move_execute(
 ) -> Result<JournalId, DuetError> {
     let src_fs = fs_for(&plan.src_source, pool.inner()).await?;
     let dst_fs = fs_for(&plan.dst.source, pool.inner()).await?;
+    // TODO(MVP-4 Task 5): replace with TaskQueue closure
     let entry = ops::move_execute(
         &*src_fs,
         &*dst_fs,
@@ -171,6 +174,7 @@ pub async fn fs_move_execute(
             pool.inner().clone(),
             app.clone(),
         ),
+        tokio_util::sync::CancellationToken::new(),
     )
     .await?;
     Ok(emit_pushed(&app, entry))

@@ -148,7 +148,8 @@ async fn smoke_copy_with_conflict_creates_backup_and_undo_restores() {
     .unwrap();
     assert_eq!(plan.conflicts.len(), 1, "should detect conflict");
 
-    ops::copy_execute(&local, &local, plan, &env.ctx())
+    let cancel = tokio_util::sync::CancellationToken::new();
+    ops::copy_execute(&local, &local, plan, &env.ctx(), cancel)
         .await
         .unwrap();
 
@@ -197,7 +198,8 @@ async fn smoke_move_same_fs_then_undo_restores() {
         .unwrap();
     assert!(plan.is_same_fs);
 
-    ops::move_execute(&local, &local, plan, &env.ctx())
+    let cancel = tokio_util::sync::CancellationToken::new();
+    ops::move_execute(&local, &local, plan, &env.ctx(), cancel)
         .await
         .unwrap();
     assert!(!env.dir().join("src/a").exists());

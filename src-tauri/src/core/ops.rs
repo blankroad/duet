@@ -217,12 +217,13 @@ pub async fn copy_execute(
     dst_fs: &dyn FileSystem,
     plan: CopyPlan,
     ctx: &OpCtx,
+    cancel_token: tokio_util::sync::CancellationToken,
 ) -> Result<JournalEntry, DuetError> {
     match plan.strategy {
         CopyStrategy::LocalToLocal | CopyStrategy::Relay => {
-            copy_execute_relay(src_fs, dst_fs, plan, ctx).await
+            copy_execute_relay(src_fs, dst_fs, plan, ctx, cancel_token).await
         }
-        CopyStrategy::SshSameHost => copy_execute_same_host(plan, ctx).await,
+        CopyStrategy::SshSameHost => copy_execute_same_host(plan, ctx, cancel_token).await,
     }
 }
 
@@ -233,6 +234,7 @@ async fn copy_execute_relay(
     dst_fs: &dyn FileSystem,
     plan: CopyPlan,
     ctx: &OpCtx,
+    cancel_token: tokio_util::sync::CancellationToken,
 ) -> Result<JournalEntry, DuetError> {
     if plan.items.is_empty() {
         return Err(DuetError::Io("plan has no items".into()));
@@ -240,6 +242,11 @@ async fn copy_execute_relay(
     let mut copied = Vec::new();
     let mut backups = Vec::new();
     for it in &plan.items {
+        // 항목 경계 cancel check
+        if cancel_token.is_cancelled() {
+            return Err(DuetError::Cancelled);
+        }
+
         let src_path = it.location.path.join(&it.name);
         let dst_path = plan.dst.path.join(&it.name);
 
@@ -253,7 +260,18 @@ async fn copy_execute_relay(
             });
         }
 
-        crate::fs::copy_relay(src_fs, &src_path, dst_fs, &dst_path).await?;
+        // copy 본체 — connection loss 면 1회 retry
+        match crate::fs::copy_relay(src_fs, &src_path, dst_fs, &dst_path).await {
+            Ok(()) => {}
+            Err(e) if crate::services::retry::is_retryable_error(&e) => {
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                if cancel_token.is_cancelled() {
+                    return Err(DuetError::Cancelled);
+                }
+                crate::fs::copy_relay(src_fs, &src_path, dst_fs, &dst_path).await?;
+            }
+            Err(e) => return Err(e),
+        }
         copied.push(dst_path);
     }
 
@@ -296,6 +314,7 @@ pub async fn move_execute(
     dst_fs: &dyn FileSystem,
     plan: MovePlan,
     ctx: &OpCtx,
+    cancel_token: tokio_util::sync::CancellationToken,
 ) -> Result<JournalEntry, DuetError> {
     if plan.items.is_empty() {
         return Err(DuetError::Io("plan has no items".into()));
@@ -311,6 +330,11 @@ pub async fn move_execute(
     let mut moved = Vec::new();
     let mut backups = Vec::new();
     for it in &plan.items {
+        // 항목 경계 cancel check
+        if cancel_token.is_cancelled() {
+            return Err(DuetError::Cancelled);
+        }
+
         let src_path = it.location.path.join(&it.name);
         let dst_path = plan.dst.path.join(&it.name);
 
@@ -327,7 +351,18 @@ pub async fn move_execute(
             // 같은 fs: 단순 rename — 빠르고 atomic
             src_fs.rename(&src_path, &dst_path).await?;
         } else {
-            crate::fs::copy_relay(src_fs, &src_path, dst_fs, &dst_path).await?;
+            // copy 본체 — connection loss 면 1회 retry
+            match crate::fs::copy_relay(src_fs, &src_path, dst_fs, &dst_path).await {
+                Ok(()) => {}
+                Err(e) if crate::services::retry::is_retryable_error(&e) => {
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    if cancel_token.is_cancelled() {
+                        return Err(DuetError::Cancelled);
+                    }
+                    crate::fs::copy_relay(src_fs, &src_path, dst_fs, &dst_path).await?;
+                }
+                Err(e) => return Err(e),
+            }
             // src 는 휴지통으로 (영구삭제 아님)
             let batch_id = crate::services::trash::new_batch_id();
             src_fs.trash(&src_path, &batch_id).await?;
@@ -445,7 +480,11 @@ async fn pick_backup_path(
 /// 5. exit !=0 → DuetError::Ssh(stderr) hard error
 ///
 /// 락 획득 순서: rsync_available → session (역방향 금지 — 데드락 회피).
-async fn copy_execute_same_host(plan: CopyPlan, ctx: &OpCtx) -> Result<JournalEntry, DuetError> {
+async fn copy_execute_same_host(
+    plan: CopyPlan,
+    ctx: &OpCtx,
+    cancel_token: tokio_util::sync::CancellationToken,
+) -> Result<JournalEntry, DuetError> {
     if plan.items.is_empty() {
         return Err(DuetError::Io("plan has no items".into()));
     }
@@ -497,6 +536,10 @@ async fn copy_execute_same_host(plan: CopyPlan, ctx: &OpCtx) -> Result<JournalEn
 
     let mut backups = Vec::new();
     for it in &plan.items {
+        // 항목 경계 cancel check (backup pre-loop)
+        if cancel_token.is_cancelled() {
+            return Err(DuetError::Cancelled);
+        }
         let dst_path = plan.dst.path.join(&it.name);
         if dst_fs.metadata(&dst_path).await.is_ok() {
             let backup = pick_backup_path(&dst_fs, &plan.dst.path, &it.name).await?;
@@ -513,6 +556,11 @@ async fn copy_execute_same_host(plan: CopyPlan, ctx: &OpCtx) -> Result<JournalEn
     let mut copied = Vec::new();
 
     for it in &plan.items {
+        // 항목 경계 cancel check (copy main loop)
+        if cancel_token.is_cancelled() {
+            return Err(DuetError::Cancelled);
+        }
+
         let src_path = it.location.path.join(&it.name);
         let dst_path = plan.dst.path.join(&it.name);
         let src_arg = shell_escape_path(&src_path)?;
@@ -536,7 +584,7 @@ async fn copy_execute_same_host(plan: CopyPlan, ctx: &OpCtx) -> Result<JournalEn
         // metadata 등) 가 블락됨. 후속에서 exec_streaming 을 두 단계로 분리:
         // (1) lock 잡고 channel_open_session 만 → (2) lock 풀고 channel 위에
         // wait loop. MVP-3 v1 은 modal 안에서 사용자 대기라 acceptable.
-        let (exit, stderr) = {
+        let exec_result = {
             let handle = session_mutex.lock().await;
             exec_streaming(&handle, &cmd, |line| {
                 if let Some(p) = parse_rsync_progress2_line(line) {
@@ -562,7 +610,21 @@ async fn copy_execute_same_host(plan: CopyPlan, ctx: &OpCtx) -> Result<JournalEn
                     }
                 }
             })
-            .await?
+            .await
+        };
+
+        // exec/rsync 결과 — connection loss 면 1회 retry
+        let (exit, stderr) = match exec_result {
+            Ok(result) => result,
+            Err(e) if crate::services::retry::is_retryable_error(&e) => {
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                if cancel_token.is_cancelled() {
+                    return Err(DuetError::Cancelled);
+                }
+                let handle = session_mutex.lock().await;
+                exec_streaming(&handle, &cmd, |_| {}).await?
+            }
+            Err(e) => return Err(e),
         };
 
         if exit != 0 {
