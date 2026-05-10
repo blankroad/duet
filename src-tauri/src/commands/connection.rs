@@ -107,6 +107,7 @@ async fn open_and_register(
         host_ip,
         user: host.user.clone(),
         session: Some(tokio::sync::Mutex::new(session.handle)),
+        rsync_available: tokio::sync::Mutex::new(None),
     })
     .await;
 

@@ -134,6 +134,7 @@ async fn reconnect_loop(
                     host_ip,
                     user: host.user.clone(),
                     session: Some(tokio::sync::Mutex::new(session.handle)),
+                    rsync_available: tokio::sync::Mutex::new(None),
                 };
                 pool.insert(new_conn).await;
 

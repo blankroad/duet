@@ -24,6 +24,10 @@ pub struct ActiveConnection {
     ///
     /// `Mutex` 로 동시 접근 직렬화 (russh Handle 자체는 Send 이나 Sync 아님).
     pub session: Option<tokio::sync::Mutex<russh::client::Handle<AcceptAllHandler>>>,
+    /// rsync 가 원격에 설치되어 있는지 캐시.
+    /// `None` = 미확인, `Some(true/false)` = 확인됨.
+    /// MVP-3 same-host copy 의 첫 호출 때 detect 후 채움. 연결 재시작 시 reset.
+    pub rsync_available: tokio::sync::Mutex<Option<bool>>,
 }
 
 /// Debug 수동 구현 — session 내용은 절대 출력하지 않음 (CLAUDE.md §5, 자격증명 보호).
@@ -35,6 +39,7 @@ impl std::fmt::Debug for ActiveConnection {
             .field("host_ip", &self.host_ip)
             .field("user", &self.user)
             .field("session", &"<russh::Handle>")
+            .field("rsync_available", &"<cached>")
             .finish()
     }
 }
@@ -102,6 +107,7 @@ mod tests {
             host_ip: ip.parse().unwrap(),
             user: "test".to_string(),
             session: None, // 단위 테스트 전용 — 실제 SSH 서버 불필요
+            rsync_available: tokio::sync::Mutex::new(None),
         }
     }
 
