@@ -49,12 +49,14 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::fs_ops::fs_mkdir,
             commands::undo::undo_last,
             commands::undo::undo_history,
+            commands::tasks::tasks_list,
+            commands::tasks::task_cancel,
         ])
         .events(collect_events![
             services::connection_events::ConnectionStateEvent,
             services::fs_events::FsChangedEvent,
             services::journal_events::JournalChangedEvent,
-            services::progress_events::ProgressEvent,
+            services::task_events::TaskEvent,
         ])
 }
 
@@ -120,6 +122,8 @@ pub fn run() {
             let watcher = services::fs_watcher::FsWatcher::new(app.handle().clone())
                 .expect("fs watcher init");
             app.manage(watcher);
+            let task_queue = services::task_queue::TaskQueue::new(app.handle().clone());
+            app.manage(task_queue);
             Ok(())
         })
         .run(tauri::generate_context!())

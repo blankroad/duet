@@ -5,4 +5,5 @@ pub mod fs_ops;
 pub mod pane;
 pub mod settings;
 pub mod system;
+pub mod tasks;
 pub mod undo;

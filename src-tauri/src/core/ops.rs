@@ -218,12 +218,18 @@ pub async fn copy_execute(
     plan: CopyPlan,
     ctx: &OpCtx,
     cancel_token: tokio_util::sync::CancellationToken,
+    progress: Option<crate::services::task_queue::ProgressEmitter>,
 ) -> Result<JournalEntry, DuetError> {
     match plan.strategy {
         CopyStrategy::LocalToLocal | CopyStrategy::Relay => {
+            // relay 는 byte-level progress emit 안 함 (read_full/write_full 라
+            // 라인 단위 X) — progress 인자 무시
+            let _ = progress;
             copy_execute_relay(src_fs, dst_fs, plan, ctx, cancel_token).await
         }
-        CopyStrategy::SshSameHost => copy_execute_same_host(plan, ctx, cancel_token).await,
+        CopyStrategy::SshSameHost => {
+            copy_execute_same_host(plan, ctx, cancel_token, progress).await
+        }
     }
 }
 
@@ -315,6 +321,7 @@ pub async fn move_execute(
     plan: MovePlan,
     ctx: &OpCtx,
     cancel_token: tokio_util::sync::CancellationToken,
+    _progress: Option<crate::services::task_queue::ProgressEmitter>,
 ) -> Result<JournalEntry, DuetError> {
     if plan.items.is_empty() {
         return Err(DuetError::Io("plan has no items".into()));
@@ -484,15 +491,14 @@ async fn copy_execute_same_host(
     plan: CopyPlan,
     ctx: &OpCtx,
     cancel_token: tokio_util::sync::CancellationToken,
+    progress: Option<crate::services::task_queue::ProgressEmitter>,
 ) -> Result<JournalEntry, DuetError> {
     if plan.items.is_empty() {
         return Err(DuetError::Io("plan has no items".into()));
     }
     use crate::core::copy_progress::parse_rsync_progress2_line;
     use crate::core::copy_strategy::shell_escape_path;
-    use crate::services::progress_events::ProgressEvent;
     use crate::ssh::remote_exec::{exec, exec_streaming};
-    use tauri_specta::Event;
 
     // src_source 에서 connection_id 추출
     let SourceId::Ssh { connection_id, .. } = &plan.src_source else {
@@ -502,10 +508,6 @@ async fn copy_execute_same_host(
         .pool
         .as_ref()
         .ok_or_else(|| DuetError::Io("OpCtx.pool required for same-host copy".into()))?;
-    let app = ctx
-        .app
-        .as_ref()
-        .ok_or_else(|| DuetError::Io("OpCtx.app required for same-host copy".into()))?;
 
     let conn = pool.get(connection_id).await?;
     let session_mutex = conn
@@ -551,8 +553,6 @@ async fn copy_execute_same_host(
         }
     }
 
-    // op_id (MVP-3 단일 active op 가정 — UUID 임시)
-    let op_id = uuid::Uuid::now_v7().to_string();
     let mut copied = Vec::new();
 
     for it in &plan.items {
@@ -577,8 +577,7 @@ async fn copy_execute_same_host(
             .checked_sub(std::time::Duration::from_secs(2))
             .unwrap_or_else(std::time::Instant::now);
         let total_bytes = plan.total_size_bytes;
-        let app_for_cb = app.clone();
-        let op_id_cb = op_id.clone();
+        let progress_for_cb = progress.clone();
 
         // TODO(perf): session_mutex 가 rsync 전체 동안 잡혀 다른 SFTP op (list,
         // metadata 등) 가 블락됨. 후속에서 exec_streaming 을 두 단계로 분리:
@@ -594,19 +593,19 @@ async fn copy_execute_same_host(
                         || now.duration_since(last_emit) >= std::time::Duration::from_secs(1)
                     {
                         last_emit = now;
-                        let _ = ProgressEvent {
-                            op_id: op_id_cb.clone(),
-                            bytes_done: p.bytes_done,
-                            bytes_total: if total_bytes > 0 {
-                                Some(total_bytes)
-                            } else {
-                                None
-                            },
-                            speed_bps: Some(p.speed_bps),
-                            eta_sec: Some(p.eta_sec),
-                            percent: Some(p.percent),
+                        if let Some(emitter) = &progress_for_cb {
+                            emitter.emit(crate::services::task_events::ProgressInfo {
+                                bytes_done: p.bytes_done,
+                                bytes_total: if total_bytes > 0 {
+                                    Some(total_bytes)
+                                } else {
+                                    None
+                                },
+                                speed_bps: Some(p.speed_bps),
+                                eta_sec: Some(p.eta_sec),
+                                percent: Some(p.percent),
+                            });
                         }
-                        .emit(&app_for_cb);
                     }
                 }
             })

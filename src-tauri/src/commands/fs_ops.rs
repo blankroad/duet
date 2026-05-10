@@ -5,12 +5,15 @@
 
 use std::sync::Arc;
 
+use crate::core::copy_strategy::{decide as decide_strategy, CopyStrategy};
 use crate::core::ops::{self, CopyPlan, DeletePlan, MovePlan, OpCtx};
 use crate::fs::{FileSystem, LocalFs, SshFs};
 use crate::services::connection_pool::ConnectionPool;
 use crate::services::journal::{Journal, JournalEntry, JournalId};
 use crate::services::journal_events::JournalChangedEvent;
 use crate::services::settings::SettingsStore;
+use crate::services::task_events::{HostKey, TaskId, TaskKind};
+use crate::services::task_queue::TaskQueue;
 use crate::types::{DeleteMode, DuetError, EntryRef, Location, SourceId};
 use tauri_specta::Event;
 
@@ -115,25 +118,58 @@ pub async fn fs_copy_execute(
     pool: tauri::State<'_, Arc<ConnectionPool>>,
     settings: tauri::State<'_, Arc<SettingsStore>>,
     journal: tauri::State<'_, Arc<Journal>>,
+    queue: tauri::State<'_, Arc<TaskQueue>>,
     app: tauri::AppHandle,
-) -> Result<JournalId, DuetError> {
-    let src_fs = fs_for(&plan.src_source, pool.inner()).await?;
-    let dst_fs = fs_for(&plan.dst.source, pool.inner()).await?;
-    // TODO(MVP-4 Task 5): replace with TaskQueue closure
-    let entry = ops::copy_execute(
-        &*src_fs,
-        &*dst_fs,
-        plan,
-        &ctx(
-            settings.inner().clone(),
-            journal.inner().clone(),
-            pool.inner().clone(),
-            app.clone(),
-        ),
-        tokio_util::sync::CancellationToken::new(),
-    )
-    .await?;
-    Ok(emit_pushed(&app, entry))
+) -> Result<TaskId, DuetError> {
+    let host_key = host_key_for_op(&plan.src_source, &plan.dst.source);
+    let title = format_copy_title(&plan);
+
+    let pool_inner = pool.inner().clone();
+    let settings_inner = settings.inner().clone();
+    let journal_inner = journal.inner().clone();
+    let app_for_run = app.clone();
+
+    // refresh 할 location: dst + src (items[0].location)
+    let mut affected = vec![plan.dst.clone()];
+    if let Some(first) = plan.items.first() {
+        affected.push(first.location.clone());
+    }
+
+    let plan_for_run = plan;
+
+    let task_id = queue
+        .inner()
+        .clone()
+        .enqueue(
+            TaskKind::Copy,
+            title,
+            host_key,
+            affected,
+            Box::new(move |cancel_token, progress| {
+                Box::pin(async move {
+                    let src_fs = fs_for(&plan_for_run.src_source, &pool_inner).await?;
+                    let dst_fs = fs_for(&plan_for_run.dst.source, &pool_inner).await?;
+                    let ctx = OpCtx {
+                        settings: settings_inner,
+                        journal: journal_inner.clone(),
+                        pool: Some(pool_inner.clone()),
+                        app: Some(app_for_run.clone()),
+                    };
+                    let entry = ops::copy_execute(
+                        &*src_fs,
+                        &*dst_fs,
+                        plan_for_run,
+                        &ctx,
+                        cancel_token,
+                        Some(progress),
+                    )
+                    .await?;
+                    Ok(emit_pushed(&app_for_run, entry))
+                })
+            }),
+        )
+        .await;
+    Ok(task_id)
 }
 
 #[tauri::command]
@@ -159,25 +195,58 @@ pub async fn fs_move_execute(
     pool: tauri::State<'_, Arc<ConnectionPool>>,
     settings: tauri::State<'_, Arc<SettingsStore>>,
     journal: tauri::State<'_, Arc<Journal>>,
+    queue: tauri::State<'_, Arc<TaskQueue>>,
     app: tauri::AppHandle,
-) -> Result<JournalId, DuetError> {
-    let src_fs = fs_for(&plan.src_source, pool.inner()).await?;
-    let dst_fs = fs_for(&plan.dst.source, pool.inner()).await?;
-    // TODO(MVP-4 Task 5): replace with TaskQueue closure
-    let entry = ops::move_execute(
-        &*src_fs,
-        &*dst_fs,
-        plan,
-        &ctx(
-            settings.inner().clone(),
-            journal.inner().clone(),
-            pool.inner().clone(),
-            app.clone(),
-        ),
-        tokio_util::sync::CancellationToken::new(),
-    )
-    .await?;
-    Ok(emit_pushed(&app, entry))
+) -> Result<TaskId, DuetError> {
+    let host_key = host_key_for_op(&plan.src_source, &plan.dst.source);
+    let title = format_move_title(&plan);
+
+    let pool_inner = pool.inner().clone();
+    let settings_inner = settings.inner().clone();
+    let journal_inner = journal.inner().clone();
+    let app_for_run = app.clone();
+
+    // refresh 할 location: dst + src (items[0].location)
+    let mut affected = vec![plan.dst.clone()];
+    if let Some(first) = plan.items.first() {
+        affected.push(first.location.clone());
+    }
+
+    let plan_for_run = plan;
+
+    let task_id = queue
+        .inner()
+        .clone()
+        .enqueue(
+            TaskKind::Move,
+            title,
+            host_key,
+            affected,
+            Box::new(move |cancel_token, progress| {
+                Box::pin(async move {
+                    let src_fs = fs_for(&plan_for_run.src_source, &pool_inner).await?;
+                    let dst_fs = fs_for(&plan_for_run.dst.source, &pool_inner).await?;
+                    let ctx = OpCtx {
+                        settings: settings_inner,
+                        journal: journal_inner.clone(),
+                        pool: Some(pool_inner.clone()),
+                        app: Some(app_for_run.clone()),
+                    };
+                    let entry = ops::move_execute(
+                        &*src_fs,
+                        &*dst_fs,
+                        plan_for_run,
+                        &ctx,
+                        cancel_token,
+                        Some(progress),
+                    )
+                    .await?;
+                    Ok(emit_pushed(&app_for_run, entry))
+                })
+            }),
+        )
+        .await;
+    Ok(task_id)
 }
 
 #[tauri::command]
@@ -230,4 +299,41 @@ pub async fn fs_mkdir(
     )
     .await?;
     Ok(emit_pushed(&app, entry))
+}
+
+/// src/dst SourceId 로부터 TaskQueue worker 키 결정.
+/// SshSameHost 이면 해당 host IP 기준 Ssh 키, 그 외는 Local.
+fn host_key_for_op(src: &SourceId, dst: &SourceId) -> HostKey {
+    match decide_strategy(src, dst) {
+        CopyStrategy::SshSameHost => match src {
+            SourceId::Ssh { host_ip, .. } => HostKey::Ssh {
+                host_ip: host_ip.to_string(),
+            },
+            // SshSameHost 이면 src 는 반드시 Ssh — unreachable
+            _ => HostKey::Local,
+        },
+        CopyStrategy::LocalToLocal | CopyStrategy::Relay => HostKey::Local,
+    }
+}
+
+fn format_copy_title(plan: &CopyPlan) -> String {
+    let n = plan.items.len();
+    let first = plan.items.first().map(|i| i.name.as_str()).unwrap_or("?");
+    let dst = plan.dst.path.display();
+    if n == 1 {
+        format!("Copying {first} → {dst}")
+    } else {
+        format!("Copying {first} and {} more → {dst}", n - 1)
+    }
+}
+
+fn format_move_title(plan: &MovePlan) -> String {
+    let n = plan.items.len();
+    let first = plan.items.first().map(|i| i.name.as_str()).unwrap_or("?");
+    let dst = plan.dst.path.display();
+    if n == 1 {
+        format!("Moving {first} → {dst}")
+    } else {
+        format!("Moving {first} and {} more → {dst}", n - 1)
+    }
 }
