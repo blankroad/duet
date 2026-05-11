@@ -16,3 +16,4 @@ pub mod settings;
 pub mod task_events;
 pub mod task_queue;
 pub mod trash;
+pub mod user_aliases;
