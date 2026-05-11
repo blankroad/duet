@@ -2,6 +2,7 @@ import { useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import { GeneralSection } from "./settings/GeneralSection";
+import { KeymapSection } from "./settings/KeymapSection";
 
 type SectionId = "general" | "keymap" | "aliases";
 
@@ -45,7 +46,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             </aside>
             <main className="flex-1 overflow-auto p-4">
               {section === "general" && <GeneralSection />}
-              {section === "keymap" && <div className="text-fg-muted">Keymap section (T15)</div>}
+              {section === "keymap" && <KeymapSection />}
               {section === "aliases" && <div className="text-fg-muted">Aliases section (T16)</div>}
             </main>
           </div>
