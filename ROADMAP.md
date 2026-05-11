@@ -106,10 +106,10 @@
 
 ## MVP-7: 커맨드 팔레트 + 설정
 
-- [ ] Ctrl+P 커맨드 팔레트
-- [ ] 설정 화면 (`Ctrl+,`)
-- [ ] `keymap.toml` 핫 리로드
-- [ ] 사용자 명령 (alias)
+- [x] Ctrl+P 커맨드 팔레트 — fuzzy 매칭, built-in + saved hosts + bookmarks + favorites + user aliases
+- [x] 설정 화면 (`Ctrl+,`) — sidebar/content 섹션화 (General + Keymap + Aliases)
+- [x] `keymap.toml` 핫 리로드 — `notify` watcher + `KeymapChangedEvent`
+- [x] 사용자 명령 (alias) — Navigate / Connect, user-aliases.json
 
 ## 장기 (Maybe)
 
@@ -124,7 +124,7 @@
 
 ## 현재 단계
 
-**MVP-7 시작 직전.** MVP-6 완료 — 탭/히스토리/북마크/호스트 즐겨찾기.
+**모든 MVP 완료.** MVP-1~7 — duet 의 정식 기능 모두 구현. 이후 장기 (Maybe) 항목 또는 안정화/UX 개선.
 
 ## 단계 변경 규칙
 
