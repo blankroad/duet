@@ -55,6 +55,10 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::secret_vault::vault_remove,
             commands::search::search_global,
             commands::search::search_cancel,
+            commands::keymap::keymap_list,
+            commands::keymap::keymap_set,
+            commands::keymap::keymap_unset,
+            commands::keymap::keymap_reset,
             commands::settings::settings_get,
             commands::settings::settings_set,
             commands::fs_ops::fs_delete_plan,
@@ -77,6 +81,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             services::connection_events::ConnectionStateEvent,
             services::fs_events::FsChangedEvent,
             services::journal_events::JournalChangedEvent,
+            services::keymap_events::KeymapChangedEvent,
             services::task_events::TaskEvent,
         ])
 }
@@ -149,6 +154,10 @@ pub fn run() {
         services::user_aliases::UserAliasesStore::load_default().await
     })
     .expect("user aliases load");
+    let keymap = tauri::async_runtime::block_on(async {
+        services::keymap::KeymapStore::load_default().await
+    })
+    .expect("keymap load");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -161,6 +170,7 @@ pub fn run() {
         .manage(bookmarks)
         .manage(host_favorites)
         .manage(user_aliases)
+        .manage(keymap)
         .invoke_handler(specta_builder.invoke_handler())
         .setup(move |app| {
             specta_builder.mount_events(app);
