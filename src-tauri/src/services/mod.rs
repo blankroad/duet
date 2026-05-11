@@ -9,6 +9,7 @@ pub mod fs_watcher;
 pub mod host_favorites;
 pub mod journal;
 pub mod journal_events;
+pub mod keymap;
 pub mod retry;
 pub mod saved_hosts;
 pub mod secret_vault;
