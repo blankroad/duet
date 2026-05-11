@@ -12,3 +12,4 @@ pub mod settings;
 pub mod system;
 pub mod tasks;
 pub mod undo;
+pub mod user_aliases;

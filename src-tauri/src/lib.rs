@@ -69,6 +69,9 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::undo::undo_history,
             commands::tasks::tasks_list,
             commands::tasks::task_cancel,
+            commands::user_aliases::user_aliases_list,
+            commands::user_aliases::user_aliases_add,
+            commands::user_aliases::user_aliases_remove,
         ])
         .events(collect_events![
             services::connection_events::ConnectionStateEvent,
@@ -142,6 +145,10 @@ pub fn run() {
         services::host_favorites::HostFavoritesStore::load_default().await
     })
     .expect("host favorites load");
+    let user_aliases = tauri::async_runtime::block_on(async {
+        services::user_aliases::UserAliasesStore::load_default().await
+    })
+    .expect("user aliases load");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -153,6 +160,7 @@ pub fn run() {
         .manage(secret_vault)
         .manage(bookmarks)
         .manage(host_favorites)
+        .manage(user_aliases)
         .invoke_handler(specta_builder.invoke_handler())
         .setup(move |app| {
             specta_builder.mount_events(app);
