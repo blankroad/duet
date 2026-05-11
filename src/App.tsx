@@ -25,6 +25,8 @@ import { useToast } from "@/stores/toast";
 import { bootstrapSavedHosts } from "@/stores/savedHosts";
 import { bootstrapBookmarks, addBookmark } from "@/stores/bookmarks";
 import { bootstrapHostFavorites, addHostFavorite } from "@/stores/hostFavorites";
+import { bootstrapUserAliases } from "@/stores/userAliases";
+import { useDynamicCommands } from "@/lib/dynamicCommands";
 import { useConnections } from "@/stores/connections";
 import { useTauri } from "@/hooks/useTauri";
 import { useKeyboardNav } from "@/hooks/useKeyboardNav";
@@ -38,7 +40,7 @@ import { useTaskEvents } from "@/hooks/useTaskEvents";
 import { formatErr } from "@/lib/error";
 import { formatSize } from "@/lib/format";
 import { commands } from "@/types/bindings";
-import type { ConnectionDto, CopyStrategy, DuetError, Entry, HostFavorite, Location, SearchHit } from "@/types/bindings";
+import type { ConnectionDto, CopyStrategy, DuetError, Entry, HostFavorite, Location, SearchHit, UserAlias } from "@/types/bindings";
 
 /**
  * App 루트.
@@ -330,6 +332,25 @@ function App() {
     [navigateTo, showToast],
   );
 
+  const onAliasExecute = useCallback(
+    (alias: UserAlias) => {
+      if (alias.kind.kind === "navigate") {
+        const id = usePanes.getState().activePane;
+        void navigateTo(id, alias.kind.location);
+      } else if (alias.kind.kind === "connect") {
+        const targetAlias = alias.kind.saved_host_alias;
+        const conns = Object.values(useConnections.getState().active);
+        const conn = conns.find((c) => c.alias === targetAlias);
+        if (!conn) {
+          showToast(`Connect to ${targetAlias} first (use saved hosts dialog)`);
+          return;
+        }
+        showToast(`${targetAlias} is connected`);
+      }
+    },
+    [navigateTo, showToast],
+  );
+
   const onAddBookmark = useCallback(() => {
     const id = usePanes.getState().activePane;
     const tab = activeTab(usePanes.getState(), id);
@@ -386,6 +407,14 @@ function App() {
     },
     [],
   );
+
+  // 모든 callback 정의 후 dynamic commands hook 등록
+  useDynamicCommands({
+    onSavedActivate,
+    onBookmarkActivate,
+    onFavoriteActivate,
+    onAliasExecute,
+  });
 
   /** 연결 성공 후 해당 패널을 SSH 위치로 이동. */
   const onConnected = useCallback(
@@ -445,6 +474,7 @@ function App() {
       void bootstrapSavedHosts();
       void bootstrapBookmarks();
       void bootstrapHostFavorites();
+      void bootstrapUserAliases();
     })();
     // navigate가 deps에 들어가면 무한 루프 — 마운트 1회만
     // eslint-disable-next-line react-hooks/exhaustive-deps
