@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useUI } from "@/stores/ui";
 import { usePanes, activeTab, type SortKey } from "@/stores/panes";
 import { useSearch } from "@/stores/search";
+import { usePalette } from "@/stores/palette";
 
 /**
  * 글로벌 단축키.
@@ -89,6 +90,12 @@ export function useGlobalShortcuts(opts: {
           if (!isInput) {
             e.preventDefault();
             usePanes.getState().toggleShowHidden(usePanes.getState().activePane);
+          }
+          break;
+        case "p":
+          if (!isInput) {
+            e.preventDefault();
+            usePalette.getState().open();
           }
           break;
         case "r":

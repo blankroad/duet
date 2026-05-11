@@ -13,6 +13,11 @@ import { ProgressModal } from "@/components/dialogs/ProgressModal";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { Toast } from "@/components/Toast";
 import { SearchPanel } from "@/components/SearchPanel";
+import { CommandPalette } from "@/components/CommandPalette";
+import { useCommands } from "@/stores/commands";
+import { usePalette } from "@/stores/palette";
+import { buildBuiltins } from "@/lib/commands";
+import { useUI } from "@/stores/ui";
 import { usePanes, activeTab, type PaneId } from "@/stores/panes";
 import { useSearch } from "@/stores/search";
 import { useUIDialogs } from "@/stores/ui-dialogs";
@@ -189,6 +194,58 @@ function App() {
   );
 
   useTaskEvents(refreshAffected);
+
+  const setBuiltins = useCommands((s) => s.setBuiltins);
+  const openPalette = usePalette((s) => s.open);
+  const toggleSidebar = useUI((s) => s.toggleSidebar);
+
+  useEffect(() => {
+    const builtins = buildBuiltins({
+      openTab: () => usePanes.getState().openTab(usePanes.getState().activePane),
+      closeActiveTab: () => {
+        const id = usePanes.getState().activePane;
+        const p = usePanes.getState().panes[id];
+        usePanes.getState().closeTab(id, p.activeTabIndex);
+      },
+      nextTab: () => {
+        const id = usePanes.getState().activePane;
+        const p = usePanes.getState().panes[id];
+        usePanes.getState().selectTab(id, (p.activeTabIndex + 1) % p.tabs.length);
+      },
+      prevTab: () => {
+        const id = usePanes.getState().activePane;
+        const p = usePanes.getState().panes[id];
+        usePanes.getState().selectTab(id, (p.activeTabIndex - 1 + p.tabs.length) % p.tabs.length);
+      },
+      back: () => onBack(usePanes.getState().activePane),
+      forward: () => onForward(usePanes.getState().activePane),
+      refresh: () => onRefresh(usePanes.getState().activePane),
+      toggleHidden: () => usePanes.getState().toggleShowHidden(usePanes.getState().activePane),
+      toggleSidebar: () => toggleSidebar(),
+      sortByName: () => usePanes.getState().toggleSortKey(usePanes.getState().activePane, "name"),
+      sortBySize: () => usePanes.getState().toggleSortKey(usePanes.getState().activePane, "size"),
+      sortByMtime: () => usePanes.getState().toggleSortKey(usePanes.getState().activePane, "mtime"),
+      sortByKind: () => usePanes.getState().toggleSortKey(usePanes.getState().activePane, "kind"),
+      sortByExt: () => usePanes.getState().toggleSortKey(usePanes.getState().activePane, "ext"),
+      focusFilter: () => usePanes.getState().setFilterFocused(usePanes.getState().activePane, true),
+      openSearch: () => {
+        const id = usePanes.getState().activePane;
+        const tab = activeTab(usePanes.getState(), id);
+        useSearch.getState().open(id, tab.location);
+      },
+      openSettings: () => openDialog({ kind: "settings" }),
+      openPalette: () => openPalette(),
+      quit: () => {
+        const isMac = navigator.userAgent.includes("Mac");
+        if (!isMac) {
+          void import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
+            void getCurrentWindow().close();
+          });
+        }
+      },
+    });
+    setBuiltins(builtins);
+  }, [setBuiltins, openPalette, toggleSidebar, onBack, onForward, onRefresh, openDialog]);
 
   const onRenameSubmit = useCallback(
     async (newName: string) => {
@@ -507,6 +564,7 @@ function App() {
       )}
       {dialog.kind === "settings" && <SettingsDialog onClose={closeDialog} />}
       <Toast />
+      <CommandPalette />
     </div>
   );
 }
