@@ -36,6 +36,7 @@ import { useConnectionEvents } from "@/hooks/useConnectionEvents";
 import { useFsChangedEvents } from "@/hooks/useFsChangedEvents";
 import { useDestructiveKeys } from "@/hooks/useDestructiveKeys";
 import { useJournalEvents } from "@/hooks/useJournalEvents";
+import { useKeymapEvents } from "@/hooks/useKeymapEvents";
 import { useTaskEvents } from "@/hooks/useTaskEvents";
 import { formatErr } from "@/lib/error";
 import { formatSize } from "@/lib/format";
@@ -163,12 +164,13 @@ function App() {
   );
 
   useKeyboardNav(onKeyboardActivate, onKeyboardUp);
-  useGlobalShortcuts({ onRefresh, onBack, onForward });
+  useGlobalShortcuts();
   useSshHosts();
   useConnectionEvents();
   useFsChangedEvents(onRefresh);
   useDestructiveKeys();
   useJournalEvents();
+  useKeymapEvents();
 
   const dialog = useUIDialogs((s) => s.dialog);
   const closeDialog = useUIDialogs((s) => s.close);
