@@ -158,6 +158,7 @@ pub fn run() {
         services::keymap::KeymapStore::load_default().await
     })
     .expect("keymap load");
+    let keymap_for_setup = keymap.clone();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -178,6 +179,12 @@ pub fn run() {
             let watcher = services::fs_watcher::FsWatcher::new(app.handle().clone())
                 .expect("fs watcher init");
             app.manage(watcher);
+            match services::keymap_watcher::start(app.handle().clone(), keymap_for_setup.clone()) {
+                Ok(w) => {
+                    app.manage(w);
+                }
+                Err(e) => tracing::warn!("keymap watcher: {e}"),
+            }
             let task_queue = services::task_queue::TaskQueue::new(app.handle().clone());
             app.manage(task_queue);
             let active_search = commands::search::ActiveSearch::new();
