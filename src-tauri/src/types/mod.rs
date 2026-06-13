@@ -91,6 +91,36 @@ pub struct EntryMeta {
     pub permissions: Option<u32>,
 }
 
+/// 미리보기 데이터 종류.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "lowercase")]
+pub enum PreviewKind {
+    /// utf8 텍스트 — `text` 채워짐.
+    Text,
+    /// 이미지 — `bytes_base64` + `mime` 채워짐.
+    Image,
+    /// utf8 디코드 실패 (바이너리). 본문 없음.
+    Binary,
+    /// size cap 초과. 본문 없음 (`total_size` 만).
+    TooLarge,
+}
+
+/// `fs_read_preview` 응답. 미리보기 패널 렌더용.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct PreviewData {
+    pub kind: PreviewKind,
+    /// `Text` 일 때 본문 (cap 이내).
+    pub text: Option<String>,
+    /// `Image` 일 때 base64 인코딩 원본 바이트.
+    pub bytes_base64: Option<String>,
+    /// `Image` 일 때 data URL 용 MIME (예: `image/png`).
+    pub mime: Option<String>,
+    /// 본문이 cap 으로 잘렸는지 (현재는 cap 초과 시 TooLarge 라 항상 false, 향후 streaming 대비).
+    pub truncated: bool,
+    /// 실제 파일 크기 (bytes).
+    pub total_size: u64,
+}
+
 /// `trash()` 결과 — 어디로 갔는지. undo 시 복원 정보.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(tag = "kind", rename_all = "snake_case")]

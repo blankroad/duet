@@ -1,6 +1,6 @@
-import { Folder, File, Link as LinkIcon } from "lucide-react";
 import type { Entry } from "@/types/bindings";
 import { formatSize, formatTime } from "@/lib/format";
+import { EntryIcon } from "@/lib/fileIcon";
 import clsx from "clsx";
 
 interface EntryRowProps {
@@ -10,17 +10,6 @@ interface EntryRowProps {
   onClick: () => void;
   onDoubleClick: () => void;
 }
-
-const iconFor = (entry: Entry) => {
-  switch (entry.kind) {
-    case "dir":
-      return <Folder size={14} className="text-accent" />;
-    case "symlink":
-      return <LinkIcon size={14} className="text-fg-muted" />;
-    default:
-      return <File size={14} className="text-fg-muted" />;
-  }
-};
 
 /**
  * DESIGN.md "행 (EntryRow)" 디자인.
@@ -42,7 +31,7 @@ export function EntryRow({ entry, isCursor, isSelected, onClick, onDoubleClick }
       onClick={onClick}
       onDoubleClick={onDoubleClick}
     >
-      {iconFor(entry)}
+      <EntryIcon entry={entry} size={14} />
       <span className={clsx("font-mono flex-1 truncate", entry.hidden && "text-fg-muted")}>
         {entry.name}
       </span>

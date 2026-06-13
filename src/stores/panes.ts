@@ -4,6 +4,15 @@ import type { Entry, Location } from "@/types/bindings";
 export type PaneId = "left" | "right";
 export type SortKey = "name" | "size" | "mtime" | "kind" | "ext";
 export type SortOrder = "asc" | "desc";
+export type ViewMode = "details" | "grid" | "tiles";
+
+/** Grid 뷰 셀의 목표 폭(px). 컬럼수 계산에 사용 — EntryGrid 와 키보드 네비가 공유. */
+export const GRID_CELL_WIDTH = 120;
+
+/** 그리드 폭(px)에서 컬럼 수 계산. EntryGrid 와 useKeyboardNav 가 동일 식 공유. */
+export function gridColumns(widthPx: number): number {
+  return Math.max(1, Math.floor(widthPx / GRID_CELL_WIDTH));
+}
 
 export interface TabState {
   id: string;
@@ -15,6 +24,9 @@ export interface TabState {
   sortKey: SortKey;
   sortOrder: SortOrder;
   showHidden: boolean;
+  viewMode: ViewMode;
+  /** grid 뷰의 현재 컬럼 수. EntryGrid 가 폭 측정 후 보고 — 키보드 ↑↓ 이동폭에 사용. */
+  gridCols: number;
   filter: string;
   filterFocused: boolean;
   history: { stack: Location[]; index: number };
@@ -38,10 +50,15 @@ interface PanesState {
   moveCursor: (id: PaneId, delta: number) => void;
   setCursor: (id: PaneId, index: number) => void;
   toggleSelected: (id: PaneId, name: string) => void;
+  /** 선택 집합을 names 로 교체 (마키 드래그 선택용). */
+  setSelected: (id: PaneId, names: string[]) => void;
   clearSelection: (id: PaneId) => void;
   setSort: (id: PaneId, key: SortKey, order: SortOrder) => void;
   toggleSortKey: (id: PaneId, key: SortKey) => void;
   toggleShowHidden: (id: PaneId) => void;
+  setViewMode: (id: PaneId, mode: ViewMode) => void;
+  cycleViewMode: (id: PaneId) => void;
+  setGridCols: (id: PaneId, cols: number) => void;
   setFilter: (id: PaneId, filter: string) => void;
   setFilterFocused: (id: PaneId, focused: boolean) => void;
   // NEW
@@ -70,6 +87,8 @@ const initialTab = (location: Location = home()): TabState => ({
   sortKey: "name",
   sortOrder: "asc",
   showHidden: false,
+  viewMode: "details",
+  gridCols: 1,
   filter: "",
   filterFocused: false,
   history: { stack: [location], index: 0 },
@@ -188,6 +207,13 @@ export const usePanes = create<PanesState>((set, get) => ({
         }),
       },
     })),
+  setSelected: (id, names) =>
+    set((s) => ({
+      panes: {
+        ...s.panes,
+        [id]: withActiveTab(s.panes[id], (t) => ({ ...t, selected: new Set(names) })),
+      },
+    })),
   clearSelection: (id) =>
     set((s) => ({
       panes: { ...s.panes, [id]: withActiveTab(s.panes[id], (t) => ({ ...t, selected: new Set() })) },
@@ -218,6 +244,34 @@ export const usePanes = create<PanesState>((set, get) => ({
         [id]: withActiveTab(s.panes[id], (t) => ({ ...t, showHidden: !t.showHidden, cursorIndex: 0 })),
       },
     })),
+  setViewMode: (id, mode) =>
+    set((s) => ({
+      panes: {
+        ...s.panes,
+        [id]: withActiveTab(s.panes[id], (t) => (t.viewMode === mode ? t : { ...t, viewMode: mode })),
+      },
+    })),
+  cycleViewMode: (id) =>
+    set((s) => ({
+      panes: {
+        ...s.panes,
+        [id]: withActiveTab(s.panes[id], (t) => {
+          const order: ViewMode[] = ["details", "grid", "tiles"];
+          const next = order[(order.indexOf(t.viewMode) + 1) % order.length]!;
+          return { ...t, viewMode: next };
+        }),
+      },
+    })),
+  setGridCols: (id, cols) =>
+    set((s) => {
+      const c = Math.max(1, cols);
+      return {
+        panes: {
+          ...s.panes,
+          [id]: withActiveTab(s.panes[id], (t) => (t.gridCols === c ? t : { ...t, gridCols: c })),
+        },
+      };
+    }),
   setFilter: (id, filter) =>
     set((s) => ({
       panes: { ...s.panes, [id]: withActiveTab(s.panes[id], (t) => ({ ...t, filter, cursorIndex: 0 })) },

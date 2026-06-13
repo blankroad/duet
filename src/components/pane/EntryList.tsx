@@ -1,11 +1,17 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useRef } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
+import clsx from "clsx";
 import type { Entry } from "@/types/bindings";
-import type { SortKey, SortOrder } from "@/stores/panes";
+import { type PaneId, type SortKey, type SortOrder } from "@/stores/panes";
+import { useMarquee } from "@/hooks/useMarquee";
+import { useEntryDrag } from "@/hooks/useEntryDrag";
+import { useDragState } from "@/stores/dragState";
+import { normRect, rowsInRect } from "@/lib/marquee";
 import { EntryRow } from "./EntryRow";
 
 interface EntryListProps {
+  id: PaneId;
   entries: Entry[];
   cursorIndex: number;
   selected: Set<string>;
@@ -22,8 +28,10 @@ const ROW_HEIGHT = 28;
 /**
  * 가상 스크롤 파일 리스트 + 정렬 가능 컬럼 헤더.
  * 헤더 클릭 시 onSortClick — 같은 key 재클릭은 order toggle (store).
+ * 빈 영역 드래그 = 마키 선택, 행 드래그 = 패널↔패널 DnD (이동 기본 / Ctrl=복사).
  */
 export function EntryList({
+  id,
   entries,
   cursorIndex,
   selected,
@@ -35,6 +43,10 @@ export function EntryList({
   onSortClick,
 }: EntryListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
+  const onEntryMouseDown = useEntryDrag(id);
+  const dragActive = useDragState((s) => s.active);
+  const overThisPane = useDragState((s) => s.overPane === id);
+  const overFolder = useDragState((s) => (s.overPane === id ? s.overFolder : null));
 
   const virtualizer = useVirtualizer({
     count: entries.length,
@@ -43,11 +55,21 @@ export function EntryList({
     overscan: 8,
   });
 
+  const { marquee, onContainerMouseDown } = useMarquee({
+    id,
+    scrollRef: parentRef,
+    entries,
+    hitTest: (rect) => rowsInRect(rect.y1, rect.y2, ROW_HEIGHT, entries.length),
+  });
+
   useEffect(() => {
     if (cursorIndex >= 0) {
       virtualizer.scrollToIndex(cursorIndex, { align: "auto" });
     }
   }, [cursorIndex, virtualizer]);
+
+  // 이 패널의 빈 영역 위로 드래그 중 (폴더 위가 아닐 때) — 패널 하이라이트
+  const paneHighlight = dragActive && overThisPane && overFolder === null;
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
@@ -57,14 +79,27 @@ export function EntryList({
         <ColumnHeader label="Modified" col="mtime" current={sortKey} order={sortOrder} onClick={onSortClick} className="w-32 px-2 text-right" />
         <ColumnHeader label="Type" col="kind" current={sortKey} order={sortOrder} onClick={onSortClick} className="w-16 px-2" />
       </div>
-      <div ref={parentRef} className="flex-1 min-h-0 overflow-auto">
+      <div
+        ref={parentRef}
+        data-drop-pane={id}
+        className={clsx(
+          "flex-1 min-h-0 overflow-auto",
+          paneHighlight && "ring-2 ring-inset ring-accent",
+        )}
+        onMouseDown={onContainerMouseDown}
+      >
         <div style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative" }}>
           {virtualizer.getVirtualItems().map((vi) => {
             const entry = entries[vi.index];
             if (entry === undefined) return null;
+            const isDir = entry.kind === "dir";
             return (
               <div
                 key={vi.key}
+                data-entry={entry.name}
+                data-drop-folder={isDir ? entry.name : undefined}
+                onMouseDown={(e) => onEntryMouseDown(e, entry)}
+                className={clsx(dragActive && overFolder === entry.name && "ring-2 ring-inset ring-accent")}
                 style={{
                   position: "absolute",
                   top: 0,
@@ -84,9 +119,21 @@ export function EntryList({
               </div>
             );
           })}
+          {marquee && <MarqueeBox rect={marquee} />}
         </div>
       </div>
     </div>
+  );
+}
+
+/** 마키 선택 사각형 오버레이 (콘텐츠 좌표). */
+function MarqueeBox({ rect }: { rect: { x1: number; y1: number; x2: number; y2: number } }) {
+  const n = normRect(rect);
+  return (
+    <div
+      className="pointer-events-none absolute z-10 border border-accent bg-accent/10"
+      style={{ left: n.x1, top: n.y1, width: n.x2 - n.x1, height: n.y2 - n.y1 }}
+    />
   );
 }
 

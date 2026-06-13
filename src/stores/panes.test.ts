@@ -20,6 +20,8 @@ const reset = () => {
           sortKey: "name" as const,
           sortOrder: "asc" as const,
           showHidden: false,
+          viewMode: "details" as const,
+          gridCols: 1,
           filter: "",
           filterFocused: false,
           history: { stack: [homeLocation], index: 0 },
@@ -206,5 +208,52 @@ describe("panes — history", () => {
     const t = activeTab(usePanes.getState(), "left");
     expect(t.history.stack.map((l) => l.path)).toEqual(["/", "/a", "/c"]);
     expect(t.history.index).toBe(2);
+  });
+});
+
+describe("panes — view mode", () => {
+  beforeEach(reset);
+
+  it("defaults to details", () => {
+    expect(activeTab(usePanes.getState(), "left").viewMode).toBe("details");
+  });
+
+  it("setViewMode switches the active tab's view", () => {
+    usePanes.getState().setViewMode("left", "grid");
+    expect(activeTab(usePanes.getState(), "left").viewMode).toBe("grid");
+  });
+
+  it("cycleViewMode rotates details → grid → tiles → details", () => {
+    const cycle = () => usePanes.getState().cycleViewMode("left");
+    cycle();
+    expect(activeTab(usePanes.getState(), "left").viewMode).toBe("grid");
+    cycle();
+    expect(activeTab(usePanes.getState(), "left").viewMode).toBe("tiles");
+    cycle();
+    expect(activeTab(usePanes.getState(), "left").viewMode).toBe("details");
+  });
+
+  it("setGridCols clamps to >= 1", () => {
+    usePanes.getState().setGridCols("left", 0);
+    expect(activeTab(usePanes.getState(), "left").gridCols).toBe(1);
+    usePanes.getState().setGridCols("left", 5);
+    expect(activeTab(usePanes.getState(), "left").gridCols).toBe(5);
+  });
+});
+
+describe("panes — setSelected", () => {
+  beforeEach(reset);
+
+  it("replaces the selection set", () => {
+    usePanes.getState().setSelected("left", ["a", "b", "c"]);
+    expect(activeTab(usePanes.getState(), "left").selected).toEqual(new Set(["a", "b", "c"]));
+    usePanes.getState().setSelected("left", ["x"]);
+    expect(activeTab(usePanes.getState(), "left").selected).toEqual(new Set(["x"]));
+  });
+
+  it("empty array clears selection", () => {
+    usePanes.getState().setSelected("left", ["a"]);
+    usePanes.getState().setSelected("left", []);
+    expect(activeTab(usePanes.getState(), "left").selected.size).toBe(0);
   });
 });

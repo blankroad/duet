@@ -69,6 +69,8 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::fs_ops::fs_move_execute,
             commands::fs_ops::fs_rename,
             commands::fs_ops::fs_mkdir,
+            commands::fs_ops::fs_read_preview,
+            commands::fs_ops::fs_copy_plan_external,
             commands::undo::undo_last,
             commands::undo::undo_history,
             commands::tasks::tasks_list,

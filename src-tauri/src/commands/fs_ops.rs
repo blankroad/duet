@@ -14,7 +14,9 @@ use crate::services::journal_events::JournalChangedEvent;
 use crate::services::settings::SettingsStore;
 use crate::services::task_events::{HostKey, TaskId, TaskKind};
 use crate::services::task_queue::TaskQueue;
-use crate::types::{DeleteMode, DuetError, EntryRef, Location, SourceId};
+use crate::types::{
+    DeleteMode, DuetError, EntryKind, EntryRef, Location, PreviewData, PreviewKind, SourceId,
+};
 use tauri_specta::Event;
 
 /// SourceId → FileSystem 동적 디스패치.
@@ -107,6 +109,44 @@ pub async fn fs_copy_plan(
         .map(|t| t.location.source.clone())
         .ok_or_else(|| DuetError::Io("no items".into()))?;
     let src_fs = fs_for(&src_source, pool.inner()).await?;
+    let dst_fs = fs_for(&dst.source, pool.inner()).await?;
+    ops::copy_plan(&*src_fs, &*dst_fs, items, dst).await
+}
+
+/// OS(파인더/탐색기)에서 끌어온 로컬 절대경로들을 dst 로 복사하기 위한 plan.
+///
+/// 끌어온 경로는 항상 로컬 절대경로 — 각 경로를 (부모 디렉토리 Local Location + 파일명)
+/// EntryRef 로 변환해 일반 copy_plan 재사용. 경로 분해는 Rust `Path` 로만 (CLAUDE.md §7).
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_copy_plan_external(
+    paths: Vec<std::path::PathBuf>,
+    dst: Location,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+) -> Result<CopyPlan, DuetError> {
+    let mut items = Vec::with_capacity(paths.len());
+    for p in &paths {
+        let name = p
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| DuetError::Io(format!("invalid path: {}", p.display())))?
+            .to_string();
+        let parent = p
+            .parent()
+            .ok_or_else(|| DuetError::Io(format!("path has no parent: {}", p.display())))?
+            .to_path_buf();
+        items.push(EntryRef {
+            location: Location {
+                source: SourceId::Local,
+                path: parent,
+            },
+            name,
+        });
+    }
+    if items.is_empty() {
+        return Err(DuetError::Io("no paths".into()));
+    }
+    let src_fs = fs_for(&SourceId::Local, pool.inner()).await?;
     let dst_fs = fs_for(&dst.source, pool.inner()).await?;
     ops::copy_plan(&*src_fs, &*dst_fs, items, dst).await
 }
@@ -301,6 +341,115 @@ pub async fn fs_mkdir(
     Ok(emit_pushed(&app, entry))
 }
 
+/// 텍스트 미리보기 최대 크기 (256 KB). 초과 시 `TooLarge`.
+const PREVIEW_TEXT_CAP: u64 = 256 * 1024;
+/// 이미지 미리보기 최대 크기 (5 MB). 초과 시 `TooLarge` — SSH 왕복/메모리 보호.
+const PREVIEW_IMAGE_CAP: u64 = 5 * 1024 * 1024;
+
+/// 확장자 → 이미지 MIME. 이미지가 아니면 None.
+fn image_mime(path: &std::path::Path) -> Option<&'static str> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    Some(match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "svg" => "image/svg+xml",
+        "ico" => "image/x-icon",
+        _ => return None,
+    })
+}
+
+/// 표준 base64 인코더 (의존성 회피 — 자기완결). 패딩 포함.
+fn base64_encode(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
+        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TABLE[((n >> 18) & 63) as usize] as char);
+        out.push(TABLE[((n >> 12) & 63) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            TABLE[((n >> 6) & 63) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[(n & 63) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+/// 파일 미리보기 1건 읽기 — 미리보기 패널용.
+///
+/// 이미지(확장자 판정)는 base64 + MIME, 그 외는 utf8 디코드 시도해서 Text/Binary.
+/// cap 초과는 `TooLarge` 로 반환(에러 아님 — 패널이 메타만 표시).
+/// 디렉토리/심볼릭 등 파일이 아니면 에러.
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_read_preview(
+    location: Location,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+) -> Result<PreviewData, DuetError> {
+    let fs = fs_for(&location.source, pool.inner()).await?;
+    let meta = fs.metadata(&location.path).await?;
+    if meta.kind != EntryKind::File {
+        return Err(DuetError::Io("not a regular file".into()));
+    }
+    let total_size = meta.size.unwrap_or(0);
+    let mime = image_mime(&location.path);
+    let cap = if mime.is_some() {
+        PREVIEW_IMAGE_CAP
+    } else {
+        PREVIEW_TEXT_CAP
+    };
+    if total_size > cap {
+        return Ok(PreviewData {
+            kind: PreviewKind::TooLarge,
+            text: None,
+            bytes_base64: None,
+            mime: None,
+            truncated: false,
+            total_size,
+        });
+    }
+    let bytes = fs.read_full(&location.path).await?;
+    if let Some(mime) = mime {
+        return Ok(PreviewData {
+            kind: PreviewKind::Image,
+            text: None,
+            bytes_base64: Some(base64_encode(&bytes)),
+            mime: Some(mime.to_string()),
+            truncated: false,
+            total_size,
+        });
+    }
+    match String::from_utf8(bytes) {
+        Ok(text) => Ok(PreviewData {
+            kind: PreviewKind::Text,
+            text: Some(text),
+            bytes_base64: None,
+            mime: None,
+            truncated: false,
+            total_size,
+        }),
+        Err(_) => Ok(PreviewData {
+            kind: PreviewKind::Binary,
+            text: None,
+            bytes_base64: None,
+            mime: None,
+            truncated: false,
+            total_size,
+        }),
+    }
+}
+
 /// src/dst SourceId 로부터 TaskQueue worker 키 결정.
 /// SshSameHost 이면 해당 host IP 기준 Ssh 키, 그 외는 Local.
 fn host_key_for_op(src: &SourceId, dst: &SourceId) -> HostKey {
@@ -335,5 +484,31 @@ fn format_move_title(plan: &MovePlan) -> String {
         format!("Moving {first} → {dst}")
     } else {
         format!("Moving {first} and {} more → {dst}", n - 1)
+    }
+}
+
+#[cfg(test)]
+mod preview_tests {
+    use super::{base64_encode, image_mime};
+    use std::path::Path;
+
+    #[test]
+    fn base64_matches_known_vectors() {
+        assert_eq!(base64_encode(b""), "");
+        assert_eq!(base64_encode(b"f"), "Zg==");
+        assert_eq!(base64_encode(b"fo"), "Zm8=");
+        assert_eq!(base64_encode(b"foo"), "Zm9v");
+        assert_eq!(base64_encode(b"foob"), "Zm9vYg==");
+        assert_eq!(base64_encode(b"fooba"), "Zm9vYmE=");
+        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
+    }
+
+    #[test]
+    fn image_mime_by_extension() {
+        assert_eq!(image_mime(Path::new("a.png")), Some("image/png"));
+        assert_eq!(image_mime(Path::new("a.JPG")), Some("image/jpeg"));
+        assert_eq!(image_mime(Path::new("a.svg")), Some("image/svg+xml"));
+        assert_eq!(image_mime(Path::new("notes.txt")), None);
+        assert_eq!(image_mime(Path::new("noext")), None);
     }
 }

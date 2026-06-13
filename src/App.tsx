@@ -13,6 +13,8 @@ import { ProgressModal } from "@/components/dialogs/ProgressModal";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { Toast } from "@/components/Toast";
 import { SearchPanel } from "@/components/SearchPanel";
+import { PreviewPane } from "@/components/pane/PreviewPane";
+import { DragGhost } from "@/components/pane/DragGhost";
 import { CommandPalette } from "@/components/CommandPalette";
 import { useCommands } from "@/stores/commands";
 import { usePalette } from "@/stores/palette";
@@ -35,6 +37,7 @@ import { useSshHosts } from "@/hooks/useSshHosts";
 import { useConnectionEvents } from "@/hooks/useConnectionEvents";
 import { useFsChangedEvents } from "@/hooks/useFsChangedEvents";
 import { useDestructiveKeys } from "@/hooks/useDestructiveKeys";
+import { useOsFileDrop } from "@/hooks/useOsFileDrop";
 import { useJournalEvents } from "@/hooks/useJournalEvents";
 import { useKeymapEvents } from "@/hooks/useKeymapEvents";
 import { useTaskEvents } from "@/hooks/useTaskEvents";
@@ -169,6 +172,7 @@ function App() {
   useConnectionEvents();
   useFsChangedEvents(onRefresh);
   useDestructiveKeys();
+  useOsFileDrop();
   useJournalEvents();
   useKeymapEvents();
 
@@ -202,6 +206,8 @@ function App() {
   const setBuiltins = useCommands((s) => s.setBuiltins);
   const openPalette = usePalette((s) => s.open);
   const toggleSidebar = useUI((s) => s.toggleSidebar);
+  const togglePreview = useUI((s) => s.togglePreview);
+  const previewOpen = useUI((s) => s.previewOpen);
 
   useEffect(() => {
     const builtins = buildBuiltins({
@@ -226,6 +232,10 @@ function App() {
       refresh: () => onRefresh(usePanes.getState().activePane),
       toggleHidden: () => usePanes.getState().toggleShowHidden(usePanes.getState().activePane),
       toggleSidebar: () => toggleSidebar(),
+      togglePreview: () => togglePreview(),
+      viewDetails: () => usePanes.getState().setViewMode(usePanes.getState().activePane, "details"),
+      viewGrid: () => usePanes.getState().setViewMode(usePanes.getState().activePane, "grid"),
+      viewTiles: () => usePanes.getState().setViewMode(usePanes.getState().activePane, "tiles"),
       sortByName: () => usePanes.getState().toggleSortKey(usePanes.getState().activePane, "name"),
       sortBySize: () => usePanes.getState().toggleSortKey(usePanes.getState().activePane, "size"),
       sortByMtime: () => usePanes.getState().toggleSortKey(usePanes.getState().activePane, "mtime"),
@@ -249,7 +259,7 @@ function App() {
       },
     });
     setBuiltins(builtins);
-  }, [setBuiltins, openPalette, toggleSidebar, onBack, onForward, onRefresh, openDialog]);
+  }, [setBuiltins, openPalette, toggleSidebar, togglePreview, onBack, onForward, onRefresh, openDialog]);
 
   const onRenameSubmit = useCallback(
     async (newName: string) => {
@@ -489,7 +499,7 @@ function App() {
       </header>
       <SearchPanel onPickHit={onPickHit} />
 
-      <main className="flex flex-1 min-h-0 gap-0">
+      <main className="flex flex-1 min-h-0 gap-1.5 p-1.5">
         <Sidebar
           onHostActivate={onHostActivate}
           onAdHocOpen={onAdHocOpen}
@@ -501,6 +511,7 @@ function App() {
         />
         <Pane id="left" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} onBack={onBack} onForward={onForward} />
         <Pane id="right" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} onBack={onBack} onForward={onForward} />
+        {previewOpen && <PreviewPane />}
       </main>
 
       <TasksBar />
@@ -597,6 +608,7 @@ function App() {
       {dialog.kind === "settings" && <SettingsDialog onClose={closeDialog} />}
       <Toast />
       <CommandPalette />
+      <DragGhost />
     </div>
   );
 }

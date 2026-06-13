@@ -30,6 +30,13 @@ const config: Config = {
         sans: ["ui-sans-serif", "system-ui", "-apple-system", "sans-serif"],
         mono: ["ui-monospace", "Cascadia Code", "SF Mono", "monospace"],
       },
+      // Fluent 절제형 토큰 — globals.css CSS 변수 매핑 (네임드로 두어 기존 rounded/shadow 무영향)
+      borderRadius: {
+        panel: "var(--radius)",
+      },
+      boxShadow: {
+        panel: "var(--shadow)",
+      },
       fontSize: {
         // 13px 베이스, 11px 메타, 15px 타이틀 (DESIGN.md 참조)
         meta: ["11px", { lineHeight: "1.4" }],

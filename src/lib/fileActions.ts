@@ -1,0 +1,105 @@
+import { commands } from "@/types/bindings";
+import type { DeleteMode, EntryRef, Location } from "@/types/bindings";
+import { usePanes, activeTab, type PaneId } from "@/stores/panes";
+import type { DialogState } from "@/stores/ui-dialogs";
+import { formatErr } from "@/lib/error";
+
+type OpenFn = (d: DialogState) => void;
+type ToastFn = (msg: string) => void;
+
+/**
+ * 파괴적/생성 작업 트리거 — 키보드(useDestructiveKeys)와 툴바(PaneToolbar)가 공유.
+ * plan 호출까지만 — execute 는 App.tsx 의 dialog 핸들러가 진행 (CLAUDE.md §3/§4).
+ *
+ * 모두 "활성 패널의 선택(set) 또는 cursor 단일 항목"을 대상으로 동작.
+ */
+
+interface ActiveCtx {
+  active: PaneId;
+  opposite: PaneId;
+  tab: ReturnType<typeof activeTab>;
+  targets: EntryRef[];
+}
+
+/** 활성 패널의 대상 항목 + 반대 패널 id 해석. */
+export function resolveActiveTargets(): ActiveCtx {
+  const state = usePanes.getState();
+  const active = state.activePane;
+  const opposite: PaneId = active === "left" ? "right" : "left";
+  const tab = activeTab(state, active);
+  const cursorEntry = tab.entries[tab.cursorIndex];
+  const names =
+    tab.selected.size > 0
+      ? Array.from(tab.selected)
+      : cursorEntry
+        ? [cursorEntry.name]
+        : [];
+  const targets: EntryRef[] = names.map((name) => ({ location: tab.location, name }));
+  return { active, opposite, tab, targets };
+}
+
+/** F2 — 단일 선택만 rename. */
+export function triggerRename(open: OpenFn, showToast: ToastFn): void {
+  const { targets } = resolveActiveTargets();
+  if (targets.length !== 1) {
+    showToast("Rename: select exactly one item");
+    return;
+  }
+  open({ kind: "rename", target: targets[0]! });
+}
+
+/** F7 — 활성 패널 현재 디렉토리에 새 폴더. */
+export function triggerMkdir(open: OpenFn): void {
+  const { tab } = resolveActiveTargets();
+  open({ kind: "mkdir", parent: tab.location });
+}
+
+/** targets 를 dst 로 복사/이동 plan 호출 후 확인 다이얼로그. 키보드·툴바·DnD 공유. */
+export async function planTransferTo(
+  targets: EntryRef[],
+  dst: Location,
+  mode: "copy" | "move",
+  open: OpenFn,
+  showToast: ToastFn,
+): Promise<void> {
+  if (targets.length === 0) return;
+  if (mode === "move") {
+    const r = await commands.fsMovePlan(targets, dst);
+    if (r.status === "ok") open({ kind: "move-confirm", plan: r.data });
+    else showToast(`Move plan failed: ${formatErr(r.error)}`);
+  } else {
+    const r = await commands.fsCopyPlan(targets, dst);
+    if (r.status === "ok") open({ kind: "copy-confirm", plan: r.data });
+    else showToast(`Copy plan failed: ${formatErr(r.error)}`);
+  }
+}
+
+/** F5 — 반대 패널로 복사. */
+export async function triggerCopy(open: OpenFn, showToast: ToastFn): Promise<void> {
+  const { opposite, targets } = resolveActiveTargets();
+  const dst: Location = activeTab(usePanes.getState(), opposite).location;
+  await planTransferTo(targets, dst, "copy", open, showToast);
+}
+
+/** F6 — 반대 패널로 이동. */
+export async function triggerMove(open: OpenFn, showToast: ToastFn): Promise<void> {
+  const { opposite, targets } = resolveActiveTargets();
+  const dst: Location = activeTab(usePanes.getState(), opposite).location;
+  await planTransferTo(targets, dst, "move", open, showToast);
+}
+
+/** Delete(trash) / Shift+Delete(permanent). */
+export async function triggerDelete(
+  mode: DeleteMode,
+  open: OpenFn,
+  showToast: ToastFn,
+): Promise<void> {
+  const { targets } = resolveActiveTargets();
+  if (targets.length === 0) return;
+  const r = await commands.fsDeletePlan(targets, mode);
+  if (r.status === "ok") {
+    open({ kind: mode === "permanent" ? "delete-danger" : "delete-confirm", plan: r.data });
+  } else {
+    showToast(`Delete plan failed: ${formatErr(r.error)}`);
+  }
+}

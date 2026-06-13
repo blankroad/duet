@@ -7,9 +7,14 @@ import { create } from "zustand";
 interface UIState {
   sidebarOpen: boolean;
   toggleSidebar: () => void;
+  /** 미리보기 패널 표시 여부 (F11 토글). */
+  previewOpen: boolean;
+  togglePreview: () => void;
 }
 
 export const useUI = create<UIState>((set) => ({
   sidebarOpen: true,
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
+  previewOpen: false,
+  togglePreview: () => set((s) => ({ previewOpen: !s.previewOpen })),
 }));

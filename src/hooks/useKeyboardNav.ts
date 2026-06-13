@@ -28,15 +28,29 @@ export function useKeyboardNav(
       const state = usePanes.getState();
       const id = state.activePane;
       const tab = activeTab(state, id);
+      // grid 뷰에서 ↑↓ 는 한 행(=컬럼 수)만큼, ←→ 는 1칸. 그 외 뷰는 단일 컬럼.
+      const rowStep = tab.viewMode === "grid" ? Math.max(1, tab.gridCols) : 1;
 
       switch (e.key) {
         case "ArrowDown":
           e.preventDefault();
-          state.moveCursor(id, 1);
+          state.moveCursor(id, rowStep);
           break;
         case "ArrowUp":
           e.preventDefault();
-          state.moveCursor(id, -1);
+          state.moveCursor(id, -rowStep);
+          break;
+        case "ArrowLeft":
+          if (tab.viewMode === "grid") {
+            e.preventDefault();
+            state.moveCursor(id, -1);
+          }
+          break;
+        case "ArrowRight":
+          if (tab.viewMode === "grid") {
+            e.preventDefault();
+            state.moveCursor(id, 1);
+          }
           break;
         case "Enter":
           e.preventDefault();

@@ -33,6 +33,10 @@ export interface BuiltinDeps {
   refresh: () => void;
   toggleHidden: () => void;
   toggleSidebar: () => void;
+  togglePreview: () => void;
+  viewDetails: () => void;
+  viewGrid: () => void;
+  viewTiles: () => void;
   // sort (5)
   sortByName: () => void;
   sortBySize: () => void;
@@ -61,6 +65,10 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
     { id: "view.refreshF5", label: "Refresh (F5)", category: "View", defaultKey: "F5", action: deps.refresh },
     { id: "view.toggleHidden", label: "Toggle hidden files", category: "View", defaultKey: "Ctrl+H", action: deps.toggleHidden },
     { id: "view.toggleSidebar", label: "Toggle sidebar", category: "View", defaultKey: "Ctrl+B", action: deps.toggleSidebar },
+    { id: "view.togglePreview", label: "Toggle preview", category: "View", defaultKey: "F11", action: deps.togglePreview },
+    { id: "view.details", label: "View: Details", category: "View", action: deps.viewDetails },
+    { id: "view.grid", label: "View: Grid", category: "View", action: deps.viewGrid },
+    { id: "view.tiles", label: "View: Tiles", category: "View", action: deps.viewTiles },
     { id: "sort.byName", label: "Sort by name", category: "Sort", defaultKey: "Ctrl+Shift+1", action: deps.sortByName },
     { id: "sort.bySize", label: "Sort by size", category: "Sort", defaultKey: "Ctrl+Shift+2", action: deps.sortBySize },
     { id: "sort.byMtime", label: "Sort by modified", category: "Sort", defaultKey: "Ctrl+Shift+3", action: deps.sortByMtime },
