@@ -1,0 +1,20 @@
+# SSH 통합 테스트 픽스처 — sshd + rsync 컨테이너 한 대.
+#
+# 기동: scripts/ssh-it.sh (키 생성 → build → up --wait → cargo test → down)
+# 수동: docker compose -f src-tauri/tests/fixtures/ssh/docker-compose.yml up -d --build --wait
+services:
+  ssh:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: duet-ssh-it
+    ports:
+      # 호스트 2222 → 컨테이너 22. 테스트 하니스 기본값과 일치.
+      - "127.0.0.1:2222:22"
+    healthcheck:
+      # sshd 가 22 를 listen 할 때까지 — `up --wait` 가 healthy 까지 블록.
+      test: ["CMD-SHELL", "nc -z localhost 22 || exit 1"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 2s

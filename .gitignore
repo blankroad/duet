@@ -31,6 +31,9 @@ Thumbs.db
 *.key
 *.pfx
 
+# SSH 통합 테스트 픽스처의 런타임 생성 키 (테스트 전용 — 절대 커밋 금지)
+/src-tauri/tests/fixtures/ssh/keys/
+
 # Lock files for sub-projects (root 만 커밋)
 # (pnpm-lock.yaml, Cargo.lock 은 root 에서 커밋)
 .gstack/

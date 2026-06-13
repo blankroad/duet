@@ -70,7 +70,8 @@
 - [x] 같은 호스트 감지 (`host_ip` 일치 시 same-host, user 달라도 OK)
 - [x] SSH exec 채널로 `rsync` 또는 `cp -a` 실행 (russh exec, 시스템 ssh X)
 - [x] 진행률 파싱 (rsync `--info=progress2`) + ProgressEvent + ProgressModal
-- [ ] 큰 파일 / 많은 파일에서 검증 (10GB+, 1만개 파일+) — docker compose 후속
+- [x] 큰 파일 / 많은 파일에서 검증 (10GB+, 1만개 파일+) — docker compose 통합 테스트 하니스
+      (`scripts/ssh-it.sh`, `src-tauri/tests/ssh_it_*`). 기본 256MB/2000개, `DUET_SSH_IT_BYTES`/`_COUNT` 로 10GB/1만개 opt-in
 - [x] 실패 시 폴백 정책: hard error (silent relay 절대 X — CLAUDE.md DON'T)
 
 **완료 시 일상 사용**: TC보다 명백히 빠른 일상 도구.
