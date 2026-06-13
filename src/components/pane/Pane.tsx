@@ -1,8 +1,9 @@
+import { useMemo } from "react";
 import { TabBar } from "./TabBar";
 import { PathBar } from "./PathBar";
 import { PaneFilterBar } from "./PaneFilterBar";
 import { EntryList } from "./EntryList";
-import { usePanes, activeTab, selectDisplayedEntries, type PaneId } from "@/stores/panes";
+import { usePanes, activeTab, computeDisplayed, type PaneId } from "@/stores/panes";
 import type { Entry } from "@/types/bindings";
 import clsx from "clsx";
 
@@ -27,7 +28,9 @@ export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward 
   const toggleSelected = usePanes((s) => s.toggleSelected);
   const toggleSortKey = usePanes((s) => s.toggleSortKey);
   const tab = usePanes((s) => activeTab(s, id));
-  const displayed = usePanes((s) => selectDisplayedEntries(id, s));
+  // selector 가 매번 새 배열을 반환하면 zustand v5 무한 re-render → useMemo 로
+  // tab(안정 ref) 변경 시에만 재정렬. (activeTab 은 기존 tab ref 반환.)
+  const displayed = useMemo(() => computeDisplayed(tab), [tab]);
 
   return (
     <div
