@@ -26,16 +26,20 @@ export function useEntryDrag(id: PaneId) {
       const sx = e.clientX;
       const sy = e.clientY;
       const tab = activeTab(usePanes.getState(), id);
-      const names =
-        tab.selected.size > 0 && tab.selected.has(entry.name)
-          ? Array.from(tab.selected)
-          : [entry.name];
+      // 드래그 대상: 누른 항목이 기존 선택에 속하면 선택 전체, 아니면 그 항목만.
+      const dragWholeSelection = tab.selected.size > 0 && tab.selected.has(entry.name);
+      const names = dragWholeSelection ? Array.from(tab.selected) : [entry.name];
       let started = false;
 
       const onMove = (ev: MouseEvent) => {
         if (!started) {
           if (!exceedsThreshold(ev.clientX - sx, ev.clientY - sy)) return;
           started = true;
+          // 선택에 없던 항목을 드래그하면 그 항목만 선택으로 교체 — 기존 선택이
+          // 그대로 남아 드래그 대상과 불일치하던 문제 수정 (marquee 와 동일 의미).
+          if (!dragWholeSelection) {
+            usePanes.getState().setSelected(id, [entry.name]);
+          }
           useDragState.getState().start({
             source: tab.location,
             targets: names.map((name) => ({ location: tab.location, name })),
