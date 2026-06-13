@@ -564,11 +564,17 @@ async fn copy_execute_same_host(
         let src_path = it.location.path.join(&it.name);
         let dst_path = plan.dst.path.join(&it.name);
         let src_arg = shell_escape_path(&src_path)?;
-        let dst_arg = shell_escape_path(&dst_path)?;
 
         let cmd = if use_rsync {
-            format!("rsync -a --info=progress2 -- {src_arg} {dst_arg}")
+            // rsync 는 SRC(trailing-slash 없음) 를 DEST *디렉토리* 안에 basename
+            // 으로 생성한다. 따라서 dst.path.join(name) (= 최종 경로) 을 주면
+            // dir 복사 시 한 단계 더 중첩됨 (dst/many/many/). 부모 디렉토리
+            // (plan.dst.path) 를 줘야 dst/<name> 으로 떨어진다 — file/dir 동일.
+            let dst_parent_arg = shell_escape_path(&plan.dst.path)?;
+            format!("rsync -a --info=progress2 -- {src_arg} {dst_parent_arg}")
         } else {
+            // cp 는 DEST 를 새 이름으로 취급 → 최종 경로를 그대로 준다.
+            let dst_arg = shell_escape_path(&dst_path)?;
             format!("cp -a -- {src_arg} {dst_arg}")
         };
 
