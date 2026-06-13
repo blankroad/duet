@@ -268,7 +268,7 @@ export function selectDisplayedEntries(id: PaneId, state: PanesState): Entry[] {
   return computeDisplayed(t);
 }
 
-function computeDisplayed(t: TabState): Entry[] {
+export function computeDisplayed(t: TabState): Entry[] {
   let arr = t.entries;
   if (t.filter.length > 0) {
     const q = t.filter.toLowerCase();
