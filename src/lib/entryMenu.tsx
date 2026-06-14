@@ -14,8 +14,12 @@ import {
   LayoutGrid,
   ArrowDownUp,
   Eye,
+  ExternalLink,
+  FolderSearch,
 } from "lucide-react";
+import { commands } from "@/types/bindings";
 import type { Entry, Location } from "@/types/bindings";
+import { formatErr } from "@/lib/error";
 import { usePanes, type PaneId, type SortKey, type ViewMode } from "@/stores/panes";
 import { useUIDialogs } from "@/stores/ui-dialogs";
 import { useToast } from "@/stores/toast";
@@ -63,6 +67,12 @@ async function copyText(text: string): Promise<void> {
   }
 }
 
+/** OS 파일 매니저에서 항목 위치 표시 (로컬 전용). */
+async function revealEntry(target: Location): Promise<void> {
+  const r = await commands.revealPath(target);
+  if (r.status === "error") useToast.getState().show(`Reveal failed: ${formatErr(r.error)}`);
+}
+
 export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
   const { paneId, entry, location, selectedCount, onActivate, onOpenInOtherPane } = deps;
   const open = useUIDialogs.getState().open;
@@ -74,12 +84,19 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
 
   const items: MenuEntry[] = [];
 
-  if (isDir && !multi) {
-    items.push(
-      { id: "open", label: "Open", icon: <FolderOpen size={ICON} />, shortcut: "Enter", onSelect: () => onActivate(paneId, entry) },
-      { id: "open-other", label: "Open in other pane", icon: <PanelRight size={ICON} />, onSelect: () => onOpenInOtherPane(paneId, entry) },
-      sep(),
-    );
+  if (!multi) {
+    if (isDir) {
+      items.push(
+        { id: "open", label: "Open", icon: <FolderOpen size={ICON} />, shortcut: "Enter", onSelect: () => onActivate(paneId, entry) },
+        { id: "open-other", label: "Open in other pane", icon: <PanelRight size={ICON} />, onSelect: () => onOpenInOtherPane(paneId, entry) },
+      );
+    } else {
+      items.push({ id: "open", label: "Open", icon: <ExternalLink size={ICON} />, shortcut: "Enter", onSelect: () => onActivate(paneId, entry) });
+    }
+    if (location.source.kind === "local") {
+      items.push({ id: "reveal", label: "Show in file manager", icon: <FolderSearch size={ICON} />, onSelect: () => void revealEntry(child) });
+    }
+    items.push(sep());
   }
 
   items.push(

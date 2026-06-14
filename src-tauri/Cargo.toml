@@ -38,6 +38,7 @@ ssh2-config = "0.4"      # ~/.ssh/config 파싱
 trash = "5"              # 크로스 플랫폼 휴지통
 notify = "7"             # 파일 변경 감지
 ignore = "0.4"           # 디렉토리 워킹
+opener = { version = "0.7", features = ["reveal"] }  # 기본 앱으로 열기 / OS 탐색기에서 보기
 
 # === Encoding ===
 unicode-normalization = "0.1"

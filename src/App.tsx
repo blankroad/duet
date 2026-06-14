@@ -19,6 +19,7 @@ import { CommandPalette } from "@/components/CommandPalette";
 import { ContextMenu } from "@/components/ContextMenu";
 import { useContextMenu } from "@/stores/contextMenu";
 import { buildEntryMenu, buildEmptyMenu, folderName } from "@/lib/entryMenu";
+import { childLocation } from "@/lib/entryDnd";
 import { useCommands } from "@/stores/commands";
 import { usePalette } from "@/stores/palette";
 import { buildBuiltins } from "@/lib/commands";
@@ -103,12 +104,19 @@ function App() {
 
   const onActivate = useCallback(
     (id: PaneId, entry: Entry) => {
-      if (entry.kind !== "dir") return; // file open은 MVP-7
       const tab = activeTab(usePanes.getState(), id);
-      const sep = tab.location.path.endsWith("/") ? "" : "/";
-      navigate(id, tab.location.path + sep + entry.name);
+      if (entry.kind === "dir") {
+        const sep = tab.location.path.endsWith("/") ? "" : "/";
+        void navigate(id, tab.location.path + sep + entry.name);
+        return;
+      }
+      // 파일 — OS 기본 앱으로 열기 (원격은 backend 가 temp 다운로드 후 열기).
+      void (async () => {
+        const r = await commands.openPath(childLocation(tab.location, entry.name));
+        if (r.status === "error") showToast(`Cannot open ${entry.name} — ${formatErr(r.error)}`);
+      })();
     },
-    [navigate],
+    [navigate, showToast],
   );
 
   const onRefresh = useCallback(
