@@ -87,6 +87,8 @@ pub enum OpKind {
     },
     Sync {
         count: u32,
+        /// prune 로 휴지통으로 보낸(삭제 전파) 개수.
+        pruned: u32,
         src: Location,
         dst: Location,
     },
@@ -138,6 +140,14 @@ pub enum UndoAction {
         left_created: Vec<PathBuf>,
         right_source: SourceId,
         right_created: Vec<PathBuf>,
+    },
+    /// 단방향 sync 되돌리기 — 새로 복사 제거 + 덮어쓴 백업 복원 + prune 삭제분 휴지통 복원.
+    /// (휴지통 복원은 best-effort — macOS 로컬은 NotSupported 라 수동 복원 필요.)
+    UndoSync {
+        dst_source: SourceId,
+        created: Vec<PathBuf>,
+        backups_to_restore: Vec<BackupRestore>,
+        pruned: Vec<TrashItem>,
     },
     Irreversible,
 }

@@ -452,6 +452,8 @@ pub struct SyncPlan {
     pub src: Location,
     pub dst: Location,
     pub strategy: CopyStrategy,
+    /// true 면 src 에 없는 dst 항목을 휴지통으로 보냄(삭제 전파). FE 가 토글.
+    pub prune: bool,
 }
 
 /// sync 계획 검증 — 양쪽이 디렉토리이고 같은 위치가 아님. 전략 결정.
@@ -480,7 +482,12 @@ pub async fn sync_plan(
             "sync currently supports local↔local only (same-host SSH sync is a follow-up)".into(),
         ));
     }
-    Ok(SyncPlan { src, dst, strategy })
+    Ok(SyncPlan {
+        src,
+        dst,
+        strategy,
+        prune: false,
+    })
 }
 
 /// src 트리의 파일 개수 (진행률 total 용). best-effort — 실패 시 0.
@@ -530,15 +537,32 @@ pub async fn sync_execute(
         &mut state,
     )
     .await?;
-    let undo = UndoAction::UndoCopy {
-        target_source: plan.dst.source.clone(),
-        copied: state.created,
-        backups_to_restore: state.backups,
-    };
+    // prune: src 에 없는 dst 항목을 휴지통으로 (삭제 전파, undo 복원 가능).
+    let mut pruned = Vec::new();
+    if plan.prune {
+        let batch_id = crate::services::trash::new_batch_id();
+        prune_pass(
+            src_fs,
+            &plan.src.path,
+            dst_fs,
+            &plan.dst.path,
+            &cancel_token,
+            &batch_id,
+            &mut pruned,
+        )
+        .await?;
+    }
     let op = OpKind::Sync {
         count: state.done as u32,
+        pruned: pruned.len() as u32,
         src: plan.src.clone(),
         dst: plan.dst.clone(),
+    };
+    let undo = UndoAction::UndoSync {
+        dst_source: plan.dst.source.clone(),
+        created: state.created,
+        backups_to_restore: state.backups,
+        pruned,
     };
     ctx.journal.push(op, undo).await
 }
@@ -613,6 +637,48 @@ async fn mirror_dir(
                 }
             }
             _ => {} // symlink/other 는 v1 skip.
+        }
+    }
+    Ok(())
+}
+
+/// prune: src 에 없는 dst 항목을 휴지통으로 (삭제 전파). dst 에만 있는 디렉토리는
+/// 통째 trash(재귀 안 함), 양쪽에 있는 디렉토리는 내부로 재귀. TrashItem 으로 기록(undo).
+async fn prune_pass(
+    src_fs: &dyn FileSystem,
+    src_dir: &std::path::Path,
+    dst_fs: &dyn FileSystem,
+    dst_dir: &std::path::Path,
+    cancel: &tokio_util::sync::CancellationToken,
+    batch_id: &str,
+    pruned: &mut Vec<TrashItem>,
+) -> Result<(), DuetError> {
+    let dst_entries = dst_fs.list(dst_dir).await.unwrap_or_default();
+    for e in dst_entries {
+        if cancel.is_cancelled() {
+            return Err(DuetError::Cancelled);
+        }
+        let dp = dst_dir.join(&e.name);
+        let sp = src_dir.join(&e.name);
+        if src_fs.metadata(&sp).await.is_ok() {
+            // 양쪽 존재 — 디렉토리면 내부 prune 재귀(파일은 mirror 가 이미 동기화).
+            if e.kind == crate::types::EntryKind::Dir {
+                Box::pin(prune_pass(
+                    src_fs, &sp, dst_fs, &dp, cancel, batch_id, pruned,
+                ))
+                .await?;
+            }
+        } else {
+            // dst 에만 — 휴지통으로 (디렉토리면 통째).
+            let loc = dst_fs.trash(&dp, batch_id).await?;
+            let trash_path = match &loc {
+                TrashLocation::Local { trash_id } => trash_id.clone(),
+                TrashLocation::Remote { trash_path } => trash_path.to_string_lossy().into_owned(),
+            };
+            pruned.push(TrashItem {
+                trash_path,
+                original_path: dp,
+            });
         }
     }
     Ok(())

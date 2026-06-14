@@ -275,6 +275,76 @@ pub async fn execute_undo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
                     .collect(),
             }
         }
+        UndoAction::UndoSync {
+            dst_source,
+            created,
+            backups_to_restore,
+            pruned,
+        } => {
+            let fs = match fs_for(dst_source, pool).await {
+                Ok(f) => f,
+                Err(e) => return error("source unreachable", e),
+            };
+            // 1) 새로 복사한 파일 제거.
+            for p in created {
+                if fs.metadata(p).await.is_ok() {
+                    if let Err(e) = fs.remove(p).await {
+                        return error("remove copied", e);
+                    }
+                }
+            }
+            // 2) 덮어쓴 백업 복원.
+            for b in backups_to_restore {
+                if fs.metadata(&b.backup_path).await.is_ok() {
+                    if let Err(e) = fs.rename(&b.backup_path, &b.original_path).await {
+                        return error("restore backup", e);
+                    }
+                }
+            }
+            // 3) prune 로 휴지통 보낸 항목 복원 — best-effort(macOS 로컬은 NotSupported).
+            let mut prune_failed = false;
+            let mut refresh = std::collections::HashSet::<PathBuf>::new();
+            for item in pruned {
+                let loc = match dst_source {
+                    SourceId::Local => TrashLocation::Local {
+                        trash_id: item.trash_path.clone(),
+                    },
+                    SourceId::Ssh { .. } => TrashLocation::Remote {
+                        trash_path: PathBuf::from(&item.trash_path),
+                    },
+                };
+                if fs
+                    .restore_from_trash(&loc, &item.original_path)
+                    .await
+                    .is_err()
+                {
+                    prune_failed = true;
+                }
+                if let Some(par) = item.original_path.parent() {
+                    refresh.insert(par.to_path_buf());
+                }
+            }
+            for p in created {
+                if let Some(par) = p.parent() {
+                    refresh.insert(par.to_path_buf());
+                }
+            }
+            UndoOutcome {
+                kind: UndoKind::Ok,
+                message: if prune_failed {
+                    Some("일부 삭제 항목은 휴지통에서 수동 복원 필요 (macOS).".into())
+                } else {
+                    None
+                },
+                refreshed_locations: refresh
+                    .into_iter()
+                    .map(|p| Location {
+                        source: dst_source.clone(),
+                        path: p,
+                    })
+                    .collect(),
+            }
+        }
     }
 }
 

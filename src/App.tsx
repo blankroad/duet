@@ -8,6 +8,7 @@ import { AdHocConnectDialog } from "@/components/connection/AdHocConnectDialog";
 import { RenameDialog } from "@/components/dialogs/RenameDialog";
 import { BatchRenameDialog } from "@/components/dialogs/BatchRenameDialog";
 import { CompareDialog } from "@/components/dialogs/CompareDialog";
+import { SyncDialog } from "@/components/dialogs/SyncDialog";
 import { MkdirDialog } from "@/components/dialogs/MkdirDialog";
 import { CompressDialog } from "@/components/dialogs/CompressDialog";
 import { ArgsDialog } from "@/components/dialogs/ArgsDialog";
@@ -553,17 +554,20 @@ function App() {
     }
   }, [dialog, openDialog, closeDialog, showToast]);
 
-  const onSyncConfirm = useCallback(async () => {
-    if (dialog.kind !== "sync-confirm") return;
-    const plan = dialog.plan;
-    const r = await commands.fsSyncExecute(plan);
-    if (r.status === "ok") {
-      openDialog({ kind: "progress", title: "Syncing…", taskId: r.data });
-    } else {
-      closeDialog();
-      showToast(`Sync failed: ${formatErr(r.error)}`);
-    }
-  }, [dialog, openDialog, closeDialog, showToast]);
+  const onSyncConfirm = useCallback(
+    async (prune: boolean) => {
+      if (dialog.kind !== "sync-confirm") return;
+      const plan = { ...dialog.plan, prune };
+      const r = await commands.fsSyncExecute(plan);
+      if (r.status === "ok") {
+        openDialog({ kind: "progress", title: "Syncing…", taskId: r.data });
+      } else {
+        closeDialog();
+        showToast(`Sync failed: ${formatErr(r.error)}`);
+      }
+    },
+    [dialog, openDialog, closeDialog, showToast],
+  );
 
   const onMoveConfirm = useCallback(async () => {
     if (dialog.kind !== "move-confirm") return;
@@ -869,13 +873,11 @@ function App() {
         />
       )}
       {dialog.kind === "sync-confirm" && (
-        <ConfirmDialog
-          title="Sync to other pane"
-          body={`Mirror “${dialog.srcLabel}” → “${dialog.dstLabel}” (one-way). New and changed files are copied; nothing is deleted. Overwritten files are backed up and the whole sync is undoable.`}
-          ctaLabel="Sync"
-          ctaTone="neutral"
-          onCancel={closeDialog}
-          onConfirm={onSyncConfirm}
+        <SyncDialog
+          srcLabel={dialog.srcLabel}
+          dstLabel={dialog.dstLabel}
+          onClose={closeDialog}
+          onConfirm={(prune) => void onSyncConfirm(prune)}
         />
       )}
       {dialog.kind === "repack-confirm" && (
