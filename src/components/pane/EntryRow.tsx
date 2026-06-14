@@ -23,8 +23,9 @@ export function EntryRow({ entry, isCursor, isSelected, onClick, onDoubleClick }
     <div
       className={clsx(
         "flex h-7 items-center gap-2 px-2 text-base cursor-default",
-        "hover:bg-subtle",
-        isSelected && "bg-active",
+        // 선택된 행은 hover 로 회색(bg-subtle) 덮어쓰지 않음 — 마키 드래그 중
+        // 포인터가 지나가도 파란 선택색 유지 (hover 변종이 specificity 로 이김).
+        isSelected ? "bg-active" : "hover:bg-subtle",
         isCursor && "border-l-2 border-l-accent pl-[6px]",
         !isCursor && "border-l-2 border-l-transparent",
       )}

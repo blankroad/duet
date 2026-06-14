@@ -189,8 +189,8 @@ function GridCell({ entry, isCursor, isSelected, highlight, onMouseDown, onConte
       onContextMenu={onContextMenu}
       className={clsx(
         "m-1 flex flex-col items-center justify-center gap-1 rounded-panel border p-2 cursor-default",
-        "hover:bg-subtle",
-        isSelected ? "bg-active" : "border-transparent",
+        // 선택 셀은 hover 회색으로 덮지 않음 (마키 드래그 중 파란 선택색 유지).
+        isSelected ? "bg-active" : "border-transparent hover:bg-subtle",
         isCursor ? "border-accent" : "border-transparent",
         highlight && "ring-2 ring-inset ring-accent",
       )}
@@ -219,8 +219,8 @@ function TileRow({ entry, isCursor, isSelected, highlight, onMouseDown, onContex
       onContextMenu={onContextMenu}
       className={clsx(
         "flex h-12 items-center gap-3 px-3 cursor-default",
-        "hover:bg-subtle",
-        isSelected && "bg-active",
+        // 선택 행은 hover 회색으로 덮지 않음 (마키 드래그 중 파란 선택색 유지).
+        isSelected ? "bg-active" : "hover:bg-subtle",
         isCursor ? "border-l-2 border-l-accent pl-[10px]" : "border-l-2 border-l-transparent",
         highlight && "ring-2 ring-inset ring-accent",
       )}
