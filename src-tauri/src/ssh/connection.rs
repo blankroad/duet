@@ -19,7 +19,7 @@
 //! 안쪽(마지막 jump)이 먼저 닫히도록 역순으로 저장한다 (`connect_via_jump` 참조).
 
 use std::net::{IpAddr, Ipv4Addr};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -39,22 +39,33 @@ use crate::types::{DuetError, HostKeyInfo};
 /// 미지/변경 키는 거부(`Ok(false)`)하고 사유를 `report` 에 적어 둔다. 호출자가
 /// 그 report 를 읽어 `HostKeyUnverified` 에러로 변환 → frontend 가 신뢰 다이얼로그.
 /// 사용자가 미지의 키를 수락하면 `learn=true` 로 재연결해 known_hosts 에 기록(TOFU).
-/// **변경된 키는 learn 여부와 무관하게 항상 거부** (MITM 방어).
+/// **변경된 키는 기본적으로 거부**(MITM 방어). 사용자가 새 fingerprint 를 검증 후
+/// `replace_changed=true` 로 명시 승인한 경우에만, 기존 줄을 백업·제거하고 교체.
 pub struct HostKeyVerifier {
     host: String,
     port: u16,
     /// true 면 미지의 키를 수락하고 known_hosts 에 추가 (사용자가 신뢰 후 재연결).
     learn: bool,
+    /// true 면 *변경된* 키를 known_hosts 에서 교체(기존 줄 백업 후 제거 → 새 키 추가).
+    /// 사용자가 새 fingerprint 를 out-of-band 검증한 뒤에만 켜진다 (§9 MITM 인지).
+    replace_changed: bool,
     /// 거부 사유 출력 채널 — 핸드셰이크 백그라운드 task 에서 채워 caller 가 읽음.
     report: Arc<Mutex<Option<HostKeyInfo>>>,
 }
 
 impl HostKeyVerifier {
-    fn new(host: &str, port: u16, learn: bool, report: Arc<Mutex<Option<HostKeyInfo>>>) -> Self {
+    fn new(
+        host: &str,
+        port: u16,
+        learn: bool,
+        replace_changed: bool,
+        report: Arc<Mutex<Option<HostKeyInfo>>>,
+    ) -> Self {
         Self {
             host: host.to_string(),
             port,
             learn,
+            replace_changed,
             report,
         }
     }
@@ -142,11 +153,36 @@ impl Handler for HostKeyVerifier {
                     Ok(false)
                 }
             }
-            // 변경된 키 → learn 여부와 무관하게 항상 거부 (MITM 방어).
+            // 변경된 키 → 기본은 거부 (MITM 방어). 단 사용자가 새 fingerprint 를
+            // out-of-band 검증 후 replace_changed 로 명시 승인했고 충돌 줄 번호를
+            // 알 때만, 기존 줄을 백업·제거하고 새 키로 교체 후 수락.
             KnownHostDecision::Reject {
                 changed: true,
                 line,
             } => {
+                if self.replace_changed {
+                    if let Some(l) = line {
+                        match replace_changed_known_host(
+                            l,
+                            &self.host,
+                            self.port,
+                            server_public_key,
+                        ) {
+                            Ok(backup) => {
+                                tracing::info!(
+                                    "known_hosts: replaced changed key for {} (backup: {})",
+                                    self.host,
+                                    backup.display()
+                                );
+                                return Ok(true);
+                            }
+                            Err(e) => {
+                                // 교체 실패 → 안전하게 거부(사유 기록). 키는 로그 금지(§5).
+                                tracing::warn!("known_hosts replace failed for {}: {e}", self.host);
+                            }
+                        }
+                    }
+                }
                 self.record(server_public_key, true, line);
                 Ok(false)
             }
@@ -154,17 +190,100 @@ impl Handler for HostKeyVerifier {
     }
 }
 
+/// russh 와 *동일한* 줄 계수로 `KeyChanged { line }` 을 물리적 줄 인덱스로 매핑.
+///
+/// russh 의 `check_known_hosts` 는 주석(`#` 로 시작) 줄을 **세지 않는다** —
+/// `line` 은 주석을 제외한 1-based 순번이다. 잘못된 줄을 지우면 위험하므로 이
+/// 계수를 정확히 재현해 단위 테스트한다. blank 줄은 (주석이 아니므로) 센다.
+fn physical_line_index(content: &str, russh_line: usize) -> Option<usize> {
+    if russh_line == 0 {
+        return None;
+    }
+    let mut nth = 0usize;
+    for (idx, piece) in content.split_inclusive('\n').enumerate() {
+        // russh: `buffer.as_bytes().first() == Some(&b'#')` 일 때 계수 제외.
+        if piece.as_bytes().first() == Some(&b'#') {
+            continue;
+        }
+        nth += 1;
+        if nth == russh_line {
+            return Some(idx);
+        }
+    }
+    None
+}
+
+/// 표준 known_hosts 경로 — russh 의 `known_hosts_path()` 와 동일 규칙
+/// (windows: `~/ssh/known_hosts`, 그 외: `~/.ssh/known_hosts`).
+fn default_known_hosts_path() -> Result<PathBuf, DuetError> {
+    let home = dirs::home_dir().ok_or_else(|| DuetError::Io("home directory not found".into()))?;
+    #[cfg(target_os = "windows")]
+    let p = home.join("ssh").join("known_hosts");
+    #[cfg(not(target_os = "windows"))]
+    let p = home.join(".ssh").join("known_hosts");
+    Ok(p)
+}
+
+/// 변경된 호스트키를 백업 후 교체한다. 반환값은 백업 파일 경로(복구용).
+///
+/// **안전 절차:** ① 편집 전 파일 전체를 `known_hosts.duet-bak.<unix>` 로 백업,
+/// ② russh 와 동일한 줄 계수로 충돌 줄 *하나만* 제거(나머지·줄바꿈 그대로 보존),
+/// ③ russh 의 learn 으로 새 키 추가(포맷 일치). §3 의 파일 삭제 trait 대상은
+/// 사용자 데이터이고, 이건 신뢰스토어 config 편집 + 전체 백업이라 별도 취급.
+fn replace_changed_known_host(
+    russh_line: usize,
+    host: &str,
+    port: u16,
+    new_key: &key::PublicKey,
+) -> Result<PathBuf, DuetError> {
+    let path = default_known_hosts_path()?;
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| DuetError::Io(format!("read known_hosts: {e}")))?;
+
+    let target_idx = physical_line_index(&content, russh_line)
+        .ok_or_else(|| DuetError::Io(format!("known_hosts line {russh_line} out of range")))?;
+
+    // ① 백업 — 편집 전 원본 전체. 같은 디렉토리에 타임스탬프 suffix.
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let mut backup_os = path.clone().into_os_string();
+    backup_os.push(format!(".duet-bak.{secs}"));
+    let backup = PathBuf::from(backup_os);
+    std::fs::write(&backup, &content)
+        .map_err(|e| DuetError::Io(format!("backup known_hosts: {e}")))?;
+
+    // ② 충돌 줄 하나만 제거하고 재작성.
+    let mut rebuilt = String::with_capacity(content.len());
+    for (idx, piece) in content.split_inclusive('\n').enumerate() {
+        if idx != target_idx {
+            rebuilt.push_str(piece);
+        }
+    }
+    std::fs::write(&path, &rebuilt)
+        .map_err(|e| DuetError::Io(format!("write known_hosts: {e}")))?;
+
+    // ③ 새 키 추가 (russh 포맷 — 끝 줄바꿈 보정 포함).
+    russh::keys::known_hosts::learn_known_hosts_path(host, port, new_key, &path)
+        .map_err(|e| DuetError::Io(format!("learn new host key: {e}")))?;
+
+    Ok(backup)
+}
+
 /// 호스트키 검증 정책 — connect 경로 전체에서 공유(같은 report).
 #[derive(Clone)]
 struct HostKeyPolicy {
     learn: bool,
+    replace_changed: bool,
     report: Arc<Mutex<Option<HostKeyInfo>>>,
 }
 
 impl HostKeyPolicy {
-    fn new(learn: bool) -> Self {
+    fn new(learn: bool, replace_changed: bool) -> Self {
         Self {
             learn,
+            replace_changed,
             report: Arc::new(Mutex::new(None)),
         }
     }
@@ -239,7 +358,7 @@ pub async fn connect_with_key(
     // connect_stream 에 TcpStream 을 직접 전달 — 이미 연결된 소켓 재사용.
     // 호스트키 검증 strict (learn 없음 — 이 직접 API 는 사용자 신뢰 흐름 밖).
     let report = Arc::new(Mutex::new(None));
-    let verifier = HostKeyVerifier::new(hostname, port, false, report.clone());
+    let verifier = HostKeyVerifier::new(hostname, port, false, false, report.clone());
     let mut handle = russh::client::connect_stream(make_config(), tcp, verifier)
         .await
         .map_err(|e| {
@@ -290,7 +409,7 @@ pub async fn connect_with_agent(
         .ip();
 
     let report = Arc::new(Mutex::new(None));
-    let verifier = HostKeyVerifier::new(hostname, port, false, report.clone());
+    let verifier = HostKeyVerifier::new(hostname, port, false, false, report.clone());
     let mut handle = russh::client::connect_stream(make_config(), tcp, verifier)
         .await
         .map_err(|e| {
@@ -357,6 +476,7 @@ pub async fn connect_with_password(
     user: &str,
     password: &str,
     learn_host_key: bool,
+    replace_changed_host_key: bool,
 ) -> Result<SshSession, DuetError> {
     let tcp = TcpStream::connect((hostname, port))
         .await
@@ -367,7 +487,13 @@ pub async fn connect_with_password(
         .ip();
 
     let report = Arc::new(Mutex::new(None));
-    let verifier = HostKeyVerifier::new(hostname, port, learn_host_key, report.clone());
+    let verifier = HostKeyVerifier::new(
+        hostname,
+        port,
+        learn_host_key,
+        replace_changed_host_key,
+        report.clone(),
+    );
     let mut handle = russh::client::connect_stream(make_config(), tcp, verifier)
         .await
         .map_err(|e| {
@@ -484,7 +610,13 @@ async fn handshake_on_stream<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    let verifier = HostKeyVerifier::new(host, port, policy.learn, policy.report.clone());
+    let verifier = HostKeyVerifier::new(
+        host,
+        port,
+        policy.learn,
+        policy.replace_changed,
+        policy.report.clone(),
+    );
     russh::client::connect_stream(make_config(), stream, verifier)
         .await
         .map_err(|e| {
@@ -673,14 +805,16 @@ async fn resolve_target_ip(hostname: &str) -> IpAddr {
 /// `connect_with_password` 별도 호출.
 ///
 /// `learn_host_key=true` 면 미지의 호스트키를 known_hosts 에 기록(사용자가 신뢰
-/// 다이얼로그에서 수락 후 재연결). 변경된 키는 이 플래그와 무관하게 항상 거부.
+/// 다이얼로그에서 수락 후 재연결). `replace_changed_host_key=true` 면 *변경된*
+/// 키를 백업 후 교체(사용자가 새 fingerprint 를 검증 후 명시 승인한 경우만).
 /// 호스트키 미검증 시 `DuetError::HostKeyUnverified(info)` 를 반환한다.
 pub async fn connect(
     host: &SshHostEntry,
     all_hosts: &[SshHostEntry],
     learn_host_key: bool,
+    replace_changed_host_key: bool,
 ) -> Result<SshSession, DuetError> {
-    let policy = HostKeyPolicy::new(learn_host_key);
+    let policy = HostKeyPolicy::new(learn_host_key, replace_changed_host_key);
     if host.proxy_jump.is_empty() {
         connect_direct(host, &policy).await
     } else {
@@ -697,6 +831,27 @@ mod tests {
     fn accept_all_handler_is_send() {
         fn assert_send<T: Send>() {}
         assert_send::<super::HostKeyVerifier>();
+    }
+
+    /// russh 의 `KeyChanged { line }` → 물리 줄 인덱스 매핑.
+    /// **핵심:** russh 는 주석(`#`) 줄을 세지 않으므로 그 계수를 정확히 재현해야
+    /// 엉뚱한 줄을 지우지 않는다 (변경 키 교체의 가장 위험한 부분).
+    #[test]
+    fn physical_line_index_skips_comments_like_russh() {
+        use super::physical_line_index;
+        // 주석 2줄 뒤 호스트 항목 2개 + 사이 blank 줄.
+        let content = "# header comment\n# another\nhostA key1\n\nhostB key2\n";
+        // russh line 1 = 첫 *비주석* 줄 = 물리 idx 2 (hostA).
+        assert_eq!(physical_line_index(content, 1), Some(2));
+        // russh line 2 = 두 번째 비주석 = blank(물리 idx 3) — blank 도 셈.
+        assert_eq!(physical_line_index(content, 2), Some(3));
+        // russh line 3 = hostB = 물리 idx 4.
+        assert_eq!(physical_line_index(content, 3), Some(4));
+        // 범위 밖.
+        assert_eq!(physical_line_index(content, 4), None);
+        assert_eq!(physical_line_index(content, 0), None);
+        // 주석만 있으면 매핑 없음.
+        assert_eq!(physical_line_index("# only comment\n", 1), None);
     }
 
     /// known_hosts 검증 분류 — 미지 → learn → 일치 → 변경 (실제 SSH 서버 불필요).
@@ -765,6 +920,7 @@ mod tests {
                 "user",
                 "pw",
                 false,
+                false,
             ))
         };
     }
@@ -799,7 +955,7 @@ mod tests {
         };
         let all = vec![target.clone()]; // jump 가 목록에 없음
 
-        let result = super::connect(&target, &all, false).await;
+        let result = super::connect(&target, &all, false, false).await;
         match result {
             Err(DuetError::ConnectionFailed(msg)) => {
                 assert!(
@@ -838,7 +994,7 @@ mod tests {
         };
         let all = vec![target.clone(), b1];
 
-        match super::connect(&target, &all, false).await {
+        match super::connect(&target, &all, false, false).await {
             Err(DuetError::ConnectionFailed(msg)) => {
                 assert!(
                     msg.contains("b2"),

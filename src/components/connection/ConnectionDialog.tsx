@@ -50,12 +50,13 @@ export function ConnectionDialog({ alias, onClose, onConnected }: ConnectionDial
     }
   }, [open, alias]);
 
-  // trust=true 면 미지의 호스트키를 known_hosts 에 기록(사용자가 prompt 에서 신뢰).
-  const doConnect = async (trust: boolean) => {
+  // trust=true 면 미지의 호스트키를 known_hosts 에 기록(TOFU). replaceChanged=true 면
+  // *변경된* 키를 백업 후 교체(사용자가 새 fingerprint 검증 후 prompt 에서 명시 승인).
+  const doConnect = async (trust: boolean, replaceChanged = false) => {
     if (!host) return;
     setPhase({ kind: "connecting" });
     const pw = password ? password : null;
-    const result = await commands.connectionOpen(host.alias, pw, trust);
+    const result = await commands.connectionOpen(host.alias, pw, trust, replaceChanged);
     if (result.status === "ok") {
       setPassword(""); // 성공 — 즉시 clear (CLAUDE.md §5)
       const dto = result.data;
@@ -122,7 +123,12 @@ export function ConnectionDialog({ alias, onClose, onConnected }: ConnectionDial
 
           {phase.kind === "error" && <ErrorBox error={phase.error} />}
           {phase.kind === "host-key" && (
-            <HostKeyPrompt info={phase.info} onTrust={() => void doConnect(true)} onCancel={onClose} />
+            <HostKeyPrompt
+              info={phase.info}
+              onTrust={() => void doConnect(true)}
+              onReplace={() => void doConnect(false, true)}
+              onCancel={onClose}
+            />
           )}
 
           {phase.kind !== "host-key" && (

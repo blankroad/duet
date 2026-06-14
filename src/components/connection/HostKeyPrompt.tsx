@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { ShieldQuestion, ShieldAlert } from "lucide-react";
 import type { HostKeyInfo } from "@/types/bindings";
 
@@ -5,19 +6,24 @@ import type { HostKeyInfo } from "@/types/bindings";
  * 서버 호스트키 검증 결과 프롬프트 (OpenSSH 방식).
  *
  * - 미지의 호스트(TOFU): fingerprint 확인 후 "Trust & connect" → known_hosts 기록.
- * - 키 변경(MITM 위험): 신뢰 버튼 없음. ~/.ssh/known_hosts 의 충돌 라인 수동 수정 안내.
+ * - 키 변경(MITM 위험): 기본은 신뢰 불가. 사용자가 새 fingerprint 를 다른 경로로
+ *   확인했다고 체크박스로 명시 승인하면 "키 교체 후 연결" 가능 — 백엔드가 기존
+ *   known_hosts 줄을 백업 후 제거하고 새 키로 교체한다(원본은 `.duet-bak.<ts>`).
  *
- * 신뢰 결정은 사용자만 — fingerprint 를 보여주고 명시 승인을 받는다 (CLAUDE.md §9).
+ * 신뢰/교체 결정은 사용자만 — fingerprint 를 보여주고 명시 승인을 받는다 (CLAUDE.md §9).
  */
 export function HostKeyPrompt({
   info,
   onTrust,
+  onReplace,
   onCancel,
 }: {
   info: HostKeyInfo;
   onTrust: () => void;
+  onReplace: () => void;
   onCancel: () => void;
 }) {
+  const [verified, setVerified] = useState(false);
   if (info.changed) {
     return (
       <div className="mt-3 rounded border border-danger/60 bg-danger/10 p-3 text-meta">
@@ -30,22 +36,40 @@ export function HostKeyPrompt({
         </p>
         <KeyRow label="제시된 키" value={info.fingerprint} />
         <p className="mt-1.5 text-fg-muted">
-          신뢰할 수 있는 변경임을 확인했다면 <span className="font-mono">~/.ssh/known_hosts</span>
+          이 fingerprint 가 신뢰할 수 있는 출처(서버 관리자/콘솔 등)와 일치하는지{" "}
+          <b>다른 경로로</b> 확인하세요. 확인되면 아래에서 키를 교체할 수 있습니다 — 기존{" "}
+          <span className="font-mono">~/.ssh/known_hosts</span>
           {info.changed_line != null && (
             <>
               {" "}
-              의 <span className="font-mono">{info.changed_line}</span> 번째 줄
+              의 <span className="font-mono">{info.changed_line}</span> 번째 항목
             </>
           )}{" "}
-          을 수동으로 제거한 뒤 다시 연결하세요.
+          은 백업(<span className="font-mono">.duet-bak</span>) 후 제거됩니다.
         </p>
-        <div className="mt-3 flex justify-end">
+        <label className="mt-2 flex items-center gap-2 text-fg">
+          <input
+            type="checkbox"
+            checked={verified}
+            onChange={(e) => setVerified(e.target.checked)}
+          />
+          위 fingerprint 를 다른 경로로 확인했습니다
+        </label>
+        <div className="mt-3 flex justify-end gap-2">
           <button
             type="button"
             onClick={onCancel}
             className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
           >
             닫기
+          </button>
+          <button
+            type="button"
+            disabled={!verified}
+            onClick={onReplace}
+            className="rounded bg-danger px-3 py-1 text-base text-white disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            키 교체 후 연결
           </button>
         </div>
       </div>

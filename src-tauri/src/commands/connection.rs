@@ -84,27 +84,38 @@ pub async fn ssh_config_hosts() -> Result<Vec<SshHostEntryDto>, DuetError> {
 /// `password` 가 `Some` 이면 키/agent 실패 시 마지막 fallback 으로 사용.
 /// 사용 여부와 무관하게 이 함수가 끝나기 전 평문은 `zeroize_string` 으로
 /// best-effort 제거된다 — CLAUDE.md §5 ("drop 시 zeroize 노력").
+#[allow(clippy::too_many_arguments)] // 연결 입력 + 두 호스트키 신뢰 플래그.
 async fn open_and_register(
     host: SshHostEntry,
     all_hosts: &[SshHostEntry],
     mut password: Option<String>,
     trust_host_key: bool,
+    replace_changed_host_key: bool,
     pool: &Arc<ConnectionPool>,
     app: &tauri::AppHandle,
 ) -> Result<ConnectionDto, DuetError> {
     // 키 → agent fallback. AuthFailed 면 password 가 있을 때만 마지막 시도.
     // trust_host_key=true 면 미지의 호스트키를 known_hosts 에 기록(사용자 신뢰 후 재연결).
-    let connect_result = match connect(&host, all_hosts, trust_host_key).await {
-        Ok(s) => Ok(s),
-        Err(DuetError::AuthFailed) => match password.as_deref() {
-            Some(pw) => {
-                connect_with_password(&host.hostname, host.port, &host.user, pw, trust_host_key)
+    // replace_changed_host_key=true 면 변경된 키를 백업 후 교체(사용자 검증 후 명시 승인).
+    let connect_result =
+        match connect(&host, all_hosts, trust_host_key, replace_changed_host_key).await {
+            Ok(s) => Ok(s),
+            Err(DuetError::AuthFailed) => match password.as_deref() {
+                Some(pw) => {
+                    connect_with_password(
+                        &host.hostname,
+                        host.port,
+                        &host.user,
+                        pw,
+                        trust_host_key,
+                        replace_changed_host_key,
+                    )
                     .await
-            }
-            None => Err(DuetError::AuthFailed),
-        },
-        Err(e) => Err(e),
-    };
+                }
+                None => Err(DuetError::AuthFailed),
+            },
+            Err(e) => Err(e),
+        };
     // 성공/실패 무관하게 평문 비밀번호 즉시 zeroize (§5).
     if let Some(mut pw) = password.take() {
         crate::services::secret_vault::zeroize_string(&mut pw);
@@ -156,6 +167,7 @@ pub async fn connection_open(
     alias: String,
     password: Option<String>,
     trust_host_key: bool,
+    replace_changed_host_key: bool,
     pool: tauri::State<'_, Arc<ConnectionPool>>,
     app: tauri::AppHandle,
 ) -> Result<ConnectionDto, DuetError> {
@@ -172,6 +184,7 @@ pub async fn connection_open(
         &all_hosts,
         password,
         trust_host_key,
+        replace_changed_host_key,
         pool.inner(),
         &app,
     )
@@ -193,6 +206,7 @@ pub async fn connection_open_adhoc(
     key_path: Option<PathBuf>,
     password: Option<String>,
     trust_host_key: bool,
+    replace_changed_host_key: bool,
     pool: tauri::State<'_, Arc<ConnectionPool>>,
     app: tauri::AppHandle,
 ) -> Result<ConnectionDto, DuetError> {
@@ -210,7 +224,16 @@ pub async fn connection_open_adhoc(
         identity_files: key_path.into_iter().collect(),
         proxy_jump: vec![],
     };
-    open_and_register(entry, &[], password, trust_host_key, pool.inner(), &app).await
+    open_and_register(
+        entry,
+        &[],
+        password,
+        trust_host_key,
+        replace_changed_host_key,
+        pool.inner(),
+        &app,
+    )
+    .await
 }
 
 /// 연결 종료 + ConnectionPool 에서 제거.

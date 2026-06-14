@@ -122,8 +122,9 @@ export function AdHocConnectDialog({
     }
   };
 
-  // trust=true 면 미지의 호스트키를 known_hosts 에 기록(사용자가 prompt 에서 신뢰).
-  const doConnect = async (trust: boolean) => {
+  // trust=true 면 미지의 호스트키를 known_hosts 에 기록(TOFU). replaceChanged=true 면
+  // *변경된* 키를 백업 후 교체(사용자가 새 fingerprint 검증 후 prompt 에서 명시 승인).
+  const doConnect = async (trust: boolean, replaceChanged = false) => {
     const portNum = Number.parseInt(port, 10);
     if (!host.trim() || !user.trim() || Number.isNaN(portNum)) {
       setPhase({
@@ -142,6 +143,7 @@ export function AdHocConnectDialog({
       keyPath.trim() ? keyPath.trim() : null,
       pw,
       trust,
+      replaceChanged,
     );
     if (r.status !== "ok") {
       if (r.error.kind === "HostKeyUnverified") {
@@ -367,6 +369,7 @@ export function AdHocConnectDialog({
             <HostKeyPrompt
               info={phase.info}
               onTrust={() => void doConnect(true)}
+              onReplace={() => void doConnect(false, true)}
               onCancel={handleClose}
             />
           )}
