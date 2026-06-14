@@ -47,15 +47,19 @@ pub trait FileSystem: Send + Sync {
     async fn write_full(&self, path: &Path, bytes: &[u8]) -> Result<(), DuetError>;
 
     /// 스트리밍 읽기 핸들 — 큰 파일을 전부 메모리에 올리지 않고 chunk 로 읽기 위함.
+    /// `offset>0` 이면 그 위치부터 (재개 복사용).
     async fn open_read(
         &self,
         path: &Path,
+        offset: u64,
     ) -> Result<Pin<Box<dyn tokio::io::AsyncRead + Send>>, DuetError>;
 
-    /// 스트리밍 쓰기 핸들 (생성 + truncate). `flush`/`shutdown` 은 호출자 책임.
+    /// 스트리밍 쓰기 핸들. `offset==0` 이면 생성+truncate, `offset>0` 이면 기존 파일을
+    /// 열어 그 위치부터 이어쓰기(재개). `flush`/`shutdown` 은 호출자 책임.
     async fn open_write(
         &self,
         path: &Path,
+        offset: u64,
     ) -> Result<Pin<Box<dyn tokio::io::AsyncWrite + Send>>, DuetError>;
     /// 파일 앞부분만 읽기 (미리보기용) — 최대 `max` 바이트, 더 있으면 `truncated=true`.
     ///
@@ -114,22 +118,24 @@ pub async fn copy_relay(
     dst_fs: &dyn FileSystem,
     dst: &std::path::Path,
 ) -> Result<(), DuetError> {
-    // 진행률/취소 없는 호출(undo 등) — 절대 취소 안 되는 토큰 + no-op 콜백.
+    // 진행률/취소 없는 호출(undo 등) — 절대 취소 안 되는 토큰 + no-op 콜백, 재개 없음.
     let cancel = CancellationToken::new();
-    copy_tree(src_fs, src, dst_fs, dst, &cancel, &|_| {}).await
+    copy_tree(src_fs, src, dst_fs, dst, false, &cancel, &|_| {}).await
 }
 
-/// `copy_relay` 의 진행률/취소 지원 변형. `on_bytes(delta)` 는 파일에서 쓴
+/// `copy_relay` 의 진행률/취소/재개 지원 변형. `on_bytes(delta)` 는 파일에서 쓴
 /// 바이트 증분마다 호출(진행률 emit 용). `cancel` 은 chunk 경계마다 검사.
+/// `resume=true` 면 중단된 `.part` 의 현재 크기부터 이어쓰기(전송 재개).
 pub async fn copy_relay_streaming(
     src_fs: &dyn FileSystem,
     src: &std::path::Path,
     dst_fs: &dyn FileSystem,
     dst: &std::path::Path,
+    resume: bool,
     cancel: &CancellationToken,
     on_bytes: &(dyn Fn(u64) + Send + Sync),
 ) -> Result<(), DuetError> {
-    copy_tree(src_fs, src, dst_fs, dst, cancel, on_bytes).await
+    copy_tree(src_fs, src, dst_fs, dst, resume, cancel, on_bytes).await
 }
 
 async fn copy_tree(
@@ -137,6 +143,7 @@ async fn copy_tree(
     src: &std::path::Path,
     dst_fs: &dyn FileSystem,
     dst: &std::path::Path,
+    resume: bool,
     cancel: &CancellationToken,
     on_bytes: &(dyn Fn(u64) + Send + Sync),
 ) -> Result<(), DuetError> {
@@ -149,30 +156,52 @@ async fn copy_tree(
                 let child_src = src.join(&e.name);
                 let child_dst = dst.join(&e.name);
                 Box::pin(copy_tree(
-                    src_fs, &child_src, dst_fs, &child_dst, cancel, on_bytes,
+                    src_fs, &child_src, dst_fs, &child_dst, resume, cancel, on_bytes,
                 ))
                 .await?;
             }
             Ok(())
         }
         // Symlink/Other 는 target 내용을 따라가 복사 (MVP-2).
-        _ => stream_copy_file(src_fs, src, dst_fs, dst, cancel, on_bytes).await,
+        _ => stream_copy_file(src_fs, src, dst_fs, dst, resume, cancel, on_bytes).await,
     }
 }
 
+/// `<dst>.duet-part` 임시 경로 — 완성 전까지 여기에 쓰고, 끝나면 dst 로 rename.
+/// 중단되면 dst(최종 이름)는 안 생기고 .part 만 남아 재개에 쓰인다.
+fn part_path(dst: &std::path::Path) -> std::path::PathBuf {
+    let mut s = dst.as_os_str().to_os_string();
+    s.push(".duet-part");
+    std::path::PathBuf::from(s)
+}
+
 /// 단일 파일을 고정 버퍼로 흘려 복사 — 전체를 메모리에 올리지 않음(대용량 안전).
-/// chunk 경계마다 취소 검사 + `on_bytes` 호출.
+/// `<dst>.duet-part` 에 쓴 뒤 dst 로 rename(중단 시 반쪽 파일을 최종 이름에 안 남김).
+/// `resume=true` 면 기존 .part 크기부터 이어쓰기. chunk 경계마다 취소 검사 + `on_bytes`.
 async fn stream_copy_file(
     src_fs: &dyn FileSystem,
     src: &std::path::Path,
     dst_fs: &dyn FileSystem,
     dst: &std::path::Path,
+    resume: bool,
     cancel: &CancellationToken,
     on_bytes: &(dyn Fn(u64) + Send + Sync),
 ) -> Result<(), DuetError> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    let mut reader = src_fs.open_read(src).await?;
-    let mut writer = dst_fs.open_write(dst).await?;
+    let part = part_path(dst);
+    // 재개 시작 오프셋 = 기존 .part 의 실제 크기 (실제 persist 된 만큼). fresh 면 0.
+    let start = if resume {
+        dst_fs
+            .metadata(&part)
+            .await
+            .ok()
+            .and_then(|m| m.size)
+            .unwrap_or(0)
+    } else {
+        0
+    };
+    let mut reader = src_fs.open_read(src, start).await?;
+    let mut writer = dst_fs.open_write(&part, start).await?;
     let mut buf = vec![0u8; RELAY_CHUNK];
     loop {
         if cancel.is_cancelled() {
@@ -199,5 +228,16 @@ async fn stream_copy_file(
         .shutdown()
         .await
         .map_err(|e| DuetError::Io(format!("copy close: {e}")))?;
+    // 완성 — .part 를 최종 이름으로. dst 가 이미 있으면(예: dir 재시도로 재복사된
+    // 완료 파일; 호출자가 사전 백업 보장) 우리 것이므로 제거 후 rename (SFTP rename 은
+    // 기존 파일에 실패할 수 있어 명시 제거).
+    if let Err(e) = dst_fs.rename(&part, dst).await {
+        if dst_fs.metadata(dst).await.is_ok() {
+            dst_fs.remove(dst).await?;
+            dst_fs.rename(&part, dst).await?;
+        } else {
+            return Err(e);
+        }
+    }
     Ok(())
 }

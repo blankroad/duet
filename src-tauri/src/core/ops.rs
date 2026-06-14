@@ -296,12 +296,14 @@ async fn copy_execute_relay(
             });
         }
 
-        // copy 본체 — chunk 스트리밍(메모리 bounded, mid-file cancel) + connection loss 면 1회 retry
+        // copy 본체 — chunk 스트리밍(메모리 bounded, mid-file cancel). connection loss 면
+        // 1회 retry 하되 resume=true 로 중단된 .part 부터 이어받음(전송 재개).
         match crate::fs::copy_relay_streaming(
             src_fs,
             &src_path,
             dst_fs,
             &dst_path,
+            false,
             &cancel_token,
             &on_bytes,
         )
@@ -318,6 +320,7 @@ async fn copy_execute_relay(
                     &src_path,
                     dst_fs,
                     &dst_path,
+                    true, // 재개 — 이미 쓴 .part 이어받기
                     &cancel_token,
                     &on_bytes,
                 )

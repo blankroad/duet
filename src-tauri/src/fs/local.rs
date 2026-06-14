@@ -148,17 +148,40 @@ impl FileSystem for LocalFs {
     async fn open_read(
         &self,
         path: &Path,
+        offset: u64,
     ) -> Result<std::pin::Pin<Box<dyn tokio::io::AsyncRead + Send>>, DuetError> {
-        let file = tokio::fs::File::open(path).await.map_err(DuetError::from)?;
+        let mut file = tokio::fs::File::open(path).await.map_err(DuetError::from)?;
+        if offset > 0 {
+            use tokio::io::AsyncSeekExt;
+            file.seek(std::io::SeekFrom::Start(offset))
+                .await
+                .map_err(DuetError::from)?;
+        }
         Ok(Box::pin(file))
     }
 
     async fn open_write(
         &self,
         path: &Path,
+        offset: u64,
     ) -> Result<std::pin::Pin<Box<dyn tokio::io::AsyncWrite + Send>>, DuetError> {
-        // create + truncate (write_full 과 동일 의미).
-        let file = tokio::fs::File::create(path)
+        if offset == 0 {
+            // create + truncate (write_full 과 동일 의미).
+            let file = tokio::fs::File::create(path)
+                .await
+                .map_err(DuetError::from)?;
+            return Ok(Box::pin(file));
+        }
+        // 재개: 기존 파일을 열어 offset 위치부터 이어쓰기.
+        use tokio::io::AsyncSeekExt;
+        let mut file = tokio::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(path)
+            .await
+            .map_err(DuetError::from)?;
+        file.seek(std::io::SeekFrom::Start(offset))
             .await
             .map_err(DuetError::from)?;
         Ok(Box::pin(file))
@@ -505,6 +528,7 @@ mod tests {
             &dir.path().join("big.bin"),
             &local,
             &dir.path().join("out.bin"),
+            false,
             &cancel,
             &on_bytes,
         )
@@ -536,10 +560,44 @@ mod tests {
             &dir.path().join("a"),
             &local,
             &dir.path().join("b"),
+            false,
             &cancel,
             &|_| {},
         )
         .await;
         assert!(matches!(r, Err(DuetError::Cancelled)));
+    }
+
+    /// 재개(resume): 절반 쓴 .part 가 있으면 그 지점부터 이어받아 byte-exact 완성.
+    #[tokio::test]
+    async fn copy_relay_streaming_resumes_from_part() {
+        let dir = TempDir::new().unwrap();
+        let size = 256 * 1024 + 500;
+        let data: Vec<u8> = (0..size).map(|i| (i % 251) as u8).collect();
+        fs::write(dir.path().join("src.bin"), &data).await.unwrap();
+        // 중단 상태 모사 — out.bin.duet-part 에 앞부분 절반만 기록.
+        let half = size / 2;
+        fs::write(dir.path().join("out.bin.duet-part"), &data[..half])
+            .await
+            .unwrap();
+
+        let local = LocalFs::new();
+        let cancel = tokio_util::sync::CancellationToken::new();
+        crate::fs::copy_relay_streaming(
+            &local,
+            &dir.path().join("src.bin"),
+            &local,
+            &dir.path().join("out.bin"),
+            true, // 재개
+            &cancel,
+            &|_| {},
+        )
+        .await
+        .unwrap();
+
+        let out = fs::read(dir.path().join("out.bin")).await.unwrap();
+        assert_eq!(out, data, "resumed copy is byte-exact");
+        // .part 는 rename 으로 사라짐.
+        assert!(!dir.path().join("out.bin.duet-part").exists());
     }
 }

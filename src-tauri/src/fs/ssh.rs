@@ -268,32 +268,53 @@ impl FileSystem for SshFs {
     async fn open_read(
         &self,
         path: &Path,
+        offset: u64,
     ) -> Result<std::pin::Pin<Box<dyn tokio::io::AsyncRead + Send>>, DuetError> {
+        use tokio::io::AsyncSeekExt;
         let sftp = self.open_sftp().await?;
         let path_str = path
             .to_str()
             .ok_or_else(|| DuetError::Io("non-UTF8 path".into()))?;
         // File 은 Arc<RawSftpSession> 를 자체 보유 — sftp 로컬 var 가 drop 돼도 채널 유지.
-        let file = sftp
+        let mut file = sftp
             .open(path_str.to_string())
             .await
             .map_err(|e| map_sftp_error(e, path_str))?;
+        if offset > 0 {
+            file.seek(std::io::SeekFrom::Start(offset))
+                .await
+                .map_err(|e| DuetError::Ssh(format!("sftp seek: {e}")))?;
+        }
         Ok(Box::pin(file))
     }
 
     async fn open_write(
         &self,
         path: &Path,
+        offset: u64,
     ) -> Result<std::pin::Pin<Box<dyn tokio::io::AsyncWrite + Send>>, DuetError> {
+        use russh_sftp::protocol::OpenFlags;
+        use tokio::io::AsyncSeekExt;
         let sftp = self.open_sftp().await?;
         let path_str = path
             .to_str()
             .ok_or_else(|| DuetError::Io("non-UTF8 path".into()))?;
-        // create = WRITE|CREATE|TRUNCATE (write_full 과 동일).
-        let file = sftp
-            .create(path_str.to_string())
+        // offset==0: WRITE|CREATE|TRUNCATE (create 와 동일). offset>0: 이어쓰기 위해
+        // TRUNCATE 없이 열고 seek.
+        let flags = if offset == 0 {
+            OpenFlags::WRITE | OpenFlags::CREATE | OpenFlags::TRUNCATE
+        } else {
+            OpenFlags::WRITE | OpenFlags::CREATE
+        };
+        let mut file = sftp
+            .open_with_flags(path_str.to_string(), flags)
             .await
             .map_err(|e| map_sftp_error(e, path_str))?;
+        if offset > 0 {
+            file.seek(std::io::SeekFrom::Start(offset))
+                .await
+                .map_err(|e| DuetError::Ssh(format!("sftp seek: {e}")))?;
+        }
         Ok(Box::pin(file))
     }
 
