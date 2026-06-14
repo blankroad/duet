@@ -88,6 +88,22 @@ export async function triggerMove(open: OpenFn, showToast: ToastFn): Promise<voi
   await planTransferTo(targets, dst, "move", open, showToast);
 }
 
+/** 단일 아카이브 압축 해제 — plan 후 바로 task 로 실행 (진행은 TasksBar). */
+export async function triggerExtract(showToast: ToastFn): Promise<void> {
+  const { targets } = resolveActiveTargets();
+  if (targets.length !== 1) {
+    showToast("Extract: select one archive");
+    return;
+  }
+  const plan = await commands.fsExtractPlan(targets[0]!);
+  if (plan.status === "error") {
+    showToast(`Extract failed: ${formatErr(plan.error)}`);
+    return;
+  }
+  const exec = await commands.fsExtractExecute(plan.data);
+  if (exec.status === "error") showToast(`Extract failed: ${formatErr(exec.error)}`);
+}
+
 /** Delete(trash) / Shift+Delete(permanent). */
 export async function triggerDelete(
   mode: DeleteMode,

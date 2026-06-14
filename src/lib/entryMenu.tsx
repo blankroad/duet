@@ -16,10 +16,12 @@ import {
   Eye,
   ExternalLink,
   FolderSearch,
+  FileArchive,
 } from "lucide-react";
 import { commands } from "@/types/bindings";
 import type { Entry, Location } from "@/types/bindings";
 import { formatErr } from "@/lib/error";
+import { isArchiveName } from "@/lib/archive";
 import { usePanes, type PaneId, type SortKey, type ViewMode } from "@/stores/panes";
 import { useUIDialogs } from "@/stores/ui-dialogs";
 import { useToast } from "@/stores/toast";
@@ -27,7 +29,7 @@ import { useConnections } from "@/stores/connections";
 import { addBookmark } from "@/stores/bookmarks";
 import { addHostFavorite } from "@/stores/hostFavorites";
 import { childLocation } from "@/lib/entryDnd";
-import { triggerCopy, triggerMove, triggerRename, triggerMkdir, triggerDelete } from "@/lib/fileActions";
+import { triggerCopy, triggerMove, triggerRename, triggerMkdir, triggerDelete, triggerExtract } from "@/lib/fileActions";
 import type { MenuEntry } from "@/stores/contextMenu";
 
 /**
@@ -97,6 +99,13 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
       items.push({ id: "reveal", label: "Show in file manager", icon: <FolderSearch size={ICON} />, onSelect: () => void revealEntry(child) });
     }
     items.push(sep());
+  }
+
+  if (!isDir && !multi && isArchiveName(entry.name)) {
+    items.push(
+      { id: "extract", label: "Extract here", icon: <FileArchive size={ICON} />, onSelect: () => void triggerExtract(showToast) },
+      sep(),
+    );
   }
 
   items.push(

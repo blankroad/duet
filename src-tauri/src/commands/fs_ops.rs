@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use crate::core::archive::{self, CompressFormat, CompressPlan, ExtractPlan};
 use crate::core::copy_strategy::{decide as decide_strategy, CopyStrategy};
 use crate::core::ops::{self, CopyPlan, DeletePlan, MovePlan, OpCtx};
 use crate::fs::{FileSystem, LocalFs, SshFs};
@@ -339,6 +340,133 @@ pub async fn fs_mkdir(
     )
     .await?;
     Ok(emit_pushed(&app, entry))
+}
+
+// === Archive: Extract / Compress ===
+
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_extract_plan(
+    archive: EntryRef,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+) -> Result<ExtractPlan, DuetError> {
+    let fs = fs_for(&archive.location.source, pool.inner()).await?;
+    archive::extract_plan(&*fs, archive).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_extract_execute(
+    plan: ExtractPlan,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+    settings: tauri::State<'_, Arc<SettingsStore>>,
+    journal: tauri::State<'_, Arc<Journal>>,
+    queue: tauri::State<'_, Arc<TaskQueue>>,
+    app: tauri::AppHandle,
+) -> Result<TaskId, DuetError> {
+    let host_key = host_key_for_op(&plan.source, &plan.source);
+    let title = format!("Extracting {}", plan.archive_name);
+    let affected = vec![plan.archive_dir.clone()];
+
+    let pool_inner = pool.inner().clone();
+    let settings_inner = settings.inner().clone();
+    let journal_inner = journal.inner().clone();
+    let app_for_run = app.clone();
+    let plan_for_run = plan;
+
+    let task_id = queue
+        .inner()
+        .clone()
+        .enqueue(
+            TaskKind::Extract,
+            title,
+            host_key,
+            affected,
+            Box::new(move |cancel_token, _progress| {
+                Box::pin(async move {
+                    let fs = fs_for(&plan_for_run.source, &pool_inner).await?;
+                    let ctx = OpCtx {
+                        settings: settings_inner,
+                        journal: journal_inner.clone(),
+                        pool: Some(pool_inner.clone()),
+                        app: Some(app_for_run.clone()),
+                    };
+                    let entry =
+                        archive::extract_execute(&*fs, plan_for_run, &ctx, cancel_token).await?;
+                    Ok(emit_pushed(&app_for_run, entry))
+                })
+            }),
+        )
+        .await;
+    Ok(task_id)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_compress_plan(
+    items: Vec<EntryRef>,
+    archive_name: String,
+    format: CompressFormat,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+) -> Result<CompressPlan, DuetError> {
+    let source = items
+        .first()
+        .map(|t| t.location.source.clone())
+        .ok_or_else(|| DuetError::Io("no items".into()))?;
+    let fs = fs_for(&source, pool.inner()).await?;
+    archive::compress_plan(&*fs, items, archive_name, format).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_compress_execute(
+    plan: CompressPlan,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+    settings: tauri::State<'_, Arc<SettingsStore>>,
+    journal: tauri::State<'_, Arc<Journal>>,
+    queue: tauri::State<'_, Arc<TaskQueue>>,
+    app: tauri::AppHandle,
+) -> Result<TaskId, DuetError> {
+    let host_key = host_key_for_op(&plan.source, &plan.source);
+    let n = plan.item_names.len();
+    let title = if n == 1 {
+        format!("Compressing {}", plan.item_names[0])
+    } else {
+        format!("Compressing {n} items")
+    };
+    let affected = vec![plan.src_dir.clone()];
+
+    let pool_inner = pool.inner().clone();
+    let settings_inner = settings.inner().clone();
+    let journal_inner = journal.inner().clone();
+    let app_for_run = app.clone();
+    let plan_for_run = plan;
+
+    let task_id = queue
+        .inner()
+        .clone()
+        .enqueue(
+            TaskKind::Compress,
+            title,
+            host_key,
+            affected,
+            Box::new(move |cancel_token, _progress| {
+                Box::pin(async move {
+                    let fs = fs_for(&plan_for_run.source, &pool_inner).await?;
+                    let ctx = OpCtx {
+                        settings: settings_inner,
+                        journal: journal_inner.clone(),
+                        pool: Some(pool_inner.clone()),
+                        app: Some(app_for_run.clone()),
+                    };
+                    let entry =
+                        archive::compress_execute(&*fs, plan_for_run, &ctx, cancel_token).await?;
+                    Ok(emit_pushed(&app_for_run, entry))
+                })
+            }),
+        )
+        .await;
+    Ok(task_id)
 }
 
 /// 텍스트 미리보기 최대 크기 (256 KB). 초과 시 `TooLarge`.

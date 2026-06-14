@@ -35,6 +35,8 @@ pub enum HostKey {
 pub enum TaskKind {
     Copy,
     Move,
+    Extract,
+    Compress,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]

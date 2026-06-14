@@ -73,6 +73,14 @@ pub enum OpKind {
         path: PathBuf,
         source: SourceId,
     },
+    Extract {
+        archive: Location,
+        dest: Location,
+    },
+    Compress {
+        count: u32,
+        dst: Location,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]

@@ -455,7 +455,7 @@ pub async fn mkdir(
 // === Helpers ===
 
 /// backup 이름 선택 — 같은 timestamp 충돌 시 .<n> suffix retry.
-async fn pick_backup_path(
+pub(crate) async fn pick_backup_path(
     fs: &dyn FileSystem,
     parent: &std::path::Path,
     original_name: &str,

@@ -40,6 +40,11 @@ notify = "7"             # 파일 변경 감지
 ignore = "0.4"           # 디렉토리 워킹
 opener = { version = "0.7", features = ["reveal"] }  # 기본 앱으로 열기 / OS 탐색기에서 보기
 
+# === Archive (로컬 압축/해제 — 원격은 호스트 unzip/tar exec) ===
+zip = { version = "2", default-features = false, features = ["deflate"] }
+tar = "0.4"
+flate2 = "1"
+
 # === Encoding ===
 unicode-normalization = "0.1"
 unicode-width = "0.2"

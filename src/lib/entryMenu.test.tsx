@@ -31,7 +31,7 @@ describe("buildEntryMenu", () => {
     expect(ids(menu)).toContain("open-other");
   });
 
-  it("omits Open entries for a file", () => {
+  it("includes Open (external) but not Open-in-other-pane for a file", () => {
     const menu = buildEntryMenu({
       paneId: "left",
       entry: file,
@@ -40,8 +40,49 @@ describe("buildEntryMenu", () => {
       onActivate: noop,
       onOpenInOtherPane: noop,
     });
-    expect(ids(menu)).not.toContain("open");
+    expect(ids(menu)).toContain("open");
     expect(ids(menu)).not.toContain("open-other");
+    // 일반 파일은 압축 해제 항목 없음.
+    expect(ids(menu)).not.toContain("extract");
+  });
+
+  it("adds Extract only for an archive file", () => {
+    const zip: Entry = { name: "data.zip", kind: "file", size: 10, modified_ms: null, permissions: null, hidden: false };
+    const menu = buildEntryMenu({
+      paneId: "left",
+      entry: zip,
+      location: localLoc,
+      selectedCount: 1,
+      onActivate: noop,
+      onOpenInOtherPane: noop,
+    });
+    expect(ids(menu)).toContain("extract");
+  });
+
+  it("shows 'Show in file manager' only for local entries", () => {
+    const localMenu = buildEntryMenu({
+      paneId: "left",
+      entry: file,
+      location: localLoc,
+      selectedCount: 1,
+      onActivate: noop,
+      onOpenInOtherPane: noop,
+    });
+    expect(ids(localMenu)).toContain("reveal");
+
+    const sshLoc: Location = {
+      source: { kind: "ssh", connection_id: "c1", host_ip: "10.0.0.1", user: "u" },
+      path: "/var",
+    };
+    const sshMenu = buildEntryMenu({
+      paneId: "left",
+      entry: file,
+      location: sshLoc,
+      selectedCount: 1,
+      onActivate: noop,
+      onOpenInOtherPane: noop,
+    });
+    expect(ids(sshMenu)).not.toContain("reveal");
   });
 
   it("disables Rename and hides Open for multi-selection", () => {

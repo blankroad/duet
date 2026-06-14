@@ -1,0 +1,634 @@
+//! 아카이브 압축 해제 / 생성.
+//!
+//! 로컬은 Rust crate (`zip`/`tar`/`flate2`) 로, 원격(SSH)은 호스트의
+//! `unzip`/`tar`/`zip` 을 russh exec 로 실행 (시스템 ssh 호출 X — CLAUDE.md §9).
+//! 같은-호스트 원칙: 원격 아카이브는 로컬 PC 를 경유하지 않고 호스트에서 직접 처리.
+//!
+//! plan/execute 두 단계 (CLAUDE.md §3/§4). execute 는 journal 에 기록하여
+//! Ctrl+Z 되돌리기 가능 — 생성물(해제 디렉토리 / 압축 파일)을 제거하는 형태.
+
+use crate::core::copy_strategy::shell_escape_path;
+use crate::core::ops::{self, OpCtx};
+use crate::fs::FileSystem;
+use crate::services::journal::{BackupRestore, JournalEntry, OpKind, UndoAction};
+use crate::ssh::remote_exec::exec;
+use crate::types::{ConnectionId, DuetError, EntryKind, EntryRef, Location, SourceId};
+use serde::{Deserialize, Serialize};
+use specta::Type;
+use std::path::Path;
+use tokio_util::sync::CancellationToken;
+
+/// 지원 아카이브 포맷.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum ArchiveFormat {
+    Zip,
+    Tar,
+    TarGz,
+    /// 단일 파일 gzip (`file.txt.gz`).
+    Gz,
+}
+
+/// 압축 생성 포맷 (UI 선택). `Gz` 는 단일 파일 전용이라 생성 대상에서 제외.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum CompressFormat {
+    Zip,
+    TarGz,
+}
+
+impl CompressFormat {
+    /// 기본 확장자 (앞 `.` 포함).
+    pub fn extension(self) -> &'static str {
+        match self {
+            CompressFormat::Zip => ".zip",
+            CompressFormat::TarGz => ".tar.gz",
+        }
+    }
+}
+
+/// 파일 이름 확장자로 아카이브 포맷 판정. 아카이브가 아니면 None.
+pub fn detect_format(name: &str) -> Option<ArchiveFormat> {
+    let lower = name.to_ascii_lowercase();
+    if lower.ends_with(".tar.gz") || lower.ends_with(".tgz") {
+        Some(ArchiveFormat::TarGz)
+    } else if lower.ends_with(".tar") {
+        Some(ArchiveFormat::Tar)
+    } else if lower.ends_with(".zip") {
+        Some(ArchiveFormat::Zip)
+    } else if lower.ends_with(".gz") {
+        Some(ArchiveFormat::Gz)
+    } else {
+        None
+    }
+}
+
+/// 아카이브 이름에서 해제 디렉토리 이름 도출 (`data.tar.gz` → `data`).
+/// 알려진 확장자가 없거나 결과가 비면 `<name>.extracted`.
+pub fn archive_stem(name: &str) -> String {
+    let lower = name.to_ascii_lowercase();
+    for suf in [".tar.gz", ".tgz", ".tar", ".zip", ".gz"] {
+        if lower.ends_with(suf) {
+            let stem = &name[..name.len() - suf.len()];
+            if !stem.is_empty() {
+                return stem.to_string();
+            }
+        }
+    }
+    format!("{name}.extracted")
+}
+
+// === Extract ===
+
+/// 압축 해제 계획 — UI 가 대상/충돌 표시.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct ExtractPlan {
+    pub source: SourceId,
+    /// 아카이브가 위치한 디렉토리.
+    pub archive_dir: Location,
+    pub archive_name: String,
+    pub format: ArchiveFormat,
+    /// 해제 결과가 들어갈 디렉토리 (`archive_dir/<stem>`).
+    pub dest_dir: std::path::PathBuf,
+    /// dest_dir 가 이미 존재 (execute 시 backup 후 진행).
+    pub conflict: bool,
+}
+
+pub async fn extract_plan(fs: &dyn FileSystem, archive: EntryRef) -> Result<ExtractPlan, DuetError> {
+    let format = detect_format(&archive.name)
+        .ok_or_else(|| DuetError::Io(format!("unsupported archive: {}", archive.name)))?;
+    let archive_path = archive.location.path.join(&archive.name);
+    let meta = fs.metadata(&archive_path).await?;
+    if meta.kind != EntryKind::File {
+        return Err(DuetError::Io("not a regular file".into()));
+    }
+    let stem = archive_stem(&archive.name);
+    let dest_dir = archive.location.path.join(&stem);
+    let conflict = fs.metadata(&dest_dir).await.is_ok();
+    Ok(ExtractPlan {
+        source: archive.location.source.clone(),
+        archive_dir: archive.location.clone(),
+        archive_name: archive.name,
+        format,
+        dest_dir,
+        conflict,
+    })
+}
+
+pub async fn extract_execute(
+    fs: &dyn FileSystem,
+    plan: ExtractPlan,
+    ctx: &OpCtx,
+    cancel_token: CancellationToken,
+) -> Result<JournalEntry, DuetError> {
+    let archive_path = plan.archive_dir.path.join(&plan.archive_name);
+
+    // dest 충돌 → backup 으로 mv (undo 시 복원).
+    let mut backups = Vec::new();
+    if fs.metadata(&plan.dest_dir).await.is_ok() {
+        let parent = plan
+            .dest_dir
+            .parent()
+            .unwrap_or(plan.archive_dir.path.as_path());
+        let name = plan
+            .dest_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("extracted");
+        let backup = ops::pick_backup_path(fs, parent, name).await?;
+        fs.rename(&plan.dest_dir, &backup).await?;
+        backups.push(BackupRestore {
+            backup_path: backup,
+            original_path: plan.dest_dir.clone(),
+        });
+    }
+    fs.mkdir(&plan.dest_dir).await?;
+
+    if cancel_token.is_cancelled() {
+        return Err(DuetError::Cancelled);
+    }
+
+    match &plan.source {
+        SourceId::Local => extract_local(&archive_path, &plan.dest_dir, plan.format).await?,
+        SourceId::Ssh { connection_id, .. } => {
+            extract_remote(ctx, connection_id, &archive_path, &plan.dest_dir, plan.format).await?
+        }
+    }
+
+    // undo = 생성된 dest_dir 제거 + backup 복원 (UndoCopy 재사용).
+    let undo = UndoAction::UndoCopy {
+        target_source: plan.source.clone(),
+        copied: vec![plan.dest_dir.clone()],
+        backups_to_restore: backups,
+    };
+    let op = OpKind::Extract {
+        archive: Location {
+            source: plan.source.clone(),
+            path: archive_path,
+        },
+        dest: Location {
+            source: plan.source.clone(),
+            path: plan.dest_dir,
+        },
+    };
+    ctx.journal.push(op, undo).await
+}
+
+/// 로컬 아카이브 해제 — blocking IO 라 spawn_blocking.
+async fn extract_local(
+    archive: &Path,
+    dest: &Path,
+    fmt: ArchiveFormat,
+) -> Result<(), DuetError> {
+    let archive = archive.to_path_buf();
+    let dest = dest.to_path_buf();
+    tokio::task::spawn_blocking(move || extract_local_blocking(&archive, &dest, fmt))
+        .await
+        .map_err(|e| DuetError::Io(format!("extract task join: {e}")))?
+}
+
+fn extract_local_blocking(archive: &Path, dest: &Path, fmt: ArchiveFormat) -> Result<(), DuetError> {
+    let file =
+        std::fs::File::open(archive).map_err(|e| DuetError::Io(format!("open archive: {e}")))?;
+    match fmt {
+        ArchiveFormat::Zip => {
+            let mut zip = zip::ZipArchive::new(file)
+                .map_err(|e| DuetError::Io(format!("zip open: {e}")))?;
+            // zip crate 의 extract 는 enclosed_name 으로 zip-slip 방지.
+            zip.extract(dest)
+                .map_err(|e| DuetError::Io(format!("zip extract: {e}")))?;
+        }
+        ArchiveFormat::Tar => {
+            let mut tar = tar::Archive::new(file);
+            tar.unpack(dest)
+                .map_err(|e| DuetError::Io(format!("tar extract: {e}")))?;
+        }
+        ArchiveFormat::TarGz => {
+            let gz = flate2::read::GzDecoder::new(file);
+            let mut tar = tar::Archive::new(gz);
+            tar.unpack(dest)
+                .map_err(|e| DuetError::Io(format!("tar.gz extract: {e}")))?;
+        }
+        ArchiveFormat::Gz => {
+            // 단일 파일 gzip → dest/<.gz 제거한 이름>.
+            let mut gz = flate2::read::GzDecoder::new(file);
+            let out_name = archive
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .ok_or_else(|| DuetError::Io("invalid gz name".into()))?;
+            let out_path = dest.join(out_name);
+            let mut out = std::fs::File::create(&out_path)
+                .map_err(|e| DuetError::Io(format!("create output: {e}")))?;
+            std::io::copy(&mut gz, &mut out)
+                .map_err(|e| DuetError::Io(format!("gz decompress: {e}")))?;
+        }
+    }
+    Ok(())
+}
+
+/// 원격 아카이브 해제 — 호스트의 unzip/tar 를 exec.
+async fn extract_remote(
+    ctx: &OpCtx,
+    connection_id: &ConnectionId,
+    archive: &Path,
+    dest: &Path,
+    fmt: ArchiveFormat,
+) -> Result<(), DuetError> {
+    let pool = ctx
+        .pool
+        .as_ref()
+        .ok_or_else(|| DuetError::Io("OpCtx.pool required for remote extract".into()))?;
+    let conn = pool.get(connection_id).await?;
+    let session_mutex = conn
+        .session
+        .as_ref()
+        .ok_or_else(|| DuetError::ConnectionFailed("no live session".into()))?;
+
+    let a = shell_escape_path(archive)?;
+    let d = shell_escape_path(dest)?;
+    let cmd = match fmt {
+        ArchiveFormat::Zip => format!("unzip -o {a} -d {d}"),
+        ArchiveFormat::Tar => format!("tar -xf {a} -C {d}"),
+        ArchiveFormat::TarGz => format!("tar -xzf {a} -C {d}"),
+        ArchiveFormat::Gz => {
+            return Err(DuetError::NotSupported(
+                "remote single-file .gz extract".into(),
+            ))
+        }
+    };
+
+    let handle = session_mutex.lock().await;
+    let out = exec(&handle, &cmd).await?;
+    if out.exit_status != 0 {
+        return Err(DuetError::Ssh(format!(
+            "extract failed (exit {}): {}",
+            out.exit_status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+    Ok(())
+}
+
+// === Compress ===
+
+/// 압축 생성 계획.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct CompressPlan {
+    pub source: SourceId,
+    /// 압축 대상 항목들이 위치한 디렉토리.
+    pub src_dir: Location,
+    pub item_names: Vec<String>,
+    pub format: CompressFormat,
+    /// 생성될 아카이브 경로 (`src_dir/<name><ext>`).
+    pub dest_path: std::path::PathBuf,
+    /// dest_path 가 이미 존재 (execute 시 backup 후 진행).
+    pub conflict: bool,
+}
+
+/// 압축 대상 검증 + dest 경로/충돌 계산.
+pub async fn compress_plan(
+    fs: &dyn FileSystem,
+    items: Vec<EntryRef>,
+    archive_name: String,
+    format: CompressFormat,
+) -> Result<CompressPlan, DuetError> {
+    if items.is_empty() {
+        return Err(DuetError::Io("no items".into()));
+    }
+    let src_dir = items[0].location.clone();
+    for it in &items {
+        if it.location.path != src_dir.path || it.location.source != src_dir.source {
+            return Err(DuetError::Io("items must share directory".into()));
+        }
+    }
+    if archive_name.contains('/') || archive_name.is_empty() {
+        return Err(DuetError::Io(format!("invalid name: {archive_name}")));
+    }
+    // 확장자 자동 부여 (이미 있으면 중복 안 함).
+    let ext = format.extension();
+    let file_name = if archive_name.to_ascii_lowercase().ends_with(ext) {
+        archive_name
+    } else {
+        format!("{archive_name}{ext}")
+    };
+    let dest_path = src_dir.path.join(&file_name);
+    let conflict = fs.metadata(&dest_path).await.is_ok();
+    let item_names = items.into_iter().map(|i| i.name).collect();
+    Ok(CompressPlan {
+        source: src_dir.source.clone(),
+        src_dir,
+        item_names,
+        format,
+        dest_path,
+        conflict,
+    })
+}
+
+pub async fn compress_execute(
+    fs: &dyn FileSystem,
+    plan: CompressPlan,
+    ctx: &OpCtx,
+    cancel_token: CancellationToken,
+) -> Result<JournalEntry, DuetError> {
+    // dest 충돌 → backup.
+    let mut backups = Vec::new();
+    if fs.metadata(&plan.dest_path).await.is_ok() {
+        let parent = plan
+            .dest_path
+            .parent()
+            .unwrap_or(plan.src_dir.path.as_path());
+        let name = plan
+            .dest_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("archive");
+        let backup = ops::pick_backup_path(fs, parent, name).await?;
+        fs.rename(&plan.dest_path, &backup).await?;
+        backups.push(BackupRestore {
+            backup_path: backup,
+            original_path: plan.dest_path.clone(),
+        });
+    }
+
+    if cancel_token.is_cancelled() {
+        return Err(DuetError::Cancelled);
+    }
+
+    match &plan.source {
+        SourceId::Local => {
+            compress_local(&plan.src_dir.path, &plan.item_names, &plan.dest_path, plan.format)
+                .await?
+        }
+        SourceId::Ssh { connection_id, .. } => {
+            compress_remote(
+                ctx,
+                connection_id,
+                &plan.src_dir.path,
+                &plan.item_names,
+                &plan.dest_path,
+                plan.format,
+            )
+            .await?
+        }
+    }
+
+    let undo = UndoAction::UndoCopy {
+        target_source: plan.source.clone(),
+        copied: vec![plan.dest_path.clone()],
+        backups_to_restore: backups,
+    };
+    let op = OpKind::Compress {
+        count: plan.item_names.len() as u32,
+        dst: Location {
+            source: plan.source.clone(),
+            path: plan.dest_path,
+        },
+    };
+    ctx.journal.push(op, undo).await
+}
+
+/// 로컬 압축 — blocking IO 라 spawn_blocking.
+async fn compress_local(
+    src_dir: &Path,
+    names: &[String],
+    dest: &Path,
+    fmt: CompressFormat,
+) -> Result<(), DuetError> {
+    let src_dir = src_dir.to_path_buf();
+    let names = names.to_vec();
+    let dest = dest.to_path_buf();
+    tokio::task::spawn_blocking(move || compress_local_blocking(&src_dir, &names, &dest, fmt))
+        .await
+        .map_err(|e| DuetError::Io(format!("compress task join: {e}")))?
+}
+
+fn compress_local_blocking(
+    src_dir: &Path,
+    names: &[String],
+    dest: &Path,
+    fmt: CompressFormat,
+) -> Result<(), DuetError> {
+    let out =
+        std::fs::File::create(dest).map_err(|e| DuetError::Io(format!("create archive: {e}")))?;
+    match fmt {
+        CompressFormat::Zip => {
+            let mut zip = zip::ZipWriter::new(out);
+            let opts: zip::write::FileOptions<()> = zip::write::FileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+            for name in names {
+                add_to_zip(&mut zip, src_dir, Path::new(name), name, &opts)?;
+            }
+            zip.finish()
+                .map_err(|e| DuetError::Io(format!("zip finish: {e}")))?;
+        }
+        CompressFormat::TarGz => {
+            let enc = flate2::write::GzEncoder::new(out, flate2::Compression::default());
+            let mut tar = tar::Builder::new(enc);
+            for name in names {
+                let full = src_dir.join(name);
+                let meta = std::fs::metadata(&full)
+                    .map_err(|e| DuetError::Io(format!("stat {name}: {e}")))?;
+                if meta.is_dir() {
+                    tar.append_dir_all(name, &full)
+                        .map_err(|e| DuetError::Io(format!("tar add dir {name}: {e}")))?;
+                } else {
+                    let mut f = std::fs::File::open(&full)
+                        .map_err(|e| DuetError::Io(format!("open {name}: {e}")))?;
+                    tar.append_file(name, &mut f)
+                        .map_err(|e| DuetError::Io(format!("tar add {name}: {e}")))?;
+                }
+            }
+            let enc = tar
+                .into_inner()
+                .map_err(|e| DuetError::Io(format!("tar finish: {e}")))?;
+            enc.finish()
+                .map_err(|e| DuetError::Io(format!("gz finish: {e}")))?;
+        }
+    }
+    Ok(())
+}
+
+/// zip 에 파일/디렉토리 재귀 추가. `rel` 은 아카이브 내부 경로.
+fn add_to_zip<W: std::io::Write + std::io::Seek>(
+    zip: &mut zip::ZipWriter<W>,
+    src_dir: &Path,
+    rel: &Path,
+    rel_str: &str,
+    opts: &zip::write::FileOptions<()>,
+) -> Result<(), DuetError> {
+    let full = src_dir.join(rel);
+    let meta =
+        std::fs::metadata(&full).map_err(|e| DuetError::Io(format!("stat {rel_str}: {e}")))?;
+    if meta.is_dir() {
+        zip.add_directory(rel_str, *opts)
+            .map_err(|e| DuetError::Io(format!("zip add dir {rel_str}: {e}")))?;
+        for entry in
+            std::fs::read_dir(&full).map_err(|e| DuetError::Io(format!("read dir {rel_str}: {e}")))?
+        {
+            let entry = entry.map_err(|e| DuetError::Io(format!("dir entry: {e}")))?;
+            let child_name = entry.file_name();
+            let child_name = child_name.to_string_lossy();
+            let child_rel = rel.join(child_name.as_ref());
+            let child_rel_str = format!("{rel_str}/{child_name}");
+            add_to_zip(zip, src_dir, &child_rel, &child_rel_str, opts)?;
+        }
+    } else {
+        zip.start_file(rel_str, *opts)
+            .map_err(|e| DuetError::Io(format!("zip start {rel_str}: {e}")))?;
+        let mut f =
+            std::fs::File::open(&full).map_err(|e| DuetError::Io(format!("open {rel_str}: {e}")))?;
+        std::io::copy(&mut f, zip).map_err(|e| DuetError::Io(format!("zip write {rel_str}: {e}")))?;
+    }
+    Ok(())
+}
+
+/// 원격 압축 — 호스트의 zip/tar 를 exec. `cd <dir>` 로 상대 경로 보장.
+async fn compress_remote(
+    ctx: &OpCtx,
+    connection_id: &ConnectionId,
+    src_dir: &Path,
+    names: &[String],
+    dest: &Path,
+    fmt: CompressFormat,
+) -> Result<(), DuetError> {
+    let pool = ctx
+        .pool
+        .as_ref()
+        .ok_or_else(|| DuetError::Io("OpCtx.pool required for remote compress".into()))?;
+    let conn = pool.get(connection_id).await?;
+    let session_mutex = conn
+        .session
+        .as_ref()
+        .ok_or_else(|| DuetError::ConnectionFailed("no live session".into()))?;
+
+    let dir = shell_escape_path(src_dir)?;
+    let dest_arg = shell_escape_path(dest)?;
+    // 항목들을 각각 quote — 이름은 상대 경로로 cd 후 전달.
+    let mut name_args = String::new();
+    for n in names {
+        name_args.push(' ');
+        name_args.push_str(&shell_escape_path(Path::new(n))?);
+    }
+    let cmd = match fmt {
+        CompressFormat::Zip => {
+            format!("cd {dir} && zip -r -q {dest_arg} --{name_args}")
+        }
+        CompressFormat::TarGz => {
+            format!("cd {dir} && tar -czf {dest_arg} --{name_args}")
+        }
+    };
+
+    let handle = session_mutex.lock().await;
+    let out = exec(&handle, &cmd).await?;
+    if out.exit_status != 0 {
+        return Err(DuetError::Ssh(format!(
+            "compress failed (exit {}): {}",
+            out.exit_status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write as _;
+
+    #[test]
+    fn detect_format_by_extension() {
+        assert_eq!(detect_format("a.zip"), Some(ArchiveFormat::Zip));
+        assert_eq!(detect_format("a.tar"), Some(ArchiveFormat::Tar));
+        assert_eq!(detect_format("a.tar.gz"), Some(ArchiveFormat::TarGz));
+        assert_eq!(detect_format("a.TGZ"), Some(ArchiveFormat::TarGz));
+        assert_eq!(detect_format("a.txt.gz"), Some(ArchiveFormat::Gz));
+        assert_eq!(detect_format("notes.txt"), None);
+        assert_eq!(detect_format("noext"), None);
+    }
+
+    #[test]
+    fn archive_stem_strips_known_suffixes() {
+        assert_eq!(archive_stem("data.zip"), "data");
+        assert_eq!(archive_stem("data.tar.gz"), "data");
+        assert_eq!(archive_stem("data.tgz"), "data");
+        assert_eq!(archive_stem("file.txt.gz"), "file.txt");
+        assert_eq!(archive_stem(".zip"), ".zip.extracted");
+        assert_eq!(archive_stem("plain"), "plain.extracted");
+    }
+
+    /// zip 생성(crate writer) → 해제 round-trip — extract_local_blocking 검증.
+    #[test]
+    fn zip_roundtrip_local() {
+        let dir = tempfile::tempdir().unwrap();
+        let zip_path = dir.path().join("a.zip");
+        {
+            let f = std::fs::File::create(&zip_path).unwrap();
+            let mut w = zip::ZipWriter::new(f);
+            let opts: zip::write::FileOptions<()> = zip::write::FileOptions::default();
+            w.start_file("hello.txt", opts).unwrap();
+            w.write_all(b"hi there").unwrap();
+            w.add_directory("sub/", opts).unwrap();
+            w.start_file("sub/nested.txt", opts).unwrap();
+            w.write_all(b"nested").unwrap();
+            w.finish().unwrap();
+        }
+        let dest = dir.path().join("out");
+        std::fs::create_dir(&dest).unwrap();
+        extract_local_blocking(&zip_path, &dest, ArchiveFormat::Zip).unwrap();
+        assert_eq!(std::fs::read(dest.join("hello.txt")).unwrap(), b"hi there");
+        assert_eq!(std::fs::read(dest.join("sub/nested.txt")).unwrap(), b"nested");
+    }
+
+    /// tar.gz 압축 → 해제 round-trip — compress_local_blocking + extract 검증.
+    #[test]
+    fn targz_roundtrip_local() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src");
+        std::fs::create_dir(&src).unwrap();
+        std::fs::write(src.join("a.txt"), b"alpha").unwrap();
+        std::fs::create_dir(src.join("d")).unwrap();
+        std::fs::write(src.join("d/b.txt"), b"beta").unwrap();
+
+        let archive = dir.path().join("out.tar.gz");
+        compress_local_blocking(
+            &src,
+            &["a.txt".into(), "d".into()],
+            &archive,
+            CompressFormat::TarGz,
+        )
+        .unwrap();
+        assert!(archive.exists());
+
+        let dest = dir.path().join("unpacked");
+        std::fs::create_dir(&dest).unwrap();
+        extract_local_blocking(&archive, &dest, ArchiveFormat::TarGz).unwrap();
+        assert_eq!(std::fs::read(dest.join("a.txt")).unwrap(), b"alpha");
+        assert_eq!(std::fs::read(dest.join("d/b.txt")).unwrap(), b"beta");
+    }
+
+    /// zip 압축 → 해제 round-trip (디렉토리 재귀 add_to_zip 검증).
+    #[test]
+    fn zip_roundtrip_with_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src");
+        std::fs::create_dir(&src).unwrap();
+        std::fs::write(src.join("top.txt"), b"top").unwrap();
+        std::fs::create_dir(src.join("inner")).unwrap();
+        std::fs::write(src.join("inner/leaf.txt"), b"leaf").unwrap();
+
+        let archive = dir.path().join("out.zip");
+        compress_local_blocking(
+            &src,
+            &["top.txt".into(), "inner".into()],
+            &archive,
+            CompressFormat::Zip,
+        )
+        .unwrap();
+
+        let dest = dir.path().join("unpacked");
+        std::fs::create_dir(&dest).unwrap();
+        extract_local_blocking(&archive, &dest, ArchiveFormat::Zip).unwrap();
+        assert_eq!(std::fs::read(dest.join("top.txt")).unwrap(), b"top");
+        assert_eq!(std::fs::read(dest.join("inner/leaf.txt")).unwrap(), b"leaf");
+    }
+}
