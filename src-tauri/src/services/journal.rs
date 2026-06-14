@@ -85,6 +85,11 @@ pub enum OpKind {
         count: u32,
         dst: Location,
     },
+    Sync {
+        count: u32,
+        src: Location,
+        dst: Location,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]

@@ -7,7 +7,9 @@ use std::sync::Arc;
 
 use crate::core::archive::{self, CompressFormat, CompressPlan, ExtractPlan};
 use crate::core::copy_strategy::{decide as decide_strategy, CopyStrategy};
-use crate::core::ops::{self, BatchRenamePlan, CopyPlan, DeletePlan, MovePlan, OpCtx, RenameRule};
+use crate::core::ops::{
+    self, BatchRenamePlan, CopyPlan, DeletePlan, MovePlan, OpCtx, RenameRule, SyncPlan,
+};
 use crate::fs::{FileSystem, LocalFs, SshFs};
 use crate::services::connection_pool::ConnectionPool;
 use crate::services::journal::{Journal, JournalEntry, JournalId};
@@ -274,6 +276,78 @@ pub async fn fs_move_execute(
                         app: Some(app_for_run.clone()),
                     };
                     let entry = ops::move_execute(
+                        &*src_fs,
+                        &*dst_fs,
+                        plan_for_run,
+                        &ctx,
+                        cancel_token,
+                        Some(progress),
+                    )
+                    .await?;
+                    Ok(emit_pushed(&app_for_run, entry))
+                })
+            }),
+        )
+        .await;
+    Ok(task_id)
+}
+
+/// 단방향 미러 계획 — 활성 패널 dir(src) → 반대 패널 dir(dst). v1 local↔local 만.
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_sync_plan(
+    src: Location,
+    dst: Location,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+) -> Result<SyncPlan, DuetError> {
+    let src_fs = fs_for(&src.source, pool.inner()).await?;
+    let dst_fs = fs_for(&dst.source, pool.inner()).await?;
+    ops::sync_plan(&*src_fs, &*dst_fs, src, dst).await
+}
+
+/// 미러 실행 — Task 로 enqueue (진행률/취소). 추가 전용, UndoCopy 로 복원.
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_sync_execute(
+    plan: SyncPlan,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+    settings: tauri::State<'_, Arc<SettingsStore>>,
+    journal: tauri::State<'_, Arc<Journal>>,
+    queue: tauri::State<'_, Arc<TaskQueue>>,
+    app: tauri::AppHandle,
+) -> Result<TaskId, DuetError> {
+    let host_key = host_key_for_op(&plan.src.source, &plan.dst.source);
+    let title = format!(
+        "Syncing {} → {}",
+        plan.src.path.display(),
+        plan.dst.path.display()
+    );
+    let pool_inner = pool.inner().clone();
+    let settings_inner = settings.inner().clone();
+    let journal_inner = journal.inner().clone();
+    let app_for_run = app.clone();
+    let affected = vec![plan.dst.clone(), plan.src.clone()];
+    let plan_for_run = plan;
+
+    let task_id = queue
+        .inner()
+        .clone()
+        .enqueue(
+            TaskKind::Sync,
+            title,
+            host_key,
+            affected,
+            Box::new(move |cancel_token, progress| {
+                Box::pin(async move {
+                    let src_fs = fs_for(&plan_for_run.src.source, &pool_inner).await?;
+                    let dst_fs = fs_for(&plan_for_run.dst.source, &pool_inner).await?;
+                    let ctx = OpCtx {
+                        settings: settings_inner,
+                        journal: journal_inner.clone(),
+                        pool: Some(pool_inner.clone()),
+                        app: Some(app_for_run.clone()),
+                    };
+                    let entry = ops::sync_execute(
                         &*src_fs,
                         &*dst_fs,
                         plan_for_run,

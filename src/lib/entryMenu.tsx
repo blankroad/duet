@@ -19,6 +19,7 @@ import {
   FileArchive,
   Package,
   Undo2,
+  FolderSync,
 } from "lucide-react";
 import { commands } from "@/types/bindings";
 import type { Entry, Location } from "@/types/bindings";
@@ -31,7 +32,7 @@ import { useConnections } from "@/stores/connections";
 import { bookmarkLocation } from "@/lib/bookmarkActions";
 import { addHostFavorite } from "@/stores/hostFavorites";
 import { childLocation } from "@/lib/entryDnd";
-import { triggerCopy, triggerMove, triggerRename, triggerBatchRename, triggerMkdir, triggerDelete, triggerExtract, triggerCompress } from "@/lib/fileActions";
+import { triggerCopy, triggerMove, triggerRename, triggerBatchRename, triggerMkdir, triggerDelete, triggerExtract, triggerCompress, triggerSync } from "@/lib/fileActions";
 import type { MenuEntry } from "@/stores/contextMenu";
 
 /**
@@ -183,6 +184,7 @@ export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
   const items: MenuEntry[] = [
     { id: "mkdir", label: "New folder", icon: <FolderPlus size={ICON} />, shortcut: "F7", onSelect: () => triggerMkdir(open) },
     { id: "refresh", label: "Refresh", icon: <RotateCw size={ICON} />, shortcut: "Ctrl+R", onSelect: () => onRefresh(paneId) },
+    { id: "sync", label: "Sync to other pane", icon: <FolderSync size={ICON} />, onSelect: () => void triggerSync(open, useToast.getState().show) },
     sep(),
     {
       id: "view",

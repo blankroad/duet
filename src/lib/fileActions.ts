@@ -60,6 +60,21 @@ export function triggerBatchRename(open: OpenFn, showToast: ToastFn): void {
   open({ kind: "batch-rename", targets });
 }
 
+/** 단방향 미러 — 활성 패널 dir → 반대 패널 dir. plan 후 확인 다이얼로그. */
+export async function triggerSync(open: OpenFn, showToast: ToastFn): Promise<void> {
+  const { active, opposite } = resolveActiveTargets();
+  const state = usePanes.getState();
+  const src = activeTab(state, active).location;
+  const dst = activeTab(state, opposite).location;
+  const r = await commands.fsSyncPlan(src, dst);
+  if (r.status === "error") {
+    showToast(`Sync: ${formatErr(r.error)}`);
+    return;
+  }
+  const label = (loc: Location) => String(loc.path).split("/").filter(Boolean).pop() ?? "/";
+  open({ kind: "sync-confirm", plan: r.data, srcLabel: label(src), dstLabel: label(dst) });
+}
+
 /** F7 — 활성 패널 현재 디렉토리에 새 폴더. */
 export function triggerMkdir(open: OpenFn): void {
   const { tab } = resolveActiveTargets();

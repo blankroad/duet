@@ -394,6 +394,180 @@ pub async fn move_execute(
     ctx.journal.push(op, undo).await
 }
 
+// === Sync (단방향 미러) ===
+
+/// 단방향 미러 계획 — src 디렉토리 → dst 디렉토리.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct SyncPlan {
+    pub src: Location,
+    pub dst: Location,
+    pub strategy: CopyStrategy,
+}
+
+/// sync 계획 검증 — 양쪽이 디렉토리이고 같은 위치가 아님. 전략 결정.
+///
+/// v1 은 local↔local 만 지원(완전 undo 가능). same-host SSH(rsync)·cross-host 는
+/// 후속 — rsync 변경 추적 없이는 §4 undo 보장이 어렵기 때문(의도적 단계 분리).
+pub async fn sync_plan(
+    src_fs: &dyn FileSystem,
+    dst_fs: &dyn FileSystem,
+    src: Location,
+    dst: Location,
+) -> Result<SyncPlan, DuetError> {
+    if src.source == dst.source && src.path == dst.path {
+        return Err(DuetError::Io(
+            "sync: source and destination are the same".into(),
+        ));
+    }
+    if src_fs.metadata(&src.path).await?.kind != crate::types::EntryKind::Dir
+        || dst_fs.metadata(&dst.path).await?.kind != crate::types::EntryKind::Dir
+    {
+        return Err(DuetError::Io("sync: both sides must be directories".into()));
+    }
+    let strategy = decide_strategy(&src.source, &dst.source);
+    if !matches!(strategy, CopyStrategy::LocalToLocal) {
+        return Err(DuetError::NotSupported(
+            "sync currently supports local↔local only (same-host SSH sync is a follow-up)".into(),
+        ));
+    }
+    Ok(SyncPlan { src, dst, strategy })
+}
+
+/// src 트리의 파일 개수 (진행률 total 용). best-effort — 실패 시 0.
+async fn count_files(fs: &dyn FileSystem, dir: &std::path::Path) -> u64 {
+    let mut total = 0u64;
+    let entries = match fs.list(dir).await {
+        Ok(e) => e,
+        Err(_) => return 0,
+    };
+    for e in entries {
+        match e.kind {
+            crate::types::EntryKind::File => total += 1,
+            crate::types::EntryKind::Dir => {
+                total += Box::pin(count_files(fs, &dir.join(&e.name))).await;
+            }
+            _ => {}
+        }
+    }
+    total
+}
+
+/// 단방향 추가 미러 실행 — src 의 새/변경 파일을 dst 로 복사(미변경 skip).
+/// 덮어쓰는 dst 파일은 `.bak.<ts>` 백업, 새로 만든 파일은 추적 → UndoCopy 로 완전 복원.
+/// 삭제(prune)는 v1 미지원(추가 전용) — undo 안전.
+pub async fn sync_execute(
+    src_fs: &dyn FileSystem,
+    dst_fs: &dyn FileSystem,
+    plan: SyncPlan,
+    ctx: &OpCtx,
+    cancel_token: tokio_util::sync::CancellationToken,
+    progress: Option<crate::services::task_queue::ProgressEmitter>,
+) -> Result<JournalEntry, DuetError> {
+    let total = count_files(src_fs, &plan.src.path).await;
+    let mut state = MirrorState {
+        created: Vec::new(),
+        backups: Vec::new(),
+        done: 0,
+        total,
+    };
+    mirror_dir(
+        src_fs,
+        dst_fs,
+        &plan.src.path,
+        &plan.dst.path,
+        &cancel_token,
+        progress.as_ref(),
+        &mut state,
+    )
+    .await?;
+    let undo = UndoAction::UndoCopy {
+        target_source: plan.dst.source.clone(),
+        copied: state.created,
+        backups_to_restore: state.backups,
+    };
+    let op = OpKind::Sync {
+        count: state.done as u32,
+        src: plan.src.clone(),
+        dst: plan.dst.clone(),
+    };
+    ctx.journal.push(op, undo).await
+}
+
+struct MirrorState {
+    created: Vec<PathBuf>,
+    backups: Vec<BackupRestore>,
+    done: u64,
+    total: u64,
+}
+
+/// src 파일이 dst 와 다른가 (크기 다름 또는 src 가 더 최신).
+fn entry_differs(src: &crate::types::Entry, dst: &crate::types::EntryMeta) -> bool {
+    src.size != dst.size || src.modified_ms.unwrap_or(0) > dst.modified_ms.unwrap_or(0)
+}
+
+async fn mirror_dir(
+    src_fs: &dyn FileSystem,
+    dst_fs: &dyn FileSystem,
+    src_dir: &std::path::Path,
+    dst_dir: &std::path::Path,
+    cancel: &tokio_util::sync::CancellationToken,
+    progress: Option<&crate::services::task_queue::ProgressEmitter>,
+    state: &mut MirrorState,
+) -> Result<(), DuetError> {
+    let entries = src_fs.list(src_dir).await?;
+    for e in entries {
+        if cancel.is_cancelled() {
+            return Err(DuetError::Cancelled);
+        }
+        let s = src_dir.join(&e.name);
+        let d = dst_dir.join(&e.name);
+        match e.kind {
+            crate::types::EntryKind::Dir => {
+                if dst_fs.metadata(&d).await.is_err() {
+                    dst_fs.mkdir(&d).await?;
+                }
+                Box::pin(mirror_dir(src_fs, dst_fs, &s, &d, cancel, progress, state)).await?;
+            }
+            crate::types::EntryKind::File => {
+                let dst_meta = dst_fs.metadata(&d).await.ok();
+                let needs = match &dst_meta {
+                    None => true,
+                    Some(dm) => entry_differs(&e, dm),
+                };
+                if needs {
+                    if dst_meta.is_some() {
+                        // 덮어쓰기 전 기존 dst 파일 백업 (undo 복원용).
+                        let backup = pick_backup_path(dst_fs, dst_dir, &e.name).await?;
+                        dst_fs.rename(&d, &backup).await?;
+                        state.backups.push(BackupRestore {
+                            backup_path: backup,
+                            original_path: d.clone(),
+                        });
+                    } else {
+                        state.created.push(d.clone());
+                    }
+                    crate::fs::copy_relay(src_fs, &s, dst_fs, &d).await?;
+                }
+                state.done += 1;
+                if let Some(p) = progress {
+                    if state.total > 0 {
+                        let pct = ((state.done.min(state.total)) * 100 / state.total) as u8;
+                        p.emit(crate::services::task_events::ProgressInfo {
+                            bytes_done: state.done,
+                            bytes_total: Some(state.total),
+                            speed_bps: None,
+                            eta_sec: None,
+                            percent: Some(pct),
+                        });
+                    }
+                }
+            }
+            _ => {} // symlink/other 는 v1 skip.
+        }
+    }
+    Ok(())
+}
+
 // === Rename / Mkdir (단순 — plan 불필요) ===
 
 pub async fn rename(
@@ -1101,6 +1275,75 @@ mod tests {
         let entry = rename(&local, target, "b".into(), &ctx).await.unwrap();
         assert!(dir.path().join("b").exists());
         assert!(matches!(entry.undo, UndoAction::UndoRename { .. }));
+    }
+
+    #[tokio::test]
+    async fn sync_mirrors_new_and_changed_then_undo_restores() {
+        let dir = TempDir::new().unwrap();
+        let src = dir.path().join("src");
+        let dst = dir.path().join("dst");
+        std::fs::create_dir_all(src.join("sub")).unwrap();
+        std::fs::create_dir_all(&dst).unwrap();
+        std::fs::write(src.join("new.txt"), b"fresh").unwrap();
+        std::fs::write(src.join("sub/x.txt"), b"deep").unwrap();
+        std::fs::write(src.join("same.txt"), b"keep").unwrap();
+        // dst 에 same.txt 동일 내용 + changed.txt 다른 내용(원본 src 에 존재).
+        std::fs::write(src.join("changed.txt"), b"NEW-content").unwrap();
+        std::fs::write(dst.join("changed.txt"), b"old").unwrap();
+
+        let fs = LocalFs::new();
+        let (ctx, _cd) = mk_ctx().await;
+        let mk_loc = |p: &std::path::Path| Location {
+            source: SourceId::Local,
+            path: p.to_path_buf(),
+        };
+        let plan = sync_plan(&fs, &fs, mk_loc(&src), mk_loc(&dst))
+            .await
+            .unwrap();
+        let entry = sync_execute(
+            &fs,
+            &fs,
+            plan,
+            &ctx,
+            tokio_util::sync::CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+
+        // dst 가 src 를 반영.
+        assert_eq!(std::fs::read(dst.join("new.txt")).unwrap(), b"fresh");
+        assert_eq!(std::fs::read(dst.join("sub/x.txt")).unwrap(), b"deep");
+        assert_eq!(
+            std::fs::read(dst.join("changed.txt")).unwrap(),
+            b"NEW-content"
+        );
+
+        // undo: 새로 만든 파일 제거 + 덮어쓴 파일 복원.
+        let pool = Arc::new(crate::services::connection_pool::ConnectionPool::new());
+        let outcome = crate::core::undo::execute_undo(&entry, &pool).await;
+        assert!(matches!(outcome.kind, crate::core::undo::UndoKind::Ok));
+        assert!(
+            !dst.join("new.txt").exists(),
+            "created file removed on undo"
+        );
+        assert_eq!(
+            std::fs::read(dst.join("changed.txt")).unwrap(),
+            b"old",
+            "overwritten file restored from backup"
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_plan_rejects_same_dir() {
+        let dir = TempDir::new().unwrap();
+        let fs = LocalFs::new();
+        let loc = Location {
+            source: SourceId::Local,
+            path: dir.path().to_path_buf(),
+        };
+        let r = sync_plan(&fs, &fs, loc.clone(), loc).await;
+        assert!(matches!(r, Err(DuetError::Io(_))));
     }
 
     #[tokio::test]
