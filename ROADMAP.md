@@ -28,7 +28,7 @@
 - [x] `russh` 통합, `ssh/connection.rs`
 - [x] `~/.ssh/config` 파싱, 호스트 자동완성
 - [x] 키 인증 (key file, agent)
-- [ ] 비밀번호 인증 (백엔드 메모리 only) — 함수는 있으나 secure prompt 미연결 (Task 7b)
+- [x] 비밀번호 인증 (백엔드 메모리 only) — dialog `<input type=password>` → IPC, 사용 직후 zeroize (§5 2026-05 완화, Task 7b)
 - [x] ProxyJump 지원 (russh nested session, 시스템 ssh 명령 사용 X) — 1-hop
 - [x] `SshFs` 구현 (`russh-sftp`)
 - [x] 사이드바에 호스트 목록 + 연결 상태
@@ -114,12 +114,13 @@
 
 ## 장기 (Maybe)
 
-- [ ] 파일 미리보기 (이미지, 텍스트)
-- [ ] 압축/해제 (zip, tar.gz)
-- [ ] 동기화 모드 (rsync 기반)
-- [ ] 점프 호스트 풀 SSH 동작
+- [x] 파일 미리보기 (이미지, 텍스트, PDF/미디어 스트리밍, Quick Look)
+- [x] 압축/해제 (zip, tar.gz) + 아카이브 내부 탐색(browse) + 편집 후 repack
+- [~] 동기화 모드 (rsync 기반) — v1: local↔local 단방향 미러(추가 전용, undo 가능).
+      same-host rsync / prune(--delete) / cross-host 는 후속(undo 추적 설계 필요)
+- [x] 점프 호스트 풀 SSH 동작 — N-hop ProxyJump 체인
 - [ ] Drag & Drop (외부 앱 → duet, duet → 외부)
-- [ ] 다중 선택 일괄 이름 변경
+- [x] 다중 선택 일괄 이름 변경 (batch rename)
 
 ---
 
