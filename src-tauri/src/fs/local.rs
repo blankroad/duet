@@ -145,6 +145,25 @@ impl FileSystem for LocalFs {
         tokio::fs::write(path, bytes).await.map_err(DuetError::from)
     }
 
+    async fn open_read(
+        &self,
+        path: &Path,
+    ) -> Result<std::pin::Pin<Box<dyn tokio::io::AsyncRead + Send>>, DuetError> {
+        let file = tokio::fs::File::open(path).await.map_err(DuetError::from)?;
+        Ok(Box::pin(file))
+    }
+
+    async fn open_write(
+        &self,
+        path: &Path,
+    ) -> Result<std::pin::Pin<Box<dyn tokio::io::AsyncWrite + Send>>, DuetError> {
+        // create + truncate (write_full 과 동일 의미).
+        let file = tokio::fs::File::create(path)
+            .await
+            .map_err(DuetError::from)?;
+        Ok(Box::pin(file))
+    }
+
     async fn list(&self, path: &Path) -> Result<Vec<Entry>, DuetError> {
         let mut read_dir = tokio::fs::read_dir(path).await.map_err(DuetError::from)?;
         let mut entries = Vec::new();
@@ -462,5 +481,65 @@ mod tests {
         .unwrap();
         assert_eq!(fs::read(dir.path().join("dst/a")).await.unwrap(), b"A");
         assert_eq!(fs::read(dir.path().join("dst/sub/b")).await.unwrap(), b"B");
+    }
+
+    /// 다중 chunk 파일(>256KB)을 스트리밍 복사 — chunk 경계 정확성 + 진행률 누적 확인.
+    /// 전체를 메모리에 안 올리는 경로가 바이트 단위로 정확한지 검증.
+    #[tokio::test]
+    async fn copy_relay_streaming_multichunk_exact_and_progress() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        let dir = TempDir::new().unwrap();
+        // 256KB(RELAY_CHUNK) 경계를 여러 번 넘는 크기 + 비정렬 꼬리.
+        let size = 256 * 1024 * 3 + 777;
+        let data: Vec<u8> = (0..size).map(|i| (i % 251) as u8).collect();
+        fs::write(dir.path().join("big.bin"), &data).await.unwrap();
+
+        let local = LocalFs::new();
+        let counted = AtomicU64::new(0);
+        let on_bytes = |delta: u64| {
+            counted.fetch_add(delta, Ordering::Relaxed);
+        };
+        let cancel = tokio_util::sync::CancellationToken::new();
+        crate::fs::copy_relay_streaming(
+            &local,
+            &dir.path().join("big.bin"),
+            &local,
+            &dir.path().join("out.bin"),
+            &cancel,
+            &on_bytes,
+        )
+        .await
+        .unwrap();
+
+        let out = fs::read(dir.path().join("out.bin")).await.unwrap();
+        assert_eq!(out.len(), size);
+        assert_eq!(out, data, "byte-exact across chunk boundaries");
+        assert_eq!(
+            counted.load(Ordering::Relaxed),
+            size as u64,
+            "progress sums to size"
+        );
+    }
+
+    /// 이미 취소된 토큰이면 첫 chunk 전에 Cancelled.
+    #[tokio::test]
+    async fn copy_relay_streaming_honors_cancel() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("a"), vec![0u8; 512 * 1024])
+            .await
+            .unwrap();
+        let local = LocalFs::new();
+        let cancel = tokio_util::sync::CancellationToken::new();
+        cancel.cancel();
+        let r = crate::fs::copy_relay_streaming(
+            &local,
+            &dir.path().join("a"),
+            &local,
+            &dir.path().join("b"),
+            &cancel,
+            &|_| {},
+        )
+        .await;
+        assert!(matches!(r, Err(DuetError::Cancelled)));
     }
 }

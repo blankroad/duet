@@ -265,6 +265,38 @@ impl FileSystem for SshFs {
         Ok(())
     }
 
+    async fn open_read(
+        &self,
+        path: &Path,
+    ) -> Result<std::pin::Pin<Box<dyn tokio::io::AsyncRead + Send>>, DuetError> {
+        let sftp = self.open_sftp().await?;
+        let path_str = path
+            .to_str()
+            .ok_or_else(|| DuetError::Io("non-UTF8 path".into()))?;
+        // File 은 Arc<RawSftpSession> 를 자체 보유 — sftp 로컬 var 가 drop 돼도 채널 유지.
+        let file = sftp
+            .open(path_str.to_string())
+            .await
+            .map_err(|e| map_sftp_error(e, path_str))?;
+        Ok(Box::pin(file))
+    }
+
+    async fn open_write(
+        &self,
+        path: &Path,
+    ) -> Result<std::pin::Pin<Box<dyn tokio::io::AsyncWrite + Send>>, DuetError> {
+        let sftp = self.open_sftp().await?;
+        let path_str = path
+            .to_str()
+            .ok_or_else(|| DuetError::Io("non-UTF8 path".into()))?;
+        // create = WRITE|CREATE|TRUNCATE (write_full 과 동일).
+        let file = sftp
+            .create(path_str.to_string())
+            .await
+            .map_err(|e| map_sftp_error(e, path_str))?;
+        Ok(Box::pin(file))
+    }
+
     async fn list(&self, path: &Path) -> Result<Vec<Entry>, DuetError> {
         let sftp = self.open_sftp().await?;
         let path_str = path

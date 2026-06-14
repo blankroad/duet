@@ -9,6 +9,8 @@ pub mod ssh;
 use crate::types::{DuetError, Entry, SourceId};
 use async_trait::async_trait;
 use std::path::Path;
+use std::pin::Pin;
+use tokio_util::sync::CancellationToken;
 
 pub use local::LocalFs;
 pub use ssh::SshFs;
@@ -38,10 +40,23 @@ pub trait FileSystem: Send + Sync {
         location: &crate::types::TrashLocation,
         original_path: &Path,
     ) -> Result<(), DuetError>;
-    /// 단일 파일 전체 읽기. 큰 파일은 메모리 폭주 위험 — 후속에서 streaming 화.
+    /// 단일 파일 전체 읽기. 큰 파일은 메모리 폭주 위험 — 복사는 `open_read`/`open_write`
+    /// 스트리밍 사용. 이건 작은 파일(설정/미리보기 등) 전용.
     async fn read_full(&self, path: &Path) -> Result<Vec<u8>, DuetError>;
     /// 단일 파일 전체 쓰기.
     async fn write_full(&self, path: &Path, bytes: &[u8]) -> Result<(), DuetError>;
+
+    /// 스트리밍 읽기 핸들 — 큰 파일을 전부 메모리에 올리지 않고 chunk 로 읽기 위함.
+    async fn open_read(
+        &self,
+        path: &Path,
+    ) -> Result<Pin<Box<dyn tokio::io::AsyncRead + Send>>, DuetError>;
+
+    /// 스트리밍 쓰기 핸들 (생성 + truncate). `flush`/`shutdown` 은 호출자 책임.
+    async fn open_write(
+        &self,
+        path: &Path,
+    ) -> Result<Pin<Box<dyn tokio::io::AsyncWrite + Send>>, DuetError>;
     /// 파일 앞부분만 읽기 (미리보기용) — 최대 `max` 바이트, 더 있으면 `truncated=true`.
     ///
     /// 기본 구현은 `read_full` 후 절단(큰 파일 비효율) — impl 별 override 로
@@ -83,15 +98,47 @@ where
     Ok(total)
 }
 
+/// relay 스트리밍 복사 버퍼 — 한 번에 메모리에 올리는 최대 바이트.
+/// 전체 파일이 아니라 이 크기씩 흘려보내 큰 파일에서도 메모리 bounded.
+const RELAY_CHUNK: usize = 256 * 1024;
+
 /// 본인 PC 통한 stream copy. local↔ssh 양방향 OK; ssh↔ssh 는 호출 전에
 /// `core::ops` 가 same-host 검사 하고 차단.
 ///
 /// 디렉토리는 재귀: src 가 dir 이면 dst 에 mkdir 후 자식 entries 차례로 복사.
+/// 파일은 chunk 스트리밍 — 전체를 메모리에 올리지 않음(대용량 안전). 진행률/취소가
+/// 필요하면 `copy_relay_streaming` 사용.
 pub async fn copy_relay(
     src_fs: &dyn FileSystem,
     src: &std::path::Path,
     dst_fs: &dyn FileSystem,
     dst: &std::path::Path,
+) -> Result<(), DuetError> {
+    // 진행률/취소 없는 호출(undo 등) — 절대 취소 안 되는 토큰 + no-op 콜백.
+    let cancel = CancellationToken::new();
+    copy_tree(src_fs, src, dst_fs, dst, &cancel, &|_| {}).await
+}
+
+/// `copy_relay` 의 진행률/취소 지원 변형. `on_bytes(delta)` 는 파일에서 쓴
+/// 바이트 증분마다 호출(진행률 emit 용). `cancel` 은 chunk 경계마다 검사.
+pub async fn copy_relay_streaming(
+    src_fs: &dyn FileSystem,
+    src: &std::path::Path,
+    dst_fs: &dyn FileSystem,
+    dst: &std::path::Path,
+    cancel: &CancellationToken,
+    on_bytes: &(dyn Fn(u64) + Send + Sync),
+) -> Result<(), DuetError> {
+    copy_tree(src_fs, src, dst_fs, dst, cancel, on_bytes).await
+}
+
+async fn copy_tree(
+    src_fs: &dyn FileSystem,
+    src: &std::path::Path,
+    dst_fs: &dyn FileSystem,
+    dst: &std::path::Path,
+    cancel: &CancellationToken,
+    on_bytes: &(dyn Fn(u64) + Send + Sync),
 ) -> Result<(), DuetError> {
     let meta = src_fs.metadata(src).await?;
     match meta.kind {
@@ -101,24 +148,56 @@ pub async fn copy_relay(
             for e in entries {
                 let child_src = src.join(&e.name);
                 let child_dst = dst.join(&e.name);
-                Box::pin(copy_relay(src_fs, &child_src, dst_fs, &child_dst)).await?;
+                Box::pin(copy_tree(
+                    src_fs, &child_src, dst_fs, &child_dst, cancel, on_bytes,
+                ))
+                .await?;
             }
             Ok(())
         }
-        crate::types::EntryKind::File => copy_file_bytes(src_fs, src, dst_fs, dst).await,
-        crate::types::EntryKind::Symlink | crate::types::EntryKind::Other => {
-            // MVP-2 는 symlink 따라가서 복사 (target 의 내용 복사).
-            copy_file_bytes(src_fs, src, dst_fs, dst).await
-        }
+        // Symlink/Other 는 target 내용을 따라가 복사 (MVP-2).
+        _ => stream_copy_file(src_fs, src, dst_fs, dst, cancel, on_bytes).await,
     }
 }
 
-async fn copy_file_bytes(
+/// 단일 파일을 고정 버퍼로 흘려 복사 — 전체를 메모리에 올리지 않음(대용량 안전).
+/// chunk 경계마다 취소 검사 + `on_bytes` 호출.
+async fn stream_copy_file(
     src_fs: &dyn FileSystem,
     src: &std::path::Path,
     dst_fs: &dyn FileSystem,
     dst: &std::path::Path,
+    cancel: &CancellationToken,
+    on_bytes: &(dyn Fn(u64) + Send + Sync),
 ) -> Result<(), DuetError> {
-    let bytes = src_fs.read_full(src).await?;
-    dst_fs.write_full(dst, &bytes).await
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut reader = src_fs.open_read(src).await?;
+    let mut writer = dst_fs.open_write(dst).await?;
+    let mut buf = vec![0u8; RELAY_CHUNK];
+    loop {
+        if cancel.is_cancelled() {
+            return Err(DuetError::Cancelled);
+        }
+        let n = reader
+            .read(&mut buf)
+            .await
+            .map_err(|e| DuetError::Io(format!("copy read: {e}")))?;
+        if n == 0 {
+            break;
+        }
+        writer
+            .write_all(&buf[..n])
+            .await
+            .map_err(|e| DuetError::Io(format!("copy write: {e}")))?;
+        on_bytes(n as u64);
+    }
+    writer
+        .flush()
+        .await
+        .map_err(|e| DuetError::Io(format!("copy flush: {e}")))?;
+    writer
+        .shutdown()
+        .await
+        .map_err(|e| DuetError::Io(format!("copy close: {e}")))?;
+    Ok(())
 }

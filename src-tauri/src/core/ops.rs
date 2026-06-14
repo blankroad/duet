@@ -222,10 +222,7 @@ pub async fn copy_execute(
 ) -> Result<JournalEntry, DuetError> {
     match plan.strategy {
         CopyStrategy::LocalToLocal | CopyStrategy::Relay => {
-            // relay 는 byte-level progress emit 안 함 (read_full/write_full 라
-            // 라인 단위 X) — progress 인자 무시
-            let _ = progress;
-            copy_execute_relay(src_fs, dst_fs, plan, ctx, cancel_token).await
+            copy_execute_relay(src_fs, dst_fs, plan, ctx, cancel_token, progress).await
         }
         CopyStrategy::SshSameHost => {
             copy_execute_same_host(plan, ctx, cancel_token, progress).await
@@ -234,17 +231,50 @@ pub async fn copy_execute(
 }
 
 /// 기존 relay 경로 (LocalToLocal + Relay 공통).
-/// 충돌 시 dst 파일을 .bak.<ts> 로 mv 후 src 를 복사.
+/// 충돌 시 dst 파일을 .bak.<ts> 로 mv 후 src 를 복사. 파일은 chunk 스트리밍이라
+/// 큰 파일도 메모리 bounded + chunk 경계마다 취소 가능 + 바이트 진행률 emit.
 async fn copy_execute_relay(
     src_fs: &dyn FileSystem,
     dst_fs: &dyn FileSystem,
     plan: CopyPlan,
     ctx: &OpCtx,
     cancel_token: tokio_util::sync::CancellationToken,
+    progress: Option<crate::services::task_queue::ProgressEmitter>,
 ) -> Result<JournalEntry, DuetError> {
     if plan.items.is_empty() {
         return Err(DuetError::Io("plan has no items".into()));
     }
+    // 누적 바이트 진행률 — plan 전체 크기 대비. chunk 마다 호출되되 ~150ms throttle.
+    let total = plan.total_size_bytes;
+    let done = std::sync::atomic::AtomicU64::new(0);
+    let last = std::sync::Mutex::new(std::time::Instant::now());
+    let on_bytes = move |delta: u64| {
+        use std::sync::atomic::Ordering::Relaxed;
+        let d = done.fetch_add(delta, Relaxed) + delta;
+        let Some(p) = progress.as_ref() else { return };
+        let complete = d >= total;
+        if let Ok(mut l) = last.lock() {
+            let now = std::time::Instant::now();
+            if !complete && now.duration_since(*l) < std::time::Duration::from_millis(150) {
+                return;
+            }
+            *l = now;
+        }
+        let shown = d.min(total);
+        let percent = if total > 0 {
+            (shown * 100 / total) as u8
+        } else {
+            0
+        };
+        p.emit(crate::services::task_events::ProgressInfo {
+            bytes_done: shown,
+            bytes_total: Some(total),
+            speed_bps: None,
+            eta_sec: None,
+            percent: Some(percent),
+        });
+    };
+
     let mut copied = Vec::new();
     let mut backups = Vec::new();
     for it in &plan.items {
@@ -266,15 +296,32 @@ async fn copy_execute_relay(
             });
         }
 
-        // copy 본체 — connection loss 면 1회 retry
-        match crate::fs::copy_relay(src_fs, &src_path, dst_fs, &dst_path).await {
+        // copy 본체 — chunk 스트리밍(메모리 bounded, mid-file cancel) + connection loss 면 1회 retry
+        match crate::fs::copy_relay_streaming(
+            src_fs,
+            &src_path,
+            dst_fs,
+            &dst_path,
+            &cancel_token,
+            &on_bytes,
+        )
+        .await
+        {
             Ok(()) => {}
             Err(e) if crate::services::retry::is_retryable_error(&e) => {
                 tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                 if cancel_token.is_cancelled() {
                     return Err(DuetError::Cancelled);
                 }
-                crate::fs::copy_relay(src_fs, &src_path, dst_fs, &dst_path).await?;
+                crate::fs::copy_relay_streaming(
+                    src_fs,
+                    &src_path,
+                    dst_fs,
+                    &dst_path,
+                    &cancel_token,
+                    &on_bytes,
+                )
+                .await?;
             }
             Err(e) => return Err(e),
         }
