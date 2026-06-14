@@ -17,6 +17,7 @@ import {
   ExternalLink,
   FolderSearch,
   FileArchive,
+  Package,
 } from "lucide-react";
 import { commands } from "@/types/bindings";
 import type { Entry, Location } from "@/types/bindings";
@@ -29,7 +30,7 @@ import { useConnections } from "@/stores/connections";
 import { addBookmark } from "@/stores/bookmarks";
 import { addHostFavorite } from "@/stores/hostFavorites";
 import { childLocation } from "@/lib/entryDnd";
-import { triggerCopy, triggerMove, triggerRename, triggerMkdir, triggerDelete, triggerExtract } from "@/lib/fileActions";
+import { triggerCopy, triggerMove, triggerRename, triggerMkdir, triggerDelete, triggerExtract, triggerCompress } from "@/lib/fileActions";
 import type { MenuEntry } from "@/stores/contextMenu";
 
 /**
@@ -111,6 +112,7 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
   items.push(
     { id: "copy", label: "Copy to other pane", icon: <Copy size={ICON} />, shortcut: "F5", onSelect: () => void triggerCopy(open, showToast) },
     { id: "move", label: "Move to other pane", icon: <FolderInput size={ICON} />, shortcut: "F6", onSelect: () => void triggerMove(open, showToast) },
+    { id: "compress", label: "Compress…", icon: <Package size={ICON} />, onSelect: () => triggerCompress(open, showToast) },
     sep(),
     { id: "rename", label: "Rename", icon: <Pencil size={ICON} />, shortcut: "F2", disabled: multi, onSelect: () => triggerRename(open, showToast) },
     { id: "mkdir", label: "New folder", icon: <FolderPlus size={ICON} />, shortcut: "F7", onSelect: () => triggerMkdir(open) },

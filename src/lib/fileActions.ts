@@ -104,6 +104,21 @@ export async function triggerExtract(showToast: ToastFn): Promise<void> {
   if (exec.status === "error") showToast(`Extract failed: ${formatErr(exec.error)}`);
 }
 
+/** 선택 항목들을 압축 — 이름/포맷 선택 다이얼로그 오픈. */
+export function triggerCompress(open: OpenFn, showToast: ToastFn): void {
+  const { targets } = resolveActiveTargets();
+  if (targets.length === 0) {
+    showToast("Compress: select at least one item");
+    return;
+  }
+  // 단일 항목이면 그 이름, 여러 개면 부모 폴더 이름을 기본 아카이브 이름으로.
+  const defaultName =
+    targets.length === 1
+      ? targets[0]!.name
+      : String(targets[0]!.location.path).split("/").filter(Boolean).pop() ?? "archive";
+  open({ kind: "compress", items: targets, defaultName });
+}
+
 /** Delete(trash) / Shift+Delete(permanent). */
 export async function triggerDelete(
   mode: DeleteMode,

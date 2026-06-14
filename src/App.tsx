@@ -7,6 +7,7 @@ import { ConnectionDialog } from "@/components/connection/ConnectionDialog";
 import { AdHocConnectDialog } from "@/components/connection/AdHocConnectDialog";
 import { RenameDialog } from "@/components/dialogs/RenameDialog";
 import { MkdirDialog } from "@/components/dialogs/MkdirDialog";
+import { CompressDialog } from "@/components/dialogs/CompressDialog";
 import { ConfirmDialog } from "@/components/dialogs/ConfirmDialog";
 import { DangerConfirmDialog } from "@/components/dialogs/DangerConfirmDialog";
 import { ProgressModal } from "@/components/dialogs/ProgressModal";
@@ -48,7 +49,7 @@ import { useTaskEvents } from "@/hooks/useTaskEvents";
 import { formatErr } from "@/lib/error";
 import { formatSize } from "@/lib/format";
 import { commands } from "@/types/bindings";
-import type { ConnectionDto, CopyStrategy, DuetError, Entry, HostFavorite, Location, SearchHit, UserAlias } from "@/types/bindings";
+import type { CompressFormat, ConnectionDto, CopyStrategy, DuetError, Entry, HostFavorite, Location, SearchHit, UserAlias } from "@/types/bindings";
 
 /**
  * App 루트.
@@ -352,6 +353,23 @@ function App() {
     [dialog, closeDialog, refreshAffected, showToast],
   );
 
+  const onCompressSubmit = useCallback(
+    async (name: string, format: CompressFormat) => {
+      if (dialog.kind !== "compress") return;
+      const items = dialog.items;
+      closeDialog();
+      const plan = await commands.fsCompressPlan(items, name, format);
+      if (plan.status === "error") {
+        showToast(`Compress failed: ${formatErr(plan.error)}`);
+        return;
+      }
+      // execute 는 task 로 — 완료 시 affected_locations 자동 새로고침 (useTaskEvents).
+      const exec = await commands.fsCompressExecute(plan.data);
+      if (exec.status === "error") showToast(`Compress failed: ${formatErr(exec.error)}`);
+    },
+    [dialog, closeDialog, showToast],
+  );
+
   const onDeleteConfirm = useCallback(async () => {
     if (dialog.kind !== "delete-confirm" && dialog.kind !== "delete-danger") return;
     const plan = dialog.plan;
@@ -605,6 +623,14 @@ function App() {
           parent={dialog.parent}
           onClose={closeDialog}
           onSubmit={onMkdirSubmit}
+        />
+      )}
+      {dialog.kind === "compress" && (
+        <CompressDialog
+          itemCount={dialog.items.length}
+          defaultName={dialog.defaultName}
+          onClose={closeDialog}
+          onSubmit={onCompressSubmit}
         />
       )}
       {dialog.kind === "delete-confirm" && (
