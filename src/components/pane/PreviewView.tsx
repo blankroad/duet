@@ -56,10 +56,30 @@ export function PreviewView({
       // location 변경 시 remount 로 error 상태 리셋.
       return <MediaPreview key={location.path} kind={data.kind} location={location} />;
     case "binary":
-      return <Centered>Binary file · {formatSize(data.total_size)}</Centered>;
+      return <NoPreview label={`Binary file · ${formatSize(data.total_size)}`} location={location} />;
     case "toolarge":
-      return <Centered>Too large to preview · {formatSize(data.total_size)}</Centered>;
+      return (
+        <NoPreview label={`Too large to preview · ${formatSize(data.total_size)}`} location={location} />
+      );
   }
+}
+
+/** 미리보기 불가(바이너리/대용량) — 외부 앱 열기 제공. */
+function NoPreview({ label, location }: { label: string; location: Location }) {
+  return (
+    <Centered>
+      <div className="flex flex-col items-center gap-2">
+        <span>{label}</span>
+        <button
+          type="button"
+          onClick={() => void commands.openPath(location)}
+          className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
+        >
+          Open in default app
+        </button>
+      </div>
+    </Centered>
+  );
 }
 
 /** 오디오/비디오 — 코덱 미지원(특히 Linux/WebKitGTK) 시 외부 앱 폴백. */

@@ -617,22 +617,49 @@ fn too_large(total_size: u64) -> PreviewData {
     }
 }
 
+/// Binary 미리보기 결과.
+fn binary_preview(total_size: u64) -> PreviewData {
+    PreviewData {
+        kind: PreviewKind::Binary,
+        text: None,
+        bytes_base64: None,
+        mime: None,
+        truncated: false,
+        total_size,
+    }
+}
+
+/// 바이너리 휴리스틱 — NUL 바이트(SQLite 등 텍스트 헤더 가진 바이너리)나
+/// 비텍스트 제어문자 비율이 높으면 true. 빈 입력은 false(빈 텍스트로 표시).
+fn looks_binary(bytes: &[u8]) -> bool {
+    if bytes.is_empty() {
+        return false;
+    }
+    // 실제 텍스트 파일엔 NUL 이 거의 없음 — 강한 신호.
+    if bytes.contains(&0) {
+        return true;
+    }
+    // \t\n\r 외 C0 제어문자 비율이 과하면 바이너리.
+    let sample = &bytes[..bytes.len().min(8192)];
+    let ctrl = sample
+        .iter()
+        .filter(|&&b| b < 0x20 && b != b'\t' && b != b'\n' && b != b'\r')
+        .count();
+    ctrl * 100 / sample.len() > 30
+}
+
 /// 바이트를 텍스트로 디코드 — 유효 UTF-8 prefix 만 사용(head 절단 시 멀티바이트
-/// 경계 보호). prefix 가 비면 Binary.
+/// 경계 보호). 바이너리(NUL/제어문자 과다)거나 prefix 가 비면 Binary.
 fn decode_text(bytes: &[u8], truncated: bool, total_size: u64) -> PreviewData {
+    if looks_binary(bytes) {
+        return binary_preview(total_size);
+    }
     let valid_len = match std::str::from_utf8(bytes) {
         Ok(_) => bytes.len(),
         Err(e) => e.valid_up_to(),
     };
     if valid_len == 0 && !bytes.is_empty() {
-        return PreviewData {
-            kind: PreviewKind::Binary,
-            text: None,
-            bytes_base64: None,
-            mime: None,
-            truncated: false,
-            total_size,
-        };
+        return binary_preview(total_size);
     }
     // valid_len 까지는 유효 UTF-8 보장.
     let text = String::from_utf8_lossy(&bytes[..valid_len]).into_owned();
@@ -717,6 +744,22 @@ mod preview_tests {
         let d = decode_text(&[0xFF, 0xFE, 0x00], false, 3);
         assert_eq!(d.kind, PreviewKind::Binary);
         assert!(d.text.is_none());
+    }
+
+    #[test]
+    fn decode_text_sqlite_header_is_binary() {
+        // "SQLite format 3\0" — 앞부분 ASCII 라 prefix 로는 텍스트로 오인되던 케이스.
+        let mut bytes = b"SQLite format 3\0".to_vec();
+        bytes.extend_from_slice(&[0x10, 0x00, 0x00, 0x01, 0x00, 0x40]);
+        let d = decode_text(&bytes, false, 4096);
+        assert_eq!(d.kind, PreviewKind::Binary);
+        assert!(d.text.is_none());
+    }
+
+    #[test]
+    fn decode_text_plain_with_newlines_stays_text() {
+        let d = decode_text(b"line1\nline2\ttab\r\n", false, 17);
+        assert_eq!(d.kind, PreviewKind::Text);
     }
 
     #[test]
