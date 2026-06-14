@@ -477,9 +477,13 @@ pub async fn sync_plan(
         return Err(DuetError::Io("sync: both sides must be directories".into()));
     }
     let strategy = decide_strategy(&src.source, &dst.source);
-    if !matches!(strategy, CopyStrategy::LocalToLocal) {
+    if !matches!(
+        strategy,
+        CopyStrategy::LocalToLocal | CopyStrategy::SshSameHost
+    ) {
         return Err(DuetError::NotSupported(
-            "sync currently supports local↔local only (same-host SSH sync is a follow-up)".into(),
+            "sync supports local↔local and same-host SSH only (cross-host relay is a follow-up)"
+                .into(),
         ));
     }
     Ok(SyncPlan {
@@ -509,10 +513,28 @@ async fn count_files(fs: &dyn FileSystem, dir: &std::path::Path) -> u64 {
     total
 }
 
-/// 단방향 추가 미러 실행 — src 의 새/변경 파일을 dst 로 복사(미변경 skip).
-/// 덮어쓰는 dst 파일은 `.bak.<ts>` 백업, 새로 만든 파일은 추적 → UndoCopy 로 완전 복원.
-/// 삭제(prune)는 v1 미지원(추가 전용) — undo 안전.
+/// 단방향 미러 실행 — 전략별 분기. local↔local 은 in-Rust 스트리밍 미러,
+/// same-host SSH 는 host-side rsync(PC 경유 0). 둘 다 UndoSync 로 복원.
 pub async fn sync_execute(
+    src_fs: &dyn FileSystem,
+    dst_fs: &dyn FileSystem,
+    plan: SyncPlan,
+    ctx: &OpCtx,
+    cancel_token: tokio_util::sync::CancellationToken,
+    progress: Option<crate::services::task_queue::ProgressEmitter>,
+) -> Result<JournalEntry, DuetError> {
+    match plan.strategy {
+        CopyStrategy::SshSameHost => {
+            sync_execute_same_host(plan, ctx, cancel_token, progress).await
+        }
+        // LocalToLocal (+ 방어적으로 Relay) — in-Rust 미러.
+        _ => sync_execute_local(src_fs, dst_fs, plan, ctx, cancel_token, progress).await,
+    }
+}
+
+/// 단방향 추가 미러(local) — src 의 새/변경 파일을 dst 로 복사(미변경 skip).
+/// 덮어쓰는 dst 파일은 `.bak.<ts>` 백업, 새로 만든 파일은 추적. prune 시 잉여 dst 휴지통.
+async fn sync_execute_local(
     src_fs: &dyn FileSystem,
     dst_fs: &dyn FileSystem,
     plan: SyncPlan,
@@ -682,6 +704,196 @@ async fn prune_pass(
         }
     }
     Ok(())
+}
+
+/// same-host SSH 단방향 미러 — host-side rsync (PC 경유 0, §9 시스템 ssh 안 씀).
+///
+/// undo(§4): ① dry-run `rsync -ain` 으로 *새로 생성될 파일* 목록 확보(itemize),
+/// ② 실제는 `--backup-dir` 로 실행해 덮어쓰기/삭제분을 host-side 백업폴더에 보존,
+/// ③ undo 는 UndoSync 가 생성분 rm + 백업분 복원. rsync 필수(cp 로는 mirror 불가).
+async fn sync_execute_same_host(
+    plan: SyncPlan,
+    ctx: &OpCtx,
+    cancel_token: tokio_util::sync::CancellationToken,
+    progress: Option<crate::services::task_queue::ProgressEmitter>,
+) -> Result<JournalEntry, DuetError> {
+    use crate::core::copy_progress::{
+        parse_rsync_itemize_created_file, parse_rsync_progress2_line,
+    };
+    use crate::core::copy_strategy::shell_escape_path;
+    use crate::ssh::remote_exec::{exec, exec_streaming};
+
+    let SourceId::Ssh { connection_id, .. } = &plan.src.source else {
+        return Err(DuetError::Io("same-host sync on non-ssh source".into()));
+    };
+    let pool = ctx
+        .pool
+        .as_ref()
+        .ok_or_else(|| DuetError::Io("OpCtx.pool required for same-host sync".into()))?;
+    let conn = pool.get(connection_id).await?;
+    let session_mutex = conn
+        .session
+        .as_ref()
+        .ok_or_else(|| DuetError::ConnectionFailed("no live session".into()))?;
+
+    // rsync 필수 — mirror(+삭제)는 cp 로 불가.
+    let use_rsync = {
+        let mut cache = conn.rsync_available.lock().await;
+        match *cache {
+            Some(v) => v,
+            None => {
+                let handle = session_mutex.lock().await;
+                let d = exec(&handle, "command -v rsync")
+                    .await
+                    .map(|o| o.exit_status == 0)
+                    .unwrap_or(false);
+                *cache = Some(d);
+                d
+            }
+        }
+    };
+    if !use_rsync {
+        return Err(DuetError::NotSupported(
+            "same-host sync requires rsync on the host".into(),
+        ));
+    }
+
+    // host home 아래 백업폴더(undo 복원용). 절대경로로 shell-escape (§7).
+    let home = crate::fs::SshFs::new(pool.get(connection_id).await?)
+        .home()
+        .await?;
+    let batch = crate::services::trash::new_batch_id();
+    let backup_dir = home.join(".duet-trash").join(format!("sync-{batch}"));
+
+    let src_arg = shell_escape_path(&plan.src.path)?;
+    let dst_arg = shell_escape_path(&plan.dst.path)?;
+    let backup_arg = shell_escape_path(&backup_dir)?;
+    let delete_flag = if plan.prune { " --delete" } else { "" };
+
+    // 1) dry-run itemize → 새로 생성될 파일(undo rm 대상). LC_ALL=C 로 메시지 로캘 고정.
+    //    src 에 trailing slash → 내용 미러(merge), dst 에 떨어뜨림.
+    let dry_cmd = format!("LC_ALL=C rsync -ain{delete_flag} -- {src_arg}/ {dst_arg}");
+    let dry_out = {
+        let handle = session_mutex.lock().await;
+        exec(&handle, &dry_cmd).await?
+    };
+    if dry_out.exit_status != 0 {
+        return Err(DuetError::Ssh(format!(
+            "rsync dry-run failed (exit {}): {}",
+            dry_out.exit_status,
+            String::from_utf8_lossy(&dry_out.stderr).trim()
+        )));
+    }
+    let mut created = Vec::new();
+    for line in String::from_utf8_lossy(&dry_out.stdout).lines() {
+        if let Some(rel) = parse_rsync_itemize_created_file(line) {
+            created.push(plan.dst.path.join(&rel));
+        }
+    }
+
+    if cancel_token.is_cancelled() {
+        return Err(DuetError::Cancelled);
+    }
+
+    // 2) 실제 실행 — --backup-dir 로 덮어쓰기/삭제분 보존, progress2.
+    let real_cmd = format!(
+        "mkdir -p {backup_arg} && LC_ALL=C rsync -a --info=progress2{delete_flag} \
+         --backup --backup-dir={backup_arg} -- {src_arg}/ {dst_arg}"
+    );
+    let mut last_emit = std::time::Instant::now()
+        .checked_sub(std::time::Duration::from_secs(2))
+        .unwrap_or_else(std::time::Instant::now);
+    let progress_cb = progress.clone();
+    let exec_result = {
+        let handle = session_mutex.lock().await;
+        exec_streaming(&handle, &real_cmd, |line| {
+            if let Some(p) = parse_rsync_progress2_line(line) {
+                let now = std::time::Instant::now();
+                if p.percent == 100
+                    || now.duration_since(last_emit) >= std::time::Duration::from_secs(1)
+                {
+                    last_emit = now;
+                    if let Some(em) = &progress_cb {
+                        em.emit(crate::services::task_events::ProgressInfo {
+                            bytes_done: p.bytes_done,
+                            bytes_total: None,
+                            speed_bps: Some(p.speed_bps),
+                            eta_sec: Some(p.eta_sec),
+                            percent: Some(p.percent),
+                        });
+                    }
+                }
+            }
+        })
+        .await
+    };
+    let (exit, stderr) = match exec_result {
+        Ok(r) => r,
+        Err(e) if crate::services::retry::is_retryable_error(&e) => {
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            if cancel_token.is_cancelled() {
+                return Err(DuetError::Cancelled);
+            }
+            let handle = session_mutex.lock().await;
+            exec_streaming(&handle, &real_cmd, |_| {}).await?
+        }
+        Err(e) => return Err(e),
+    };
+    if exit != 0 {
+        return Err(DuetError::Ssh(format!(
+            "rsync sync failed (exit {}): {}",
+            exit,
+            String::from_utf8_lossy(&stderr).trim()
+        )));
+    }
+
+    // 3) backup_dir 재귀 나열 → 복원 대상(덮어쓰기+삭제분). 각각 backup_dir/rel → dst/rel.
+    let dst_fs = crate::fs::SshFs::new(pool.get(connection_id).await?);
+    let mut backups = Vec::new();
+    collect_backup_files(
+        &dst_fs,
+        &backup_dir,
+        &backup_dir,
+        &plan.dst.path,
+        &mut backups,
+    )
+    .await;
+
+    let op = OpKind::Sync {
+        count: created.len() as u32,
+        pruned: if plan.prune { backups.len() as u32 } else { 0 },
+        src: plan.src.clone(),
+        dst: plan.dst.clone(),
+    };
+    let undo = UndoAction::UndoSync {
+        dst_source: plan.dst.source.clone(),
+        created,
+        backups_to_restore: backups,
+        pruned: vec![],
+    };
+    ctx.journal.push(op, undo).await
+}
+
+/// backup_dir 트리의 모든 파일을 `BackupRestore{backup_dir/rel → dst/rel}` 로 수집.
+async fn collect_backup_files(
+    fs: &dyn FileSystem,
+    dir: &std::path::Path,
+    backup_root: &std::path::Path,
+    dst_root: &std::path::Path,
+    out: &mut Vec<BackupRestore>,
+) {
+    let entries = fs.list(dir).await.unwrap_or_default();
+    for e in entries {
+        let p = dir.join(&e.name);
+        if e.kind == crate::types::EntryKind::Dir {
+            Box::pin(collect_backup_files(fs, &p, backup_root, dst_root, out)).await;
+        } else if let Ok(rel) = p.strip_prefix(backup_root) {
+            out.push(BackupRestore {
+                backup_path: p.clone(),
+                original_path: dst_root.join(rel),
+            });
+        }
+    }
 }
 
 // === Bidirectional merge (안전 — 한쪽에만 있는 파일을 반대편으로 복사, 충돌 미변경) ===

@@ -85,9 +85,73 @@ fn parse_eta(s: &str) -> Option<u32> {
     Some(h * 3600 + m * 60 + sec)
 }
 
+/// rsync `-i`(itemize-changes) 한 줄에서 *새로 생성된 파일*의 상대경로를 추출.
+///
+/// 형식: 11자 플래그 `YXcstpoguax` + 공백 + 경로. 새로 생성된 파일은 모든 속성 칸이
+/// `+` (`>f+++++++++`). Y∈`<>c`, X==`f`, 나머지 9칸 모두 `+` 일 때만 생성 파일로 본다.
+/// (생성 디렉토리 `cd+++++++++` 는 무시 — undo 는 파일만 rm, 빈 디렉토리는 잔류 허용.
+///  `*deleting`·업데이트는 `--backup-dir` 에 보존되므로 별도 추적 불필요.)
+pub fn parse_rsync_itemize_created_file(line: &str) -> Option<String> {
+    let line = line.trim_end_matches(['\r', '\n']);
+    let fb = line.as_bytes();
+    if fb.len() < 12 {
+        return None;
+    }
+    let y = fb[0];
+    if !(y == b'<' || y == b'>' || y == b'c') {
+        return None;
+    }
+    if fb[1] != b'f' {
+        return None;
+    }
+    if !fb[2..11].iter().all(|&c| c == b'+') {
+        return None;
+    }
+    // 플래그는 ASCII 11자 → byte 11 은 char 경계. 그 뒤(공백 포함) 가 경로.
+    let path = line[11..].trim_start();
+    if path.is_empty() {
+        return None;
+    }
+    Some(path.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn itemize_detects_created_files_only() {
+        // 새 파일 — 모든 속성 +.
+        assert_eq!(
+            parse_rsync_itemize_created_file(">f+++++++++ docs/new.txt"),
+            Some("docs/new.txt".to_string())
+        );
+        assert_eq!(
+            parse_rsync_itemize_created_file("cf+++++++++ a b.txt").as_deref(),
+            Some("a b.txt") // 공백 포함 경로
+        );
+        // 업데이트(일부 속성만) — 생성 아님(backup-dir 가 처리).
+        assert_eq!(
+            parse_rsync_itemize_created_file(">f.st...... docs/up.txt"),
+            None
+        );
+        // 생성 디렉토리 — 무시(파일만 추적).
+        assert_eq!(
+            parse_rsync_itemize_created_file("cd+++++++++ newdir/"),
+            None
+        );
+        // 삭제 메시지 — 무시.
+        assert_eq!(
+            parse_rsync_itemize_created_file("*deleting   old.txt"),
+            None
+        );
+        // 잡음.
+        assert_eq!(parse_rsync_itemize_created_file(""), None);
+        assert_eq!(
+            parse_rsync_itemize_created_file("sending incremental file list"),
+            None
+        );
+    }
 
     #[test]
     fn parse_typical_line() {

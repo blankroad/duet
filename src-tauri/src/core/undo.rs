@@ -293,9 +293,15 @@ pub async fn execute_undo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
                     }
                 }
             }
-            // 2) 덮어쓴 백업 복원.
+            // 2) 덮어쓴 백업 복원. original_path 에는 rsync 가 덮어쓴 *새* 내용이 있으므로
+            //    먼저 제거 후 rename — SFTP 는 rename-over-existing 이 실패하기 때문.
             for b in backups_to_restore {
                 if fs.metadata(&b.backup_path).await.is_ok() {
+                    if fs.metadata(&b.original_path).await.is_ok() {
+                        if let Err(e) = fs.remove(&b.original_path).await {
+                            return error("remove synced before restore", e);
+                        }
+                    }
                     if let Err(e) = fs.rename(&b.backup_path, &b.original_path).await {
                         return error("restore backup", e);
                     }
