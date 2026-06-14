@@ -28,7 +28,7 @@ import { useContextMenu } from "@/stores/contextMenu";
 import { buildEntryMenu, buildEmptyMenu, folderName } from "@/lib/entryMenu";
 import { childLocation } from "@/lib/entryDnd";
 import { isArchiveName } from "@/lib/archive";
-import { resolveActiveTargets, triggerCompare } from "@/lib/fileActions";
+import { resolveActiveTargets, triggerCompare, triggerSync } from "@/lib/fileActions";
 import { useCommands } from "@/stores/commands";
 import { usePalette } from "@/stores/palette";
 import { buildBuiltins } from "@/lib/commands";
@@ -416,6 +416,7 @@ function App() {
         useSearch.getState().open(id, tab.location);
       },
       compareFolders: () => void triggerCompare(openDialog, showToast),
+      syncFolders: () => void triggerSync(openDialog, showToast),
       openSettings: () => openDialog({ kind: "settings" }),
       openPalette: () => openPalette(),
       quit: () => {

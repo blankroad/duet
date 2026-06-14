@@ -50,6 +50,7 @@ export interface BuiltinDeps {
   openSearch: () => void;
   // file (two-pane)
   compareFolders: () => void;
+  syncFolders: () => void;
   // bookmark
   toggleBookmark: () => void;
   // settings / palette
@@ -85,6 +86,7 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
     { id: "filter.focus", label: "Focus filter", category: "Filter", defaultKey: "Ctrl+F", action: deps.focusFilter },
     { id: "search.global", label: "Global search", category: "Search", defaultKey: "Ctrl+Shift+F", action: deps.openSearch },
     { id: "file.compare", label: "Compare folders (left ↔ right)", category: "File", action: deps.compareFolders },
+    { id: "file.sync", label: "Sync to other pane (mirror)", category: "File", action: deps.syncFolders },
     { id: "settings.open", label: "Open settings", category: "Settings", defaultKey: "Ctrl+,", action: deps.openSettings },
     { id: "palette.open", label: "Command palette", category: "Settings", defaultKey: "Ctrl+P", action: deps.openPalette },
     { id: "app.quit", label: "Quit", category: "Settings", defaultKey: "Ctrl+Q", action: deps.quit },
