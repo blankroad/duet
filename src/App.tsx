@@ -40,6 +40,8 @@ import { bookmarkLocation } from "@/lib/bookmarkActions";
 import { bootstrapHostFavorites, addHostFavorite } from "@/stores/hostFavorites";
 import { bootstrapUserAliases } from "@/stores/userAliases";
 import { bootstrapAppLaunchers, setAppArgs } from "@/stores/appLaunchers";
+import { bootstrapPlaces } from "@/stores/places";
+import { recordRecent } from "@/stores/recents";
 import { useDynamicCommands } from "@/lib/dynamicCommands";
 import { useConnections } from "@/stores/connections";
 import { useTauri } from "@/hooks/useTauri";
@@ -80,6 +82,7 @@ function App() {
         // navigate 성공 후 watcher 갱신. 실패는 silent — fs:changed 알림 안 옴
         // 정도의 영향. (사용자가 명시 새로고침으로 우회 가능.)
         void commands.paneWatchSet(id, location);
+        if (opts.pushHistory !== false) recordRecent(location);
       } catch (e) {
         // 사용자가 더블클릭해도 silent fail 면 무반응으로 인식. toast 로 노출.
         const msg =
@@ -99,6 +102,7 @@ function App() {
         const entries = await listDirectory(location);
         usePanes.getState().setEntries(id, location, entries, { pushHistory: opts.pushHistory ?? true });
         void commands.paneWatchSet(id, location);
+        if (opts.pushHistory !== false) recordRecent(location);
       } catch (e) {
         const msg =
           e && typeof e === "object" && "kind" in e
@@ -110,19 +114,15 @@ function App() {
     [listDirectory, showToast],
   );
 
-  /** 활성 패널을 로컬 홈 디렉토리로 이동. */
-  const onLocalHome = useCallback(() => {
-    const id = usePanes.getState().activePane;
-    void (async () => {
-      const r = await commands.homeDirectory();
-      if (r.status === "ok") await navigateTo(id, { source: { kind: "local" }, path: r.data });
-      else showToast(`Home unavailable — ${formatErr(r.error)}`);
-    })();
-  }, [navigateTo, showToast]);
+  /** 로컬/SSH location 을 지정 패널로 이동 — 사이드바 Places/Volumes/Recent/Bookmarks 공용. */
+  const onOpenLocation = useCallback(
+    (location: Location, pane: PaneId) => void navigateTo(pane, location),
+    [navigateTo],
+  );
 
   /** 활성 패널을 그 소스의 휴지통으로 이동 — 삭제 항목 보기/복구(복사·이동으로). */
-  const onTrashActivate = useCallback(() => {
-    const id = usePanes.getState().activePane;
+  const onTrashActivate = useCallback((pane?: PaneId) => {
+    const id = pane ?? usePanes.getState().activePane;
     const src = activeTab(usePanes.getState(), id).location.source;
     void (async () => {
       const r = await commands.trashLocation(src);
@@ -499,31 +499,22 @@ function App() {
     }
   }, [dialog, openDialog, closeDialog, showToast]);
 
-  const onBookmarkActivate = useCallback(
-    (location: Location) => {
-      const id = usePanes.getState().activePane;
-      void navigateTo(id, location);
-    },
-    [navigateTo],
-  );
-
   // 새 연결 다이얼로그 — 호스트 더블클릭/즐겨찾기 자동접속 시 alias 가 들어옴.
   const [dialogAlias, setDialogAlias] = useState<string | null>(null);
   // 연결 성공 후 이동할 (alias, path) — 호스트-인식 북마크/즐겨찾기 클릭이 세팅.
   const pendingNav = useRef<{ alias: string; path: string } | null>(null);
 
   /**
-   * 호스트 폴더로 이동 — 이미 연결돼 있으면 바로, 아니면 연결 다이얼로그를 띄우고
-   * 성공 시 그 경로로 이동(onConnected 가 pendingNav 처리). 호스트-인식 북마크의 핵심.
+   * 호스트 경로로 이동 — 연결돼 있으면 지정 pane 으로 바로, 아니면 연결 다이얼로그 →
+   * 성공 시 그 경로로 이동(onConnected 가 pendingNav 처리). 호스트-인식 북마크/즐겨찾기 핵심.
    */
-  const connectAndNavigate = useCallback(
-    (hostAlias: string, path: string) => {
+  const onOpenHostPath = useCallback(
+    (hostAlias: string, path: string, pane: PaneId) => {
       const conn = Object.values(useConnections.getState().active).find(
         (c) => c.alias === hostAlias,
       );
-      const id = usePanes.getState().activePane;
       if (conn) {
-        void navigateTo(id, {
+        void navigateTo(pane, {
           source: { kind: "ssh", connection_id: conn.id, host_ip: conn.host_ip, user: conn.user },
           path,
         });
@@ -533,11 +524,6 @@ function App() {
       setDialogAlias(hostAlias);
     },
     [navigateTo],
-  );
-
-  const onFavoriteActivate = useCallback(
-    (fav: HostFavorite) => connectAndNavigate(fav.host_alias, String(fav.path)),
-    [connectAndNavigate],
   );
 
   const onAliasExecute = useCallback(
@@ -607,6 +593,16 @@ function App() {
       setAdHocOpen(true);
     },
     [],
+  );
+
+  // 팔레트/동적 커맨드용 — 활성 패널 기준 래퍼.
+  const onBookmarkActivate = useCallback(
+    (location: Location) => onOpenLocation(location, usePanes.getState().activePane),
+    [onOpenLocation],
+  );
+  const onFavoriteActivate = useCallback(
+    (fav: HostFavorite) => onOpenHostPath(fav.host_alias, String(fav.path), usePanes.getState().activePane),
+    [onOpenHostPath],
   );
 
   // 모든 callback 정의 후 dynamic commands hook 등록
@@ -681,6 +677,7 @@ function App() {
       void bootstrapHostFavorites().then(() => bootstrapBookmarks());
       void bootstrapUserAliases();
       void bootstrapAppLaunchers();
+      void bootstrapPlaces();
     })();
     // navigate가 deps에 들어가면 무한 루프 — 마운트 1회만
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -696,11 +693,10 @@ function App() {
           onHostActivate={onHostActivate}
           onAdHocOpen={onAdHocOpen}
           onSavedActivate={onSavedActivate}
-          onBookmarkActivate={onBookmarkActivate}
-          onFavoriteActivate={onFavoriteActivate}
+          onOpenLocation={onOpenLocation}
+          onOpenHostPath={onOpenHostPath}
           onAddBookmark={onAddBookmark}
           onAddFavorite={onAddFavorite}
-          onLocalHome={onLocalHome}
           onTrashActivate={onTrashActivate}
         />
         <Pane id="left" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} onBack={onBack} onForward={onForward} onUp={onUp} onEntryContextMenu={onEntryContextMenu} onEmptyContextMenu={onEmptyContextMenu} />

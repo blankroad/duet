@@ -41,6 +41,8 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::system::reveal_path,
             commands::system::trash_location,
             commands::system::trash_restore,
+            commands::system::places,
+            commands::system::volumes,
             commands::connection::ssh_config_hosts,
             commands::connection::connection_open,
             commands::connection::connection_open_adhoc,

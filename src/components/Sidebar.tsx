@@ -11,7 +11,15 @@ import {
   ChevronRight,
   Trash2,
   Home,
+  FileText,
+  Download,
+  Image as ImageIcon,
+  Film,
+  HardDrive,
+  Clock,
+  RefreshCw,
 } from "lucide-react";
+import { useEffect, Fragment, type ReactNode } from "react";
 import { useUI } from "@/stores/ui";
 import { useConnections, type Host, type ConnectionState } from "@/stores/connections";
 import { useSavedHosts, removeSavedHost, reorderSavedHosts } from "@/stores/savedHosts";
@@ -21,80 +29,94 @@ import {
   removeHostFavorite,
   reorderHostFavorites,
 } from "@/stores/hostFavorites";
+import { usePlaces, refreshVolumes } from "@/stores/places";
+import { useRecents, type RecentEntry } from "@/stores/recents";
+import { usePanes, type PaneId } from "@/stores/panes";
 import { useContextMenu, type MenuEntry } from "@/stores/contextMenu";
 import { useToast } from "@/stores/toast";
 import { useReorderable } from "@/hooks/useReorderable";
-import type { SavedHost, Bookmark as BookmarkType, HostFavorite, Location } from "@/types/bindings";
+import type {
+  SavedHost,
+  Bookmark as BookmarkType,
+  HostFavorite,
+  Location,
+  Place,
+  Volume,
+} from "@/types/bindings";
 import clsx from "clsx";
-import { Fragment, type ReactNode } from "react";
 
 /**
  * 사이드바.
  *
- * - 섹션 헤더 클릭으로 접기/펼치기(상태 영속), 제목 옆 항목 수 표시, 전체 세로 스크롤.
- * - 항목 우클릭 → 컨텍스트 메뉴(Open/Connect/Remove 등).
+ * - 섹션 헤더 클릭으로 접기/펼치기(상태 영속), 접었을 때 항목 수 표시, 전체 세로 스크롤.
+ * - 항목 우클릭 → 컨텍스트 메뉴(Open / Open in other pane / Copy path / Remove 등).
+ * - Cmd/Ctrl+클릭 = 반대 패널에서 열기 (그냥 클릭은 활성 패널).
  * - Bookmarks / Saved hosts / Favorites(그룹 내) 는 드래그로 순서 변경.
  *
- * - Local: home (MVP-0 placeholder)
+ * 섹션:
+ * - Places: 표준 로컬 폴더(Home/Desktop/…) + Trash. (backend `places` 가 OS별 해석)
+ * - Volumes: 마운트된 외장/네트워크 드라이브. (backend `volumes`)
  * - Hosts: `~/.ssh/config` 호스트 + 연결 상태 점 + ad-hoc. (읽기전용 — 재정렬 X)
  * - Saved hosts: ad-hoc dialog 에서 저장한 호스트. 더블클릭 → prefill 다이얼로그.
- * - Bookmarks: 북마크한 위치(로컬/SSH). 더블클릭 → 이동.
- * - Favorites: 활성 SSH 연결의 호스트별 즐겨찾기 경로. alias 별 그룹화 + 그룹 접기.
+ * - Bookmarks: 북마크한 위치(로컬/SSH).
+ * - Favorites: 호스트별 즐겨찾기 경로(재접속 안전). alias 별 그룹화 + 그룹 접기.
+ * - Recent: 최근 방문 폴더(로컬/SSH). localStorage 영속.
  */
 export function Sidebar({
   onHostActivate,
   onAdHocOpen,
   onSavedActivate,
-  onBookmarkActivate,
-  onFavoriteActivate,
+  onOpenLocation,
+  onOpenHostPath,
   onAddBookmark,
   onAddFavorite,
-  onLocalHome,
   onTrashActivate,
 }: {
   onHostActivate: (alias: string) => void;
   onAdHocOpen: () => void;
   onSavedActivate: (host: SavedHost) => void;
-  onBookmarkActivate: (location: Location) => void;
-  onFavoriteActivate: (favorite: HostFavorite) => void;
+  /** 로컬/SSH location 을 지정 패널로 이동. */
+  onOpenLocation: (location: Location, pane: PaneId) => void;
+  /** 호스트 경로로 이동(필요 시 자동 접속) — 지정 패널. */
+  onOpenHostPath: (hostAlias: string, path: string, pane: PaneId) => void;
   onAddBookmark: () => void;
   onAddFavorite: () => void;
-  /** 활성 패널을 로컬 홈으로 이동. */
-  onLocalHome: () => void;
-  /** 활성 패널을 그 소스의 휴지통으로 이동 (삭제 항목 보기/복구). */
-  onTrashActivate: () => void;
+  /** 패널을 그 소스의 휴지통으로 이동 (삭제 항목 보기/복구). */
+  onTrashActivate: (pane?: PaneId) => void;
 }) {
   const open = useUI((s) => s.sidebarOpen);
   if (!open) return null;
 
   return (
     <aside className="flex w-48 min-h-0 flex-col overflow-y-auto border-r border-border bg-subtle text-base">
-      <Section sectionKey="local" title="Local" icon={<Folder size={14} />}>
-        <button
-          type="button"
-          onClick={onLocalHome}
-          className={clsx(rowClass, "w-full text-left")}
-          title="Go to home directory"
-        >
-          <Home size={11} className="shrink-0 text-fg-muted" />
-          <span className="truncate">Home</span>
-        </button>
-        <button
-          type="button"
-          onClick={onTrashActivate}
-          className={clsx(rowClass, "w-full text-left")}
-          title="Browse trash (deleted items)"
-        >
-          <Trash2 size={11} className="shrink-0 text-fg-muted" />
-          <span className="truncate">Trash</span>
-        </button>
-      </Section>
+      <PlacesSection onOpenLocation={onOpenLocation} onTrashActivate={onTrashActivate} />
+      <VolumesSection onOpenLocation={onOpenLocation} />
       <HostsSection onHostActivate={onHostActivate} onAdHocOpen={onAdHocOpen} />
       <SavedHostsSection onActivate={onSavedActivate} />
-      <BookmarksSection onActivate={onBookmarkActivate} onAdd={onAddBookmark} />
-      <HostFavoritesSection onActivate={onFavoriteActivate} onAdd={onAddFavorite} />
+      <BookmarksSection onOpen={onOpenLocation} onAdd={onAddBookmark} />
+      <HostFavoritesSection onOpen={onOpenHostPath} onAdd={onAddFavorite} />
+      <RecentSection onOpenLocation={onOpenLocation} onOpenHostPath={onOpenHostPath} />
     </aside>
   );
+}
+
+// ─────────────────────────── pane targeting ───────────────────────────
+
+/** Cmd/Ctrl 누르면 반대 패널, 아니면 활성 패널. */
+function targetPane(e: { metaKey: boolean; ctrlKey: boolean }): PaneId {
+  const active = usePanes.getState().activePane;
+  if (e.metaKey || e.ctrlKey) return active === "left" ? "right" : "left";
+  return active;
+}
+
+/** 활성 패널의 반대편. */
+function otherPane(): PaneId {
+  return usePanes.getState().activePane === "left" ? "right" : "left";
+}
+
+/** 로컬 path → Location. */
+function localLocation(path: string): Location {
+  return { source: { kind: "local" }, path };
 }
 
 /** 컨텍스트 메뉴 오픈 헬퍼. */
@@ -118,6 +140,243 @@ function DropLine() {
 }
 
 const rowClass = "group flex cursor-default items-center gap-1 rounded px-2 py-0.5 hover:bg-border";
+
+// ─────────────────────────── Places ───────────────────────────
+
+function placeIcon(label: string): ReactNode {
+  const cls = "shrink-0 text-fg-muted";
+  switch (label) {
+    case "Home":
+      return <Home size={11} className={cls} />;
+    case "Documents":
+      return <FileText size={11} className={cls} />;
+    case "Downloads":
+      return <Download size={11} className={cls} />;
+    case "Pictures":
+      return <ImageIcon size={11} className={cls} />;
+    case "Movies":
+      return <Film size={11} className={cls} />;
+    default:
+      return <Folder size={11} className={cls} />;
+  }
+}
+
+function PlacesSection({
+  onOpenLocation,
+  onTrashActivate,
+}: {
+  onOpenLocation: (location: Location, pane: PaneId) => void;
+  onTrashActivate: (pane?: PaneId) => void;
+}) {
+  const places = usePlaces((s) => s.places);
+  return (
+    <Section sectionKey="places" title="Places" icon={<Folder size={14} />} count={places.length}>
+      {places.map((p) => (
+        <PlaceItem key={p.label} place={p} onOpenLocation={onOpenLocation} />
+      ))}
+      <TrashItem onTrashActivate={onTrashActivate} />
+    </Section>
+  );
+}
+
+function PlaceItem({
+  place,
+  onOpenLocation,
+}: {
+  place: Place;
+  onOpenLocation: (location: Location, pane: PaneId) => void;
+}) {
+  const path = String(place.path);
+  const menu: MenuEntry[] = [
+    { id: "open", label: "Open", onSelect: () => onOpenLocation(localLocation(path), usePanes.getState().activePane) },
+    { id: "open-other", label: "Open in other pane", onSelect: () => onOpenLocation(localLocation(path), otherPane()) },
+    { id: "copy-path", label: "Copy path", onSelect: () => copyText(path) },
+  ];
+  return (
+    <button
+      type="button"
+      onClick={(e) => onOpenLocation(localLocation(path), targetPane(e))}
+      onContextMenu={(e) => openMenu(e, menu)}
+      title={path}
+      className={clsx(rowClass, "w-full text-left")}
+    >
+      {placeIcon(place.label)}
+      <span className="truncate">{place.label}</span>
+    </button>
+  );
+}
+
+function TrashItem({ onTrashActivate }: { onTrashActivate: (pane?: PaneId) => void }) {
+  const menu: MenuEntry[] = [
+    { id: "open", label: "Open", onSelect: () => onTrashActivate(usePanes.getState().activePane) },
+    { id: "open-other", label: "Open in other pane", onSelect: () => onTrashActivate(otherPane()) },
+  ];
+  return (
+    <button
+      type="button"
+      onClick={(e) => onTrashActivate(targetPane(e))}
+      onContextMenu={(e) => openMenu(e, menu)}
+      title="Browse trash (deleted items)"
+      className={clsx(rowClass, "w-full text-left")}
+    >
+      <Trash2 size={11} className="shrink-0 text-fg-muted" />
+      <span className="truncate">Trash</span>
+    </button>
+  );
+}
+
+// ─────────────────────────── Volumes ───────────────────────────
+
+function VolumesSection({
+  onOpenLocation,
+}: {
+  onOpenLocation: (location: Location, pane: PaneId) => void;
+}) {
+  const volumes = usePlaces((s) => s.volumes);
+  // 사이드바가 열릴 때마다 재스캔 — 마운트/언마운트 반영.
+  useEffect(() => {
+    void refreshVolumes();
+  }, []);
+  return (
+    <Section
+      sectionKey="volumes"
+      title="Volumes"
+      icon={<HardDrive size={14} />}
+      count={volumes.length}
+      action={
+        <button
+          type="button"
+          onClick={() => void refreshVolumes()}
+          className="rounded p-0.5 text-fg-muted hover:bg-border hover:text-fg"
+          title="Rescan volumes"
+          aria-label="Rescan volumes"
+        >
+          <RefreshCw size={11} />
+        </button>
+      }
+    >
+      {volumes.length === 0 ? (
+        <Item label="(no mounted volumes)" muted />
+      ) : (
+        volumes.map((v) => <VolumeItem key={String(v.path)} volume={v} onOpenLocation={onOpenLocation} />)
+      )}
+    </Section>
+  );
+}
+
+function VolumeItem({
+  volume,
+  onOpenLocation,
+}: {
+  volume: Volume;
+  onOpenLocation: (location: Location, pane: PaneId) => void;
+}) {
+  const path = String(volume.path);
+  const menu: MenuEntry[] = [
+    { id: "open", label: "Open", onSelect: () => onOpenLocation(localLocation(path), usePanes.getState().activePane) },
+    { id: "open-other", label: "Open in other pane", onSelect: () => onOpenLocation(localLocation(path), otherPane()) },
+    { id: "copy-path", label: "Copy path", onSelect: () => copyText(path) },
+  ];
+  return (
+    <button
+      type="button"
+      onClick={(e) => onOpenLocation(localLocation(path), targetPane(e))}
+      onContextMenu={(e) => openMenu(e, menu)}
+      title={path}
+      className={clsx(rowClass, "w-full text-left")}
+    >
+      <HardDrive size={11} className="shrink-0 text-fg-muted" />
+      <span className="truncate">{volume.name}</span>
+    </button>
+  );
+}
+
+// ─────────────────────────── Recent ───────────────────────────
+
+function RecentSection({
+  onOpenLocation,
+  onOpenHostPath,
+}: {
+  onOpenLocation: (location: Location, pane: PaneId) => void;
+  onOpenHostPath: (hostAlias: string, path: string, pane: PaneId) => void;
+}) {
+  const items = useRecents((s) => s.items);
+  const clear = useRecents((s) => s.clear);
+  return (
+    <Section
+      sectionKey="recent"
+      title="Recent"
+      icon={<Clock size={14} />}
+      count={items.length}
+      action={
+        items.length > 0 ? (
+          <button
+            type="button"
+            onClick={clear}
+            className="rounded p-0.5 text-fg-muted hover:bg-border hover:text-fg"
+            title="Clear recents"
+            aria-label="Clear recents"
+          >
+            <X size={11} />
+          </button>
+        ) : undefined
+      }
+    >
+      {items.length === 0 ? (
+        <Item label="(no recent folders)" muted />
+      ) : (
+        items.map((r, i) => (
+          <RecentItem
+            key={`${r.source}:${r.source === "ssh" ? r.alias : ""}:${r.path}:${i}`}
+            entry={r}
+            onOpenLocation={onOpenLocation}
+            onOpenHostPath={onOpenHostPath}
+          />
+        ))
+      )}
+    </Section>
+  );
+}
+
+function RecentItem({
+  entry,
+  onOpenLocation,
+  onOpenHostPath,
+}: {
+  entry: RecentEntry;
+  onOpenLocation: (location: Location, pane: PaneId) => void;
+  onOpenHostPath: (hostAlias: string, path: string, pane: PaneId) => void;
+}) {
+  const open = (pane: PaneId) => {
+    if (entry.source === "ssh") onOpenHostPath(entry.alias, entry.path, pane);
+    else onOpenLocation(localLocation(entry.path), pane);
+  };
+  const title = entry.source === "ssh" ? `${entry.alias}:${entry.path}` : entry.path;
+  const menu: MenuEntry[] = [
+    { id: "open", label: "Open", onSelect: () => open(usePanes.getState().activePane) },
+    { id: "open-other", label: "Open in other pane", onSelect: () => open(otherPane()) },
+    { id: "copy-path", label: "Copy path", onSelect: () => copyText(entry.path) },
+  ];
+  return (
+    <button
+      type="button"
+      onClick={(e) => open(targetPane(e))}
+      onContextMenu={(e) => openMenu(e, menu)}
+      title={title}
+      className={clsx(rowClass, "w-full text-left")}
+    >
+      {entry.source === "ssh" ? (
+        <Server size={11} className="shrink-0 text-fg-muted" />
+      ) : (
+        <Folder size={11} className="shrink-0 text-fg-muted" />
+      )}
+      <span className="truncate">{entry.label}</span>
+      {entry.source === "ssh" && (
+        <span className="ml-auto shrink-0 truncate text-meta opacity-50">{entry.alias}</span>
+      )}
+    </button>
+  );
+}
 
 // ─────────────────────────── Saved hosts ───────────────────────────
 
@@ -186,10 +445,10 @@ function SavedHostItem({
 // ─────────────────────────── Bookmarks ───────────────────────────
 
 function BookmarksSection({
-  onActivate,
+  onOpen,
   onAdd,
 }: {
-  onActivate: (location: Location) => void;
+  onOpen: (location: Location, pane: PaneId) => void;
   onAdd: () => void;
 }) {
   const items = useBookmarks((s) => s.items);
@@ -214,7 +473,7 @@ function BookmarksSection({
             {dragKey && insertBeforeKey === b.id && <DropLine />}
             <BookmarkItem
               bookmark={b}
-              onActivate={onActivate}
+              onOpen={onOpen}
               dragging={dragKey === b.id}
               onMouseDown={(e) => onItemMouseDown(e, b.id)}
             />
@@ -228,18 +487,19 @@ function BookmarksSection({
 
 function BookmarkItem({
   bookmark,
-  onActivate,
+  onOpen,
   dragging,
   onMouseDown,
 }: {
   bookmark: BookmarkType;
-  onActivate: (location: Location) => void;
+  onOpen: (location: Location, pane: PaneId) => void;
   dragging: boolean;
   onMouseDown: (e: React.MouseEvent) => void;
 }) {
   const sshPrefix = bookmark.location.source.kind === "ssh" ? "ssh:" : "";
   const menu: MenuEntry[] = [
-    { id: "open", label: "Open", onSelect: () => onActivate(bookmark.location) },
+    { id: "open", label: "Open", onSelect: () => onOpen(bookmark.location, usePanes.getState().activePane) },
+    { id: "open-other", label: "Open in other pane", onSelect: () => onOpen(bookmark.location, otherPane()) },
     { id: "copy-path", label: "Copy path", onSelect: () => copyText(String(bookmark.location.path)) },
     { kind: "separator" },
     { id: "remove", label: "Remove", danger: true, onSelect: () => void removeBookmark(bookmark.id) },
@@ -249,7 +509,7 @@ function BookmarkItem({
       data-reorder-key={bookmark.id}
       data-reorder-group="bookmarks"
       onMouseDown={onMouseDown}
-      onDoubleClick={() => onActivate(bookmark.location)}
+      onDoubleClick={(e) => onOpen(bookmark.location, targetPane(e))}
       onContextMenu={(e) => openMenu(e, menu)}
       title={`${sshPrefix}${bookmark.location.path}`}
       className={clsx(rowClass, dragging && "opacity-50")}
@@ -264,10 +524,10 @@ function BookmarkItem({
 // ─────────────────────────── Host favorites ───────────────────────────
 
 function HostFavoritesSection({
-  onActivate,
+  onOpen,
   onAdd,
 }: {
-  onActivate: (favorite: HostFavorite) => void;
+  onOpen: (hostAlias: string, path: string, pane: PaneId) => void;
   onAdd: () => void;
 }) {
   const items = useHostFavorites((s) => s.items);
@@ -295,7 +555,7 @@ function HostFavoritesSection({
             alias={alias}
             favs={groups[alias]!}
             connected={activeAliases.has(alias)}
-            onActivate={onActivate}
+            onOpen={onOpen}
           />
         ))
       )}
@@ -307,12 +567,12 @@ function FavoriteGroup({
   alias,
   favs,
   connected,
-  onActivate,
+  onOpen,
 }: {
   alias: string;
   favs: HostFavorite[];
   connected: boolean;
-  onActivate: (favorite: HostFavorite) => void;
+  onOpen: (hostAlias: string, path: string, pane: PaneId) => void;
 }) {
   const collapsed = useUI((s) => s.collapsed[`fav:${alias}`]);
   const toggle = useUI((s) => s.toggleSection);
@@ -345,7 +605,7 @@ function FavoriteGroup({
             {dragKey && insertBeforeKey === f.id && <DropLine />}
             <FavoriteItem
               fav={f}
-              onActivate={onActivate}
+              onOpen={onOpen}
               dragging={dragKey === f.id}
               onMouseDown={(e) => onItemMouseDown(e, f.id)}
             />
@@ -358,18 +618,20 @@ function FavoriteGroup({
 
 function FavoriteItem({
   fav,
-  onActivate,
+  onOpen,
   dragging,
   onMouseDown,
 }: {
   fav: HostFavorite;
-  onActivate: (favorite: HostFavorite) => void;
+  onOpen: (hostAlias: string, path: string, pane: PaneId) => void;
   dragging: boolean;
   onMouseDown: (e: React.MouseEvent) => void;
 }) {
+  const path = String(fav.path);
   const menu: MenuEntry[] = [
-    { id: "open", label: "Open (connect if needed)", onSelect: () => onActivate(fav) },
-    { id: "copy-path", label: "Copy path", onSelect: () => copyText(String(fav.path)) },
+    { id: "open", label: "Open (connect if needed)", onSelect: () => onOpen(fav.host_alias, path, usePanes.getState().activePane) },
+    { id: "open-other", label: "Open in other pane", onSelect: () => onOpen(fav.host_alias, path, otherPane()) },
+    { id: "copy-path", label: "Copy path", onSelect: () => copyText(path) },
     { kind: "separator" },
     { id: "remove", label: "Remove", danger: true, onSelect: () => void removeHostFavorite(fav.id) },
   ];
@@ -378,9 +640,9 @@ function FavoriteItem({
       data-reorder-key={fav.id}
       data-reorder-group={`fav:${fav.host_alias}`}
       onMouseDown={onMouseDown}
-      onDoubleClick={() => onActivate(fav)}
+      onDoubleClick={(e) => onOpen(fav.host_alias, path, targetPane(e))}
       onContextMenu={(e) => openMenu(e, menu)}
-      title={String(fav.path)}
+      title={path}
       className={clsx(rowClass, "pl-4", dragging && "opacity-50")}
     >
       <Heart size={11} className="shrink-0 text-fg-muted" />
@@ -465,7 +727,7 @@ function StateDot({ state }: { state: ConnectionState }) {
 
 // ─────────────────────────── Shared building blocks ───────────────────────────
 
-/** 접기 가능한 섹션 — 헤더 클릭으로 토글, 제목 옆 카운트, 선택적 action 버튼. */
+/** 접기 가능한 섹션 — 헤더 클릭으로 토글, 접었을 때 카운트, 선택적 action 버튼. */
 function Section({
   sectionKey,
   title,

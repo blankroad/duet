@@ -5,6 +5,8 @@ use crate::services::connection_pool::ConnectionPool;
 use crate::types::{
     ConnectionId, DuetError, EntryKind, EntryRef, Location, SourceId, TrashLocation,
 };
+use serde::Serialize;
+use specta::Type;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -282,4 +284,110 @@ async fn download_to_temp(
         .await
         .map_err(|e| DuetError::Io(format!("write temp file: {e}")))?;
     Ok(dst)
+}
+
+/// 사이드바 "Places" 항목 (이름 + 경로).
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct Place {
+    pub label: String,
+    pub path: PathBuf,
+}
+
+/// 표준 로컬 위치 — Home/Desktop/Documents/Downloads/Pictures/Movies (존재하는 것만).
+/// 경로 해석은 backend `dirs` 로 (CLAUDE.md §7).
+#[tauri::command]
+#[specta::specta]
+pub async fn places() -> Result<Vec<Place>, DuetError> {
+    let mut out = Vec::new();
+    let candidates: [(&str, Option<PathBuf>); 6] = [
+        ("Home", dirs::home_dir()),
+        ("Desktop", dirs::desktop_dir()),
+        ("Documents", dirs::document_dir()),
+        ("Downloads", dirs::download_dir()),
+        ("Pictures", dirs::picture_dir()),
+        ("Movies", dirs::video_dir()),
+    ];
+    for (label, p) in candidates {
+        if let Some(p) = p {
+            if p.is_dir() {
+                out.push(Place {
+                    label: label.into(),
+                    path: p,
+                });
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// 마운트된 볼륨/드라이브 1건.
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct Volume {
+    pub name: String,
+    pub path: PathBuf,
+}
+
+#[cfg(target_os = "macos")]
+fn list_volumes() -> Vec<Volume> {
+    // `/Volumes` 의 각 엔트리 = 마운트 (외장 디스크/이미지/네트워크 마운트 포함).
+    let mut out = Vec::new();
+    if let Ok(rd) = std::fs::read_dir("/Volumes") {
+        for e in rd.flatten() {
+            let path = e.path();
+            if path.is_dir() {
+                out.push(Volume {
+                    name: e.file_name().to_string_lossy().into_owned(),
+                    path,
+                });
+            }
+        }
+    }
+    out
+}
+
+#[cfg(target_os = "linux")]
+fn list_volumes() -> Vec<Volume> {
+    // /media/<user>/*, /run/media/<user>/*, /mnt/* 의 마운트들 (best-effort).
+    let mut out = Vec::new();
+    for base in ["/media", "/run/media"] {
+        if let Ok(rd) = std::fs::read_dir(base) {
+            for user in rd.flatten() {
+                if let Ok(inner) = std::fs::read_dir(user.path()) {
+                    for e in inner.flatten() {
+                        if e.path().is_dir() {
+                            out.push(Volume {
+                                name: e.file_name().to_string_lossy().into_owned(),
+                                path: e.path(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if let Ok(rd) = std::fs::read_dir("/mnt") {
+        for e in rd.flatten() {
+            if e.path().is_dir() {
+                out.push(Volume {
+                    name: e.file_name().to_string_lossy().into_owned(),
+                    path: e.path(),
+                });
+            }
+        }
+    }
+    out
+}
+
+#[cfg(target_os = "windows")]
+fn list_volumes() -> Vec<Volume> {
+    Vec::new() // 후속: GetLogicalDrives (platform/ 에서)
+}
+
+/// 마운트된 볼륨 목록 (읽기 전용). eject 는 후속(별도 승인).
+#[tauri::command]
+#[specta::specta]
+pub async fn volumes() -> Result<Vec<Volume>, DuetError> {
+    tokio::task::spawn_blocking(list_volumes)
+        .await
+        .map_err(|e| DuetError::Io(format!("volumes task join: {e}")))
 }
