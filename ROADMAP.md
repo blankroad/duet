@@ -116,8 +116,12 @@
 
 - [x] 파일 미리보기 (이미지, 텍스트, PDF/미디어 스트리밍, Quick Look)
 - [x] 압축/해제 (zip, tar.gz) + 아카이브 내부 탐색(browse) + 편집 후 repack
-- [~] 동기화 모드 (rsync 기반) — v1: local↔local 단방향 미러(추가 전용, undo 가능).
-      same-host rsync / prune(--delete) / cross-host 는 후속(undo 추적 설계 필요)
+- [x] 폴더 비교 (folder diff) — 두 패널 재귀 비교(좌측만/우측만/최신/다름/동일)
+- [~] 동기화 모드 — local↔local 단방향 미러(추가 전용) + 비교 기반 안전 양방향 머지
+      (한쪽-전용 파일 양방향 복사, 충돌·삭제 미변경). same-host rsync sync /
+      prune(--delete) / 3-way 충돌해결은 후속(baseline·undo 추적 설계 필요)
+- [x] 전송 안정성 — relay 복사 chunk 스트리밍(대용량 OOM 해소) + 진행률/취소 +
+      중단 시 .part 재개(같은 op retry 한정)
 - [x] 점프 호스트 풀 SSH 동작 — N-hop ProxyJump 체인
 - [ ] Drag & Drop (외부 앱 → duet, duet → 외부)
 - [x] 다중 선택 일괄 이름 변경 (batch rename)
