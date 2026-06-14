@@ -21,6 +21,7 @@ import {
   reorderHostFavorites,
 } from "@/stores/hostFavorites";
 import { useContextMenu, type MenuEntry } from "@/stores/contextMenu";
+import { useToast } from "@/stores/toast";
 import { useReorderable } from "@/hooks/useReorderable";
 import type { SavedHost, Bookmark as BookmarkType, HostFavorite, Location } from "@/types/bindings";
 import clsx from "clsx";
@@ -89,6 +90,14 @@ function openMenu(e: React.MouseEvent, items: MenuEntry[]): void {
   e.preventDefault();
   e.stopPropagation();
   useContextMenu.getState().openAt(e.clientX, e.clientY, items);
+}
+
+/** 클립보드 복사 + 토스트. */
+function copyText(text: string): void {
+  void navigator.clipboard
+    .writeText(text)
+    .then(() => useToast.getState().show(`Copied: ${text}`))
+    .catch(() => useToast.getState().show("Clipboard unavailable"));
 }
 
 /** 드래그 삽입 위치 표시 라인. */
@@ -219,6 +228,7 @@ function BookmarkItem({
   const sshPrefix = bookmark.location.source.kind === "ssh" ? "ssh:" : "";
   const menu: MenuEntry[] = [
     { id: "open", label: "Open", onSelect: () => onActivate(bookmark.location) },
+    { id: "copy-path", label: "Copy path", onSelect: () => copyText(String(bookmark.location.path)) },
     { kind: "separator" },
     { id: "remove", label: "Remove", danger: true, onSelect: () => void removeBookmark(bookmark.id) },
   ];
@@ -250,10 +260,10 @@ function HostFavoritesSection({
 }) {
   const items = useHostFavorites((s) => s.items);
   const activeRecord = useConnections((s) => s.active);
-  const activeAliases = Object.values(activeRecord).map((c) => c.alias);
-  const visible = items.filter((f) => activeAliases.includes(f.host_alias));
+  const activeAliases = new Set(Object.values(activeRecord).map((c) => c.alias));
+  // 모든 즐겨찾기 표시(연결 안 돼도) — 클릭 시 자동 접속, 어디서나 관리/삭제 가능.
   const groups: Record<string, HostFavorite[]> = {};
-  for (const f of visible) (groups[f.host_alias] ??= []).push(f);
+  for (const f of items) (groups[f.host_alias] ??= []).push(f);
   const groupKeys = Object.keys(groups).sort();
 
   return (
@@ -261,14 +271,20 @@ function HostFavoritesSection({
       sectionKey="favorites"
       title="Favorites"
       icon={<Heart size={14} />}
-      count={visible.length}
+      count={items.length}
       action={<AddBtn label="Add active tab path (SSH only)" onClick={onAdd} />}
     >
       {groupKeys.length === 0 ? (
-        <Item label="(none — connect to host first)" muted />
+        <Item label="(none — bookmark an SSH folder)" muted />
       ) : (
         groupKeys.map((alias) => (
-          <FavoriteGroup key={alias} alias={alias} favs={groups[alias]!} onActivate={onActivate} />
+          <FavoriteGroup
+            key={alias}
+            alias={alias}
+            favs={groups[alias]!}
+            connected={activeAliases.has(alias)}
+            onActivate={onActivate}
+          />
         ))
       )}
     </Section>
@@ -278,10 +294,12 @@ function HostFavoritesSection({
 function FavoriteGroup({
   alias,
   favs,
+  connected,
   onActivate,
 }: {
   alias: string;
   favs: HostFavorite[];
+  connected: boolean;
   onActivate: (favorite: HostFavorite) => void;
 }) {
   const collapsed = useUI((s) => s.collapsed[`fav:${alias}`]);
@@ -296,11 +314,18 @@ function FavoriteGroup({
       <button
         type="button"
         onClick={() => toggle(`fav:${alias}`)}
-        className="flex w-full items-center gap-0.5 px-2 text-meta text-fg-muted hover:text-fg"
+        className="flex w-full items-center gap-1 px-2 text-meta text-fg-muted hover:text-fg"
+        title={connected ? `${alias} (connected)` : `${alias} (click an item to connect)`}
       >
         {collapsed ? <ChevronRight size={10} /> : <ChevronDown size={10} />}
+        <span
+          className={clsx(
+            "h-1.5 w-1.5 shrink-0 rounded-full",
+            connected ? "bg-green-500" : "bg-fg-muted/30",
+          )}
+        />
         <span className="truncate">{alias}</span>
-        <span className="ml-1 opacity-70">{favs.length}</span>
+        {collapsed && <span className="ml-auto opacity-50">{favs.length}</span>}
       </button>
       {!collapsed &&
         favs.map((f) => (
@@ -331,7 +356,8 @@ function FavoriteItem({
   onMouseDown: (e: React.MouseEvent) => void;
 }) {
   const menu: MenuEntry[] = [
-    { id: "open", label: "Open", onSelect: () => onActivate(fav) },
+    { id: "open", label: "Open (connect if needed)", onSelect: () => onActivate(fav) },
+    { id: "copy-path", label: "Copy path", onSelect: () => copyText(String(fav.path)) },
     { kind: "separator" },
     { id: "remove", label: "Remove", danger: true, onSelect: () => void removeHostFavorite(fav.id) },
   ];
@@ -456,7 +482,10 @@ function Section({
           {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
           {icon}
           <span className="truncate">{title}</span>
-          {count !== undefined && count > 0 && <span className="opacity-70">{count}</span>}
+          {/* 접혔을 때만 개수 표시 — 펼치면 항목이 보이니 중복 제거. */}
+          {collapsed && count !== undefined && count > 0 && (
+            <span className="ml-auto text-meta opacity-50">{count}</span>
+          )}
         </button>
         {action}
       </div>
