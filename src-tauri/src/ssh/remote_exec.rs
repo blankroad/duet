@@ -7,7 +7,7 @@
 //! 둘 다 russh `Handle::channel_open_session().exec()` 사용. 시스템 ssh 호출
 //! 절대 X (CLAUDE.md §9).
 
-use crate::ssh::connection::AcceptAllHandler;
+use crate::ssh::connection::HostKeyVerifier;
 use crate::types::DuetError;
 use russh::client::Handle;
 use russh::ChannelMsg;
@@ -24,7 +24,7 @@ pub struct ExecOutput {
 ///
 /// `ExitStatus` 메시지를 수신하기 전에 채널이 닫히면 (예: 연결 끊김, 서버 측
 /// 강제 종료) `DuetError::Ssh` 반환 — silent success 방지.
-pub async fn exec(handle: &Handle<AcceptAllHandler>, cmd: &str) -> Result<ExecOutput, DuetError> {
+pub async fn exec(handle: &Handle<HostKeyVerifier>, cmd: &str) -> Result<ExecOutput, DuetError> {
     let mut channel = handle
         .channel_open_session()
         .await
@@ -72,7 +72,7 @@ pub async fn exec(handle: &Handle<AcceptAllHandler>, cmd: &str) -> Result<ExecOu
 ///
 /// stderr 는 전체 수집 후 결과로 반환 — 에러 디버깅용.
 pub async fn exec_streaming<F>(
-    handle: &Handle<AcceptAllHandler>,
+    handle: &Handle<HostKeyVerifier>,
     cmd: &str,
     mut on_stdout_line: F,
 ) -> Result<(u32, Vec<u8>), DuetError>

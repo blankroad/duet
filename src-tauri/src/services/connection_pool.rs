@@ -3,7 +3,7 @@
 //! 한 ConnectionId 당 한 SSH session. `insert` 로 등록, `get` 으로 참조 획득.
 //! 연결 끊김 watcher / 자동 재연결은 Task 13 에서 추가.
 
-use crate::ssh::connection::AcceptAllHandler;
+use crate::ssh::connection::HostKeyVerifier;
 use crate::types::{ConnectionId, DuetError, SourceId};
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -24,7 +24,7 @@ pub struct ActiveConnection {
     /// SSH session. None 인 경우는 테스트만 — 프로덕션 경로는 항상 Some.
     ///
     /// `Mutex` 로 동시 접근 직렬화 (russh Handle 자체는 Send 이나 Sync 아님).
-    pub session: Option<tokio::sync::Mutex<russh::client::Handle<AcceptAllHandler>>>,
+    pub session: Option<tokio::sync::Mutex<russh::client::Handle<HostKeyVerifier>>>,
     /// rsync 가 원격에 설치되어 있는지 캐시.
     /// `None` = 미확인, `Some(true/false)` = 확인됨.
     /// MVP-3 same-host copy 의 첫 호출 때 detect 후 채움. 연결 재시작 시 reset.

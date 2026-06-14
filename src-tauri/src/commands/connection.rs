@@ -88,14 +88,19 @@ async fn open_and_register(
     host: SshHostEntry,
     all_hosts: &[SshHostEntry],
     mut password: Option<String>,
+    trust_host_key: bool,
     pool: &Arc<ConnectionPool>,
     app: &tauri::AppHandle,
 ) -> Result<ConnectionDto, DuetError> {
     // 키 → agent fallback. AuthFailed 면 password 가 있을 때만 마지막 시도.
-    let connect_result = match connect(&host, all_hosts).await {
+    // trust_host_key=true 면 미지의 호스트키를 known_hosts 에 기록(사용자 신뢰 후 재연결).
+    let connect_result = match connect(&host, all_hosts, trust_host_key).await {
         Ok(s) => Ok(s),
         Err(DuetError::AuthFailed) => match password.as_deref() {
-            Some(pw) => connect_with_password(&host.hostname, host.port, &host.user, pw).await,
+            Some(pw) => {
+                connect_with_password(&host.hostname, host.port, &host.user, pw, trust_host_key)
+                    .await
+            }
             None => Err(DuetError::AuthFailed),
         },
         Err(e) => Err(e),
@@ -150,6 +155,7 @@ async fn open_and_register(
 pub async fn connection_open(
     alias: String,
     password: Option<String>,
+    trust_host_key: bool,
     pool: tauri::State<'_, Arc<ConnectionPool>>,
     app: tauri::AppHandle,
 ) -> Result<ConnectionDto, DuetError> {
@@ -161,7 +167,15 @@ pub async fn connection_open(
         .ok_or_else(|| {
             DuetError::ConnectionFailed(format!("alias not found in ssh config: {alias}"))
         })?;
-    open_and_register(host, &all_hosts, password, pool.inner(), &app).await
+    open_and_register(
+        host,
+        &all_hosts,
+        password,
+        trust_host_key,
+        pool.inner(),
+        &app,
+    )
+    .await
 }
 
 /// Ad-hoc SSH 연결 — `~/.ssh/config` 에 없는 host 에 직접 입력으로 접속.
@@ -171,12 +185,14 @@ pub async fn connection_open(
 /// `proxy_jump` 미지원 — config 기반 alias 가 필요.
 #[tauri::command]
 #[specta::specta]
+#[allow(clippy::too_many_arguments)] // IPC command — 인자는 ad-hoc 연결 입력값 그대로.
 pub async fn connection_open_adhoc(
     host: String,
     port: u16,
     user: String,
     key_path: Option<PathBuf>,
     password: Option<String>,
+    trust_host_key: bool,
     pool: tauri::State<'_, Arc<ConnectionPool>>,
     app: tauri::AppHandle,
 ) -> Result<ConnectionDto, DuetError> {
@@ -194,7 +210,7 @@ pub async fn connection_open_adhoc(
         identity_files: key_path.into_iter().collect(),
         proxy_jump: vec![],
     };
-    open_and_register(entry, &[], password, pool.inner(), &app).await
+    open_and_register(entry, &[], password, trust_host_key, pool.inner(), &app).await
 }
 
 /// 연결 종료 + ConnectionPool 에서 제거.

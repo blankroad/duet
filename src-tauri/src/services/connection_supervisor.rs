@@ -125,7 +125,8 @@ async fn reconnect_loop(
             }
         };
 
-        match connect(&host, &all_hosts).await {
+        // 재연결은 known_hosts 학습 안 함 — 키가 바뀌었으면 조용히 신뢰하지 않고 실패.
+        match connect(&host, &all_hosts, false).await {
             Ok(session) => {
                 let host_ip = session.host_ip;
                 let new_conn = ActiveConnection {

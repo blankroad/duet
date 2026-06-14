@@ -10,7 +10,7 @@ use specta::Type;
 use std::net::IpAddr;
 use std::path::PathBuf;
 
-pub use error::DuetError;
+pub use error::{DuetError, HostKeyInfo};
 
 /// 연결 식별자. 백엔드 ConnectionPool 키.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]

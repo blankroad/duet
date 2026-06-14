@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Network, X } from "lucide-react";
 import { commands } from "@/types/bindings";
-import type { ConnectionDto, DuetError } from "@/types/bindings";
+import type { ConnectionDto, DuetError, HostKeyInfo } from "@/types/bindings";
 import { useConnections, type Host } from "@/stores/connections";
 import type { PaneId } from "@/stores/panes";
+import { HostKeyPrompt } from "./HostKeyPrompt";
 
 /**
  * 새 SSH 연결 다이얼로그.
@@ -27,7 +28,8 @@ export interface ConnectionDialogProps {
 type DialogPhase =
   | { kind: "idle" }
   | { kind: "connecting" }
-  | { kind: "error"; error: DuetError };
+  | { kind: "error"; error: DuetError }
+  | { kind: "host-key"; info: HostKeyInfo };
 
 export function ConnectionDialog({ alias, onClose, onConnected }: ConnectionDialogProps) {
   const hosts = useConnections((s) => s.hosts);
@@ -48,14 +50,14 @@ export function ConnectionDialog({ alias, onClose, onConnected }: ConnectionDial
     }
   }, [open, alias]);
 
-  const handleConnect = async () => {
+  // trust=true 면 미지의 호스트키를 known_hosts 에 기록(사용자가 prompt 에서 신뢰).
+  const doConnect = async (trust: boolean) => {
     if (!host) return;
     setPhase({ kind: "connecting" });
-    // password 는 command 호출 직후 local state 에서 clear (CLAUDE.md §5).
     const pw = password ? password : null;
-    const result = await commands.connectionOpen(host.alias, pw);
-    setPassword(""); // 즉시 clear — 성공/실패 무관
+    const result = await commands.connectionOpen(host.alias, pw, trust);
     if (result.status === "ok") {
+      setPassword(""); // 성공 — 즉시 clear (CLAUDE.md §5)
       const dto = result.data;
       upsertActive({
         id: dto.id,
@@ -66,10 +68,18 @@ export function ConnectionDialog({ alias, onClose, onConnected }: ConnectionDial
       });
       onConnected(target, dto);
       onClose();
-    } else {
-      setPhase({ kind: "error", error: result.error });
+      return;
     }
+    if (result.error.kind === "HostKeyUnverified") {
+      // 호스트키 검증 단계(인증 前) 실패 — password 는 신뢰 재시도 위해 유지
+      // (component-local state 한정, §5). prompt 에서 신뢰하면 doConnect(true) 재호출.
+      setPhase({ kind: "host-key", info: result.error.message });
+      return;
+    }
+    setPassword(""); // 그 외 실패 — clear
+    setPhase({ kind: "error", error: result.error });
   };
+  const handleConnect = () => void doConnect(false);
 
   return (
     <Dialog.Root open={open} onOpenChange={(o) => !o && onClose()}>
@@ -111,24 +121,29 @@ export function ConnectionDialog({ alias, onClose, onConnected }: ConnectionDial
           </div>
 
           {phase.kind === "error" && <ErrorBox error={phase.error} />}
+          {phase.kind === "host-key" && (
+            <HostKeyPrompt info={phase.info} onTrust={() => void doConnect(true)} onCancel={onClose} />
+          )}
 
-          <div className="mt-4 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleConnect}
-              disabled={phase.kind === "connecting"}
-              className="rounded bg-accent px-3 py-1 text-base text-white disabled:opacity-50"
-            >
-              {phase.kind === "connecting" ? "Connecting…" : "Connect"}
-            </button>
-          </div>
+          {phase.kind !== "host-key" && (
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConnect}
+                disabled={phase.kind === "connecting"}
+                className="rounded bg-accent px-3 py-1 text-base text-white disabled:opacity-50"
+              >
+                {phase.kind === "connecting" ? "Connecting…" : "Connect"}
+              </button>
+            </div>
+          )}
 
           <Dialog.Description className="sr-only">
             Open a new SSH connection to {alias} and attach it to a pane.
@@ -203,5 +218,5 @@ function ErrorBox({ error }: { error: DuetError }) {
 }
 
 function formatError(error: DuetError): string {
-  return "message" in error ? error.message : error.kind;
+  return "message" in error && typeof error.message === "string" ? error.message : error.kind;
 }

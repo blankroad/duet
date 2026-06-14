@@ -5,7 +5,7 @@
 //! - `connect_with_password`: 비밀번호 인증 (메모리에서만, 로그 출력 없음)
 //! - `connect`: 키파일 → agent → AuthFailed 폴백 오케스트레이터.
 //!   `host.proxy_jump` 가 비어있지 않으면 jump host 통한 nested 세션.
-//! - `AcceptAllHandler`: 호스트키 무조건 수락 (MVP-2+ 에서 known_hosts 검증으로 강화)
+//! - `HostKeyVerifier`: `~/.ssh/known_hosts` 로 서버 호스트키 검증 (TOFU + 변경 차단, §9)
 //!
 //! ## ProxyJump (CLAUDE.md §9)
 //!
@@ -20,7 +20,7 @@
 
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -31,25 +31,150 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 
 use crate::ssh::config::SshHostEntry;
-use crate::types::DuetError;
+use crate::types::{DuetError, HostKeyInfo};
 
-/// 호스트키를 무조건 수락하는 client handler.
+/// 서버 호스트키를 `~/.ssh/known_hosts` 로 검증하는 client handler (CLAUDE.md §9 보안).
 ///
-/// MVP-1 은 known_hosts 검증 생략 — MVP-2 이상에서 strict 로 강화 예정.
-pub struct AcceptAllHandler;
+/// 핸드셰이크(KEX) 중 호출된다 — 그 시점엔 사용자에게 물어볼 수 없으므로,
+/// 미지/변경 키는 거부(`Ok(false)`)하고 사유를 `report` 에 적어 둔다. 호출자가
+/// 그 report 를 읽어 `HostKeyUnverified` 에러로 변환 → frontend 가 신뢰 다이얼로그.
+/// 사용자가 미지의 키를 수락하면 `learn=true` 로 재연결해 known_hosts 에 기록(TOFU).
+/// **변경된 키는 learn 여부와 무관하게 항상 거부** (MITM 방어).
+pub struct HostKeyVerifier {
+    host: String,
+    port: u16,
+    /// true 면 미지의 키를 수락하고 known_hosts 에 추가 (사용자가 신뢰 후 재연결).
+    learn: bool,
+    /// 거부 사유 출력 채널 — 핸드셰이크 백그라운드 task 에서 채워 caller 가 읽음.
+    report: Arc<Mutex<Option<HostKeyInfo>>>,
+}
+
+impl HostKeyVerifier {
+    fn new(host: &str, port: u16, learn: bool, report: Arc<Mutex<Option<HostKeyInfo>>>) -> Self {
+        Self {
+            host: host.to_string(),
+            port,
+            learn,
+            report,
+        }
+    }
+
+    /// 첫 실패 사유만 기록 (multi-hop 에서 가장 바깥 실패가 우선).
+    fn record(&self, key: &key::PublicKey, changed: bool, line: Option<usize>) {
+        if let Ok(mut g) = self.report.lock() {
+            if g.is_none() {
+                *g = Some(HostKeyInfo {
+                    host: self.host.clone(),
+                    fingerprint: key.fingerprint(),
+                    changed,
+                    changed_line: line.map(|l| l as u32),
+                });
+            }
+        }
+    }
+}
+
+/// known_hosts 조회 결정. `path=None` 이면 표준 `~/.ssh/known_hosts`.
+/// 테스트 위해 path 주입 가능 — 순수 분류(부수효과 없음).
+fn classify_known_host(
+    host: &str,
+    port: u16,
+    key: &key::PublicKey,
+    path: Option<&Path>,
+) -> KnownHostDecision {
+    let result = match path {
+        Some(p) => russh::keys::known_hosts::check_known_hosts_path(host, port, key, p),
+        None => russh::keys::check_known_hosts(host, port, key),
+    };
+    match result {
+        Ok(true) => KnownHostDecision::Accept,
+        // 미지의 호스트(또는 파일 없음) → TOFU.
+        Ok(false) => KnownHostDecision::Reject {
+            changed: false,
+            line: None,
+        },
+        // 같은 타입의 다른 키 → 변경(위험).
+        Err(russh::keys::Error::KeyChanged { line }) => KnownHostDecision::Reject {
+            changed: true,
+            line: Some(line),
+        },
+        // known_hosts 읽기 불가(예: NoHomeDir) → 안전하게 거부.
+        Err(_) => KnownHostDecision::Reject {
+            changed: false,
+            line: None,
+        },
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum KnownHostDecision {
+    Accept,
+    Reject { changed: bool, line: Option<usize> },
+}
 
 #[async_trait]
-impl Handler for AcceptAllHandler {
+impl Handler for HostKeyVerifier {
     type Error = russh::Error;
 
-    /// 서버 공개키를 무조건 수락.
-    ///
-    /// TODO (MVP-2+): known_hosts 파일 검증으로 교체.
     async fn check_server_key(
         &mut self,
-        _server_public_key: &key::PublicKey,
+        server_public_key: &key::PublicKey,
     ) -> Result<bool, Self::Error> {
-        Ok(true)
+        match classify_known_host(&self.host, self.port, server_public_key, None) {
+            KnownHostDecision::Accept => Ok(true),
+            // 미지의 호스트 — learn(사용자 신뢰 후 재연결)이면 기록 후 수락, 아니면 거부.
+            KnownHostDecision::Reject {
+                changed: false,
+                line: _,
+            } => {
+                if self.learn {
+                    // 쓰기 실패해도 이번 세션은 진행(자격증명/키는 로그 금지, §5 — 경로만 warn).
+                    if let Err(e) = russh::keys::known_hosts::learn_known_hosts(
+                        &self.host,
+                        self.port,
+                        server_public_key,
+                    ) {
+                        tracing::warn!("known_hosts write failed for {}: {e}", self.host);
+                    }
+                    Ok(true)
+                } else {
+                    self.record(server_public_key, false, None);
+                    Ok(false)
+                }
+            }
+            // 변경된 키 → learn 여부와 무관하게 항상 거부 (MITM 방어).
+            KnownHostDecision::Reject {
+                changed: true,
+                line,
+            } => {
+                self.record(server_public_key, true, line);
+                Ok(false)
+            }
+        }
+    }
+}
+
+/// 호스트키 검증 정책 — connect 경로 전체에서 공유(같은 report).
+#[derive(Clone)]
+struct HostKeyPolicy {
+    learn: bool,
+    report: Arc<Mutex<Option<HostKeyInfo>>>,
+}
+
+impl HostKeyPolicy {
+    fn new(learn: bool) -> Self {
+        Self {
+            learn,
+            report: Arc::new(Mutex::new(None)),
+        }
+    }
+}
+
+/// 핸드셰이크 실패 시: 호스트키 사유가 기록됐으면 `HostKeyUnverified`, 아니면 fallback.
+fn host_key_or(report: &Arc<Mutex<Option<HostKeyInfo>>>, fallback: DuetError) -> DuetError {
+    match report.lock().ok().and_then(|mut g| g.take()) {
+        Some(info) => DuetError::HostKeyUnverified(info),
+        None => fallback,
     }
 }
 
@@ -61,7 +186,7 @@ impl Handler for AcceptAllHandler {
 /// 패킷을 보내려다 에러가 발생할 수 있음.
 pub struct SshSession {
     /// russh 세션 핸들. SFTP 채널 개설 등 후속 작업에 사용.
-    pub handle: Handle<AcceptAllHandler>,
+    pub handle: Handle<HostKeyVerifier>,
     /// 핸드셰이크 시점의 peer IP — 같은-호스트 복사 판정용 (SourceId).
     /// ProxyJump 경로에서는 nested 채널이라 `peer_addr` 가 없으므로
     /// 로컬 DNS 에서 best-effort 로 resolve 한 IP. 해석 실패 시 `0.0.0.0`.
@@ -70,7 +195,7 @@ pub struct SshSession {
     /// nested 세션이 사용하는 ChannelStream 의 백엔드라서 살아있어야 한다.
     /// 이 필드는 외부에서 직접 사용 안 됨 — drop 가드 역할만.
     #[allow(dead_code)]
-    _jump_sessions: Vec<Handle<AcceptAllHandler>>,
+    _jump_sessions: Vec<Handle<HostKeyVerifier>>,
 }
 
 fn make_config() -> Arc<Config> {
@@ -112,9 +237,17 @@ pub async fn connect_with_key(
         .ip();
 
     // connect_stream 에 TcpStream 을 직접 전달 — 이미 연결된 소켓 재사용.
-    let mut handle = russh::client::connect_stream(make_config(), tcp, AcceptAllHandler)
+    // 호스트키 검증 strict (learn 없음 — 이 직접 API 는 사용자 신뢰 흐름 밖).
+    let report = Arc::new(Mutex::new(None));
+    let verifier = HostKeyVerifier::new(hostname, port, false, report.clone());
+    let mut handle = russh::client::connect_stream(make_config(), tcp, verifier)
         .await
-        .map_err(|e| DuetError::ConnectionFailed(format!("ssh handshake: {e}")))?;
+        .map_err(|e| {
+            host_key_or(
+                &report,
+                DuetError::ConnectionFailed(format!("ssh handshake: {e}")),
+            )
+        })?;
 
     // 키 로드. passphrase 를 로그에 절대 출력하지 않음 (CLAUDE.md §5).
     let secret = load_secret_key(key_path, passphrase).map_err(|_| DuetError::AuthFailed)?;
@@ -156,9 +289,16 @@ pub async fn connect_with_agent(
         .map_err(|e| DuetError::ConnectionFailed(format!("getpeername: {e}")))?
         .ip();
 
-    let mut handle = russh::client::connect_stream(make_config(), tcp, AcceptAllHandler)
+    let report = Arc::new(Mutex::new(None));
+    let verifier = HostKeyVerifier::new(hostname, port, false, report.clone());
+    let mut handle = russh::client::connect_stream(make_config(), tcp, verifier)
         .await
-        .map_err(|e| DuetError::ConnectionFailed(format!("ssh handshake: {e}")))?;
+        .map_err(|e| {
+            host_key_or(
+                &report,
+                DuetError::ConnectionFailed(format!("ssh handshake: {e}")),
+            )
+        })?;
 
     // SSH_AUTH_SOCK 가 없거나 agent 가 응답 안 하면 AuthFailed.
     // connect_env() 는 Unix 전용 — Windows 빌드는 cfg(unix) 로 분리.
@@ -216,6 +356,7 @@ pub async fn connect_with_password(
     port: u16,
     user: &str,
     password: &str,
+    learn_host_key: bool,
 ) -> Result<SshSession, DuetError> {
     let tcp = TcpStream::connect((hostname, port))
         .await
@@ -225,9 +366,16 @@ pub async fn connect_with_password(
         .map_err(|e| DuetError::ConnectionFailed(format!("getpeername: {e}")))?
         .ip();
 
-    let mut handle = russh::client::connect_stream(make_config(), tcp, AcceptAllHandler)
+    let report = Arc::new(Mutex::new(None));
+    let verifier = HostKeyVerifier::new(hostname, port, learn_host_key, report.clone());
+    let mut handle = russh::client::connect_stream(make_config(), tcp, verifier)
         .await
-        .map_err(|e| DuetError::ConnectionFailed(format!("ssh handshake: {e}")))?;
+        .map_err(|e| {
+            host_key_or(
+                &report,
+                DuetError::ConnectionFailed(format!("ssh handshake: {e}")),
+            )
+        })?;
 
     let auth_ok = handle
         .authenticate_password(user, password)
@@ -257,7 +405,7 @@ pub async fn connect_with_password(
 ///
 /// CLAUDE.md §5: passphrase 는 인자로만 받고 어디에도 저장/출력하지 않는다.
 async fn auth_publickey_on_handle(
-    handle: &mut Handle<AcceptAllHandler>,
+    handle: &mut Handle<HostKeyVerifier>,
     user: &str,
     key_path: &Path,
     passphrase: Option<&str>,
@@ -276,7 +424,7 @@ async fn auth_publickey_on_handle(
 /// SSH agent 로 핸들 인증.
 #[cfg(unix)]
 async fn auth_agent_on_handle(
-    handle: &mut Handle<AcceptAllHandler>,
+    handle: &mut Handle<HostKeyVerifier>,
     user: &str,
 ) -> Result<(), DuetError> {
     let mut agent = russh::keys::agent::client::AgentClient::connect_env()
@@ -301,7 +449,7 @@ async fn auth_agent_on_handle(
 
 #[cfg(not(unix))]
 async fn auth_agent_on_handle(
-    _handle: &mut Handle<AcceptAllHandler>,
+    _handle: &mut Handle<HostKeyVerifier>,
     _user: &str,
 ) -> Result<(), DuetError> {
     Err(DuetError::AuthFailed)
@@ -310,7 +458,7 @@ async fn auth_agent_on_handle(
 /// 호스트 설정의 키파일들 → SSH agent 순서로 인증 시도.
 /// 모두 실패하면 `DuetError::AuthFailed` — 호출자가 비밀번호 prompt 진행.
 async fn auth_orchestrated_on_handle(
-    handle: &mut Handle<AcceptAllHandler>,
+    handle: &mut Handle<HostKeyVerifier>,
     host: &SshHostEntry,
 ) -> Result<(), DuetError> {
     for key_path in &host.identity_files {
@@ -327,20 +475,34 @@ async fn auth_orchestrated_on_handle(
 ///
 /// 직접 TCP 든 ProxyJump 의 ChannelStream 이든 동일하게 사용. 핸드셰이크만 하고
 /// 인증은 호출자가 별도로 진행 (`auth_orchestrated_on_handle`).
-async fn handshake_on_stream<S>(stream: S) -> Result<Handle<AcceptAllHandler>, DuetError>
+async fn handshake_on_stream<S>(
+    stream: S,
+    host: &str,
+    port: u16,
+    policy: &HostKeyPolicy,
+) -> Result<Handle<HostKeyVerifier>, DuetError>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    russh::client::connect_stream(make_config(), stream, AcceptAllHandler)
+    let verifier = HostKeyVerifier::new(host, port, policy.learn, policy.report.clone());
+    russh::client::connect_stream(make_config(), stream, verifier)
         .await
-        .map_err(|e| DuetError::ConnectionFailed(format!("ssh handshake: {e}")))
+        .map_err(|e| {
+            host_key_or(
+                &policy.report,
+                DuetError::ConnectionFailed(format!("ssh handshake: {e}")),
+            )
+        })
 }
 
 /// 호스트 설정 기반 인증 오케스트레이터 (직접 연결).
 ///
 /// 시도 순서: identity_files → SSH agent → `DuetError::AuthFailed`.
 /// 네트워크 에러 (`ConnectionFailed`) 는 즉시 반환 — 폴백 없음.
-async fn connect_direct(host: &SshHostEntry) -> Result<SshSession, DuetError> {
+async fn connect_direct(
+    host: &SshHostEntry,
+    policy: &HostKeyPolicy,
+) -> Result<SshSession, DuetError> {
     let tcp = TcpStream::connect((host.hostname.as_str(), host.port))
         .await
         .map_err(|e| {
@@ -351,7 +513,7 @@ async fn connect_direct(host: &SshHostEntry) -> Result<SshSession, DuetError> {
         .map_err(|e| DuetError::ConnectionFailed(format!("getpeername: {e}")))?
         .ip();
 
-    let mut handle = handshake_on_stream(tcp).await?;
+    let mut handle = handshake_on_stream(tcp, &host.hostname, host.port, policy).await?;
     auth_orchestrated_on_handle(&mut handle, host).await?;
 
     Ok(SshSession {
@@ -379,6 +541,7 @@ async fn connect_direct(host: &SshHostEntry) -> Result<SshSession, DuetError> {
 async fn connect_via_jump(
     target: &SshHostEntry,
     all_hosts: &[SshHostEntry],
+    policy: &HostKeyPolicy,
 ) -> Result<SshSession, DuetError> {
     // 1. 모든 jump alias 를 ssh config 에서 resolve (네트워크 전 fail-fast).
     let mut jumps: Vec<&SshHostEntry> = Vec::with_capacity(target.proxy_jump.len());
@@ -397,8 +560,8 @@ async fn connect_via_jump(
 
     // 2. 첫 jump 는 직접 연결. 이후 jump 들은 직전 handle 위에 터널.
     //    jump_handles[i] 의 인증은 jumps[i] 자신의 자격증명.
-    let mut jump_handles: Vec<Handle<AcceptAllHandler>> =
-        vec![connect_direct(jumps[0]).await?.handle];
+    let mut jump_handles: Vec<Handle<HostKeyVerifier>> =
+        vec![connect_direct(jumps[0], policy).await?.handle];
     for i in 1..jumps.len() {
         let next = jumps[i];
         let stream = open_tunnel(
@@ -408,7 +571,14 @@ async fn connect_via_jump(
             next.port,
         )
         .await?;
-        let mut handle = nested_handshake(stream, &jumps[i - 1].alias).await?;
+        let mut handle = nested_handshake(
+            stream,
+            &next.hostname,
+            next.port,
+            &jumps[i - 1].alias,
+            policy,
+        )
+        .await?;
         auth_orchestrated_on_handle(&mut handle, next).await?;
         jump_handles.push(handle);
     }
@@ -424,7 +594,8 @@ async fn connect_via_jump(
     .await?;
     // host_ip 는 nested 라 peer_addr 불가 — 로컬 DNS best-effort (0.0.0.0 도 동작).
     let host_ip = resolve_target_ip(&target.hostname).await;
-    let mut handle = nested_handshake(stream, last_alias).await?;
+    let mut handle =
+        nested_handshake(stream, &target.hostname, target.port, last_alias, policy).await?;
     auth_orchestrated_on_handle(&mut handle, target).await?;
 
     // Drop 가드: 안쪽 jump 가 먼저 닫히도록 역순 저장 (위 doc 참조).
@@ -440,7 +611,7 @@ async fn connect_via_jump(
 /// originator 는 관습적으로 127.0.0.1:0 (서버가 보통 무시). 구체 타입을 명시하지
 /// 않고 `impl Trait` 로 반환 — `handshake_on_stream` 의 제네릭 경계와 동일.
 async fn open_tunnel(
-    via_handle: &Handle<AcceptAllHandler>,
+    via_handle: &Handle<HostKeyVerifier>,
     via_alias: &str,
     dst_host: &str,
     dst_port: u16,
@@ -459,17 +630,23 @@ async fn open_tunnel(
 /// nested 스트림 위 SSH 핸드셰이크 — 에러에 경유 jump alias 를 덧붙인다.
 async fn nested_handshake<S>(
     stream: S,
+    host: &str,
+    port: u16,
     via_alias: &str,
-) -> Result<Handle<AcceptAllHandler>, DuetError>
+    policy: &HostKeyPolicy,
+) -> Result<Handle<HostKeyVerifier>, DuetError>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    handshake_on_stream(stream).await.map_err(|e| match e {
-        DuetError::ConnectionFailed(msg) => {
-            DuetError::ConnectionFailed(format!("nested ssh via {via_alias}: {msg}"))
-        }
-        other => other,
-    })
+    handshake_on_stream(stream, host, port, policy)
+        .await
+        .map_err(|e| match e {
+            DuetError::ConnectionFailed(msg) => {
+                DuetError::ConnectionFailed(format!("nested ssh via {via_alias}: {msg}"))
+            }
+            // HostKeyUnverified 등은 그대로 전달 (fingerprint/host 정보 보존).
+            other => other,
+        })
 }
 
 /// 호스트명 (또는 IP 문자열) 을 IpAddr 로 best-effort 해석. 실패 시 `0.0.0.0`.
@@ -494,26 +671,73 @@ async fn resolve_target_ip(hostname: &str) -> IpAddr {
 /// 시도 순서: identity_files (passphrase 없이) → SSH agent → `DuetError::AuthFailed`.
 /// `AuthFailed` 시 호출자(`connection_open` command) 가 비밀번호 prompt 후
 /// `connect_with_password` 별도 호출.
+///
+/// `learn_host_key=true` 면 미지의 호스트키를 known_hosts 에 기록(사용자가 신뢰
+/// 다이얼로그에서 수락 후 재연결). 변경된 키는 이 플래그와 무관하게 항상 거부.
+/// 호스트키 미검증 시 `DuetError::HostKeyUnverified(info)` 를 반환한다.
 pub async fn connect(
     host: &SshHostEntry,
     all_hosts: &[SshHostEntry],
+    learn_host_key: bool,
 ) -> Result<SshSession, DuetError> {
+    let policy = HostKeyPolicy::new(learn_host_key);
     if host.proxy_jump.is_empty() {
-        connect_direct(host).await
+        connect_direct(host, &policy).await
     } else {
-        connect_via_jump(host, all_hosts).await
+        connect_via_jump(host, all_hosts, &policy).await
     }
 }
 
 #[cfg(test)]
 mod tests {
     // 실제 SSH 핸드셰이크 통합 테스트는 외부 SSH 서버 필요.
-    // 컴파일 타임 시그니처 검증: connect_with_key 와 AcceptAllHandler 가 노출되는지 확인.
+    // 컴파일 타임 시그니처 검증: connect_with_key 와 HostKeyVerifier 가 노출되는지 확인.
 
     #[test]
     fn accept_all_handler_is_send() {
         fn assert_send<T: Send>() {}
-        assert_send::<super::AcceptAllHandler>();
+        assert_send::<super::HostKeyVerifier>();
+    }
+
+    /// known_hosts 검증 분류 — 미지 → learn → 일치 → 변경 (실제 SSH 서버 불필요).
+    /// 표준 ~/.ssh/known_hosts 를 절대 건드리지 않도록 temp 경로 주입.
+    #[test]
+    fn classify_known_host_tofu_then_match_then_changed() {
+        use super::{classify_known_host, KnownHostDecision};
+        use russh::keys::key::KeyPair;
+
+        let dir = tempfile::tempdir().unwrap();
+        let kh = dir.path().join("known_hosts");
+        let host = "test.example.com";
+        let port = 22u16;
+
+        let key1 = KeyPair::generate_ed25519().clone_public_key().unwrap();
+        let key2 = KeyPair::generate_ed25519().clone_public_key().unwrap();
+
+        // 1) 미지의 호스트 (파일 없음) → Reject{changed:false}.
+        assert_eq!(
+            classify_known_host(host, port, &key1, Some(&kh)),
+            KnownHostDecision::Reject {
+                changed: false,
+                line: None
+            }
+        );
+
+        // 2) learn 후 → 같은 키는 Accept.
+        russh::keys::known_hosts::learn_known_hosts_path(host, port, &key1, &kh).unwrap();
+        assert_eq!(
+            classify_known_host(host, port, &key1, Some(&kh)),
+            KnownHostDecision::Accept
+        );
+
+        // 3) 같은 호스트, 같은 타입(ed25519)인데 다른 키 → Reject{changed:true} (MITM 경고).
+        match classify_known_host(host, port, &key2, Some(&kh)) {
+            KnownHostDecision::Reject {
+                changed: true,
+                line,
+            } => assert!(line.is_some()),
+            other => panic!("expected changed-key rejection, got {other:?}"),
+        }
     }
 
     #[test]
@@ -534,8 +758,15 @@ mod tests {
     /// connect_with_password 시그니처 컴파일 검증.
     #[test]
     fn connect_with_password_compiles() {
-        let _: fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = _>>> =
-            || Box::pin(super::connect_with_password("localhost", 22, "user", "pw"));
+        let _: fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = _>>> = || {
+            Box::pin(super::connect_with_password(
+                "localhost",
+                22,
+                "user",
+                "pw",
+                false,
+            ))
+        };
     }
 
     /// connect_with_agent 시그니처 컴파일 검증.
@@ -568,7 +799,7 @@ mod tests {
         };
         let all = vec![target.clone()]; // jump 가 목록에 없음
 
-        let result = super::connect(&target, &all).await;
+        let result = super::connect(&target, &all, false).await;
         match result {
             Err(DuetError::ConnectionFailed(msg)) => {
                 assert!(
@@ -607,7 +838,7 @@ mod tests {
         };
         let all = vec![target.clone(), b1];
 
-        match super::connect(&target, &all).await {
+        match super::connect(&target, &all, false).await {
             Err(DuetError::ConnectionFailed(msg)) => {
                 assert!(
                     msg.contains("b2"),

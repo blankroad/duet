@@ -2,13 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Lock, Unlock, X } from "lucide-react";
 import { commands } from "@/types/bindings";
-import type { ConnectionDto, DuetError, SavedHost } from "@/types/bindings";
+import type { ConnectionDto, DuetError, HostKeyInfo, SavedHost } from "@/types/bindings";
 import { useConnections } from "@/stores/connections";
 import { saveHost } from "@/stores/savedHosts";
 import { useVault, vaultGet, vaultSet } from "@/stores/vault";
 import type { PaneId } from "@/stores/panes";
 import { formatErr } from "@/lib/error";
 import { MasterPasswordDialog } from "@/components/dialogs/MasterPasswordDialog";
+import { HostKeyPrompt } from "./HostKeyPrompt";
 
 /**
  * `~/.ssh/config` 에 없는 host 에 직접 입력으로 연결.
@@ -29,7 +30,8 @@ export interface AdHocConnectDialogProps {
 type Phase =
   | { kind: "idle" }
   | { kind: "connecting" }
-  | { kind: "error"; error: DuetError };
+  | { kind: "error"; error: DuetError }
+  | { kind: "host-key"; info: HostKeyInfo };
 
 export function AdHocConnectDialog({
   open,
@@ -120,7 +122,8 @@ export function AdHocConnectDialog({
     }
   };
 
-  const handleConnect = async () => {
+  // trust=true 면 미지의 호스트키를 known_hosts 에 기록(사용자가 prompt 에서 신뢰).
+  const doConnect = async (trust: boolean) => {
     const portNum = Number.parseInt(port, 10);
     if (!host.trim() || !user.trim() || Number.isNaN(portNum)) {
       setPhase({
@@ -130,8 +133,7 @@ export function AdHocConnectDialog({
       return;
     }
     setPhase({ kind: "connecting" });
-    // password 는 command 호출 직후 local state 에서 clear (CLAUDE.md §5).
-    // 호출 인자로만 전달, store/localStorage 에 저장 안 함.
+    // password 는 호출 인자로만 전달, store/localStorage 에 저장 안 함 (CLAUDE.md §5).
     const pw = password ? password : null;
     const r = await commands.connectionOpenAdhoc(
       host.trim(),
@@ -139,9 +141,20 @@ export function AdHocConnectDialog({
       user.trim(),
       keyPath.trim() ? keyPath.trim() : null,
       pw,
+      trust,
     );
-    setPassword(""); // 즉시 clear — 성공/실패 무관
-    if (r.status === "ok") {
+    if (r.status !== "ok") {
+      if (r.error.kind === "HostKeyUnverified") {
+        // 호스트키 검증 실패 — password 는 신뢰 재시도 위해 유지(component-local, §5).
+        setPhase({ kind: "host-key", info: r.error.message });
+        return;
+      }
+      setPassword("");
+      setPhase({ kind: "error", error: r.error });
+      return;
+    }
+    setPassword(""); // 성공 — 즉시 clear (저장 흐름은 위에서 캡처한 pw 사용)
+    {
       const dto = r.data;
       upsertActive({
         id: dto.id,
@@ -187,10 +200,9 @@ export function AdHocConnectDialog({
         reset();
         onClose();
       }
-    } else {
-      setPhase({ kind: "error", error: r.error });
     }
   };
+  const handleConnect = () => void doConnect(false);
 
   return (
     <Dialog.Root open={open} onOpenChange={(o) => !o && handleClose()}>
@@ -351,24 +363,33 @@ export function AdHocConnectDialog({
               )}
             </div>
           )}
+          {phase.kind === "host-key" && (
+            <HostKeyPrompt
+              info={phase.info}
+              onTrust={() => void doConnect(true)}
+              onCancel={handleClose}
+            />
+          )}
 
-          <div className="mt-4 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={handleClose}
-              className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleConnect}
-              disabled={phase.kind === "connecting"}
-              className="rounded bg-accent px-3 py-1 text-base text-white disabled:opacity-50"
-            >
-              {phase.kind === "connecting" ? "Connecting…" : "Connect"}
-            </button>
-          </div>
+          {phase.kind !== "host-key" && (
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={handleClose}
+                className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConnect}
+                disabled={phase.kind === "connecting"}
+                className="rounded bg-accent px-3 py-1 text-base text-white disabled:opacity-50"
+              >
+                {phase.kind === "connecting" ? "Connecting…" : "Connect"}
+              </button>
+            </div>
+          )}
 
           <Dialog.Description className="sr-only">
             Connect to a host that is not in your ~/.ssh/config.
