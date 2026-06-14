@@ -83,6 +83,23 @@ pub async fn trash_location(
     match &source {
         SourceId::Local => {
             let path = local_trash_dir()?;
+            // 읽기 가능 여부 선확인 — macOS ~/.Trash 는 TCC 보호라 명확히 안내.
+            match tokio::fs::read_dir(&path).await {
+                Ok(_) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                    return Err(DuetError::Io(
+                        "Full Disk Access required to browse Trash on macOS \
+                         (System Settings → Privacy & Security → Full Disk Access). \
+                         Recent deletes can be undone with Ctrl+Z."
+                            .into(),
+                    ));
+                }
+                // 아직 휴지통 폴더가 없으면(삭제 이력 없음) 빈 폴더로 생성해 탐색 가능하게.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    let _ = tokio::fs::create_dir_all(&path).await;
+                }
+                Err(_) => {} // 그 외는 navigate 가 처리
+            }
             Ok(Location { source, path })
         }
         SourceId::Ssh { connection_id, .. } => {
