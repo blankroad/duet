@@ -90,6 +90,12 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::user_aliases::user_aliases_list,
             commands::user_aliases::user_aliases_add,
             commands::user_aliases::user_aliases_remove,
+            commands::apps::apps_list,
+            commands::apps::apps_add,
+            commands::apps::apps_rename,
+            commands::apps::apps_remove,
+            commands::apps::apps_reorder,
+            commands::apps::app_launch,
         ])
         .events(collect_events![
             services::connection_events::ConnectionStateEvent,
@@ -168,6 +174,10 @@ pub fn run() {
         services::user_aliases::UserAliasesStore::load_default().await
     })
     .expect("user aliases load");
+    let app_launchers = tauri::async_runtime::block_on(async {
+        services::app_launchers::AppLaunchersStore::load_default().await
+    })
+    .expect("app launchers load");
     let keymap = tauri::async_runtime::block_on(async {
         services::keymap::KeymapStore::load_default().await
     })
@@ -192,6 +202,7 @@ pub fn run() {
         .manage(bookmarks)
         .manage(host_favorites)
         .manage(user_aliases)
+        .manage(app_launchers)
         .manage(keymap)
         .invoke_handler(specta_builder.invoke_handler())
         .setup(move |app| {

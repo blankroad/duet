@@ -5,6 +5,7 @@ import { usePanes, activeTab } from "@/stores/panes";
 import { usePalette } from "@/stores/palette";
 import { useSearch } from "@/stores/search";
 import { useUIDialogs } from "@/stores/ui-dialogs";
+import { AppLauncherStrip } from "@/components/AppLauncherStrip";
 
 /**
  * 글로벌 상단 툴바 — 모든 패널 공통 컨트롤(창 전역 상태/액션)만.
@@ -37,8 +38,9 @@ export function TopBar() {
         <Plus size={14} />
       </IconBtn>
 
-      {/* Feature 2 앱 런처 스트립이 들어갈 자리 */}
-      <div className="mx-2 min-w-0 flex-1" />
+      <div className="mx-2 flex min-w-0 flex-1 items-center overflow-hidden">
+        <AppLauncherStrip />
+      </div>
 
       <IconBtn label="Search (Ctrl+Shift+F)" onClick={openSearch}>
         <Search size={14} />

@@ -38,6 +38,7 @@ import { bootstrapBookmarks, addBookmark, removeBookmark, findBookmarkId } from 
 import { bookmarkLocation } from "@/lib/bookmarkActions";
 import { bootstrapHostFavorites, addHostFavorite } from "@/stores/hostFavorites";
 import { bootstrapUserAliases } from "@/stores/userAliases";
+import { bootstrapAppLaunchers } from "@/stores/appLaunchers";
 import { useDynamicCommands } from "@/lib/dynamicCommands";
 import { useConnections } from "@/stores/connections";
 import { useTauri } from "@/hooks/useTauri";
@@ -668,6 +669,7 @@ function App() {
       // 즐겨찾기 먼저 로드 → 북마크 마이그레이션이 중복을 정확히 걸러냄.
       void bootstrapHostFavorites().then(() => bootstrapBookmarks());
       void bootstrapUserAliases();
+      void bootstrapAppLaunchers();
     })();
     // navigate가 deps에 들어가면 무한 루프 — 마운트 1회만
     // eslint-disable-next-line react-hooks/exhaustive-deps
