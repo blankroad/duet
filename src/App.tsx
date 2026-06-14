@@ -21,6 +21,7 @@ import { ContextMenu } from "@/components/ContextMenu";
 import { useContextMenu } from "@/stores/contextMenu";
 import { buildEntryMenu, buildEmptyMenu, folderName } from "@/lib/entryMenu";
 import { childLocation } from "@/lib/entryDnd";
+import { isArchiveName } from "@/lib/archive";
 import { useCommands } from "@/stores/commands";
 import { usePalette } from "@/stores/palette";
 import { buildBuiltins } from "@/lib/commands";
@@ -111,13 +112,30 @@ function App() {
         void navigate(id, tab.location.path + sep + entry.name);
         return;
       }
-      // 파일 — OS 기본 앱으로 열기 (원격은 backend 가 temp 다운로드 후 열기).
+      // 아카이브 파일 — 임시 추출 후 그 폴더로 진입(탐색기처럼 내부 열람).
+      if (isArchiveName(entry.name)) {
+        void (async () => {
+          const r = await commands.fsArchiveOpenForBrowse({ location: tab.location, name: entry.name });
+          if (r.status === "error") {
+            showToast(`Cannot open ${entry.name} — ${formatErr(r.error)}`);
+            return;
+          }
+          await navigateTo(id, r.data);
+          usePanes.getState().setArchiveContext(id, {
+            label: entry.name,
+            root: r.data.path,
+            exitTo: tab.location,
+          });
+        })();
+        return;
+      }
+      // 일반 파일 — OS 기본 앱으로 열기 (원격은 backend 가 temp 다운로드 후 열기).
       void (async () => {
         const r = await commands.openPath(childLocation(tab.location, entry.name));
         if (r.status === "error") showToast(`Cannot open ${entry.name} — ${formatErr(r.error)}`);
       })();
     },
-    [navigate, showToast],
+    [navigate, navigateTo, showToast],
   );
 
   const onRefresh = useCallback(
@@ -202,14 +220,20 @@ function App() {
     [onRefresh],
   );
 
-  const onKeyboardUp = useCallback(
+  const onUp = useCallback(
     (id: PaneId) => {
-      const path = activeTab(usePanes.getState(), id).location.path;
+      const tab = activeTab(usePanes.getState(), id);
+      // 아카이브 임시 루트에서 "위로" = 아카이브 빠져나가 원래 폴더로.
+      if (tab.archive && tab.location.path === tab.archive.root) {
+        void navigateTo(id, tab.archive.exitTo);
+        return;
+      }
+      const path = tab.location.path;
       if (path === "/" || path.length === 0) return;
       const parent = path.replace(/\/[^/]+\/?$/, "") || "/";
-      navigate(id, parent);
+      void navigate(id, parent);
     },
-    [navigate],
+    [navigate, navigateTo],
   );
 
   const onPickHit = useCallback(
@@ -227,7 +251,7 @@ function App() {
     [navigate],
   );
 
-  useKeyboardNav(onKeyboardActivate, onKeyboardUp);
+  useKeyboardNav(onKeyboardActivate, onUp);
   useGlobalShortcuts();
   useSshHosts();
   useConnectionEvents();
@@ -591,8 +615,8 @@ function App() {
           onAddBookmark={onAddBookmark}
           onAddFavorite={onAddFavorite}
         />
-        <Pane id="left" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} onBack={onBack} onForward={onForward} onEntryContextMenu={onEntryContextMenu} onEmptyContextMenu={onEmptyContextMenu} />
-        <Pane id="right" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} onBack={onBack} onForward={onForward} onEntryContextMenu={onEntryContextMenu} onEmptyContextMenu={onEmptyContextMenu} />
+        <Pane id="left" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} onBack={onBack} onForward={onForward} onUp={onUp} onEntryContextMenu={onEntryContextMenu} onEmptyContextMenu={onEmptyContextMenu} />
+        <Pane id="right" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} onBack={onBack} onForward={onForward} onUp={onUp} onEntryContextMenu={onEntryContextMenu} onEmptyContextMenu={onEmptyContextMenu} />
         {previewOpen && <PreviewPane />}
       </main>
 

@@ -342,7 +342,18 @@ pub async fn fs_mkdir(
     Ok(emit_pushed(&app, entry))
 }
 
-// === Archive: Extract / Compress ===
+// === Archive: Browse / Extract / Compress ===
+
+/// 아카이브를 임시 위치로 풀고 그 디렉토리 Location 반환 — 패널이 탐색기처럼 내부 열람.
+/// 로컬은 temp, 원격은 호스트사이드 추출(PC 경유 0). 비파괴라 journal 없음.
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_archive_open_for_browse(
+    archive: EntryRef,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+) -> Result<Location, DuetError> {
+    archive::open_for_browse(archive, pool.inner()).await
+}
 
 #[tauri::command]
 #[specta::specta]

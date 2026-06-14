@@ -9,13 +9,15 @@
 
 use crate::core::copy_strategy::shell_escape_path;
 use crate::core::ops::{self, OpCtx};
-use crate::fs::FileSystem;
+use crate::fs::{FileSystem, SshFs};
+use crate::services::connection_pool::ConnectionPool;
 use crate::services::journal::{BackupRestore, JournalEntry, OpKind, UndoAction};
 use crate::ssh::remote_exec::exec;
 use crate::types::{ConnectionId, DuetError, EntryKind, EntryRef, Location, SourceId};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::path::Path;
+use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 /// 지원 아카이브 포맷.
@@ -151,7 +153,11 @@ pub async fn extract_execute(
     match &plan.source {
         SourceId::Local => extract_local(&archive_path, &plan.dest_dir, plan.format).await?,
         SourceId::Ssh { connection_id, .. } => {
-            extract_remote(ctx, connection_id, &archive_path, &plan.dest_dir, plan.format).await?
+            let pool = ctx
+                .pool
+                .as_ref()
+                .ok_or_else(|| DuetError::Io("OpCtx.pool required for remote extract".into()))?;
+            extract_remote(pool, connection_id, &archive_path, &plan.dest_dir, plan.format).await?
         }
     }
 
@@ -226,27 +232,15 @@ fn extract_local_blocking(archive: &Path, dest: &Path, fmt: ArchiveFormat) -> Re
     Ok(())
 }
 
-/// 원격 아카이브 해제 — 호스트의 unzip/tar 를 exec.
-async fn extract_remote(
-    ctx: &OpCtx,
-    connection_id: &ConnectionId,
+/// 호스트의 unzip/tar 해제 명령 문자열 (인자 shell-escape). Gz 는 미지원.
+fn remote_extract_command(
     archive: &Path,
     dest: &Path,
     fmt: ArchiveFormat,
-) -> Result<(), DuetError> {
-    let pool = ctx
-        .pool
-        .as_ref()
-        .ok_or_else(|| DuetError::Io("OpCtx.pool required for remote extract".into()))?;
-    let conn = pool.get(connection_id).await?;
-    let session_mutex = conn
-        .session
-        .as_ref()
-        .ok_or_else(|| DuetError::ConnectionFailed("no live session".into()))?;
-
+) -> Result<String, DuetError> {
     let a = shell_escape_path(archive)?;
     let d = shell_escape_path(dest)?;
-    let cmd = match fmt {
+    Ok(match fmt {
         ArchiveFormat::Zip => format!("unzip -o {a} -d {d}"),
         ArchiveFormat::Tar => format!("tar -xf {a} -C {d}"),
         ArchiveFormat::TarGz => format!("tar -xzf {a} -C {d}"),
@@ -255,18 +249,103 @@ async fn extract_remote(
                 "remote single-file .gz extract".into(),
             ))
         }
-    };
+    })
+}
 
+/// 한 호스트 셸 명령을 russh exec 로 실행 (시스템 ssh X). exit!=0 → Ssh 에러.
+async fn run_host_command(
+    pool: &Arc<ConnectionPool>,
+    connection_id: &ConnectionId,
+    cmd: &str,
+) -> Result<(), DuetError> {
+    let conn = pool.get(connection_id).await?;
+    let session_mutex = conn
+        .session
+        .as_ref()
+        .ok_or_else(|| DuetError::ConnectionFailed("no live session".into()))?;
     let handle = session_mutex.lock().await;
-    let out = exec(&handle, &cmd).await?;
+    let out = exec(&handle, cmd).await?;
     if out.exit_status != 0 {
         return Err(DuetError::Ssh(format!(
-            "extract failed (exit {}): {}",
+            "host command failed (exit {}): {}",
             out.exit_status,
             String::from_utf8_lossy(&out.stderr).trim()
         )));
     }
     Ok(())
+}
+
+/// 원격 아카이브 해제 — 호스트의 unzip/tar 를 exec (dest 는 caller 가 생성).
+async fn extract_remote(
+    pool: &Arc<ConnectionPool>,
+    connection_id: &ConnectionId,
+    archive: &Path,
+    dest: &Path,
+    fmt: ArchiveFormat,
+) -> Result<(), DuetError> {
+    let cmd = remote_extract_command(archive, dest, fmt)?;
+    run_host_command(pool, connection_id, &cmd).await
+}
+
+// === Browse (투명 임시추출 — 탐색기처럼 내부 열람) ===
+
+/// 아카이브를 임시 위치로 풀고, 그 디렉토리의 `Location` 을 반환.
+///
+/// 패널이 이 Location 으로 navigate 하면 *실제 폴더* 라서 탐색/미리보기/
+/// 복사·이동/DnD/북마크가 전부 그대로 동작 (Location 모델 변경 없음).
+///
+/// - 로컬: `<temp>/duet-archive/<token>/<stem>/` 로 crate 추출.
+/// - 원격(SSH): 호스트의 `~/.duet-tmp/browse-<token>/<stem>/` 로 host-side 추출
+///   (unzip/tar exec). **로컬 PC 를 1 바이트도 경유하지 않음** — 같은-호스트 원칙.
+///   반환 Location 은 같은 `Ssh{}` source 라 패널이 그대로 원격을 탐색.
+///
+/// browse-only(비파괴) 라 journal 기록 없음.
+pub async fn open_for_browse(
+    archive: EntryRef,
+    pool: &Arc<ConnectionPool>,
+) -> Result<Location, DuetError> {
+    let format = detect_format(&archive.name)
+        .ok_or_else(|| DuetError::Io(format!("unsupported archive: {}", archive.name)))?;
+    let archive_path = archive.location.path.join(&archive.name);
+    let stem = archive_stem(&archive.name);
+    let token = uuid::Uuid::new_v4().to_string();
+
+    match &archive.location.source {
+        SourceId::Local => {
+            let dest = std::env::temp_dir()
+                .join("duet-archive")
+                .join(&token)
+                .join(&stem);
+            tokio::fs::create_dir_all(&dest)
+                .await
+                .map_err(|e| DuetError::Io(format!("create temp dir: {e}")))?;
+            extract_local(&archive_path, &dest, format).await?;
+            Ok(Location {
+                source: SourceId::Local,
+                path: dest,
+            })
+        }
+        SourceId::Ssh { connection_id, .. } => {
+            // 호스트 home 아래 임시 디렉토리 — 절대경로로 만들어 shell-escape.
+            let conn = pool.get(connection_id).await?;
+            let home = SshFs::new(conn).home().await?;
+            let dest = home
+                .join(".duet-tmp")
+                .join(format!("browse-{token}"))
+                .join(&stem);
+            // mkdir -p + 추출을 한 호스트 명령으로 (PC 경유 0).
+            let cmd = format!(
+                "mkdir -p {} && {}",
+                shell_escape_path(&dest)?,
+                remote_extract_command(&archive_path, &dest, format)?,
+            );
+            run_host_command(pool, connection_id, &cmd).await?;
+            Ok(Location {
+                source: archive.location.source.clone(),
+                path: dest,
+            })
+        }
+    }
 }
 
 // === Compress ===
@@ -604,6 +683,40 @@ mod tests {
         extract_local_blocking(&archive, &dest, ArchiveFormat::TarGz).unwrap();
         assert_eq!(std::fs::read(dest.join("a.txt")).unwrap(), b"alpha");
         assert_eq!(std::fs::read(dest.join("d/b.txt")).unwrap(), b"beta");
+    }
+
+    /// open_for_browse(로컬) — zip 을 임시 위치로 풀고 그 디렉토리에 내용이 있는지.
+    #[tokio::test]
+    async fn open_for_browse_local_extracts_to_temp() {
+        let dir = tempfile::tempdir().unwrap();
+        let zip_path = dir.path().join("pkg.zip");
+        {
+            let f = std::fs::File::create(&zip_path).unwrap();
+            let mut w = zip::ZipWriter::new(f);
+            let opts: zip::write::FileOptions<()> = zip::write::FileOptions::default();
+            w.start_file("a.txt", opts).unwrap();
+            std::io::Write::write_all(&mut w, b"alpha").unwrap();
+            w.finish().unwrap();
+        }
+        let archive = EntryRef {
+            location: Location {
+                source: SourceId::Local,
+                path: dir.path().to_path_buf(),
+            },
+            name: "pkg.zip".into(),
+        };
+        let pool = crate::services::connection_pool::ConnectionPool::new();
+        let loc = open_for_browse(archive, &pool).await.unwrap();
+
+        assert_eq!(loc.source, SourceId::Local);
+        // 반환 경로 leaf 는 stem("pkg"), 내부에 a.txt 존재.
+        assert_eq!(loc.path.file_name().unwrap(), "pkg");
+        assert_eq!(std::fs::read(loc.path.join("a.txt")).unwrap(), b"alpha");
+
+        // 임시 잔여물 정리 (temp/duet-archive/<token>/).
+        if let Some(token_dir) = loc.path.parent() {
+            let _ = std::fs::remove_dir_all(token_dir);
+        }
     }
 
     /// zip 압축 → 해제 round-trip (디렉토리 재귀 add_to_zip 검증).

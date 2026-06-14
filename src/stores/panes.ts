@@ -14,6 +14,20 @@ export function gridColumns(widthPx: number): number {
   return Math.max(1, Math.floor(widthPx / GRID_CELL_WIDTH));
 }
 
+/**
+ * 아카이브 브라우즈 컨텍스트 (UI 전용 — Location 모델 아님).
+ * 압축 파일을 임시 추출해 그 폴더를 탐색 중일 때만 set. breadcrumb 표시 +
+ * "위로" 가 임시 루트에서 원래 폴더(exitTo)로 나가게 하는 데 사용.
+ */
+export interface ArchiveBrowse {
+  /** 아카이브 파일명 (예: `data.zip`) — breadcrumb 라벨. */
+  label: string;
+  /** 추출된 임시 디렉토리 경로 (이 prefix 밖으로 나가면 컨텍스트 해제). */
+  root: string;
+  /** 아카이브가 원래 있던 위치 — "위로" 로 빠져나갈 대상. */
+  exitTo: Location;
+}
+
 export interface TabState {
   id: string;
   location: Location;
@@ -30,6 +44,8 @@ export interface TabState {
   filter: string;
   filterFocused: boolean;
   history: { stack: Location[]; index: number };
+  /** 아카이브 내부 탐색 중이면 set, 아니면 undefined. */
+  archive?: ArchiveBrowse | undefined;
 }
 
 export interface PaneState {
@@ -61,6 +77,8 @@ interface PanesState {
   setGridCols: (id: PaneId, cols: number) => void;
   setFilter: (id: PaneId, filter: string) => void;
   setFilterFocused: (id: PaneId, focused: boolean) => void;
+  /** 아카이브 브라우즈 컨텍스트 설정/해제 (진입 시 set, null=해제). */
+  setArchiveContext: (id: PaneId, ctx: ArchiveBrowse | null) => void;
   // NEW
   back: (id: PaneId) => Location | null;
   forward: (id: PaneId) => Location | null;
@@ -168,6 +186,9 @@ export const usePanes = create<PanesState>((set, get) => ({
         const trimmed = stack.length > 100 ? stack.slice(stack.length - 100) : stack;
         history = { stack: trimmed, index: trimmed.length - 1 };
       }
+      // 아카이브 임시 루트 밖으로 이동하면 컨텍스트 해제 (내부 하위폴더면 유지).
+      const archive =
+        cur.archive && location.path.startsWith(cur.archive.root) ? cur.archive : undefined;
       const nextTab: TabState = {
         ...cur,
         location,
@@ -178,6 +199,7 @@ export const usePanes = create<PanesState>((set, get) => ({
         filter: navigated ? "" : cur.filter,
         filterFocused: navigated ? false : cur.filterFocused,
         history,
+        archive,
       };
       return { panes: { ...s.panes, [id]: withActiveTab(p, () => nextTab) } };
     }),
@@ -279,6 +301,13 @@ export const usePanes = create<PanesState>((set, get) => ({
   setFilterFocused: (id, focused) =>
     set((s) => ({
       panes: { ...s.panes, [id]: withActiveTab(s.panes[id], (t) => ({ ...t, filterFocused: focused })) },
+    })),
+  setArchiveContext: (id, ctx) =>
+    set((s) => ({
+      panes: {
+        ...s.panes,
+        [id]: withActiveTab(s.panes[id], (t) => ({ ...t, archive: ctx ?? undefined })),
+      },
     })),
   back: (id) => {
     const p = get().panes[id];

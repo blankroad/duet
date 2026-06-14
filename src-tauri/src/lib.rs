@@ -76,6 +76,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::fs_ops::fs_mkdir,
             commands::fs_ops::fs_read_preview,
             commands::fs_ops::fs_copy_plan_external,
+            commands::fs_ops::fs_archive_open_for_browse,
             commands::fs_ops::fs_extract_plan,
             commands::fs_ops::fs_extract_execute,
             commands::fs_ops::fs_compress_plan,

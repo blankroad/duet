@@ -16,6 +16,8 @@ interface PaneProps {
   onRefresh: (id: PaneId) => void;
   onBack: (id: PaneId) => void;
   onForward: (id: PaneId) => void;
+  /** "위로" — 부모 디렉토리(또는 아카이브 루트에서 빠져나가기)는 App 이 결정. */
+  onUp: (id: PaneId) => void;
   onEntryContextMenu: (id: PaneId, entry: Entry, index: number, e: React.MouseEvent) => void;
   onEmptyContextMenu: (id: PaneId, e: React.MouseEvent) => void;
 }
@@ -25,7 +27,7 @@ interface PaneProps {
  * dumb component — IPC 호출은 App.tsx 가 일괄 처리.
  * displayed entries 는 store selector (raw → filter → hidden → sort) 결과.
  */
-export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward, onEntryContextMenu, onEmptyContextMenu }: PaneProps) {
+export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward, onUp, onEntryContextMenu, onEmptyContextMenu }: PaneProps) {
   const isActive = usePanes((s) => s.activePane === id);
   const setActivePane = usePanes((s) => s.setActivePane);
   const setCursor = usePanes((s) => s.setCursor);
@@ -37,12 +39,7 @@ export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward,
   // tab(안정 ref) 변경 시에만 재정렬. (activeTab 은 기존 tab ref 반환.)
   const displayed = useMemo(() => computeDisplayed(tab), [tab]);
 
-  const goUp = () => {
-    const path = tab.location.path;
-    if (path === "/" || path.length === 0) return;
-    const parent = path.replace(/\/[^/]+\/?$/, "") || "/";
-    onNavigate(id, parent);
-  };
+  const goUp = () => onUp(id);
 
   return (
     <div
@@ -55,6 +52,7 @@ export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward,
       <TabBar id={id} />
       <PathBar
         location={tab.location}
+        archive={tab.archive}
         canBack={tab.history.index > 0}
         canForward={tab.history.index < tab.history.stack.length - 1}
         onBack={() => onBack(id)}
