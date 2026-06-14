@@ -50,6 +50,16 @@ export function triggerRename(open: OpenFn, showToast: ToastFn): void {
   open({ kind: "rename", target: targets[0]! });
 }
 
+/** 여러 항목 일괄 이름변경 — 규칙/미리보기 다이얼로그 오픈 (1개 이상). */
+export function triggerBatchRename(open: OpenFn, showToast: ToastFn): void {
+  const { targets } = resolveActiveTargets();
+  if (targets.length === 0) {
+    showToast("Batch rename: select at least one item");
+    return;
+  }
+  open({ kind: "batch-rename", targets });
+}
+
 /** F7 — 활성 패널 현재 디렉토리에 새 폴더. */
 export function triggerMkdir(open: OpenFn): void {
   const { tab } = resolveActiveTargets();

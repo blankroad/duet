@@ -10,6 +10,7 @@ import {
   triggerMove,
   triggerMkdir,
   triggerRename,
+  triggerBatchRename,
 } from "@/lib/fileActions";
 
 /**
@@ -31,10 +32,15 @@ export function useDestructiveKeys() {
 
       const { targets } = resolveActiveTargets();
 
-      // F2 — 단일 선택만 rename
+      // F2 — 단일은 rename, 다중은 일괄 이름변경
       if (e.key === "F2" && targets.length === 1) {
         e.preventDefault();
         triggerRename(open, showToast);
+        return;
+      }
+      if (e.key === "F2" && targets.length > 1) {
+        e.preventDefault();
+        triggerBatchRename(open, showToast);
         return;
       }
 

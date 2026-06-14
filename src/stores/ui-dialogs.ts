@@ -4,6 +4,7 @@ import type { CopyPlan, DeletePlan, MovePlan, EntryRef, Location, Volume } from 
 export type DialogState =
   | { kind: "none" }
   | { kind: "rename"; target: EntryRef }
+  | { kind: "batch-rename"; targets: EntryRef[] }
   | { kind: "mkdir"; parent: Location }
   | { kind: "delete-confirm"; plan: DeletePlan }
   | { kind: "delete-danger"; plan: DeletePlan }

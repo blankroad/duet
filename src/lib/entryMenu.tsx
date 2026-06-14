@@ -31,7 +31,7 @@ import { useConnections } from "@/stores/connections";
 import { bookmarkLocation } from "@/lib/bookmarkActions";
 import { addHostFavorite } from "@/stores/hostFavorites";
 import { childLocation } from "@/lib/entryDnd";
-import { triggerCopy, triggerMove, triggerRename, triggerMkdir, triggerDelete, triggerExtract, triggerCompress } from "@/lib/fileActions";
+import { triggerCopy, triggerMove, triggerRename, triggerBatchRename, triggerMkdir, triggerDelete, triggerExtract, triggerCompress } from "@/lib/fileActions";
 import type { MenuEntry } from "@/stores/contextMenu";
 
 /**
@@ -128,6 +128,9 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
     { id: "compress", label: "Compress…", icon: <Package size={ICON} />, onSelect: () => triggerCompress(open, showToast) },
     sep(),
     { id: "rename", label: "Rename", icon: <Pencil size={ICON} />, shortcut: "F2", disabled: multi, onSelect: () => triggerRename(open, showToast) },
+    ...(multi
+      ? [{ id: "batch-rename", label: "Batch rename…", icon: <Pencil size={ICON} />, onSelect: () => triggerBatchRename(open, showToast) } as MenuEntry]
+      : []),
     { id: "mkdir", label: "New folder", icon: <FolderPlus size={ICON} />, shortcut: "F7", onSelect: () => triggerMkdir(open) },
     { id: "bookmark", label: "Add to bookmarks", icon: <Star size={ICON} />, onSelect: () => void bookmarkLocation(child, entry.name) },
   );

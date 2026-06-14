@@ -69,6 +69,10 @@ pub enum OpKind {
         to: PathBuf,
         source: SourceId,
     },
+    BatchRename {
+        count: u32,
+        location: Location,
+    },
     Mkdir {
         path: PathBuf,
         source: SourceId,
@@ -106,6 +110,11 @@ pub enum UndoAction {
         current: PathBuf,
         original: PathBuf,
     },
+    UndoBatchRename {
+        source: SourceId,
+        /// 모든 항목을 한 번에 되돌리기 위한 (현재 → 원본) 쌍 목록.
+        pairs: Vec<RenamePair>,
+    },
     UndoMkdir {
         source: SourceId,
         path: PathBuf,
@@ -130,6 +139,13 @@ pub struct BackupRestore {
 pub struct MoveItem {
     pub src_original: PathBuf,
     pub dst_now: PathBuf,
+}
+
+/// batch rename 의 항목별 (현재 경로 → 원래 경로) — undo 시 단일 그룹으로 복원.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct RenamePair {
+    pub current: PathBuf,
+    pub original: PathBuf,
 }
 
 /// jsonl 한 줄. push 새 entry 또는 기존 entry undone 토글.

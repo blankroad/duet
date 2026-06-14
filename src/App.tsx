@@ -6,6 +6,7 @@ import { TasksBar } from "@/components/TasksBar";
 import { ConnectionDialog } from "@/components/connection/ConnectionDialog";
 import { AdHocConnectDialog } from "@/components/connection/AdHocConnectDialog";
 import { RenameDialog } from "@/components/dialogs/RenameDialog";
+import { BatchRenameDialog } from "@/components/dialogs/BatchRenameDialog";
 import { MkdirDialog } from "@/components/dialogs/MkdirDialog";
 import { CompressDialog } from "@/components/dialogs/CompressDialog";
 import { ArgsDialog } from "@/components/dialogs/ArgsDialog";
@@ -437,6 +438,18 @@ function App() {
     [dialog, closeDialog, refreshAffected, showToast],
   );
 
+  const onBatchRenameSubmit = useCallback(
+    async (rule: import("@/types/bindings").RenameRule) => {
+      if (dialog.kind !== "batch-rename") return;
+      const targets = dialog.targets;
+      closeDialog();
+      const r = await commands.fsBatchRename(targets, rule);
+      if (r.status === "ok") refreshAffected([targets[0]!.location]);
+      else showToast(`Batch rename failed: ${formatErr(r.error)}`);
+    },
+    [dialog, closeDialog, refreshAffected, showToast],
+  );
+
   const onMkdirSubmit = useCallback(
     async (name: string) => {
       if (dialog.kind !== "mkdir") return;
@@ -744,6 +757,13 @@ function App() {
           target={dialog.target}
           onClose={closeDialog}
           onSubmit={onRenameSubmit}
+        />
+      )}
+      {dialog.kind === "batch-rename" && (
+        <BatchRenameDialog
+          targets={dialog.targets}
+          onClose={closeDialog}
+          onSubmit={onBatchRenameSubmit}
         />
       )}
       {dialog.kind === "mkdir" && (

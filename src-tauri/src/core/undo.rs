@@ -194,6 +194,31 @@ pub async fn execute_undo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
                     .collect(),
             }
         }
+        UndoAction::UndoBatchRename { source, pairs } => {
+            let fs = match fs_for(source, pool).await {
+                Ok(f) => f,
+                Err(e) => return error("source unreachable", e),
+            };
+            // 역순으로 current → original 복원. forward 에서 new==old 겹침을 차단했으므로
+            // 순서 무관하게 충돌 없이 복원 가능.
+            let mut refresh = std::collections::HashSet::<PathBuf>::new();
+            for p in pairs.iter().rev() {
+                if fs.metadata(&p.current).await.is_err() {
+                    return UndoOutcome {
+                        kind: UndoKind::Skipped,
+                        message: Some("Item no longer at renamed location — undo skipped".into()),
+                        refreshed_locations: vec![],
+                    };
+                }
+                if let Err(e) = fs.rename(&p.current, &p.original).await {
+                    return error("rename back", e);
+                }
+                if let Some(par) = p.original.parent() {
+                    refresh.insert(par.to_path_buf());
+                }
+            }
+            ok_with_locs(source, refresh)
+        }
         UndoAction::UndoMkdir { source, path } => {
             let fs = match fs_for(source, pool).await {
                 Ok(f) => f,

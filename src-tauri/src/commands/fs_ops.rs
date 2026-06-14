@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use crate::core::archive::{self, CompressFormat, CompressPlan, ExtractPlan};
 use crate::core::copy_strategy::{decide as decide_strategy, CopyStrategy};
-use crate::core::ops::{self, CopyPlan, DeletePlan, MovePlan, OpCtx};
+use crate::core::ops::{self, BatchRenamePlan, CopyPlan, DeletePlan, MovePlan, OpCtx, RenameRule};
 use crate::fs::{FileSystem, LocalFs, SshFs};
 use crate::services::connection_pool::ConnectionPool;
 use crate::services::journal::{Journal, JournalEntry, JournalId};
@@ -305,6 +305,54 @@ pub async fn fs_rename(
         &*fs,
         target,
         new_name,
+        &ctx(
+            settings.inner().clone(),
+            journal.inner().clone(),
+            pool.inner().clone(),
+            app.clone(),
+        ),
+    )
+    .await?;
+    Ok(emit_pushed(&app, entry))
+}
+
+/// 일괄 이름변경 미리보기 — 변환 결과 + 충돌 플래그. 쓰기 없음.
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_batch_rename_preview(
+    items: Vec<EntryRef>,
+    rule: RenameRule,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+) -> Result<BatchRenamePlan, DuetError> {
+    let source = items
+        .first()
+        .map(|it| it.location.source.clone())
+        .ok_or_else(|| DuetError::Io("no targets".into()))?;
+    let fs = fs_for(&source, pool.inner()).await?;
+    ops::batch_rename_preview(&*fs, items, rule).await
+}
+
+/// 일괄 이름변경 실행 — 단일 journal 엔트리(한 번의 Ctrl+Z 로 전체 복원).
+/// 충돌이 있으면 아무것도 바꾸지 않고 에러. TOCTOU 회피 위해 rule 로 재계산.
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_batch_rename(
+    items: Vec<EntryRef>,
+    rule: RenameRule,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+    settings: tauri::State<'_, Arc<SettingsStore>>,
+    journal: tauri::State<'_, Arc<Journal>>,
+    app: tauri::AppHandle,
+) -> Result<JournalId, DuetError> {
+    let source = items
+        .first()
+        .map(|it| it.location.source.clone())
+        .ok_or_else(|| DuetError::Io("no targets".into()))?;
+    let fs = fs_for(&source, pool.inner()).await?;
+    let entry = ops::batch_rename_execute(
+        &*fs,
+        items,
+        rule,
         &ctx(
             settings.inner().clone(),
             journal.inner().clone(),

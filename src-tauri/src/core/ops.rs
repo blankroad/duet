@@ -6,7 +6,7 @@
 use crate::core::copy_strategy::{decide as decide_strategy, CopyStrategy};
 use crate::fs::FileSystem;
 use crate::services::journal::{
-    BackupRestore, Journal, JournalEntry, MoveItem, OpKind, TrashItem, UndoAction,
+    BackupRestore, Journal, JournalEntry, MoveItem, OpKind, RenamePair, TrashItem, UndoAction,
 };
 use crate::services::settings::SettingsStore;
 use crate::types::{DeleteMode, DuetError, EntryRef, Location, SourceId, TrashLocation};
@@ -427,6 +427,291 @@ pub async fn rename(
         .await
 }
 
+// === Batch rename ===
+
+/// 이름 변환 규칙 — find/replace + case + 순번 + prefix/suffix (정규식 X, §6).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+pub struct RenameRule {
+    /// stem 전체를 이 값으로 교체. None/빈 문자열이면 원본 stem 유지.
+    pub base: Option<String>,
+    /// 리터럴 find (빈 문자열이면 skip). 정규식 아님.
+    pub find: String,
+    pub replace: String,
+    /// true 면 모든 일치, false 면 첫 일치만 치환.
+    pub replace_all: bool,
+    pub prefix: String,
+    pub suffix: String,
+    pub seq: Option<SeqRule>,
+    pub case: Option<CaseOp>,
+    /// true 면 확장자 포함 전체에 적용. false(기본)면 stem 만 변환하고 확장자 보존.
+    pub target_ext: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct SeqRule {
+    pub start: u32,
+    pub step: u32,
+    /// 0-padding 자릿수 (예: 3 → 001).
+    pub padding: u8,
+    pub position: SeqPos,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum SeqPos {
+    Prefix,
+    Suffix,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum CaseOp {
+    Upper,
+    Lower,
+    Title,
+}
+
+/// preview/실행 공통 — 변환 후 항목.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct BatchRenameItem {
+    pub old_name: String,
+    pub new_name: String,
+    /// 빈/슬래시 포함, 배치 내 중복, 선택 외 기존 파일과 충돌 시 true.
+    pub collision: bool,
+}
+
+/// batch rename 미리보기 결과 — UI 다이얼로그가 표시.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct BatchRenamePlan {
+    pub source: SourceId,
+    pub location: Location,
+    pub items: Vec<BatchRenameItem>,
+    pub has_collision: bool,
+}
+
+/// 파일명의 (stem, ext) 분리. `target_ext` 면 전체를 stem 취급(ext 빈 문자열).
+/// 마지막 '.' 기준이되 선행 dot 파일(`.bashrc`)은 확장자 없음으로 본다.
+fn split_stem_ext(name: &str, target_ext: bool) -> (&str, &str) {
+    if target_ext {
+        return (name, "");
+    }
+    match name.rfind('.') {
+        Some(i) if i > 0 => (&name[..i], &name[i..]),
+        _ => (name, ""),
+    }
+}
+
+fn replace_first(haystack: &str, find: &str, replace: &str) -> String {
+    match haystack.find(find) {
+        Some(i) => format!(
+            "{}{}{}",
+            &haystack[..i],
+            replace,
+            &haystack[i + find.len()..]
+        ),
+        None => haystack.to_string(),
+    }
+}
+
+fn title_case(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut at_word_start = true;
+    for ch in s.chars() {
+        if ch.is_alphanumeric() {
+            if at_word_start {
+                out.extend(ch.to_uppercase());
+            } else {
+                out.extend(ch.to_lowercase());
+            }
+            at_word_start = false;
+        } else {
+            out.push(ch);
+            at_word_start = true;
+        }
+    }
+    out
+}
+
+/// 규칙을 한 이름에 적용 (순수 함수 — fs 접근 없음). `index` 는 선택 내 위치(0-based).
+///
+/// 적용 순서: base 교체 → find/replace → case → seq → 리터럴 prefix/suffix → 확장자 복원.
+pub fn apply_rename_rule(name: &str, rule: &RenameRule, index: usize) -> String {
+    let (stem, ext) = split_stem_ext(name, rule.target_ext);
+    let mut work = match &rule.base {
+        Some(b) if !b.is_empty() => b.clone(),
+        _ => stem.to_string(),
+    };
+    if !rule.find.is_empty() {
+        work = if rule.replace_all {
+            work.replace(&rule.find, &rule.replace)
+        } else {
+            replace_first(&work, &rule.find, &rule.replace)
+        };
+    }
+    if let Some(c) = rule.case {
+        work = match c {
+            CaseOp::Upper => work.to_uppercase(),
+            CaseOp::Lower => work.to_lowercase(),
+            CaseOp::Title => title_case(&work),
+        };
+    }
+    if let Some(seq) = &rule.seq {
+        let n = seq.start as u64 + index as u64 * seq.step as u64;
+        let num = format!("{:0width$}", n, width = seq.padding as usize);
+        match seq.position {
+            SeqPos::Prefix => work = format!("{num}{work}"),
+            SeqPos::Suffix => work = format!("{work}{num}"),
+        }
+    }
+    let mut result = format!("{}{}{}", rule.prefix, work, rule.suffix);
+    result.push_str(ext);
+    result
+}
+
+/// 선택된 이름들에 대한 (old, new, collision) 매핑을 계산.
+///
+/// collision 판정: 빈/슬래시 포함 → 무효; 배치 내 new 중복; new 가 (자기 자신이
+/// 아닌) 선택 항목의 *기존* 이름과 겹침(단일패스 안전 위해 차단); 선택 밖 기존
+/// 파일과 충돌. `new == old` 는 no-op 로 충돌 아님.
+async fn compute_batch_mapping(
+    fs: &dyn FileSystem,
+    location: &Location,
+    names: &[String],
+    rule: &RenameRule,
+) -> Vec<(String, String, bool)> {
+    let old_set: std::collections::HashSet<&str> = names.iter().map(|s| s.as_str()).collect();
+    let new_names: Vec<String> = names
+        .iter()
+        .enumerate()
+        .map(|(i, n)| apply_rename_rule(n, rule, i))
+        .collect();
+    let mut counts: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
+    for nn in &new_names {
+        *counts.entry(nn.as_str()).or_default() += 1;
+    }
+    let mut out = Vec::with_capacity(names.len());
+    for (i, old) in names.iter().enumerate() {
+        let new = &new_names[i];
+        let dup_in_batch = counts.get(new.as_str()).copied().unwrap_or(0) > 1;
+        // 다른 선택 항목의 *기존* 이름과 겹치면 단일패스 안전을 위해 차단.
+        let overlaps_selected_old = old_set.contains(new.as_str());
+        let collision = if new.is_empty() || new.contains('/') {
+            true
+        } else if new == old {
+            false // no-op
+        } else if dup_in_batch || overlaps_selected_old {
+            true
+        } else {
+            fs.metadata(&location.path.join(new)).await.is_ok() // 선택 밖 기존 파일
+        };
+        out.push((old.clone(), new.clone(), collision));
+    }
+    out
+}
+
+/// 같은 디렉토리의 항목들인지 검증하고 location 을 돌려준다.
+fn validate_same_dir(items: &[EntryRef]) -> Result<Location, DuetError> {
+    let location = items
+        .first()
+        .map(|it| it.location.clone())
+        .ok_or_else(|| DuetError::Io("batch rename: no targets".into()))?;
+    if items
+        .iter()
+        .any(|it| it.location.source != location.source || it.location.path != location.path)
+    {
+        return Err(DuetError::Io(
+            "batch rename: all items must be in the same directory".into(),
+        ));
+    }
+    Ok(location)
+}
+
+/// 비파괴 미리보기 — 변환 결과 + 충돌 플래그. fs 쓰기/journal 없음.
+pub async fn batch_rename_preview(
+    fs: &dyn FileSystem,
+    items: Vec<EntryRef>,
+    rule: RenameRule,
+) -> Result<BatchRenamePlan, DuetError> {
+    let location = validate_same_dir(&items)?;
+    let names: Vec<String> = items.iter().map(|it| it.name.clone()).collect();
+    let mapping = compute_batch_mapping(fs, &location, &names, &rule).await;
+    let has_collision = mapping.iter().any(|(_, _, c)| *c);
+    let items = mapping
+        .into_iter()
+        .map(|(old_name, new_name, collision)| BatchRenameItem {
+            old_name,
+            new_name,
+            collision,
+        })
+        .collect();
+    Ok(BatchRenamePlan {
+        source: location.source.clone(),
+        location,
+        items,
+        has_collision,
+    })
+}
+
+/// 일괄 이름 변경 실행 — 모든 항목을 하나의 journal 엔트리로 push(단일 Ctrl+Z 복원).
+/// 충돌이 하나라도 있으면 아무것도 바꾸지 않고 에러. 중간 실패 시 이미 변경된 것 롤백.
+pub async fn batch_rename_execute(
+    fs: &dyn FileSystem,
+    items: Vec<EntryRef>,
+    rule: RenameRule,
+    ctx: &OpCtx,
+) -> Result<JournalEntry, DuetError> {
+    let location = validate_same_dir(&items)?;
+    let names: Vec<String> = items.iter().map(|it| it.name.clone()).collect();
+    let mapping = compute_batch_mapping(fs, &location, &names, &rule).await;
+    if mapping.iter().any(|(_, _, c)| *c) {
+        return Err(DuetError::Io(
+            "batch rename: name collision — resolve before applying".into(),
+        ));
+    }
+    // no-op(이름 동일) 제외하고 실제 변경 대상만 추림.
+    let mut froms = Vec::new();
+    let mut tos = Vec::new();
+    for (old, new, _) in &mapping {
+        if old != new {
+            froms.push(location.path.join(old));
+            tos.push(location.path.join(new));
+        }
+    }
+    if froms.is_empty() {
+        return Err(DuetError::Io("batch rename: nothing to rename".into()));
+    }
+    // 단일패스 rename (new==old 겹침을 위에서 차단했으므로 순서 무관하게 안전).
+    // 중간 실패 시 성공분을 역순 롤백.
+    for i in 0..froms.len() {
+        if let Err(e) = fs.rename(&froms[i], &tos[i]).await {
+            for j in (0..i).rev() {
+                let _ = fs.rename(&tos[j], &froms[j]).await;
+            }
+            return Err(e);
+        }
+    }
+    let pairs: Vec<RenamePair> = froms
+        .iter()
+        .zip(tos.iter())
+        .map(|(f, t)| RenamePair {
+            current: t.clone(),
+            original: f.clone(),
+        })
+        .collect();
+    ctx.journal
+        .push(
+            OpKind::BatchRename {
+                count: pairs.len() as u32,
+                location: location.clone(),
+            },
+            UndoAction::UndoBatchRename {
+                source: location.source,
+                pairs,
+            },
+        )
+        .await
+}
+
 pub async fn mkdir(
     fs: &dyn FileSystem,
     parent: Location,
@@ -835,5 +1120,134 @@ mod tests {
         .await
         .unwrap();
         assert!(dir.path().join("newdir").is_dir());
+    }
+
+    // === batch rename ===
+
+    #[test]
+    fn apply_rule_prefix_suffix_preserves_ext() {
+        let rule = RenameRule {
+            prefix: "x_".into(),
+            suffix: "_v2".into(),
+            ..Default::default()
+        };
+        assert_eq!(apply_rename_rule("photo.jpg", &rule, 0), "x_photo_v2.jpg");
+        // 확장자 없는 이름.
+        assert_eq!(apply_rename_rule("README", &rule, 0), "x_README_v2");
+        // 선행 dot 파일은 확장자 없음 취급.
+        assert_eq!(apply_rename_rule(".bashrc", &rule, 0), "x_.bashrc_v2");
+    }
+
+    #[test]
+    fn apply_rule_find_replace_and_case() {
+        let rule = RenameRule {
+            find: " ".into(),
+            replace: "_".into(),
+            replace_all: true,
+            case: Some(CaseOp::Lower),
+            ..Default::default()
+        };
+        assert_eq!(
+            apply_rename_rule("My Holiday Pic.PNG", &rule, 0),
+            "my_holiday_pic.PNG"
+        );
+        let title = RenameRule {
+            case: Some(CaseOp::Title),
+            ..Default::default()
+        };
+        assert_eq!(
+            apply_rename_rule("hello_world.txt", &title, 0),
+            "Hello_World.txt"
+        );
+    }
+
+    #[test]
+    fn apply_rule_sequence_with_base() {
+        let rule = RenameRule {
+            base: Some("img".into()),
+            seq: Some(SeqRule {
+                start: 1,
+                step: 1,
+                padding: 3,
+                position: SeqPos::Suffix,
+            }),
+            ..Default::default()
+        };
+        assert_eq!(apply_rename_rule("a.png", &rule, 0), "img001.png");
+        assert_eq!(apply_rename_rule("b.png", &rule, 1), "img002.png");
+    }
+
+    #[tokio::test]
+    async fn batch_rename_preview_flags_collisions() {
+        let dir = TempDir::new().unwrap();
+        tokio::fs::write(dir.path().join("a.txt"), b"")
+            .await
+            .unwrap();
+        tokio::fs::write(dir.path().join("b.txt"), b"")
+            .await
+            .unwrap();
+        tokio::fs::write(dir.path().join("existing.txt"), b"")
+            .await
+            .unwrap();
+        let local = LocalFs::new();
+        let parent = dir.path().to_path_buf();
+        // 두 항목 모두 "existing" 으로 → 배치 내 중복 + 기존 파일 충돌.
+        let rule = RenameRule {
+            base: Some("existing".into()),
+            ..Default::default()
+        };
+        let plan = batch_rename_preview(
+            &local,
+            vec![mk_target(&parent, "a.txt"), mk_target(&parent, "b.txt")],
+            rule,
+        )
+        .await
+        .unwrap();
+        assert!(plan.has_collision);
+        assert!(plan.items.iter().all(|it| it.collision));
+    }
+
+    #[tokio::test]
+    async fn batch_rename_execute_then_single_undo_restores_all() {
+        let dir = TempDir::new().unwrap();
+        for n in ["a.txt", "b.txt", "c.txt"] {
+            tokio::fs::write(dir.path().join(n), b"x").await.unwrap();
+        }
+        let local = LocalFs::new();
+        let parent = dir.path().to_path_buf();
+        let (ctx, _cd) = mk_ctx().await;
+        let rule = RenameRule {
+            prefix: "p_".into(),
+            ..Default::default()
+        };
+        let entry = batch_rename_execute(
+            &local,
+            vec![
+                mk_target(&parent, "a.txt"),
+                mk_target(&parent, "b.txt"),
+                mk_target(&parent, "c.txt"),
+            ],
+            rule,
+            &ctx,
+        )
+        .await
+        .unwrap();
+        for n in ["p_a.txt", "p_b.txt", "p_c.txt"] {
+            assert!(dir.path().join(n).exists(), "{n} should exist");
+        }
+        assert!(!dir.path().join("a.txt").exists());
+        // 단일 엔트리 — pairs 3개.
+        match &entry.undo {
+            UndoAction::UndoBatchRename { pairs, .. } => assert_eq!(pairs.len(), 3),
+            other => panic!("expected UndoBatchRename, got {other:?}"),
+        }
+        // undo 로 전체 복원.
+        let pool = Arc::new(crate::services::connection_pool::ConnectionPool::new());
+        let outcome = crate::core::undo::execute_undo(&entry, &pool).await;
+        assert!(matches!(outcome.kind, crate::core::undo::UndoKind::Ok));
+        for n in ["a.txt", "b.txt", "c.txt"] {
+            assert!(dir.path().join(n).exists(), "{n} restored");
+        }
+        assert!(!dir.path().join("p_a.txt").exists());
     }
 }
