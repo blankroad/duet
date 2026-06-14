@@ -9,6 +9,7 @@ import {
   Heart,
   ChevronDown,
   ChevronRight,
+  Trash2,
 } from "lucide-react";
 import { useUI } from "@/stores/ui";
 import { useConnections, type Host, type ConnectionState } from "@/stores/connections";
@@ -46,6 +47,7 @@ export function Sidebar({
   onFavoriteActivate,
   onAddBookmark,
   onAddFavorite,
+  onTrashActivate,
 }: {
   onHostActivate: (alias: string) => void;
   onAdHocOpen: () => void;
@@ -54,6 +56,8 @@ export function Sidebar({
   onFavoriteActivate: (favorite: HostFavorite) => void;
   onAddBookmark: () => void;
   onAddFavorite: () => void;
+  /** 활성 패널을 그 소스의 휴지통으로 이동 (삭제 항목 보기/복구). */
+  onTrashActivate: () => void;
 }) {
   const open = useUI((s) => s.sidebarOpen);
   if (!open) return null;
@@ -62,6 +66,15 @@ export function Sidebar({
     <aside className="flex w-48 min-h-0 flex-col overflow-y-auto border-r border-border bg-subtle text-base">
       <Section sectionKey="local" title="Local" icon={<Folder size={14} />}>
         <Item label="Home" />
+        <button
+          type="button"
+          onClick={onTrashActivate}
+          className={clsx(rowClass, "w-full text-left")}
+          title="Browse trash (deleted items)"
+        >
+          <Trash2 size={11} className="shrink-0 text-fg-muted" />
+          <span className="truncate">Trash</span>
+        </button>
       </Section>
       <HostsSection onHostActivate={onHostActivate} onAdHocOpen={onAdHocOpen} />
       <SavedHostsSection onActivate={onSavedActivate} />

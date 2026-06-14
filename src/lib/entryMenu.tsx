@@ -18,6 +18,7 @@ import {
   FolderSearch,
   FileArchive,
   Package,
+  Undo2,
 } from "lucide-react";
 import { commands } from "@/types/bindings";
 import type { Entry, Location } from "@/types/bindings";
@@ -46,8 +47,12 @@ export interface EntryMenuDeps {
   location: Location;
   /** 선택된 항목 수 (1 = 단일, >1 = 다중). */
   selectedCount: number;
+  /** 휴지통 탐색 중이면 true — "Put back" 항목 노출. */
+  inTrash?: boolean;
   onActivate: (id: PaneId, entry: Entry) => void;
   onOpenInOtherPane: (id: PaneId, entry: Entry) => void;
+  /** 휴지통 항목 원위치 복원. */
+  onPutBack?: () => void;
 }
 
 const ICON = 13;
@@ -77,7 +82,7 @@ async function revealEntry(target: Location): Promise<void> {
 }
 
 export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
-  const { paneId, entry, location, selectedCount, onActivate, onOpenInOtherPane } = deps;
+  const { paneId, entry, location, selectedCount, inTrash, onActivate, onOpenInOtherPane, onPutBack } = deps;
   const open = useUIDialogs.getState().open;
   const showToast = useToast.getState().show;
   const isDir = entry.kind === "dir";
@@ -86,6 +91,14 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
   const alias = sshAlias(location);
 
   const items: MenuEntry[] = [];
+
+  // 휴지통 탐색 중 — 원위치 복원 우선 노출.
+  if (inTrash && onPutBack) {
+    items.push(
+      { id: "put-back", label: "Put back", icon: <Undo2 size={ICON} />, onSelect: onPutBack },
+      sep(),
+    );
+  }
 
   if (!multi) {
     if (isDir) {

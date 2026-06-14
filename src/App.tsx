@@ -22,6 +22,7 @@ import { useContextMenu } from "@/stores/contextMenu";
 import { buildEntryMenu, buildEmptyMenu, folderName } from "@/lib/entryMenu";
 import { childLocation } from "@/lib/entryDnd";
 import { isArchiveName } from "@/lib/archive";
+import { resolveActiveTargets } from "@/lib/fileActions";
 import { useCommands } from "@/stores/commands";
 import { usePalette } from "@/stores/palette";
 import { buildBuiltins } from "@/lib/commands";
@@ -103,6 +104,41 @@ function App() {
     },
     [listDirectory, showToast],
   );
+
+  /** 활성 패널을 그 소스의 휴지통으로 이동 — 삭제 항목 보기/복구(복사·이동으로). */
+  const onTrashActivate = useCallback(() => {
+    const id = usePanes.getState().activePane;
+    const src = activeTab(usePanes.getState(), id).location.source;
+    void (async () => {
+      const r = await commands.trashLocation(src);
+      if (r.status === "error") {
+        showToast(`Trash unavailable — ${formatErr(r.error)}`);
+        return;
+      }
+      await navigateTo(id, r.data);
+      usePanes.getState().setTrashRoot(id, r.data.path);
+    })();
+  }, [navigateTo, showToast]);
+
+  /** 휴지통 항목 "Put back" — 원본 위치로 복원(원격) 후 휴지통 뷰 갱신. */
+  const onPutBack = useCallback(() => {
+    void (async () => {
+      const id = usePanes.getState().activePane;
+      const { targets } = resolveActiveTargets();
+      if (targets.length === 0) return;
+      let ok = 0;
+      for (const t of targets) {
+        const r = await commands.trashRestore(t);
+        if (r.status === "ok") ok += 1;
+        else showToast(`Put back failed: ${formatErr(r.error)}`);
+      }
+      if (ok > 0) {
+        const loc = activeTab(usePanes.getState(), id).location;
+        await navigateTo(id, loc, { pushHistory: false });
+        showToast(`Put back ${ok} item${ok === 1 ? "" : "s"}`);
+      }
+    })();
+  }, [navigateTo, showToast]);
 
   const onUp = useCallback(
     (id: PaneId) => {
@@ -223,12 +259,14 @@ function App() {
         entry,
         location: tab.location,
         selectedCount,
+        inTrash: tab.trashRoot !== undefined,
         onActivate,
         onOpenInOtherPane,
+        onPutBack,
       });
       useContextMenu.getState().openAt(e.clientX, e.clientY, items);
     },
-    [onActivate, onOpenInOtherPane],
+    [onActivate, onOpenInOtherPane, onPutBack],
   );
 
   /** 빈 영역 우클릭 — 패널 메뉴(새 폴더/보기/정렬/북마크). */
@@ -622,6 +660,7 @@ function App() {
           onFavoriteActivate={onFavoriteActivate}
           onAddBookmark={onAddBookmark}
           onAddFavorite={onAddFavorite}
+          onTrashActivate={onTrashActivate}
         />
         <Pane id="left" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} onBack={onBack} onForward={onForward} onUp={onUp} onEntryContextMenu={onEntryContextMenu} onEmptyContextMenu={onEmptyContextMenu} />
         <Pane id="right" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} onBack={onBack} onForward={onForward} onUp={onUp} onEntryContextMenu={onEntryContextMenu} onEmptyContextMenu={onEmptyContextMenu} />

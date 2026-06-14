@@ -46,6 +46,8 @@ export interface TabState {
   history: { stack: Location[]; index: number };
   /** 아카이브 내부 탐색 중이면 set, 아니면 undefined. */
   archive?: ArchiveBrowse | undefined;
+  /** 휴지통 탐색 중이면 휴지통 루트 경로 — "Put back" 노출 + 떠나면 해제. */
+  trashRoot?: string | undefined;
 }
 
 export interface PaneState {
@@ -79,6 +81,8 @@ interface PanesState {
   setFilterFocused: (id: PaneId, focused: boolean) => void;
   /** 아카이브 브라우즈 컨텍스트 설정/해제 (진입 시 set, null=해제). */
   setArchiveContext: (id: PaneId, ctx: ArchiveBrowse | null) => void;
+  /** 휴지통 루트 설정/해제 (휴지통 이동 시 set). */
+  setTrashRoot: (id: PaneId, root: string | null) => void;
   // NEW
   back: (id: PaneId) => Location | null;
   forward: (id: PaneId) => Location | null;
@@ -186,9 +190,11 @@ export const usePanes = create<PanesState>((set, get) => ({
         const trimmed = stack.length > 100 ? stack.slice(stack.length - 100) : stack;
         history = { stack: trimmed, index: trimmed.length - 1 };
       }
-      // 아카이브 임시 루트 밖으로 이동하면 컨텍스트 해제 (내부 하위폴더면 유지).
+      // 아카이브/휴지통 루트 밖으로 이동하면 컨텍스트 해제 (내부 하위폴더면 유지).
       const archive =
         cur.archive && location.path.startsWith(cur.archive.root) ? cur.archive : undefined;
+      const trashRoot =
+        cur.trashRoot && location.path.startsWith(cur.trashRoot) ? cur.trashRoot : undefined;
       const nextTab: TabState = {
         ...cur,
         location,
@@ -200,6 +206,7 @@ export const usePanes = create<PanesState>((set, get) => ({
         filterFocused: navigated ? false : cur.filterFocused,
         history,
         archive,
+        trashRoot,
       };
       return { panes: { ...s.panes, [id]: withActiveTab(p, () => nextTab) } };
     }),
@@ -307,6 +314,13 @@ export const usePanes = create<PanesState>((set, get) => ({
       panes: {
         ...s.panes,
         [id]: withActiveTab(s.panes[id], (t) => ({ ...t, archive: ctx ?? undefined })),
+      },
+    })),
+  setTrashRoot: (id, root) =>
+    set((s) => ({
+      panes: {
+        ...s.panes,
+        [id]: withActiveTab(s.panes[id], (t) => ({ ...t, trashRoot: root ?? undefined })),
       },
     })),
   back: (id) => {
