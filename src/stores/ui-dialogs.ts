@@ -14,6 +14,7 @@ export type DialogState =
   | { kind: "repack-confirm"; plan: CompressPlan; label: string }
   | { kind: "sync-confirm"; plan: SyncPlan; srcLabel: string; dstLabel: string }
   | { kind: "compare"; plan: ComparePlan }
+  | { kind: "compare-scanning" }
   | { kind: "app-args"; appId: string; name: string; args: string[] }
   | { kind: "eject-confirm"; volume: Volume }
   | { kind: "progress"; title: string; taskId: string }

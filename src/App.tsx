@@ -8,6 +8,7 @@ import { AdHocConnectDialog } from "@/components/connection/AdHocConnectDialog";
 import { RenameDialog } from "@/components/dialogs/RenameDialog";
 import { BatchRenameDialog } from "@/components/dialogs/BatchRenameDialog";
 import { CompareDialog } from "@/components/dialogs/CompareDialog";
+import { CompareScanningDialog } from "@/components/dialogs/CompareScanningDialog";
 import { SyncDialog } from "@/components/dialogs/SyncDialog";
 import { MkdirDialog } from "@/components/dialogs/MkdirDialog";
 import { CompressDialog } from "@/components/dialogs/CompressDialog";
@@ -855,6 +856,7 @@ function App() {
           onConfirm={onDeleteConfirm}
         />
       )}
+      {dialog.kind === "compare-scanning" && <CompareScanningDialog />}
       {dialog.kind === "compare" && (
         <CompareDialog
           plan={dialog.plan}
