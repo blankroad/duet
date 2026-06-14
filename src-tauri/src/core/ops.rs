@@ -682,25 +682,35 @@ async fn prune_pass(
         }
         let dp = dst_dir.join(&e.name);
         let sp = src_dir.join(&e.name);
-        if src_fs.metadata(&sp).await.is_ok() {
-            // 양쪽 존재 — 디렉토리면 내부 prune 재귀(파일은 mirror 가 이미 동기화).
-            if e.kind == crate::types::EntryKind::Dir {
-                Box::pin(prune_pass(
-                    src_fs, &sp, dst_fs, &dp, cancel, batch_id, pruned,
-                ))
-                .await?;
+        // src 존재 판정은 NotFound 만 '삭제됨'으로 본다. 일시적 실패(연결끊김/권한/SFTP
+        // 오류)를 `.is_ok()==false` 로 뭉뚱그리면 네트워크 글리치 한 번에 안 지운 dst 를
+        // 휴지통으로 보낸다(compare 의 Unreadable 가드와 같은 사고 클래스). → 에러는 전파.
+        match src_fs.metadata(&sp).await {
+            Ok(_) => {
+                // 양쪽 존재 — 디렉토리면 내부 prune 재귀(파일은 mirror 가 이미 동기화).
+                if e.kind == crate::types::EntryKind::Dir {
+                    Box::pin(prune_pass(
+                        src_fs, &sp, dst_fs, &dp, cancel, batch_id, pruned,
+                    ))
+                    .await?;
+                }
             }
-        } else {
-            // dst 에만 — 휴지통으로 (디렉토리면 통째).
-            let loc = dst_fs.trash(&dp, batch_id).await?;
-            let trash_path = match &loc {
-                TrashLocation::Local { trash_id } => trash_id.clone(),
-                TrashLocation::Remote { trash_path } => trash_path.to_string_lossy().into_owned(),
-            };
-            pruned.push(TrashItem {
-                trash_path,
-                original_path: dp,
-            });
+            Err(DuetError::NotFound(_)) => {
+                // 명확히 src 에 없음 — 휴지통으로 (디렉토리면 통째).
+                let loc = dst_fs.trash(&dp, batch_id).await?;
+                let trash_path = match &loc {
+                    TrashLocation::Local { trash_id } => trash_id.clone(),
+                    TrashLocation::Remote { trash_path } => {
+                        trash_path.to_string_lossy().into_owned()
+                    }
+                };
+                pruned.push(TrashItem {
+                    trash_path,
+                    original_path: dp,
+                });
+            }
+            // 일시적 실패 — '삭제됨' 으로 오인 금지. prune 중단하고 전파.
+            Err(e) => return Err(e),
         }
     }
     Ok(())
@@ -1014,30 +1024,53 @@ async fn merge_relay(
     let mut done = 0u64;
     let mut left_created = Vec::new();
     let mut right_created = Vec::new();
+    // 조기 반환 금지 — 실패/취소여도 그때까지 생성분을 journal 에 남겨 undo 가능(§4).
+    let mut outcome: Result<(), DuetError> = Ok(());
     for (status, rel) in &work {
         if cancel_token.is_cancelled() {
-            return Err(DuetError::Cancelled);
+            outcome = Err(DuetError::Cancelled);
+            break;
         }
         let rel = std::path::Path::new(rel);
-        match status {
+        let res = match status {
             CompareStatus::LeftOnly => {
                 let s = left.path.join(rel);
                 let d = right.path.join(rel);
-                crate::fs::copy_relay(left_fs, &s, right_fs, &d).await?;
-                right_created.push(d);
+                // 추가 전용 불변식 강제: race 로 dst 가 생겼으면 덮어쓰지 않고 skip.
+                if right_fs.metadata(&d).await.is_ok() {
+                    tracing::warn!("merge skip (dst exists): {}", d.display());
+                    Ok(())
+                } else {
+                    // 실패해도 부분 산출물 정리를 위해 dst 를 created 에 기록.
+                    let r = crate::fs::copy_relay(left_fs, &s, right_fs, &d).await;
+                    right_created.push(d);
+                    r
+                }
             }
             CompareStatus::RightOnly => {
                 let s = right.path.join(rel);
                 let d = left.path.join(rel);
-                crate::fs::copy_relay(right_fs, &s, left_fs, &d).await?;
-                left_created.push(d);
+                if left_fs.metadata(&d).await.is_ok() {
+                    tracing::warn!("merge skip (dst exists): {}", d.display());
+                    Ok(())
+                } else {
+                    let r = crate::fs::copy_relay(right_fs, &s, left_fs, &d).await;
+                    left_created.push(d);
+                    r
+                }
             }
-            _ => {}
+            _ => Ok(()),
+        };
+        if let Err(e) = res {
+            outcome = Err(e);
+            break;
         }
         done += 1;
         emit_merge_progress(&progress, done, total);
     }
-    push_merge_journal(ctx, left, right, left_created, right_created).await
+    let entry = push_merge_journal(ctx, left, right, left_created, right_created).await?;
+    outcome?;
+    Ok(entry)
 }
 
 /// same-host SSH 머지 — host-side cp/rsync (본인 PC 경유 0, §9 시스템 ssh 안 씀).
@@ -1077,44 +1110,88 @@ async fn merge_same_host(
     let mut done = 0u64;
     let mut left_created = Vec::new();
     let mut right_created = Vec::new();
+    // 조기 반환 금지 — 실패/취소여도 부분 생성분(통째 복사 디렉토리 포함)을 journal 에
+    // 남겨 Ctrl+Z 로 정리 가능(§4). 실패 항목의 dst 도 partial 트리 청소 위해 기록.
+    let mut outcome: Result<(), DuetError> = Ok(());
     for (status, rel) in &work {
         if cancel_token.is_cancelled() {
-            return Err(DuetError::Cancelled);
+            outcome = Err(DuetError::Cancelled);
+            break;
         }
         let rel = std::path::Path::new(rel);
-        match status {
+        let res = match status {
             CompareStatus::LeftOnly => {
                 let s = left.path.join(rel);
                 let d = right.path.join(rel);
-                host_side_copy_one(pool, left_conn, &s, &d).await?;
-                right_created.push(d);
+                match host_side_copy_one(pool, left_conn, &s, &d).await {
+                    Ok(true) => {
+                        right_created.push(d);
+                        Ok(())
+                    }
+                    Ok(false) => {
+                        tracing::warn!("merge skip (dst exists): {}", d.display());
+                        Ok(())
+                    }
+                    Err(e) => {
+                        right_created.push(d); // partial 트리 정리용
+                        Err(e)
+                    }
+                }
             }
             CompareStatus::RightOnly => {
                 let s = right.path.join(rel);
                 let d = left.path.join(rel);
-                host_side_copy_one(pool, right_conn, &s, &d).await?;
-                left_created.push(d);
+                match host_side_copy_one(pool, right_conn, &s, &d).await {
+                    Ok(true) => {
+                        left_created.push(d);
+                        Ok(())
+                    }
+                    Ok(false) => {
+                        tracing::warn!("merge skip (dst exists): {}", d.display());
+                        Ok(())
+                    }
+                    Err(e) => {
+                        left_created.push(d);
+                        Err(e)
+                    }
+                }
             }
-            _ => {}
+            _ => Ok(()),
+        };
+        if let Err(e) = res {
+            outcome = Err(e);
+            break;
         }
         done += 1;
         emit_merge_progress(&progress, done, total);
     }
-    push_merge_journal(ctx, left, right, left_created, right_created).await
+    let entry = push_merge_journal(ctx, left, right, left_created, right_created).await?;
+    outcome?;
+    Ok(entry)
 }
 
 /// 한 항목을 host-side cp/rsync 로 직접 복사 (지정 connection 의 세션에서 exec).
 /// dst 부모 디렉토리는 항상 존재(compare 가 양쪽-존재 디렉토리만 재귀하므로).
+///
+/// 반환 `true`=복사함, `false`=dst 가 이미 존재해 건너뜀(추가 전용 불변식 — race 로
+/// dst 생성 시 cp 중첩/rsync 덮어쓰기를 방지). same-host 라 conn 으로 dst stat 가능.
 async fn host_side_copy_one(
     pool: &Arc<crate::services::connection_pool::ConnectionPool>,
     conn_id: &crate::types::ConnectionId,
     src: &std::path::Path,
     dst: &std::path::Path,
-) -> Result<(), DuetError> {
+) -> Result<bool, DuetError> {
     use crate::core::copy_strategy::shell_escape_path;
     use crate::ssh::remote_exec::exec;
 
     let conn = pool.get(conn_id).await?;
+
+    // 추가 전용 가드: dst 가 이미 존재하면 복사하지 않고 skip(덮어쓰기/중첩 방지).
+    let dst_fs = crate::fs::SshFs::new(pool.get(conn_id).await?);
+    if dst_fs.metadata(dst).await.is_ok() {
+        return Ok(false);
+    }
+
     let session_mutex = conn
         .session
         .as_ref()
@@ -1158,13 +1235,13 @@ async fn host_side_copy_one(
     };
     if out.exit_status != 0 {
         return Err(DuetError::Ssh(format!(
-            "{} failed (exit {}): {}",
+            "{} failed (exit {}): {} (dst 에 부분 결과가 남았을 수 있음 — undo 로 정리 가능)",
             if use_rsync { "rsync" } else { "cp" },
             out.exit_status,
             String::from_utf8_lossy(&out.stderr).trim()
         )));
     }
-    Ok(())
+    Ok(true)
 }
 
 // === Rename / Mkdir (단순 — plan 불필요) ===
@@ -2139,5 +2216,154 @@ mod tests {
             assert!(dir.path().join(n).exists(), "{n} restored");
         }
         assert!(!dir.path().join("p_a.txt").exists());
+    }
+
+    // prune_pass 의 src 존재 판정 검증용 최소 mock — metadata/list/trash 만 구현.
+    #[derive(Clone, Copy)]
+    enum MetaKind {
+        Missing, // NotFound — '삭제됨' → prune 대상
+        Flaky,   // 일시적 Ssh 오류 — prune 금지(전파)
+    }
+    struct PruneMock {
+        meta: std::collections::HashMap<PathBuf, MetaKind>,
+        listing: Vec<crate::types::Entry>,
+        trashed: std::sync::Mutex<Vec<PathBuf>>,
+    }
+    #[async_trait::async_trait]
+    impl FileSystem for PruneMock {
+        fn source_id(&self) -> SourceId {
+            SourceId::Local
+        }
+        async fn list(
+            &self,
+            _path: &std::path::Path,
+        ) -> Result<Vec<crate::types::Entry>, DuetError> {
+            Ok(self.listing.clone())
+        }
+        async fn metadata(
+            &self,
+            path: &std::path::Path,
+        ) -> Result<crate::types::EntryMeta, DuetError> {
+            match self.meta.get(path) {
+                Some(MetaKind::Missing) | None => {
+                    Err(DuetError::NotFound(path.display().to_string()))
+                }
+                Some(MetaKind::Flaky) => Err(DuetError::Ssh("transient".into())),
+            }
+        }
+        async fn trash(
+            &self,
+            path: &std::path::Path,
+            _batch_id: &str,
+        ) -> Result<TrashLocation, DuetError> {
+            self.trashed.lock().unwrap().push(path.to_path_buf());
+            Ok(TrashLocation::Remote {
+                trash_path: path.to_path_buf(),
+            })
+        }
+        async fn rename(&self, _: &std::path::Path, _: &std::path::Path) -> Result<(), DuetError> {
+            unimplemented!()
+        }
+        async fn mkdir(&self, _: &std::path::Path) -> Result<(), DuetError> {
+            unimplemented!()
+        }
+        async fn remove(&self, _: &std::path::Path) -> Result<(), DuetError> {
+            unimplemented!()
+        }
+        async fn restore_from_trash(
+            &self,
+            _: &TrashLocation,
+            _: &std::path::Path,
+        ) -> Result<(), DuetError> {
+            unimplemented!()
+        }
+        async fn read_full(&self, _: &std::path::Path) -> Result<Vec<u8>, DuetError> {
+            unimplemented!()
+        }
+        async fn write_full(&self, _: &std::path::Path, _: &[u8]) -> Result<(), DuetError> {
+            unimplemented!()
+        }
+        async fn open_read(
+            &self,
+            _: &std::path::Path,
+            _: u64,
+        ) -> Result<std::pin::Pin<Box<dyn tokio::io::AsyncRead + Send>>, DuetError> {
+            unimplemented!()
+        }
+        async fn open_write(
+            &self,
+            _: &std::path::Path,
+            _: u64,
+        ) -> Result<std::pin::Pin<Box<dyn tokio::io::AsyncWrite + Send>>, DuetError> {
+            unimplemented!()
+        }
+    }
+
+    fn mock_file(name: &str) -> crate::types::Entry {
+        crate::types::Entry {
+            name: name.into(),
+            kind: crate::types::EntryKind::File,
+            size: Some(1),
+            modified_ms: Some(1),
+            permissions: None,
+            hidden: false,
+        }
+    }
+
+    /// src 가 NotFound 면 dst 를 휴지통으로 prune.
+    #[tokio::test]
+    async fn prune_trashes_when_src_notfound() {
+        let mock = PruneMock {
+            meta: std::collections::HashMap::from([(
+                PathBuf::from("/S/gone.txt"),
+                MetaKind::Missing,
+            )]),
+            listing: vec![mock_file("gone.txt")],
+            trashed: std::sync::Mutex::new(Vec::new()),
+        };
+        let mut pruned = Vec::new();
+        let r = prune_pass(
+            &mock,
+            std::path::Path::new("/S"),
+            &mock,
+            std::path::Path::new("/D"),
+            &tokio_util::sync::CancellationToken::new(),
+            "batch",
+            &mut pruned,
+        )
+        .await;
+        assert!(r.is_ok());
+        assert_eq!(pruned.len(), 1);
+        assert_eq!(
+            mock.trashed.lock().unwrap().as_slice(),
+            &[PathBuf::from("/D/gone.txt")]
+        );
+    }
+
+    /// src metadata 가 일시적 오류면 prune 하지 않고 전파('삭제됨' 오인 금지).
+    #[tokio::test]
+    async fn prune_propagates_transient_error_without_trashing() {
+        let mock = PruneMock {
+            meta: std::collections::HashMap::from([(
+                PathBuf::from("/S/flaky.txt"),
+                MetaKind::Flaky,
+            )]),
+            listing: vec![mock_file("flaky.txt")],
+            trashed: std::sync::Mutex::new(Vec::new()),
+        };
+        let mut pruned = Vec::new();
+        let r = prune_pass(
+            &mock,
+            std::path::Path::new("/S"),
+            &mock,
+            std::path::Path::new("/D"),
+            &tokio_util::sync::CancellationToken::new(),
+            "batch",
+            &mut pruned,
+        )
+        .await;
+        assert!(matches!(r, Err(DuetError::Ssh(_))), "일시적 오류는 전파");
+        assert!(pruned.is_empty(), "prune 안 함");
+        assert!(mock.trashed.lock().unwrap().is_empty(), "휴지통 호출 없음");
     }
 }

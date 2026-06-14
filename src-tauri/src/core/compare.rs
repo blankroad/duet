@@ -209,23 +209,24 @@ async fn compare_into(
         match (left_fs.list(lpath).await, right_fs.list(rpath).await) {
             (Ok(l), Ok(r)) => (l, r),
             _ => {
+                // Unreadable 은 안전 경고라 상한이어도 행을 남긴다(미세 초과 허용) +
+                // truncated 표시 — 그래야 FE 의 unreadable 배너가 사라지지 않는다.
                 if out.len() >= MAX_ENTRIES {
                     *truncated = true;
-                } else {
-                    out.push(CompareEntry {
-                        rel: if rel.is_empty() {
-                            ".".to_string()
-                        } else {
-                            rel.to_string()
-                        },
-                        kind: EntryKind::Dir,
-                        status: CompareStatus::Unreadable,
-                        left_size: None,
-                        right_size: None,
-                        left_mtime_ms: None,
-                        right_mtime_ms: None,
-                    });
                 }
+                out.push(CompareEntry {
+                    rel: if rel.is_empty() {
+                        ".".to_string()
+                    } else {
+                        rel.to_string()
+                    },
+                    kind: EntryKind::Dir,
+                    status: CompareStatus::Unreadable,
+                    left_size: None,
+                    right_size: None,
+                    left_mtime_ms: None,
+                    right_mtime_ms: None,
+                });
                 return Ok(());
             }
         };

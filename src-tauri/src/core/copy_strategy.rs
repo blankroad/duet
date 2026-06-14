@@ -24,10 +24,17 @@ pub enum CopyStrategy {
 }
 
 /// SourceId 쌍으로 strategy 결정.
+///
+/// same-host 판정은 `host_ip` 동일 + **non-unspecified** 일 때만. `0.0.0.0`/`::`
+/// (ProxyJump nested 등에서 DNS 미해석 시 fallback, connection.rs `resolve_target_ip`)
+/// 는 서로 다른 백엔드여도 우연히 일치하므로 same-host 에서 제외 → 안전하게 Relay.
+/// (포트만 다른 동일-IP 컨테이너 구분은 SourceId 에 port 부재 — 후속 과제.)
 pub fn decide(src: &SourceId, dst: &SourceId) -> CopyStrategy {
     match (src, dst) {
         (SourceId::Local, SourceId::Local) => CopyStrategy::LocalToLocal,
-        (SourceId::Ssh { host_ip: a, .. }, SourceId::Ssh { host_ip: b, .. }) if a == b => {
+        (SourceId::Ssh { host_ip: a, .. }, SourceId::Ssh { host_ip: b, .. })
+            if a == b && !a.is_unspecified() =>
+        {
             CopyStrategy::SshSameHost
         }
         _ => CopyStrategy::Relay,
@@ -103,6 +110,14 @@ mod tests {
     fn decide_ssh_different_host_is_relay() {
         let src = ssh([10, 0, 0, 1], "u", "a");
         let dst = ssh([10, 0, 0, 2], "u", "b");
+        assert_eq!(decide(&src, &dst), CopyStrategy::Relay);
+    }
+
+    #[test]
+    fn decide_ssh_unspecified_ip_is_relay() {
+        // 0.0.0.0 (DNS 미해석 fallback) 은 서로 다른 백엔드여도 일치하므로 same-host 제외.
+        let src = ssh([0, 0, 0, 0], "u", "a");
+        let dst = ssh([0, 0, 0, 0], "u", "b");
         assert_eq!(decide(&src, &dst), CopyStrategy::Relay);
     }
 
