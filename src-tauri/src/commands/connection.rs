@@ -1,16 +1,18 @@
 //! 연결 관련 IPC commands.
 //!
 //! - `ssh_config_hosts`: `~/.ssh/config` 의 호스트 목록 (Sidebar 표시용)
-//! - `connection_open`: 새 SSH 연결 (키파일 → SSH agent fallback;
-//!   비밀번호 prompt 단계는 Task 7b 에서 OS-native dialog 추가 예정)
+//! - `connection_open`: 새 SSH 연결 (키파일 → SSH agent → 비밀번호 fallback)
 //! - `connection_close`: 연결 종료 + pool 에서 제거
 //! - `connection_list`: 활성 연결 목록
 //!
-//! ## CLAUDE.md §5 (자격증명 보호)
+//! ## CLAUDE.md §5 (자격증명 보호) — 2026-05 완화 반영
 //!
-//! - 비밀번호/패스프레이즈는 IPC 로 송수신 절대 X.
-//!   현재(MVP-1 Phase D 1차) 는 키파일 / SSH agent 로만 인증; 비밀번호 필요한
-//!   호스트는 `AuthFailed` 반환하고 Task 7b 에서 secure prompt 추가.
+//! - 인증은 키파일 / SSH agent 우선. 둘 다 실패(`AuthFailed`)하면 frontend
+//!   dialog 의 `<input type=password>` 에서 받은 평문 비밀번호를 IPC 인자로
+//!   전달받아 마지막 fallback 으로 시도 (§5 완화 조건: component-local state,
+//!   호출 직후 clear, store/디스크 영속 X). 이 평문은 backend 메모리에만 잠시
+//!   존재하고 사용 직후 `zeroize_string` 으로 best-effort 제거한다.
+//! - 비밀번호/패스프레이즈는 `tracing` 로그에 절대 출력 X.
 //! - DTO 에서 identity_files 절대경로 / proxy_jump alias 같은 자격증명 관련
 //!   디테일은 노출하지 않음. 표시 + 선택에 필요한 최소 정보만.
 
@@ -80,24 +82,29 @@ pub async fn ssh_config_hosts() -> Result<Vec<SshHostEntryDto>, DuetError> {
 /// (직접 입력 host/port/user) 가 공유.
 ///
 /// `password` 가 `Some` 이면 키/agent 실패 시 마지막 fallback 으로 사용.
-/// password 는 이 함수 내에서만 사용되고, 호출자 스택 프레임을 벗어나면 drop —
-/// CLAUDE.md §5 완화 조건 준수 (메모리 안에만, 로그/디스크 X).
+/// 사용 여부와 무관하게 이 함수가 끝나기 전 평문은 `zeroize_string` 으로
+/// best-effort 제거된다 — CLAUDE.md §5 ("drop 시 zeroize 노력").
 async fn open_and_register(
     host: SshHostEntry,
     all_hosts: &[SshHostEntry],
-    password: Option<String>,
+    mut password: Option<String>,
     pool: &Arc<ConnectionPool>,
     app: &tauri::AppHandle,
 ) -> Result<ConnectionDto, DuetError> {
     // 키 → agent fallback. AuthFailed 면 password 가 있을 때만 마지막 시도.
-    let session: SshSession = match connect(&host, all_hosts).await {
-        Ok(s) => s,
-        Err(DuetError::AuthFailed) => match password {
-            Some(pw) => connect_with_password(&host.hostname, host.port, &host.user, &pw).await?,
-            None => return Err(DuetError::AuthFailed),
+    let connect_result = match connect(&host, all_hosts).await {
+        Ok(s) => Ok(s),
+        Err(DuetError::AuthFailed) => match password.as_deref() {
+            Some(pw) => connect_with_password(&host.hostname, host.port, &host.user, pw).await,
+            None => Err(DuetError::AuthFailed),
         },
-        Err(e) => return Err(e),
+        Err(e) => Err(e),
     };
+    // 성공/실패 무관하게 평문 비밀번호 즉시 zeroize (§5).
+    if let Some(mut pw) = password.take() {
+        crate::services::secret_vault::zeroize_string(&mut pw);
+    }
+    let session: SshSession = connect_result?;
 
     let id = ConnectionId(format!("{}:{}", host.alias, uuid::Uuid::new_v4()));
     let host_ip = session.host_ip;

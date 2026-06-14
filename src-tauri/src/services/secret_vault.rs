@@ -17,6 +17,27 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+/// `String` 의 바이트를 0으로 채운 뒤 비운다 — best-effort zeroize.
+///
+/// Rust 의 기본 `String` drop 은 메모리를 zero 하지 않아 평문 자격증명이
+/// 해제 후에도 잔존할 수 있다. CLAUDE.md §5 ("drop 시 zeroize 노력") 충족용.
+/// 강한 보장은 `secrecy`/`zeroize` crate 필요 (후속) — 여기서는 의존성 없이
+/// 직접 변이. 복사본(이동·러스트 버퍼 등)까지는 보장하지 못함(best-effort).
+///
+/// CLAUDE.md §8 예외: `platform/` 밖 `unsafe` 는 금지지만, 자격증명 메모리
+/// 제거라는 보안 목적의 직접 바이트 변이는 `secret_vault` 한정 허용 예외
+/// (기존 `lock()` 의 선례와 동일).
+pub fn zeroize_string(s: &mut String) {
+    // SAFETY: 바이트를 0(NUL)으로 채우는 것은 UTF-8 불변식을 위반하지 않으며
+    // (NUL 은 valid UTF-8), 직후 `clear()` 로 길이도 0 으로 만든다.
+    unsafe {
+        for b in s.as_bytes_mut() {
+            *b = 0;
+        }
+    }
+    s.clear();
+}
+
 /// vault 의 disk + memory 상태.
 struct VaultInner {
     /// 메모리 캐시. None = locked.
@@ -78,18 +99,9 @@ impl SecretVault {
     pub async fn lock(&self) {
         let mut inner = self.inner.write().await;
         inner.map = None;
-        // 명시적으로 zero-out 후 drop — best-effort zeroize.
-        // Rust 의 String drop 은 메모리 reuse 가능 — 강한 보장 X.
-        // 강한 보장 필요하면 secrecy crate 추가 (후속).
+        // master passphrase 는 명시적으로 zeroize 후 drop (best-effort, §5).
         if let Some(mut m) = inner.master.take() {
-            // SAFETY: platform/unsafe 외 허용 예외 — String 바이트 직접 zeroize.
-            // 안전 조건: m 은 이 스코프 내에서만 접근되며, 바이트 변이 후 즉시 drop.
-            unsafe {
-                let bytes = m.as_bytes_mut();
-                for b in bytes {
-                    *b = 0;
-                }
-            }
+            zeroize_string(&mut m);
             drop(m);
         }
     }
@@ -212,6 +224,25 @@ fn decrypt_passphrase(
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn zeroize_string_clears_bytes_and_len() {
+        let mut s = String::from("hunter2");
+        let orig_len = "hunter2".len();
+        zeroize_string(&mut s);
+        assert!(s.is_empty(), "length must be 0 after zeroize");
+        // clear() 는 len 만 0 으로 만들 뿐 버퍼를 재할당/해제하지 않으므로,
+        // 동일 allocation 의 원래 길이 구간이 0 으로 덮였는지 확인.
+        let cap = s.capacity();
+        assert!(cap >= orig_len);
+        let ptr = s.as_ptr();
+        // SAFETY(test only): ptr 는 살아있는 s 의 버퍼를 가리키고 cap >= orig_len.
+        let bytes = unsafe { std::slice::from_raw_parts(ptr, orig_len) };
+        assert!(
+            bytes.iter().all(|&b| b == 0),
+            "original bytes must be zeroed"
+        );
+    }
 
     #[tokio::test]
     async fn empty_vault_unlocks_with_any_master() {
