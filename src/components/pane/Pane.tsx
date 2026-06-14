@@ -16,6 +16,8 @@ interface PaneProps {
   onRefresh: (id: PaneId) => void;
   onBack: (id: PaneId) => void;
   onForward: (id: PaneId) => void;
+  onEntryContextMenu: (id: PaneId, entry: Entry, index: number, e: React.MouseEvent) => void;
+  onEmptyContextMenu: (id: PaneId, e: React.MouseEvent) => void;
 }
 
 /**
@@ -23,7 +25,7 @@ interface PaneProps {
  * dumb component — IPC 호출은 App.tsx 가 일괄 처리.
  * displayed entries 는 store selector (raw → filter → hidden → sort) 결과.
  */
-export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward }: PaneProps) {
+export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward, onEntryContextMenu, onEmptyContextMenu }: PaneProps) {
   const isActive = usePanes((s) => s.activePane === id);
   const setActivePane = usePanes((s) => s.setActivePane);
   const setCursor = usePanes((s) => s.setCursor);
@@ -83,6 +85,8 @@ export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward 
           onActivate={(entry) => onActivate(id, entry)}
           onToggleSelect={(name) => toggleSelected(id, name)}
           onSortClick={(k) => toggleSortKey(id, k)}
+          onEntryContextMenu={(e, entry, index) => onEntryContextMenu(id, entry, index, e)}
+          onEmptyContextMenu={(e) => onEmptyContextMenu(id, e)}
         />
       ) : (
         <EntryGrid
@@ -94,6 +98,8 @@ export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward 
           onCursorMove={(i) => setCursor(id, i)}
           onActivate={(entry) => onActivate(id, entry)}
           onColumns={(c) => setGridCols(id, c)}
+          onEntryContextMenu={(e, entry, index) => onEntryContextMenu(id, entry, index, e)}
+          onEmptyContextMenu={(e) => onEmptyContextMenu(id, e)}
         />
       )}
     </div>

@@ -84,6 +84,30 @@ impl HostFavoritesStore {
         Ok(snap)
     }
 
+    /// `order` 에 담긴 id 들만 그 순서대로 재배치 — 나머지 항목은 원위치 유지.
+    ///
+    /// 프론트는 한 alias 그룹의 id 들만 보내므로, 그 id 가 차지하던 슬롯에만 새
+    /// 순서를 채워 다른 그룹 위치를 건드리지 않는다.
+    pub async fn reorder(&self, order: Vec<String>) -> Result<Vec<HostFavorite>, DuetError> {
+        let mut v = self.inner.write().await;
+        let slots: Vec<usize> = v
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| order.contains(&f.id))
+            .map(|(i, _)| i)
+            .collect();
+        let ordered: Vec<HostFavorite> = order
+            .iter()
+            .filter_map(|id| v.iter().find(|f| &f.id == id).cloned())
+            .collect();
+        for (slot, item) in slots.into_iter().zip(ordered.into_iter()) {
+            v[slot] = item;
+        }
+        let snap = v.clone();
+        self.write_to_disk(&snap).await?;
+        Ok(snap)
+    }
+
     async fn write_to_disk(&self, items: &[HostFavorite]) -> Result<(), DuetError> {
         if let Some(parent) = self.path.parent() {
             tokio::fs::create_dir_all(parent)
@@ -140,6 +164,33 @@ mod tests {
             .add("a".into(), "  ".into(), PathBuf::from("/x"))
             .await
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn reorder_within_group_keeps_other_groups() {
+        let dir = tempdir().unwrap();
+        let s = HostFavoritesStore::load_from(&dir.path().join("hf.json"))
+            .await
+            .unwrap();
+        s.add("srv1".into(), "logs".into(), PathBuf::from("/var/log"))
+            .await
+            .unwrap();
+        s.add("srv1".into(), "app".into(), PathBuf::from("/opt/app"))
+            .await
+            .unwrap();
+        s.add("srv2".into(), "home".into(), PathBuf::from("/home/u"))
+            .await
+            .unwrap();
+        let list = s.list().await; // [srv1/logs, srv1/app, srv2/home]
+                                   // srv1 그룹만 app, logs 순으로 swap — srv2/home 위치 2 유지
+        let snap = s
+            .reorder(vec![list[1].id.clone(), list[0].id.clone()])
+            .await
+            .unwrap();
+        assert_eq!(
+            snap.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(),
+            ["app", "logs", "home"]
+        );
     }
 
     #[tokio::test]

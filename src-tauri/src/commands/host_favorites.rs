@@ -33,3 +33,12 @@ pub async fn host_favorites_remove(
 ) -> Result<Vec<HostFavorite>, DuetError> {
     store.remove(&id).await
 }
+
+#[tauri::command]
+#[specta::specta]
+pub async fn host_favorites_reorder(
+    ids: Vec<String>,
+    store: tauri::State<'_, Arc<HostFavoritesStore>>,
+) -> Result<Vec<HostFavorite>, DuetError> {
+    store.reorder(ids).await
+}

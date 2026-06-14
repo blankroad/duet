@@ -89,6 +89,30 @@ impl BookmarksStore {
         Ok(snap)
     }
 
+    /// `order` 에 담긴 id 들만 그 순서대로 재배치 — 나머지 항목은 원위치 유지.
+    ///
+    /// 부분 리스트도 안전: `order` 에 포함된 id 가 차지하던 슬롯에만 새 순서를
+    /// 채워 넣으므로(다른 항목 위치 불변), 그룹 단위 부분 재정렬에도 쓸 수 있다.
+    pub async fn reorder(&self, order: Vec<String>) -> Result<Vec<Bookmark>, DuetError> {
+        let mut v = self.inner.write().await;
+        let slots: Vec<usize> = v
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| order.contains(&b.id))
+            .map(|(i, _)| i)
+            .collect();
+        let ordered: Vec<Bookmark> = order
+            .iter()
+            .filter_map(|id| v.iter().find(|b| &b.id == id).cloned())
+            .collect();
+        for (slot, item) in slots.into_iter().zip(ordered.into_iter()) {
+            v[slot] = item;
+        }
+        let snap = v.clone();
+        self.write_to_disk(&snap).await?;
+        Ok(snap)
+    }
+
     async fn write_to_disk(&self, items: &[Bookmark]) -> Result<(), DuetError> {
         if let Some(parent) = self.path.parent() {
             tokio::fs::create_dir_all(parent)
@@ -151,6 +175,50 @@ mod tests {
             .unwrap();
         s.remove("ghost").await.unwrap();
         assert!(s.list().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn reorder_changes_order_and_persists() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("b.json");
+        let s = BookmarksStore::load_from(&path).await.unwrap();
+        s.add("A".into(), loc("/a")).await.unwrap();
+        s.add("B".into(), loc("/b")).await.unwrap();
+        let after = s.add("C".into(), loc("/c")).await.unwrap();
+        let ids: Vec<String> = after.iter().map(|b| b.id.clone()).collect();
+        // C, A, B 순으로
+        let new_order = vec![ids[2].clone(), ids[0].clone(), ids[1].clone()];
+        let snap = s.reorder(new_order).await.unwrap();
+        assert_eq!(
+            snap.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(),
+            ["C", "A", "B"]
+        );
+        // 디스크 영속 확인
+        let s2 = BookmarksStore::load_from(&path).await.unwrap();
+        let reloaded = s2.list().await;
+        assert_eq!(
+            reloaded.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(),
+            ["C", "A", "B"]
+        );
+    }
+
+    #[tokio::test]
+    async fn reorder_partial_keeps_others_in_place() {
+        let dir = tempdir().unwrap();
+        let s = BookmarksStore::load_from(&dir.path().join("b.json"))
+            .await
+            .unwrap();
+        s.add("A".into(), loc("/a")).await.unwrap();
+        s.add("B".into(), loc("/b")).await.unwrap();
+        s.add("C".into(), loc("/c")).await.unwrap();
+        let list = s.list().await;
+        // A(0) 와 C(2) 만 swap — B 는 위치 1 유지
+        let new_order = vec![list[2].id.clone(), list[0].id.clone()];
+        let snap = s.reorder(new_order).await.unwrap();
+        assert_eq!(
+            snap.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(),
+            ["C", "B", "A"]
+        );
     }
 
     #[tokio::test]

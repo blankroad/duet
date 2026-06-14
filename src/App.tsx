@@ -16,6 +16,9 @@ import { SearchPanel } from "@/components/SearchPanel";
 import { PreviewPane } from "@/components/pane/PreviewPane";
 import { DragGhost } from "@/components/pane/DragGhost";
 import { CommandPalette } from "@/components/CommandPalette";
+import { ContextMenu } from "@/components/ContextMenu";
+import { useContextMenu } from "@/stores/contextMenu";
+import { buildEntryMenu, buildEmptyMenu, folderName } from "@/lib/entryMenu";
 import { useCommands } from "@/stores/commands";
 import { usePalette } from "@/stores/palette";
 import { buildBuiltins } from "@/lib/commands";
@@ -25,7 +28,7 @@ import { useSearch } from "@/stores/search";
 import { useUIDialogs } from "@/stores/ui-dialogs";
 import { useToast } from "@/stores/toast";
 import { bootstrapSavedHosts } from "@/stores/savedHosts";
-import { bootstrapBookmarks, addBookmark } from "@/stores/bookmarks";
+import { bootstrapBookmarks, addBookmark, removeBookmark, findBookmarkId } from "@/stores/bookmarks";
 import { bootstrapHostFavorites, addHostFavorite } from "@/stores/hostFavorites";
 import { bootstrapUserAliases } from "@/stores/userAliases";
 import { useDynamicCommands } from "@/lib/dynamicCommands";
@@ -141,6 +144,55 @@ function App() {
     [onActivate],
   );
 
+  /** 우클릭한 디렉토리를 반대 패널에서 열기. */
+  const onOpenInOtherPane = useCallback(
+    (srcId: PaneId, entry: Entry) => {
+      if (entry.kind !== "dir") return;
+      const opposite: PaneId = srcId === "left" ? "right" : "left";
+      const tab = activeTab(usePanes.getState(), srcId);
+      const sep = tab.location.path.endsWith("/") ? "" : "/";
+      void navigate(opposite, tab.location.path + sep + entry.name);
+    },
+    [navigate],
+  );
+
+  /** 엔트리 우클릭 — 활성 패널/cursor/선택을 맞춘 뒤(Finder 관례) 컨텍스트 메뉴 오픈. */
+  const onEntryContextMenu = useCallback(
+    (id: PaneId, entry: Entry, index: number, e: React.MouseEvent) => {
+      e.preventDefault();
+      const s = usePanes.getState();
+      s.setActivePane(id);
+      s.setCursor(id, index);
+      const tab = activeTab(s, id);
+      const wasSelected = tab.selected.has(entry.name);
+      if (!wasSelected) s.setSelected(id, [entry.name]);
+      const selectedCount = wasSelected ? tab.selected.size : 1;
+      const items = buildEntryMenu({
+        paneId: id,
+        entry,
+        location: tab.location,
+        selectedCount,
+        onActivate,
+        onOpenInOtherPane,
+      });
+      useContextMenu.getState().openAt(e.clientX, e.clientY, items);
+    },
+    [onActivate, onOpenInOtherPane],
+  );
+
+  /** 빈 영역 우클릭 — 패널 메뉴(새 폴더/보기/정렬/북마크). */
+  const onEmptyContextMenu = useCallback(
+    (id: PaneId, e: React.MouseEvent) => {
+      e.preventDefault();
+      const s = usePanes.getState();
+      s.setActivePane(id);
+      const tab = activeTab(s, id);
+      const items = buildEmptyMenu({ paneId: id, location: tab.location, onRefresh });
+      useContextMenu.getState().openAt(e.clientX, e.clientY, items);
+    },
+    [onRefresh],
+  );
+
   const onKeyboardUp = useCallback(
     (id: PaneId) => {
       const path = activeTab(usePanes.getState(), id).location.path;
@@ -241,6 +293,13 @@ function App() {
       sortByMtime: () => usePanes.getState().toggleSortKey(usePanes.getState().activePane, "mtime"),
       sortByKind: () => usePanes.getState().toggleSortKey(usePanes.getState().activePane, "kind"),
       sortByExt: () => usePanes.getState().toggleSortKey(usePanes.getState().activePane, "ext"),
+      toggleBookmark: () => {
+        const id = usePanes.getState().activePane;
+        const tab = activeTab(usePanes.getState(), id);
+        const existing = findBookmarkId(tab.location);
+        if (existing) void removeBookmark(existing);
+        else void addBookmark(folderName(tab.location), tab.location);
+      },
       focusFilter: () => usePanes.getState().setFilterFocused(usePanes.getState().activePane, true),
       openSearch: () => {
         const id = usePanes.getState().activePane;
@@ -363,17 +422,14 @@ function App() {
     [navigateTo, showToast],
   );
 
+  /** 활성 탭 위치를 북마크에 추가 (prompt 없이 폴더명 자동). 이미 있으면 무시. */
   const onAddBookmark = useCallback(() => {
     const id = usePanes.getState().activePane;
     const tab = activeTab(usePanes.getState(), id);
-    const defaultName =
-      String(tab.location.path)
-        .split("/")
-        .filter(Boolean)
-        .pop() ?? "/";
-    const name = window.prompt("Bookmark name", defaultName);
-    if (name) void addBookmark(name, tab.location);
+    if (findBookmarkId(tab.location)) return;
+    void addBookmark(folderName(tab.location), tab.location);
   }, []);
+
 
   const onAddFavorite = useCallback(() => {
     const id = usePanes.getState().activePane;
@@ -509,8 +565,8 @@ function App() {
           onAddBookmark={onAddBookmark}
           onAddFavorite={onAddFavorite}
         />
-        <Pane id="left" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} onBack={onBack} onForward={onForward} />
-        <Pane id="right" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} onBack={onBack} onForward={onForward} />
+        <Pane id="left" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} onBack={onBack} onForward={onForward} onEntryContextMenu={onEntryContextMenu} onEmptyContextMenu={onEmptyContextMenu} />
+        <Pane id="right" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} onBack={onBack} onForward={onForward} onEntryContextMenu={onEntryContextMenu} onEmptyContextMenu={onEmptyContextMenu} />
         {previewOpen && <PreviewPane />}
       </main>
 
@@ -608,6 +664,7 @@ function App() {
       {dialog.kind === "settings" && <SettingsDialog onClose={closeDialog} />}
       <Toast />
       <CommandPalette />
+      <ContextMenu />
       <DragGhost />
     </div>
   );

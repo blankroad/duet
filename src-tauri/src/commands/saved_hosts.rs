@@ -33,3 +33,13 @@ pub async fn saved_hosts_remove(
 ) -> Result<Vec<SavedHost>, DuetError> {
     store.remove(&alias).await
 }
+
+/// alias 순서대로 저장 호스트를 재정렬한다.
+#[tauri::command]
+#[specta::specta]
+pub async fn saved_hosts_reorder(
+    aliases: Vec<String>,
+    store: tauri::State<'_, Arc<SavedHostsStore>>,
+) -> Result<Vec<SavedHost>, DuetError> {
+    store.reorder(aliases).await
+}

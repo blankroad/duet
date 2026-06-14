@@ -21,6 +21,8 @@ interface EntryListProps {
   onActivate: (entry: Entry, index: number) => void;
   onToggleSelect: (name: string) => void;
   onSortClick: (key: SortKey) => void;
+  onEntryContextMenu: (e: React.MouseEvent, entry: Entry, index: number) => void;
+  onEmptyContextMenu: (e: React.MouseEvent) => void;
 }
 
 const ROW_HEIGHT = 28;
@@ -41,6 +43,8 @@ export function EntryList({
   onActivate,
   onToggleSelect: _onToggleSelect,
   onSortClick,
+  onEntryContextMenu,
+  onEmptyContextMenu,
 }: EntryListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const onEntryMouseDown = useEntryDrag(id);
@@ -87,6 +91,9 @@ export function EntryList({
           paneHighlight && "ring-2 ring-inset ring-accent",
         )}
         onMouseDown={onContainerMouseDown}
+        onContextMenu={(e) => {
+          if (!(e.target as HTMLElement).closest("[data-entry]")) onEmptyContextMenu(e);
+        }}
       >
         <div style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative" }}>
           {virtualizer.getVirtualItems().map((vi) => {
@@ -99,6 +106,7 @@ export function EntryList({
                 data-entry={entry.name}
                 data-drop-folder={isDir ? entry.name : undefined}
                 onMouseDown={(e) => onEntryMouseDown(e, entry)}
+                onContextMenu={(e) => onEntryContextMenu(e, entry, vi.index)}
                 className={clsx(dragActive && overFolder === entry.name && "ring-2 ring-inset ring-accent")}
                 style={{
                   position: "absolute",

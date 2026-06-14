@@ -1,5 +1,12 @@
-import { ArrowLeft, ArrowRight, ArrowUp, RotateCw } from "lucide-react";
+import { ArrowLeft, ArrowRight, ArrowUp, RotateCw, Star } from "lucide-react";
 import type { Location } from "@/types/bindings";
+import {
+  useBookmarks,
+  addBookmark,
+  removeBookmark,
+  sameBookmarkLocation,
+} from "@/stores/bookmarks";
+import { folderName } from "@/lib/entryMenu";
 
 interface PathBarProps {
   location: Location;
@@ -21,6 +28,15 @@ interface PathBarProps {
 export function PathBar({ location, canBack, canForward, onBack, onForward, onUp, onRefresh, onSegmentClick }: PathBarProps) {
   const sourceLabel = location.source.kind === "local" ? "Local" : `${location.source.user}@${location.source.host_ip}`;
   const segments = location.path.split("/").filter(Boolean);
+
+  const bookmarkId = useBookmarks(
+    (s) => s.items.find((b) => sameBookmarkLocation(b.location, location))?.id ?? null,
+  );
+  const bookmarked = bookmarkId !== null;
+  const toggleBookmark = () => {
+    if (bookmarkId) void removeBookmark(bookmarkId);
+    else void addBookmark(folderName(location), location);
+  };
 
   return (
     <div className="flex h-8 items-center gap-1 border-b border-border bg-subtle px-2 text-base">
@@ -71,7 +87,19 @@ export function PathBar({ location, canBack, canForward, onBack, onForward, onUp
           );
         })}
       </div>
-      <button onClick={onRefresh} className="ml-auto rounded p-1 hover:bg-border" aria-label="Refresh">
+      <button
+        onClick={toggleBookmark}
+        className="ml-auto rounded p-1 hover:bg-border"
+        aria-label={bookmarked ? "Remove bookmark" : "Bookmark this folder"}
+        title={bookmarked ? "Bookmarked (Ctrl+D)" : "Bookmark this folder (Ctrl+D)"}
+      >
+        <Star
+          size={14}
+          className={bookmarked ? "text-accent" : "text-fg-muted"}
+          fill={bookmarked ? "currentColor" : "none"}
+        />
+      </button>
+      <button onClick={onRefresh} className="rounded p-1 hover:bg-border" aria-label="Refresh">
         <RotateCw size={14} />
       </button>
     </div>

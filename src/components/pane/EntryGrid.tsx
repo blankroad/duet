@@ -20,6 +20,8 @@ interface EntryGridProps {
   onActivate: (entry: Entry, index: number) => void;
   /** grid 컬럼 수를 store 에 보고 (키보드 ↑↓ 이동폭 공유). tiles 는 1. */
   onColumns: (cols: number) => void;
+  onEntryContextMenu: (e: React.MouseEvent, entry: Entry, index: number) => void;
+  onEmptyContextMenu: (e: React.MouseEvent) => void;
 }
 
 const GRID_CELL_HEIGHT = 92;
@@ -40,6 +42,8 @@ export function EntryGrid({
   onCursorMove,
   onActivate,
   onColumns,
+  onEntryContextMenu,
+  onEmptyContextMenu,
 }: EntryGridProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const colsRef = useRef(1);
@@ -105,6 +109,9 @@ export function EntryGrid({
         paneHighlight && "ring-2 ring-inset ring-accent",
       )}
       onMouseDown={onContainerMouseDown}
+      onContextMenu={(e) => {
+        if (!(e.target as HTMLElement).closest("[data-entry]")) onEmptyContextMenu(e);
+      }}
     >
       <div style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative" }}>
         {virtualizer.getVirtualItems().map((vrow) => {
@@ -135,6 +142,7 @@ export function EntryGrid({
                   isSelected,
                   highlight: dragActive && overFolder === entry.name,
                   onMouseDown: (e) => onEntryMouseDown(e, entry),
+                  onContextMenu: (e) => onEntryContextMenu(e, entry, index),
                   onClick: () => onCursorMove(index),
                   onDoubleClick: () => onActivate(entry, index),
                 };
@@ -167,16 +175,18 @@ interface CellProps {
   isSelected: boolean;
   highlight: boolean;
   onMouseDown: (e: React.MouseEvent) => void;
+  onContextMenu: (e: React.MouseEvent) => void;
   onClick: () => void;
   onDoubleClick: () => void;
 }
 
-function GridCell({ entry, isCursor, isSelected, highlight, onMouseDown, onClick, onDoubleClick }: CellProps) {
+function GridCell({ entry, isCursor, isSelected, highlight, onMouseDown, onContextMenu, onClick, onDoubleClick }: CellProps) {
   return (
     <div
       data-entry={entry.name}
       data-drop-folder={entry.kind === "dir" ? entry.name : undefined}
       onMouseDown={onMouseDown}
+      onContextMenu={onContextMenu}
       className={clsx(
         "m-1 flex flex-col items-center justify-center gap-1 rounded-panel border p-2 cursor-default",
         "hover:bg-subtle",
@@ -200,12 +210,13 @@ function GridCell({ entry, isCursor, isSelected, highlight, onMouseDown, onClick
   );
 }
 
-function TileRow({ entry, isCursor, isSelected, highlight, onMouseDown, onClick, onDoubleClick }: CellProps) {
+function TileRow({ entry, isCursor, isSelected, highlight, onMouseDown, onContextMenu, onClick, onDoubleClick }: CellProps) {
   return (
     <div
       data-entry={entry.name}
       data-drop-folder={entry.kind === "dir" ? entry.name : undefined}
       onMouseDown={onMouseDown}
+      onContextMenu={onContextMenu}
       className={clsx(
         "flex h-12 items-center gap-3 px-3 cursor-default",
         "hover:bg-subtle",

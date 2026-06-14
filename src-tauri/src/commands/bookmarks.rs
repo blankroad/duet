@@ -1,4 +1,4 @@
-//! Bookmarks IPC — list / add / remove.
+//! Bookmarks IPC — list / add / remove / reorder.
 
 use std::sync::Arc;
 
@@ -30,4 +30,13 @@ pub async fn bookmarks_remove(
     store: tauri::State<'_, Arc<BookmarksStore>>,
 ) -> Result<Vec<Bookmark>, DuetError> {
     store.remove(&id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn bookmarks_reorder(
+    ids: Vec<String>,
+    store: tauri::State<'_, Arc<BookmarksStore>>,
+) -> Result<Vec<Bookmark>, DuetError> {
+    store.reorder(ids).await
 }

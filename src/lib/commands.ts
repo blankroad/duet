@@ -46,6 +46,8 @@ export interface BuiltinDeps {
   // filter / search
   focusFilter: () => void;
   openSearch: () => void;
+  // bookmark
+  toggleBookmark: () => void;
   // settings / palette
   openSettings: () => void;
   openPalette: () => void;
@@ -74,6 +76,7 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
     { id: "sort.byMtime", label: "Sort by modified", category: "Sort", defaultKey: "Ctrl+Shift+3", action: deps.sortByMtime },
     { id: "sort.byKind", label: "Sort by kind", category: "Sort", defaultKey: "Ctrl+Shift+4", action: deps.sortByKind },
     { id: "sort.byExt", label: "Sort by extension", category: "Sort", defaultKey: "Ctrl+Shift+5", action: deps.sortByExt },
+    { id: "bookmark.toggle", label: "Bookmark this folder", category: "Navigation", defaultKey: "Ctrl+D", action: deps.toggleBookmark },
     { id: "filter.focus", label: "Focus filter", category: "Filter", defaultKey: "Ctrl+F", action: deps.focusFilter },
     { id: "search.global", label: "Global search", category: "Search", defaultKey: "Ctrl+Shift+F", action: deps.openSearch },
     { id: "settings.open", label: "Open settings", category: "Settings", defaultKey: "Ctrl+,", action: deps.openSettings },

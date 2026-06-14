@@ -92,6 +92,27 @@ impl SavedHostsStore {
         Ok(snapshot)
     }
 
+    /// `order` 에 담긴 alias 들만 그 순서대로 재배치 — 나머지 항목은 원위치 유지.
+    pub async fn reorder(&self, order: Vec<String>) -> Result<Vec<SavedHost>, DuetError> {
+        let mut hosts = self.inner.write().await;
+        let slots: Vec<usize> = hosts
+            .iter()
+            .enumerate()
+            .filter(|(_, h)| order.contains(&h.alias))
+            .map(|(i, _)| i)
+            .collect();
+        let ordered: Vec<SavedHost> = order
+            .iter()
+            .filter_map(|a| hosts.iter().find(|h| &h.alias == a).cloned())
+            .collect();
+        for (slot, item) in slots.into_iter().zip(ordered.into_iter()) {
+            hosts[slot] = item;
+        }
+        let snapshot = hosts.clone();
+        self.write_to_disk(&snapshot).await?;
+        Ok(snapshot)
+    }
+
     async fn write_to_disk(&self, hosts: &[SavedHost]) -> Result<(), DuetError> {
         if let Some(parent) = self.path.parent() {
             tokio::fs::create_dir_all(parent)
@@ -173,6 +194,33 @@ mod tests {
         let list = store.list().await;
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].alias, "b");
+    }
+
+    #[tokio::test]
+    async fn reorder_changes_order_and_persists() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("h.json");
+        let store = SavedHostsStore::load_from(&path).await.unwrap();
+        store.upsert(mk("a")).await.unwrap();
+        store.upsert(mk("b")).await.unwrap();
+        store.upsert(mk("c")).await.unwrap();
+        let snap = store
+            .reorder(vec!["c".into(), "a".into(), "b".into()])
+            .await
+            .unwrap();
+        assert_eq!(
+            snap.iter().map(|h| h.alias.as_str()).collect::<Vec<_>>(),
+            ["c", "a", "b"]
+        );
+        let back = SavedHostsStore::load_from(&path).await.unwrap();
+        assert_eq!(
+            back.list()
+                .await
+                .iter()
+                .map(|h| h.alias.as_str())
+                .collect::<Vec<_>>(),
+            ["c", "a", "b"]
+        );
     }
 
     #[tokio::test]

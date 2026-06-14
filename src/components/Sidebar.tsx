@@ -1,23 +1,42 @@
-import { Folder, Server, Star, Network, Plus, X, Bookmark, Heart } from "lucide-react";
+import {
+  Folder,
+  Server,
+  Star,
+  Network,
+  Plus,
+  X,
+  Bookmark,
+  Heart,
+  ChevronDown,
+  ChevronRight,
+} from "lucide-react";
 import { useUI } from "@/stores/ui";
 import { useConnections, type Host, type ConnectionState } from "@/stores/connections";
-import { useSavedHosts, removeSavedHost } from "@/stores/savedHosts";
-import { useBookmarks, removeBookmark } from "@/stores/bookmarks";
-import { useHostFavorites, removeHostFavorite } from "@/stores/hostFavorites";
+import { useSavedHosts, removeSavedHost, reorderSavedHosts } from "@/stores/savedHosts";
+import { useBookmarks, removeBookmark, reorderBookmarks } from "@/stores/bookmarks";
+import {
+  useHostFavorites,
+  removeHostFavorite,
+  reorderHostFavorites,
+} from "@/stores/hostFavorites";
+import { useContextMenu, type MenuEntry } from "@/stores/contextMenu";
+import { useReorderable } from "@/hooks/useReorderable";
 import type { SavedHost, Bookmark as BookmarkType, HostFavorite, Location } from "@/types/bindings";
 import clsx from "clsx";
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 
 /**
  * 사이드바.
  *
+ * - 섹션 헤더 클릭으로 접기/펼치기(상태 영속), 제목 옆 항목 수 표시, 전체 세로 스크롤.
+ * - 항목 우클릭 → 컨텍스트 메뉴(Open/Connect/Remove 등).
+ * - Bookmarks / Saved hosts / Favorites(그룹 내) 는 드래그로 순서 변경.
+ *
  * - Local: home (MVP-0 placeholder)
- * - Hosts: `~/.ssh/config` 의 호스트 목록 + 연결 상태 점 + ad-hoc + 버튼.
- *   호스트 더블클릭 → ConnectionDialog. + 버튼 → AdHocConnectDialog.
- * - Saved hosts: 사용자가 ad-hoc dialog 에서 "Save host" 체크해서 저장한 호스트.
- *   더블클릭 → AdHocConnectDialog 가 저장값 prefill 로 열림.
- * - Bookmarks: 사용자가 북마크한 위치 (로컬/SSH). 더블클릭 → 해당 위치로 이동.
- * - Favorites: 활성 SSH 연결의 즐겨찾기 경로. alias 별 그룹화.
+ * - Hosts: `~/.ssh/config` 호스트 + 연결 상태 점 + ad-hoc. (읽기전용 — 재정렬 X)
+ * - Saved hosts: ad-hoc dialog 에서 저장한 호스트. 더블클릭 → prefill 다이얼로그.
+ * - Bookmarks: 북마크한 위치(로컬/SSH). 더블클릭 → 이동.
+ * - Favorites: 활성 SSH 연결의 호스트별 즐겨찾기 경로. alias 별 그룹화 + 그룹 접기.
  */
 export function Sidebar({
   onHostActivate,
@@ -40,8 +59,8 @@ export function Sidebar({
   if (!open) return null;
 
   return (
-    <aside className="flex w-48 flex-col border-r border-border bg-subtle text-base">
-      <Section title="Local" icon={<Folder size={14} />}>
+    <aside className="flex w-48 min-h-0 flex-col overflow-y-auto border-r border-border bg-subtle text-base">
+      <Section sectionKey="local" title="Local" icon={<Folder size={14} />}>
         <Item label="Home" />
       </Section>
       <HostsSection onHostActivate={onHostActivate} onAdHocOpen={onAdHocOpen} />
@@ -52,19 +71,47 @@ export function Sidebar({
   );
 }
 
-function SavedHostsSection({
-  onActivate,
-}: {
-  onActivate: (host: SavedHost) => void;
-}) {
+/** 컨텍스트 메뉴 오픈 헬퍼. */
+function openMenu(e: React.MouseEvent, items: MenuEntry[]): void {
+  e.preventDefault();
+  e.stopPropagation();
+  useContextMenu.getState().openAt(e.clientX, e.clientY, items);
+}
+
+/** 드래그 삽입 위치 표시 라인. */
+function DropLine() {
+  return <div className="mx-2 my-0.5 h-0.5 rounded bg-accent" />;
+}
+
+const rowClass = "group flex cursor-default items-center gap-1 rounded px-2 py-0.5 hover:bg-border";
+
+// ─────────────────────────── Saved hosts ───────────────────────────
+
+function SavedHostsSection({ onActivate }: { onActivate: (host: SavedHost) => void }) {
   const hosts = useSavedHosts((s) => s.hosts);
+  const { dragKey, insertBeforeKey, onItemMouseDown } = useReorderable({
+    group: "saved",
+    keys: hosts.map((h) => h.alias),
+    onCommit: (next) => void reorderSavedHosts(next),
+  });
   return (
-    <Section title="Saved hosts" icon={<Bookmark size={14} />}>
+    <Section sectionKey="saved" title="Saved hosts" icon={<Bookmark size={14} />} count={hosts.length}>
       {hosts.length === 0 ? (
         <Item label="(none — Save host on connect)" muted />
       ) : (
-        hosts.map((h) => <SavedHostItem key={h.alias} host={h} onActivate={onActivate} />)
+        hosts.map((h) => (
+          <Fragment key={h.alias}>
+            {dragKey && insertBeforeKey === h.alias && <DropLine />}
+            <SavedHostItem
+              host={h}
+              onActivate={onActivate}
+              dragging={dragKey === h.alias}
+              onMouseDown={(e) => onItemMouseDown(e, h.alias)}
+            />
+          </Fragment>
+        ))
       )}
+      {dragKey && insertBeforeKey === null && <DropLine />}
     </Section>
   );
 }
@@ -72,33 +119,37 @@ function SavedHostsSection({
 function SavedHostItem({
   host,
   onActivate,
+  dragging,
+  onMouseDown,
 }: {
   host: SavedHost;
   onActivate: (host: SavedHost) => void;
+  dragging: boolean;
+  onMouseDown: (e: React.MouseEvent) => void;
 }) {
+  const menu: MenuEntry[] = [
+    { id: "connect", label: "Connect / Edit…", onSelect: () => onActivate(host) },
+    { kind: "separator" },
+    { id: "remove", label: "Remove", danger: true, onSelect: () => void removeSavedHost(host.alias) },
+  ];
   return (
     <div
+      data-reorder-key={host.alias}
+      data-reorder-group="saved"
+      onMouseDown={onMouseDown}
       onDoubleClick={() => onActivate(host)}
+      onContextMenu={(e) => openMenu(e, menu)}
       title={`${host.user}@${host.host}:${host.port}${host.key_path ? ` (key: ${host.key_path})` : ""}`}
-      className="group flex cursor-default items-center gap-1 rounded px-2 py-0.5 hover:bg-border"
+      className={clsx(rowClass, dragging && "opacity-50")}
     >
       <Bookmark size={11} className="shrink-0 text-fg-muted" />
       <span className="truncate">{host.alias}</span>
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          void removeSavedHost(host.alias);
-        }}
-        className="ml-auto shrink-0 rounded p-0.5 text-fg-muted opacity-0 hover:bg-border hover:text-danger group-hover:opacity-100"
-        aria-label={`Remove saved host ${host.alias}`}
-        title="Remove"
-      >
-        <X size={11} />
-      </button>
+      <DeleteBtn label={`Remove saved host ${host.alias}`} onClick={() => void removeSavedHost(host.alias)} />
     </div>
   );
 }
+
+// ─────────────────────────── Bookmarks ───────────────────────────
 
 function BookmarksSection({
   onActivate,
@@ -108,63 +159,74 @@ function BookmarksSection({
   onAdd: () => void;
 }) {
   const items = useBookmarks((s) => s.items);
+  const { dragKey, insertBeforeKey, onItemMouseDown } = useReorderable({
+    group: "bookmarks",
+    keys: items.map((b) => b.id),
+    onCommit: (next) => void reorderBookmarks(next),
+  });
   return (
-    <SectionWithAction
+    <Section
+      sectionKey="bookmarks"
       title="Bookmarks"
       icon={<Star size={14} />}
-      action={
-        <button
-          type="button"
-          onClick={onAdd}
-          className="rounded p-0.5 text-fg-muted hover:bg-border hover:text-fg"
-          aria-label="Add bookmark"
-          title="Add active tab to bookmarks"
-        >
-          <Plus size={11} />
-        </button>
-      }
+      count={items.length}
+      action={<AddBtn label="Add active tab to bookmarks" onClick={onAdd} />}
     >
       {items.length === 0 ? (
         <Item label="(none — + to add active tab)" muted />
       ) : (
         items.map((b) => (
-          <BookmarkItem key={b.id} bookmark={b} onActivate={onActivate} />
+          <Fragment key={b.id}>
+            {dragKey && insertBeforeKey === b.id && <DropLine />}
+            <BookmarkItem
+              bookmark={b}
+              onActivate={onActivate}
+              dragging={dragKey === b.id}
+              onMouseDown={(e) => onItemMouseDown(e, b.id)}
+            />
+          </Fragment>
         ))
       )}
-    </SectionWithAction>
+      {dragKey && insertBeforeKey === null && <DropLine />}
+    </Section>
   );
 }
 
 function BookmarkItem({
   bookmark,
   onActivate,
+  dragging,
+  onMouseDown,
 }: {
   bookmark: BookmarkType;
   onActivate: (location: Location) => void;
+  dragging: boolean;
+  onMouseDown: (e: React.MouseEvent) => void;
 }) {
   const sshPrefix = bookmark.location.source.kind === "ssh" ? "ssh:" : "";
+  const menu: MenuEntry[] = [
+    { id: "open", label: "Open", onSelect: () => onActivate(bookmark.location) },
+    { kind: "separator" },
+    { id: "remove", label: "Remove", danger: true, onSelect: () => void removeBookmark(bookmark.id) },
+  ];
   return (
     <div
+      data-reorder-key={bookmark.id}
+      data-reorder-group="bookmarks"
+      onMouseDown={onMouseDown}
       onDoubleClick={() => onActivate(bookmark.location)}
+      onContextMenu={(e) => openMenu(e, menu)}
       title={`${sshPrefix}${bookmark.location.path}`}
-      className="group flex cursor-default items-center gap-1 rounded px-2 py-0.5 hover:bg-border"
+      className={clsx(rowClass, dragging && "opacity-50")}
     >
       <Star size={11} className="shrink-0 text-fg-muted" />
       <span className="truncate">{bookmark.name}</span>
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          void removeBookmark(bookmark.id);
-        }}
-        className="ml-auto shrink-0 rounded p-0.5 text-fg-muted opacity-0 hover:bg-border hover:text-danger group-hover:opacity-100"
-        aria-label="Remove bookmark"
-      >
-        <X size={11} />
-      </button>
+      <DeleteBtn label="Remove bookmark" onClick={() => void removeBookmark(bookmark.id)} />
     </div>
   );
 }
+
+// ─────────────────────────── Host favorites ───────────────────────────
 
 function HostFavoritesSection({
   onActivate,
@@ -174,79 +236,110 @@ function HostFavoritesSection({
   onAdd: () => void;
 }) {
   const items = useHostFavorites((s) => s.items);
-  // 활성 connection 들을 Record 에서 배열로 변환
   const activeRecord = useConnections((s) => s.active);
-  const actives = Object.values(activeRecord);
-  const activeAliases = actives.map((c) => c.alias);
+  const activeAliases = Object.values(activeRecord).map((c) => c.alias);
   const visible = items.filter((f) => activeAliases.includes(f.host_alias));
-  // alias 별 그룹화
   const groups: Record<string, HostFavorite[]> = {};
-  for (const f of visible) {
-    (groups[f.host_alias] ??= []).push(f);
-  }
+  for (const f of visible) (groups[f.host_alias] ??= []).push(f);
   const groupKeys = Object.keys(groups).sort();
 
   return (
-    <SectionWithAction
+    <Section
+      sectionKey="favorites"
       title="Favorites"
       icon={<Heart size={14} />}
-      action={
-        <button
-          type="button"
-          onClick={onAdd}
-          className="rounded p-0.5 text-fg-muted hover:bg-border hover:text-fg"
-          aria-label="Add favorite"
-          title="Add active tab path (SSH only)"
-        >
-          <Plus size={11} />
-        </button>
-      }
+      count={visible.length}
+      action={<AddBtn label="Add active tab path (SSH only)" onClick={onAdd} />}
     >
       {groupKeys.length === 0 ? (
         <Item label="(none — connect to host first)" muted />
       ) : (
         groupKeys.map((alias) => (
-          <div key={alias}>
-            <div className="px-2 text-meta text-fg-muted">{alias}</div>
-            {groups[alias]!.map((f) => (
-              <FavoriteItem key={f.id} fav={f} onActivate={onActivate} />
-            ))}
-          </div>
+          <FavoriteGroup key={alias} alias={alias} favs={groups[alias]!} onActivate={onActivate} />
         ))
       )}
-    </SectionWithAction>
+    </Section>
+  );
+}
+
+function FavoriteGroup({
+  alias,
+  favs,
+  onActivate,
+}: {
+  alias: string;
+  favs: HostFavorite[];
+  onActivate: (favorite: HostFavorite) => void;
+}) {
+  const collapsed = useUI((s) => s.collapsed[`fav:${alias}`]);
+  const toggle = useUI((s) => s.toggleSection);
+  const { dragKey, insertBeforeKey, onItemMouseDown } = useReorderable({
+    group: `fav:${alias}`,
+    keys: favs.map((f) => f.id),
+    onCommit: (next) => void reorderHostFavorites(next),
+  });
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => toggle(`fav:${alias}`)}
+        className="flex w-full items-center gap-0.5 px-2 text-meta text-fg-muted hover:text-fg"
+      >
+        {collapsed ? <ChevronRight size={10} /> : <ChevronDown size={10} />}
+        <span className="truncate">{alias}</span>
+        <span className="ml-1 opacity-70">{favs.length}</span>
+      </button>
+      {!collapsed &&
+        favs.map((f) => (
+          <Fragment key={f.id}>
+            {dragKey && insertBeforeKey === f.id && <DropLine />}
+            <FavoriteItem
+              fav={f}
+              onActivate={onActivate}
+              dragging={dragKey === f.id}
+              onMouseDown={(e) => onItemMouseDown(e, f.id)}
+            />
+          </Fragment>
+        ))}
+      {!collapsed && dragKey && insertBeforeKey === null && <DropLine />}
+    </div>
   );
 }
 
 function FavoriteItem({
   fav,
   onActivate,
+  dragging,
+  onMouseDown,
 }: {
   fav: HostFavorite;
   onActivate: (favorite: HostFavorite) => void;
+  dragging: boolean;
+  onMouseDown: (e: React.MouseEvent) => void;
 }) {
+  const menu: MenuEntry[] = [
+    { id: "open", label: "Open", onSelect: () => onActivate(fav) },
+    { kind: "separator" },
+    { id: "remove", label: "Remove", danger: true, onSelect: () => void removeHostFavorite(fav.id) },
+  ];
   return (
     <div
+      data-reorder-key={fav.id}
+      data-reorder-group={`fav:${fav.host_alias}`}
+      onMouseDown={onMouseDown}
       onDoubleClick={() => onActivate(fav)}
+      onContextMenu={(e) => openMenu(e, menu)}
       title={String(fav.path)}
-      className="group flex cursor-default items-center gap-1 rounded py-0.5 pl-4 pr-2 hover:bg-border"
+      className={clsx(rowClass, "pl-4", dragging && "opacity-50")}
     >
       <Heart size={11} className="shrink-0 text-fg-muted" />
       <span className="truncate">{fav.name}</span>
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          void removeHostFavorite(fav.id);
-        }}
-        className="ml-auto shrink-0 rounded p-0.5 text-fg-muted opacity-0 hover:bg-border hover:text-danger group-hover:opacity-100"
-        aria-label="Remove favorite"
-      >
-        <X size={11} />
-      </button>
+      <DeleteBtn label="Remove favorite" onClick={() => void removeHostFavorite(fav.id)} />
     </div>
   );
 }
+
+// ─────────────────────────── Hosts (read-only) ───────────────────────────
 
 function HostsSection({
   onHostActivate,
@@ -259,20 +352,12 @@ function HostsSection({
   const stateByAlias = useConnections((s) => s.stateByAlias)();
 
   return (
-    <SectionWithAction
+    <Section
+      sectionKey="hosts"
       title="Hosts"
       icon={<Server size={14} />}
-      action={
-        <button
-          type="button"
-          onClick={onAdHocOpen}
-          className="rounded p-0.5 text-fg-muted hover:bg-border hover:text-fg"
-          aria-label="Connect to host…"
-          title="Connect to host…"
-        >
-          <Plus size={11} />
-        </button>
-      }
+      count={hosts.length}
+      action={<AddBtn label="Connect to host…" onClick={onAdHocOpen} />}
     >
       {hosts.length === 0 ? (
         <Item label="(no hosts in ~/.ssh/config)" muted />
@@ -286,7 +371,7 @@ function HostsSection({
           />
         ))
       )}
-    </SectionWithAction>
+    </Section>
   );
 }
 
@@ -299,9 +384,11 @@ function HostItem({
   state: ConnectionState;
   onActivate: () => void;
 }) {
+  const menu: MenuEntry[] = [{ id: "connect", label: "Connect…", onSelect: onActivate }];
   return (
     <div
       onDoubleClick={onActivate}
+      onContextMenu={(e) => openMenu(e, menu)}
       title={`${host.user}@${host.hostname}:${host.port}${host.has_proxy_jump ? " (via jump)" : ""}`}
       className="flex cursor-default items-center gap-1 rounded px-2 py-0.5 hover:bg-border"
     >
@@ -325,40 +412,76 @@ function StateDot({ state }: { state: ConnectionState }) {
   return <span aria-label={label} className={clsx("h-1.5 w-1.5 shrink-0 rounded-full", cls)} />;
 }
 
-function Section({ title, icon, children }: { title: string; icon: ReactNode; children: ReactNode }) {
+// ─────────────────────────── Shared building blocks ───────────────────────────
+
+/** 접기 가능한 섹션 — 헤더 클릭으로 토글, 제목 옆 카운트, 선택적 action 버튼. */
+function Section({
+  sectionKey,
+  title,
+  icon,
+  count,
+  action,
+  children,
+}: {
+  sectionKey: string;
+  title: string;
+  icon: ReactNode;
+  count?: number;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
+  const collapsed = useUI((s) => s.collapsed[sectionKey]);
+  const toggle = useUI((s) => s.toggleSection);
   return (
     <div className="border-b border-border px-2 py-1">
-      <div className="flex items-center gap-1 text-meta text-fg-muted">
-        {icon}
-        <span>{title}</span>
+      <div className="flex items-center justify-between gap-1 text-meta text-fg-muted">
+        <button
+          type="button"
+          onClick={() => toggle(sectionKey)}
+          className="flex min-w-0 flex-1 items-center gap-1 hover:text-fg"
+        >
+          {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+          {icon}
+          <span className="truncate">{title}</span>
+          {count !== undefined && count > 0 && <span className="opacity-70">{count}</span>}
+        </button>
+        {action}
       </div>
-      <div className="mt-1">{children}</div>
+      {!collapsed && <div className="mt-1">{children}</div>}
     </div>
   );
 }
 
-function SectionWithAction({
-  title,
-  icon,
-  action,
-  children,
-}: {
-  title: string;
-  icon: ReactNode;
-  action: ReactNode;
-  children: ReactNode;
-}) {
+/** 삭제(X) 버튼 — hover 시 노출. */
+function DeleteBtn({ label, onClick }: { label: string; onClick: () => void }) {
   return (
-    <div className="border-b border-border px-2 py-1">
-      <div className="flex items-center justify-between gap-1 text-meta text-fg-muted">
-        <div className="flex items-center gap-1">
-          {icon}
-          <span>{title}</span>
-        </div>
-        {action}
-      </div>
-      <div className="mt-1">{children}</div>
-    </div>
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      className="ml-auto shrink-0 rounded p-0.5 text-fg-muted opacity-0 hover:bg-border hover:text-danger group-hover:opacity-100"
+      aria-label={label}
+      title="Remove"
+    >
+      <X size={11} />
+    </button>
+  );
+}
+
+/** 섹션 헤더의 + 추가 버튼. */
+function AddBtn({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded p-0.5 text-fg-muted hover:bg-border hover:text-fg"
+      aria-label={label}
+      title={label}
+    >
+      <Plus size={11} />
+    </button>
   );
 }
 
