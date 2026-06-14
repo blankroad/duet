@@ -12,6 +12,7 @@ pub mod journal_events;
 pub mod keymap;
 pub mod keymap_events;
 pub mod keymap_watcher;
+pub mod preview_stream;
 pub mod retry;
 pub mod saved_hosts;
 pub mod secret_vault;

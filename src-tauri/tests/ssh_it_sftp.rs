@@ -43,7 +43,9 @@ async fn sftp_crud_roundtrip() {
 
     // rename
     let renamed = format!("{base}/hello-renamed.bin");
-    fs.rename(Path::new(&file), Path::new(&renamed)).await.unwrap();
+    fs.rename(Path::new(&file), Path::new(&renamed))
+        .await
+        .unwrap();
     assert!(fs.metadata(Path::new(&file)).await.is_err());
     assert!(fs.metadata(Path::new(&renamed)).await.is_ok());
 }
@@ -72,7 +74,10 @@ async fn sftp_trash_then_restore() {
     // trash → ~/.duet-trash/<batch>/... 로 이동, 원본 사라짐
     let batch = new_batch_id();
     let trash_loc = fs.trash(Path::new(&victim), &batch).await.unwrap();
-    assert!(fs.metadata(Path::new(&victim)).await.is_err(), "원본이 남아있음");
+    assert!(
+        fs.metadata(Path::new(&victim)).await.is_err(),
+        "원본이 남아있음"
+    );
     let trash_count = ssh_common::stdout_str(
         &sess.conn,
         &format!("find '{home}/.duet-trash' -type f | wc -l"),

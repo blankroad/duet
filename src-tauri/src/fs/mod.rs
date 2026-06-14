@@ -53,6 +53,16 @@ pub trait FileSystem: Send + Sync {
         head.truncate(max);
         Ok((head, truncated))
     }
+
+    /// 파일의 `[offset, offset+len)` 바이트 범위 읽기 (스트리밍 미리보기 Range 응답용).
+    /// 파일 끝을 넘으면 가능한 만큼만 반환. 기본 구현은 `read_full` 후 슬라이스
+    /// (비효율) — impl 별 seek 기반 override 권장.
+    async fn read_range(&self, path: &Path, offset: u64, len: usize) -> Result<Vec<u8>, DuetError> {
+        let full = self.read_full(path).await?;
+        let start = (offset as usize).min(full.len());
+        let end = start.saturating_add(len).min(full.len());
+        Ok(full[start..end].to_vec())
+    }
 }
 
 /// reader 에서 최대 `buf.len()` 바이트 채울 때까지 반복 read (짧은 read 대응).

@@ -485,6 +485,26 @@ const PREVIEW_TEXT_CAP: u64 = 256 * 1024;
 /// 이미지 미리보기 최대 크기 (5 MB). 초과 시 `TooLarge` — SSH 왕복/메모리 보호.
 const PREVIEW_IMAGE_CAP: u64 = 5 * 1024 * 1024;
 
+/// 확장자 → 스트리밍 대상(PDF/오디오/비디오)이면 (PreviewKind, MIME). 아니면 None.
+/// 이 종류는 바이트를 IPC 로 싣지 않고 `duet-preview://` 프로토콜로 스트리밍한다.
+fn stream_media(path: &std::path::Path) -> Option<(PreviewKind, &'static str)> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    Some(match ext.as_str() {
+        "pdf" => (PreviewKind::Pdf, "application/pdf"),
+        "mp4" | "m4v" => (PreviewKind::Video, "video/mp4"),
+        "webm" => (PreviewKind::Video, "video/webm"),
+        "mov" => (PreviewKind::Video, "video/quicktime"),
+        "mkv" => (PreviewKind::Video, "video/x-matroska"),
+        "mp3" => (PreviewKind::Audio, "audio/mpeg"),
+        "m4a" | "aac" => (PreviewKind::Audio, "audio/aac"),
+        "wav" => (PreviewKind::Audio, "audio/wav"),
+        "ogg" | "oga" => (PreviewKind::Audio, "audio/ogg"),
+        "opus" => (PreviewKind::Audio, "audio/opus"),
+        "flac" => (PreviewKind::Audio, "audio/flac"),
+        _ => return None,
+    })
+}
+
 /// 확장자 → 이미지 MIME. 이미지가 아니면 None.
 fn image_mime(path: &std::path::Path) -> Option<&'static str> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
@@ -544,6 +564,19 @@ pub async fn fs_read_preview(
     }
     let total_size = meta.size.unwrap_or(0);
 
+    // PDF/오디오/비디오: 바이트를 IPC 로 안 싣고 duet-preview:// 로 스트리밍.
+    // mime 만 채워 프론트가 <video>/<audio>/pdf.js 로 렌더.
+    if let Some((kind, mime)) = stream_media(&location.path) {
+        return Ok(PreviewData {
+            kind,
+            text: None,
+            bytes_base64: None,
+            mime: Some(mime.to_string()),
+            truncated: false,
+            total_size,
+        });
+    }
+
     // 이미지: 부분 렌더 불가 → cap 초과 시 TooLarge, 아니면 전체 읽어 base64.
     if let Some(mime) = image_mime(&location.path) {
         if total_size > PREVIEW_IMAGE_CAP {
@@ -565,7 +598,9 @@ pub async fn fs_read_preview(
         let bytes = fs.read_full(&location.path).await?;
         Ok(decode_text(&bytes, false, total_size))
     } else {
-        let (head, _had_more) = fs.read_head(&location.path, PREVIEW_TEXT_CAP as usize).await?;
+        let (head, _had_more) = fs
+            .read_head(&location.path, PREVIEW_TEXT_CAP as usize)
+            .await?;
         Ok(decode_text(&head, true, total_size))
     }
 }

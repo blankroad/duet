@@ -127,12 +127,7 @@ async fn register(host: &Host, session: SshSession) -> Session {
 
 /// 원격 셸 명령 실행 (픽스처 seed / 검증용). exit !=0 면 panic.
 pub async fn run(conn: &Arc<ActiveConnection>, cmd: &str) -> ExecOutput {
-    let handle = conn
-        .session
-        .as_ref()
-        .expect("no session")
-        .lock()
-        .await;
+    let handle = conn.session.as_ref().expect("no session").lock().await;
     let out = exec(&handle, cmd).await.expect("remote exec failed");
     assert_eq!(
         out.exit_status,
@@ -173,9 +168,7 @@ pub async fn sha256_file(conn: &Arc<ActiveConnection>, path: &str) -> String {
 /// 두 디렉토리의 동일성 비교용.
 pub async fn sha256_tree(conn: &Arc<ActiveConnection>, dir: &str) -> String {
     // 각 파일의 "상대경로  해시" 를 정렬해 합친 뒤 다시 해시.
-    let cmd = format!(
-        "cd -- '{dir}' && find . -type f | sort | xargs -r sha256sum | sha256sum",
-    );
+    let cmd = format!("cd -- '{dir}' && find . -type f | sort | xargs -r sha256sum | sha256sum",);
     let out = stdout_str(conn, &cmd).await;
     out.split_whitespace().next().unwrap_or("").to_string()
 }

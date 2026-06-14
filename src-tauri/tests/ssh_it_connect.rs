@@ -20,7 +20,11 @@ async fn connect_password_captures_peer_ip() {
     // getpeername 이 동작해 host_ip 가 unspecified(0.0.0.0) 가 아니어야 한다.
     match &sess.source {
         duet_lib::types::SourceId::Ssh { host_ip, .. } => {
-            assert_ne!(*host_ip, IpAddr::V4(Ipv4Addr::UNSPECIFIED), "host_ip 미캡처");
+            assert_ne!(
+                *host_ip,
+                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                "host_ip 미캡처"
+            );
         }
         _ => panic!("expected SourceId::Ssh"),
     }

@@ -96,7 +96,10 @@ pub struct ExtractPlan {
     pub conflict: bool,
 }
 
-pub async fn extract_plan(fs: &dyn FileSystem, archive: EntryRef) -> Result<ExtractPlan, DuetError> {
+pub async fn extract_plan(
+    fs: &dyn FileSystem,
+    archive: EntryRef,
+) -> Result<ExtractPlan, DuetError> {
     let format = detect_format(&archive.name)
         .ok_or_else(|| DuetError::Io(format!("unsupported archive: {}", archive.name)))?;
     let archive_path = archive.location.path.join(&archive.name);
@@ -157,7 +160,14 @@ pub async fn extract_execute(
                 .pool
                 .as_ref()
                 .ok_or_else(|| DuetError::Io("OpCtx.pool required for remote extract".into()))?;
-            extract_remote(pool, connection_id, &archive_path, &plan.dest_dir, plan.format).await?
+            extract_remote(
+                pool,
+                connection_id,
+                &archive_path,
+                &plan.dest_dir,
+                plan.format,
+            )
+            .await?
         }
     }
 
@@ -181,11 +191,7 @@ pub async fn extract_execute(
 }
 
 /// 로컬 아카이브 해제 — blocking IO 라 spawn_blocking.
-async fn extract_local(
-    archive: &Path,
-    dest: &Path,
-    fmt: ArchiveFormat,
-) -> Result<(), DuetError> {
+async fn extract_local(archive: &Path, dest: &Path, fmt: ArchiveFormat) -> Result<(), DuetError> {
     let archive = archive.to_path_buf();
     let dest = dest.to_path_buf();
     tokio::task::spawn_blocking(move || extract_local_blocking(&archive, &dest, fmt))
@@ -193,13 +199,17 @@ async fn extract_local(
         .map_err(|e| DuetError::Io(format!("extract task join: {e}")))?
 }
 
-fn extract_local_blocking(archive: &Path, dest: &Path, fmt: ArchiveFormat) -> Result<(), DuetError> {
+fn extract_local_blocking(
+    archive: &Path,
+    dest: &Path,
+    fmt: ArchiveFormat,
+) -> Result<(), DuetError> {
     let file =
         std::fs::File::open(archive).map_err(|e| DuetError::Io(format!("open archive: {e}")))?;
     match fmt {
         ArchiveFormat::Zip => {
-            let mut zip = zip::ZipArchive::new(file)
-                .map_err(|e| DuetError::Io(format!("zip open: {e}")))?;
+            let mut zip =
+                zip::ZipArchive::new(file).map_err(|e| DuetError::Io(format!("zip open: {e}")))?;
             // zip crate 의 extract 는 enclosed_name 으로 zip-slip 방지.
             zip.extract(dest)
                 .map_err(|e| DuetError::Io(format!("zip extract: {e}")))?;
@@ -435,8 +445,13 @@ pub async fn compress_execute(
 
     match &plan.source {
         SourceId::Local => {
-            compress_local(&plan.src_dir.path, &plan.item_names, &plan.dest_path, plan.format)
-                .await?
+            compress_local(
+                &plan.src_dir.path,
+                &plan.item_names,
+                &plan.dest_path,
+                plan.format,
+            )
+            .await?
         }
         SourceId::Ssh { connection_id, .. } => {
             compress_remote(
@@ -541,8 +556,8 @@ fn add_to_zip<W: std::io::Write + std::io::Seek>(
     if meta.is_dir() {
         zip.add_directory(rel_str, *opts)
             .map_err(|e| DuetError::Io(format!("zip add dir {rel_str}: {e}")))?;
-        for entry in
-            std::fs::read_dir(&full).map_err(|e| DuetError::Io(format!("read dir {rel_str}: {e}")))?
+        for entry in std::fs::read_dir(&full)
+            .map_err(|e| DuetError::Io(format!("read dir {rel_str}: {e}")))?
         {
             let entry = entry.map_err(|e| DuetError::Io(format!("dir entry: {e}")))?;
             let child_name = entry.file_name();
@@ -554,9 +569,10 @@ fn add_to_zip<W: std::io::Write + std::io::Seek>(
     } else {
         zip.start_file(rel_str, *opts)
             .map_err(|e| DuetError::Io(format!("zip start {rel_str}: {e}")))?;
-        let mut f =
-            std::fs::File::open(&full).map_err(|e| DuetError::Io(format!("open {rel_str}: {e}")))?;
-        std::io::copy(&mut f, zip).map_err(|e| DuetError::Io(format!("zip write {rel_str}: {e}")))?;
+        let mut f = std::fs::File::open(&full)
+            .map_err(|e| DuetError::Io(format!("open {rel_str}: {e}")))?;
+        std::io::copy(&mut f, zip)
+            .map_err(|e| DuetError::Io(format!("zip write {rel_str}: {e}")))?;
     }
     Ok(())
 }
@@ -655,7 +671,10 @@ mod tests {
         std::fs::create_dir(&dest).unwrap();
         extract_local_blocking(&zip_path, &dest, ArchiveFormat::Zip).unwrap();
         assert_eq!(std::fs::read(dest.join("hello.txt")).unwrap(), b"hi there");
-        assert_eq!(std::fs::read(dest.join("sub/nested.txt")).unwrap(), b"nested");
+        assert_eq!(
+            std::fs::read(dest.join("sub/nested.txt")).unwrap(),
+            b"nested"
+        );
     }
 
     /// tar.gz 압축 → 해제 round-trip — compress_local_blocking + extract 검증.

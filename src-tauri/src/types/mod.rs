@@ -103,6 +103,12 @@ pub enum PreviewKind {
     Binary,
     /// size cap 초과. 본문 없음 (`total_size` 만).
     TooLarge,
+    /// PDF — `mime` 채워짐, 프론트가 `duet-preview://` 로 스트리밍 렌더.
+    Pdf,
+    /// 오디오 — `mime` 채워짐, 스트리밍.
+    Audio,
+    /// 비디오 — `mime` 채워짐, 스트리밍.
+    Video,
 }
 
 /// `fs_read_preview` 응답. 미리보기 패널 렌더용.

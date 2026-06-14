@@ -127,6 +127,20 @@ impl FileSystem for LocalFs {
         Ok((buf, truncated))
     }
 
+    async fn read_range(&self, path: &Path, offset: u64, len: usize) -> Result<Vec<u8>, DuetError> {
+        use tokio::io::AsyncSeekExt;
+        let mut file = tokio::fs::File::open(path).await.map_err(DuetError::from)?;
+        file.seek(std::io::SeekFrom::Start(offset))
+            .await
+            .map_err(DuetError::from)?;
+        let mut buf = vec![0u8; len];
+        let n = crate::fs::read_upto(&mut file, &mut buf)
+            .await
+            .map_err(DuetError::from)?;
+        buf.truncate(n);
+        Ok(buf)
+    }
+
     async fn write_full(&self, path: &Path, bytes: &[u8]) -> Result<(), DuetError> {
         tokio::fs::write(path, bytes).await.map_err(DuetError::from)
     }
@@ -387,7 +401,9 @@ mod tests {
     #[tokio::test]
     async fn read_head_truncates_and_flags() {
         let dir = TempDir::new().unwrap();
-        fs::write(dir.path().join("big"), b"0123456789").await.unwrap();
+        fs::write(dir.path().join("big"), b"0123456789")
+            .await
+            .unwrap();
         let local = LocalFs::new();
         // 앞 4바이트만 + 더 있음.
         let (head, truncated) = local.read_head(&dir.path().join("big"), 4).await.unwrap();
@@ -397,6 +413,22 @@ mod tests {
         let (full, t2) = local.read_head(&dir.path().join("big"), 100).await.unwrap();
         assert_eq!(full, b"0123456789");
         assert!(!t2);
+    }
+
+    #[tokio::test]
+    async fn read_range_seeks_and_clamps() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("f"), b"0123456789")
+            .await
+            .unwrap();
+        let local = LocalFs::new();
+        let p = dir.path().join("f");
+        // 중간 범위.
+        assert_eq!(local.read_range(&p, 2, 3).await.unwrap(), b"234");
+        // 끝을 넘는 len 은 clamp.
+        assert_eq!(local.read_range(&p, 8, 100).await.unwrap(), b"89");
+        // offset 이 EOF 이상이면 빈 결과.
+        assert_eq!(local.read_range(&p, 50, 10).await.unwrap(), b"");
     }
 
     #[tokio::test]

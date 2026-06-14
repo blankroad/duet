@@ -2,7 +2,9 @@
 
 use crate::fs::{FileSystem, LocalFs, SshFs};
 use crate::services::connection_pool::ConnectionPool;
-use crate::types::{ConnectionId, DuetError, EntryKind, EntryRef, Location, SourceId, TrashLocation};
+use crate::types::{
+    ConnectionId, DuetError, EntryKind, EntryRef, Location, SourceId, TrashLocation,
+};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -168,10 +170,7 @@ pub async fn trash_restore(
     let fs = SshFs::new(conn);
     fs.restore_from_trash(&TrashLocation::Remote { trash_path: full }, &original)
         .await?;
-    let parent = original
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or(original);
+    let parent = original.parent().map(Path::to_path_buf).unwrap_or(original);
     Ok(Location {
         source: item.location.source,
         path: parent,
@@ -253,9 +252,9 @@ pub async fn reveal_path(location: Location) -> Result<(), DuetError> {
                 .map_err(|e| DuetError::Io(format!("reveal task join: {e}")))?
                 .map_err(|e| DuetError::Io(format!("reveal failed: {e}")))
         }
-        SourceId::Ssh { .. } => {
-            Err(DuetError::Io("reveal is not supported for remote files".into()))
-        }
+        SourceId::Ssh { .. } => Err(DuetError::Io(
+            "reveal is not supported for remote files".into(),
+        )),
     }
 }
 

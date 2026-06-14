@@ -175,6 +175,13 @@ pub fn run() {
     let keymap_for_setup = keymap.clone();
 
     tauri::Builder::default()
+        // duet-preview:// 스트리밍 프로토콜 (Range 지원, 로컬+SSH) — 미디어/PDF 미리보기.
+        .register_asynchronous_uri_scheme_protocol("duet-preview", |ctx, request, responder| {
+            let app = ctx.app_handle().clone();
+            tauri::async_runtime::spawn(async move {
+                responder.respond(services::preview_stream::handle(app, request).await);
+            });
+        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_os::init())
         .manage(pool)

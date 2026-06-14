@@ -224,6 +224,28 @@ impl FileSystem for SshFs {
         Ok((buf, truncated))
     }
 
+    async fn read_range(&self, path: &Path, offset: u64, len: usize) -> Result<Vec<u8>, DuetError> {
+        use tokio::io::AsyncSeekExt;
+        let sftp = self.open_sftp().await?;
+        let path_str = path
+            .to_str()
+            .ok_or_else(|| DuetError::Io("non-UTF8 path".into()))?;
+        let mut file = sftp
+            .open(path_str.to_string())
+            .await
+            .map_err(|e| map_sftp_error(e, path_str))?;
+        // SeekFrom::Start 는 SFTP 에서 저렴 (offset 지정 read). End 는 비싸므로 회피.
+        file.seek(std::io::SeekFrom::Start(offset))
+            .await
+            .map_err(|e| DuetError::Ssh(format!("sftp seek: {e}")))?;
+        let mut buf = vec![0u8; len];
+        let n = crate::fs::read_upto(&mut file, &mut buf)
+            .await
+            .map_err(|e| DuetError::Ssh(format!("sftp read: {e}")))?;
+        buf.truncate(n);
+        Ok(buf)
+    }
+
     async fn write_full(&self, path: &Path, bytes: &[u8]) -> Result<(), DuetError> {
         use tokio::io::AsyncWriteExt;
         let sftp = self.open_sftp().await?;

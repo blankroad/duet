@@ -23,7 +23,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data: asset:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+      "csp": "default-src 'self'; img-src 'self' data: blob: asset: duet-preview: http://duet-preview.localhost; media-src 'self' duet-preview: http://duet-preview.localhost; object-src 'self' duet-preview: http://duet-preview.localhost; connect-src 'self' duet-preview: http://duet-preview.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self' blob:"
     }
   },
   "bundle": {

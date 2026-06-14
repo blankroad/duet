@@ -106,11 +106,8 @@ async fn stress_many_small_files() {
         .expect("many files copy failed");
     let elapsed = t0.elapsed();
 
-    let copied = ssh_common::stdout_str(
-        &sess.conn,
-        &format!("find '{dst}/many' -type f | wc -l"),
-    )
-    .await;
+    let copied =
+        ssh_common::stdout_str(&sess.conn, &format!("find '{dst}/many' -type f | wc -l")).await;
     assert_eq!(copied, count.to_string(), "복사된 파일 개수 불일치");
 
     let src_tree = ssh_common::sha256_tree(&sess.conn, &format!("{src}/many")).await;
