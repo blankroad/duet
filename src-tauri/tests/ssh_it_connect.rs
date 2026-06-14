@@ -58,10 +58,16 @@ async fn connect_wrong_password_is_auth_failed() {
     }
     let host = ssh_common::Host::from_env();
     // SshSession 은 Debug 가 아니므로 Ok 값을 버려 Result<(), _> 로 변환 후 검사.
-    let res =
-        connection::connect_with_password(&host.host, host.port, &host.user, "definitely-wrong")
-            .await
-            .map(|_| ());
+    let res = connection::connect_with_password(
+        &host.host,
+        host.port,
+        &host.user,
+        "definitely-wrong",
+        true,
+        false,
+    )
+    .await
+    .map(|_| ());
     assert!(
         matches!(res, Err(DuetError::AuthFailed)),
         "expected AuthFailed, got {res:?}"

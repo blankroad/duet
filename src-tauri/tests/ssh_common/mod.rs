@@ -85,9 +85,11 @@ pub struct Session {
 /// `ActiveConnection` 생성은 프로덕션 경로
 /// (`commands/connection.rs::open_and_register`)와 동일한 필드 구성을 미러한다.
 pub async fn connect_password(host: &Host) -> Session {
-    let session = connection::connect_with_password(&host.host, host.port, &host.user, &host.pass)
-        .await
-        .expect("connect_with_password failed — 컨테이너가 떠 있는지 확인 (scripts/ssh-it.sh)");
+    // IT: throwaway 컨테이너의 호스트키를 TOFU 로 수락(learn=true), 변경교체는 안 함.
+    let session =
+        connection::connect_with_password(&host.host, host.port, &host.user, &host.pass, true, false)
+            .await
+            .expect("connect_with_password failed — 컨테이너가 떠 있는지 확인 (scripts/ssh-it.sh)");
     register(host, session).await
 }
 
@@ -112,6 +114,7 @@ async fn register(host: &Host, session: SshSession) -> Session {
         user: host.user.clone(),
         session: Some(tokio::sync::Mutex::new(session.handle)),
         rsync_available: tokio::sync::Mutex::new(None),
+        browse_temp_dirs: tokio::sync::Mutex::new(Vec::new()),
     };
     let pool = ConnectionPool::new();
     pool.insert(active).await;
