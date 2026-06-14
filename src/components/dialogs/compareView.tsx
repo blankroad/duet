@@ -1,6 +1,7 @@
 import { ArrowLeft, ArrowRight, Equal, AlertTriangle, FileWarning } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import type { CompareEntry, CompareStatus, CopyStrategy } from "@/types/bindings";
+import clsx from "clsx";
+import type { ApplyDirection, CompareEntry, CompareStatus, CopyStrategy } from "@/types/bindings";
 import { formatSize, formatTime } from "@/lib/format";
 
 /**
@@ -99,4 +100,83 @@ export function mtimeText(e: CompareEntry): string {
   const r = e.right_mtime_ms;
   const pick = l != null && r != null ? Math.max(l, r) : (l ?? r);
   return formatTime(pick);
+}
+
+// === 적용(apply) 방향 ===
+
+/** 상태별 기본 방향 — 한쪽전용은 그쪽→반대, newer 는 최신쪽 우선, 나머지는 skip. */
+export function defaultDirection(status: CompareStatus): ApplyDirection {
+  switch (status) {
+    case "left_only":
+    case "newer_left":
+      return "to_right";
+    case "right_only":
+    case "newer_right":
+      return "to_left";
+    default: // differ, same, unreadable — 사용자 판단
+      return "skip";
+  }
+}
+
+/** 상태별 허용 방향 — 한쪽전용은 그 방향만, 양쪽존재는 둘 다, unreadable 은 skip 만. */
+export function allowedDirections(status: CompareStatus): ApplyDirection[] {
+  switch (status) {
+    case "left_only":
+      return ["to_right", "skip"];
+    case "right_only":
+      return ["to_left", "skip"];
+    case "unreadable":
+      return ["skip"];
+    default: // same, differ, newer_left, newer_right
+      return ["to_left", "to_right", "skip"];
+  }
+}
+
+/** 이 결정이 '생성'(dst 부재)인가 — 아니면 '덮어쓰기'(양쪽 존재). dry-run 집계용. */
+export function isCreate(status: CompareStatus, dir: ApplyDirection): boolean {
+  if (dir === "to_right") return status === "left_only";
+  if (dir === "to_left") return status === "right_only";
+  return false;
+}
+
+/** 행별 방향 토글 (← · →) — 상태가 허용하는 방향만 활성. 컨트롤드. */
+export function DirectionToggle({
+  status,
+  value,
+  onChange,
+}: {
+  status: CompareStatus;
+  value: ApplyDirection;
+  onChange: (dir: ApplyDirection) => void;
+}) {
+  const allowed = allowedDirections(status);
+  const opt = (dir: ApplyDirection, label: string, title: string) => {
+    const can = allowed.includes(dir);
+    return (
+      <button
+        key={dir}
+        type="button"
+        disabled={!can}
+        onClick={(ev) => {
+          ev.stopPropagation();
+          onChange(dir);
+        }}
+        title={title}
+        className={clsx(
+          "px-1 leading-none",
+          value === dir ? "font-bold text-accent" : "text-fg-muted hover:text-fg",
+          !can && "opacity-20",
+        )}
+      >
+        {label}
+      </button>
+    );
+  };
+  return (
+    <span className="flex items-center justify-end font-mono">
+      {opt("to_left", "←", "오른쪽 → 왼쪽")}
+      {opt("skip", "·", "건너뜀")}
+      {opt("to_right", "→", "왼쪽 → 오른쪽")}
+    </span>
+  );
 }

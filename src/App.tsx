@@ -871,6 +871,18 @@ function App() {
               }
             })();
           }}
+          onApply={(decisions) => {
+            const { left, right } = dialog.plan;
+            void (async () => {
+              const r = await commands.fsApplyCompare(left, right, decisions);
+              if (r.status === "ok") {
+                openDialog({ kind: "progress", title: "Applying…", taskId: r.data });
+              } else {
+                closeDialog();
+                showToast(`Apply failed: ${formatErr(r.error)}`);
+              }
+            })();
+          }}
         />
       )}
       {dialog.kind === "sync-confirm" && (
