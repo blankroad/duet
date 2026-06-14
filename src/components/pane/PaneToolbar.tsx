@@ -12,11 +12,9 @@ import {
   Rows3,
   Eye,
   EyeOff,
-  PanelRight,
 } from "lucide-react";
 import clsx from "clsx";
 import { usePanes, activeTab, type PaneId, type ViewMode } from "@/stores/panes";
-import { useUI } from "@/stores/ui";
 import { useUIDialogs } from "@/stores/ui-dialogs";
 import { useToast } from "@/stores/toast";
 import {
@@ -54,8 +52,6 @@ export function PaneToolbar({
   const showHidden = usePanes((s) => activeTab(s, id).showHidden);
   const setViewMode = usePanes((s) => s.setViewMode);
   const toggleShowHidden = usePanes((s) => s.toggleShowHidden);
-  const previewOpen = useUI((s) => s.previewOpen);
-  const togglePreview = useUI((s) => s.togglePreview);
   const open = useUIDialogs((s) => s.open);
   const showToast = useToast((s) => s.show);
 
@@ -112,9 +108,6 @@ export function PaneToolbar({
         onClick={() => toggleShowHidden(id)}
       >
         {showHidden ? <Eye size={15} /> : <EyeOff size={15} />}
-      </ToolButton>
-      <ToolButton label="Toggle preview (F11)" active={previewOpen} onClick={() => togglePreview()}>
-        <PanelRight size={15} />
       </ToolButton>
     </div>
   );

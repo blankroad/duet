@@ -16,6 +16,7 @@ import { Toast } from "@/components/Toast";
 import { SearchPanel } from "@/components/SearchPanel";
 import { PreviewPane } from "@/components/pane/PreviewPane";
 import { QuickLook } from "@/components/pane/QuickLook";
+import { TopBar } from "@/components/TopBar";
 import { DragGhost } from "@/components/pane/DragGhost";
 import { CommandPalette } from "@/components/CommandPalette";
 import { ContextMenu } from "@/components/ContextMenu";
@@ -654,9 +655,7 @@ function App() {
 
   return (
     <div className="flex h-screen w-screen flex-col bg-base text-fg">
-      <header className="flex h-9 items-center justify-between border-b border-border px-3">
-        <span className="text-title font-medium">duet</span>
-      </header>
+      <TopBar />
       <SearchPanel onPickHit={onPickHit} />
 
       <main className="flex flex-1 min-h-0 gap-1.5 p-1.5">

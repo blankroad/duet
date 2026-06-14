@@ -1,20 +1,16 @@
-import { Settings as SettingsIcon } from "lucide-react";
 import { usePanes, activeTab } from "@/stores/panes";
-import { useUIDialogs } from "@/stores/ui-dialogs";
 import { formatSize } from "@/lib/format";
 
 /**
- * StatusBar — 활성 패널의 항목 통계 + Settings 아이콘.
+ * StatusBar — 활성 패널의 항목 통계 + 소스 라벨.
  *
  * DESIGN.md 매핑:
- * "12 items • 3 selected (4.2 MB)         user@host  ●"
- *
- * 우측 끝 gear 아이콘 → SettingsDialog 열기.
+ * "12 items • 3 selected (4.2 MB)         user@host"
+ * (Settings 는 상단 TopBar 로 이동.)
  */
 export function StatusBar() {
   const activeId = usePanes((s) => s.activePane);
   const tab = usePanes((s) => activeTab(s, activeId));
-  const openDialog = useUIDialogs((s) => s.open);
 
   const sourceLabel =
     tab.location.source.kind === "local"
@@ -33,18 +29,7 @@ export function StatusBar() {
         {totalCount} items
         {selectedCount > 0 && ` • ${selectedCount} selected (${formatSize(selectedSize)})`}
       </span>
-      <div className="flex items-center gap-2">
-        <span>{sourceLabel}</span>
-        <button
-          type="button"
-          onClick={() => openDialog({ kind: "settings" })}
-          className="rounded p-0.5 hover:bg-border"
-          aria-label="Settings"
-          title="Settings"
-        >
-          <SettingsIcon size={12} />
-        </button>
-      </div>
+      <span>{sourceLabel}</span>
     </footer>
   );
 }
