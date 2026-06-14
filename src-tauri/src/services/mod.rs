@@ -2,6 +2,7 @@
 
 pub mod app_launchers;
 pub mod bookmarks;
+pub mod compare_events;
 pub mod connection_events;
 pub mod connection_pool;
 pub mod connection_supervisor;

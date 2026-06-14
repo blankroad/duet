@@ -293,17 +293,77 @@ pub async fn fs_move_execute(
     Ok(task_id)
 }
 
+/// 활성 비교 스캔 토큰 — 새 비교 또는 cancel 시 이전 토큰 cancel (search 와 동일 패턴).
+#[derive(Default)]
+pub struct ActiveCompare {
+    token: tokio::sync::Mutex<Option<tokio_util::sync::CancellationToken>>,
+}
+
+impl ActiveCompare {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self::default())
+    }
+    async fn rotate(&self) -> tokio_util::sync::CancellationToken {
+        let mut guard = self.token.lock().await;
+        if let Some(prev) = guard.take() {
+            prev.cancel();
+        }
+        let new = tokio_util::sync::CancellationToken::new();
+        *guard = Some(new.clone());
+        new
+    }
+    async fn cancel_current(&self) {
+        if let Some(tok) = self.token.lock().await.take() {
+            tok.cancel();
+        }
+    }
+}
+
 /// 두 패널 디렉토리 재귀 비교 (folder diff) — 읽기 전용. cross-source OK.
+/// 대형/원격 트리용: 진행률(CompareProgressEvent) emit + 취소(fs_compare_cancel).
 #[tauri::command]
 #[specta::specta]
 pub async fn fs_compare_dirs(
     left: Location,
     right: Location,
     pool: tauri::State<'_, Arc<ConnectionPool>>,
+    active: tauri::State<'_, Arc<ActiveCompare>>,
+    app: tauri::AppHandle,
 ) -> Result<crate::core::compare::ComparePlan, DuetError> {
+    use crate::services::compare_events::CompareProgressEvent;
     let left_fs = fs_for(&left.source, pool.inner()).await?;
     let right_fs = fs_for(&right.source, pool.inner()).await?;
-    crate::core::compare::compare_dirs(&*left_fs, left, &*right_fs, right).await
+    let cancel = active.inner().rotate().await;
+
+    // 진행률 emit 은 256 항목 단위로 throttle (이벤트 폭주 방지).
+    let last_emit = std::sync::atomic::AtomicU64::new(0);
+    let app_for_emit = app.clone();
+    let on_progress = move |scanned: u64| {
+        let prev = last_emit.load(std::sync::atomic::Ordering::Relaxed);
+        if scanned >= prev + 256 {
+            last_emit.store(scanned, std::sync::atomic::Ordering::Relaxed);
+            let _ = CompareProgressEvent { scanned }.emit(&app_for_emit);
+        }
+    };
+    crate::core::compare::compare_dirs_progress(
+        &*left_fs,
+        left,
+        &*right_fs,
+        right,
+        &cancel,
+        &on_progress,
+    )
+    .await
+}
+
+/// 진행 중인 비교 스캔 취소.
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_compare_cancel(
+    active: tauri::State<'_, Arc<ActiveCompare>>,
+) -> Result<(), DuetError> {
+    active.inner().cancel_current().await;
+    Ok(())
 }
 
 /// 단방향 미러 계획 — 활성 패널 dir(src) → 반대 패널 dir(dst). v1 local↔local 만.

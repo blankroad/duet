@@ -109,13 +109,36 @@ pub struct ComparePlan {
 /// IPC 페이로드 폭주 방지 상한. 초과분은 `truncated=true` 로 알림(조용히 누락 금지).
 const MAX_ENTRIES: usize = 5000;
 
-/// 좌/우 디렉토리를 재귀 비교. 같은 이름이 양쪽 디렉토리면 내부로 재귀하고,
-/// 한쪽에만 있는 디렉토리는 그 디렉토리 하나를 LeftOnly/RightOnly 로(머지 시 통째 복사).
+/// 좌/우 디렉토리를 재귀 비교 (취소·진행률 없음 — 내부 호출/테스트용).
+/// 같은 이름이 양쪽 디렉토리면 내부로 재귀하고, 한쪽에만 있는 디렉토리는 그 디렉토리
+/// 하나를 LeftOnly/RightOnly 로(머지 시 통째 복사).
 pub async fn compare_dirs(
     left_fs: &dyn FileSystem,
     left: Location,
     right_fs: &dyn FileSystem,
     right: Location,
+) -> Result<ComparePlan, DuetError> {
+    compare_dirs_progress(
+        left_fs,
+        left,
+        right_fs,
+        right,
+        &tokio_util::sync::CancellationToken::new(),
+        &|_| {},
+    )
+    .await
+}
+
+/// `compare_dirs` + 취소(CancellationToken)·진행률(`on_progress(scanned)`).
+/// 대형/원격 트리 스캔용 — 명령 레이어가 토큰 등록 + 이벤트 emit 에 사용.
+/// `on_progress` 는 스캔 중 누적 항목 수로 자주 호출되므로 호출측에서 throttle 한다.
+pub async fn compare_dirs_progress(
+    left_fs: &dyn FileSystem,
+    left: Location,
+    right_fs: &dyn FileSystem,
+    right: Location,
+    cancel: &tokio_util::sync::CancellationToken,
+    on_progress: &(dyn Fn(u64) + Send + Sync),
 ) -> Result<ComparePlan, DuetError> {
     if left_fs.metadata(&left.path).await?.kind != EntryKind::Dir
         || right_fs.metadata(&right.path).await?.kind != EntryKind::Dir
@@ -134,6 +157,8 @@ pub async fn compare_dirs(
         "",
         &mut out,
         &mut truncated,
+        cancel,
+        on_progress,
     )
     .await?;
 
@@ -192,6 +217,7 @@ pub(crate) fn classify_files(l: &Entry, r: &Entry) -> CompareStatus {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn compare_into(
     left_fs: &dyn FileSystem,
     lpath: &std::path::Path,
@@ -200,8 +226,13 @@ async fn compare_into(
     rel: &str,
     out: &mut Vec<CompareEntry>,
     truncated: &mut bool,
+    cancel: &tokio_util::sync::CancellationToken,
+    on_progress: &(dyn Fn(u64) + Send + Sync),
 ) -> Result<(), DuetError> {
     use std::collections::BTreeMap;
+    if cancel.is_cancelled() {
+        return Err(DuetError::Cancelled);
+    }
     // 한쪽이라도 나열 실패면 이 서브트리는 안전 비교 불가 — 에러를 삼키지(빈 폴더 위장)
     // 않고 Unreadable 한 줄로 표출 후 재귀/항목생성 중단. merge/prune 은 Unreadable 을
     // 건드리지 않으므로 반대편 통째 복사·삭제 사고가 원천 차단된다.
@@ -245,10 +276,14 @@ async fn compare_into(
     names.dedup();
 
     for name in names {
+        if cancel.is_cancelled() {
+            return Err(DuetError::Cancelled);
+        }
         if out.len() >= MAX_ENTRIES {
             *truncated = true;
             return Ok(());
         }
+        on_progress(out.len() as u64);
         let rel_name = join_rel(rel, name);
         match (left.get(name), right.get(name)) {
             (Some(l), None) => out.push(CompareEntry::one_side(
@@ -274,6 +309,8 @@ async fn compare_into(
                         &rel_name,
                         out,
                         truncated,
+                        cancel,
+                        on_progress,
                     ))
                     .await?;
                 } else if l.kind == EntryKind::File && r.kind == EntryKind::File {
@@ -355,6 +392,42 @@ mod tests {
         let fs = LocalFs::new();
         let r = compare_dirs(&fs, loc(&dir.path().join("f")), &fs, loc(dir.path())).await;
         assert!(r.is_err());
+    }
+
+    #[tokio::test]
+    async fn compare_cancelled_token_aborts() {
+        let dir = TempDir::new().unwrap();
+        let l = dir.path().join("L");
+        let r = dir.path().join("R");
+        std::fs::create_dir_all(&l).unwrap();
+        std::fs::create_dir_all(&r).unwrap();
+        std::fs::write(l.join("a.txt"), b"a").unwrap();
+        let fs = LocalFs::new();
+        let cancel = tokio_util::sync::CancellationToken::new();
+        cancel.cancel(); // 미리 취소
+        let res = compare_dirs_progress(&fs, loc(&l), &fs, loc(&r), &cancel, &|_| {}).await;
+        assert!(matches!(res, Err(DuetError::Cancelled)));
+    }
+
+    #[tokio::test]
+    async fn compare_emits_progress() {
+        let dir = TempDir::new().unwrap();
+        let l = dir.path().join("L");
+        let r = dir.path().join("R");
+        std::fs::create_dir_all(&l).unwrap();
+        std::fs::create_dir_all(&r).unwrap();
+        for n in 0..5 {
+            std::fs::write(l.join(format!("f{n}")), b"x").unwrap();
+        }
+        let fs = LocalFs::new();
+        let count = std::sync::atomic::AtomicU64::new(0);
+        let cancel = tokio_util::sync::CancellationToken::new();
+        compare_dirs_progress(&fs, loc(&l), &fs, loc(&r), &cancel, &|_| {
+            count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        })
+        .await
+        .unwrap();
+        assert!(count.load(std::sync::atomic::Ordering::Relaxed) > 0);
     }
 
     #[test]

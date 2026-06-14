@@ -81,6 +81,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::fs_ops::fs_move_plan,
             commands::fs_ops::fs_move_execute,
             commands::fs_ops::fs_compare_dirs,
+            commands::fs_ops::fs_compare_cancel,
             commands::fs_ops::fs_merge_bidir,
             commands::fs_ops::fs_apply_compare,
             commands::fs_ops::fs_sync_plan,
@@ -119,6 +120,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
         ])
         .events(collect_events![
             services::connection_events::ConnectionStateEvent,
+            services::compare_events::CompareProgressEvent,
             services::fs_events::FsChangedEvent,
             services::journal_events::JournalChangedEvent,
             services::keymap_events::KeymapChangedEvent,
@@ -249,6 +251,7 @@ pub fn run() {
             tauri::async_runtime::spawn(core::archive::reap_local_browse_root());
             let active_search = commands::search::ActiveSearch::new();
             app.manage(active_search);
+            app.manage(commands::fs_ops::ActiveCompare::new());
             Ok(())
         })
         .run(tauri::generate_context!())
