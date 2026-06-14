@@ -135,6 +135,9 @@ async fn reconnect_loop(
                     user: host.user.clone(),
                     session: Some(tokio::sync::Mutex::new(session.handle)),
                     rsync_available: tokio::sync::Mutex::new(None),
+                    // 재연결이면 이전 browse 임시 디렉토리는 host-side 에 orphan 으로
+                    // 남음(세션이 죽어 reap 불가) — 새 연결은 빈 추적으로 시작.
+                    browse_temp_dirs: tokio::sync::Mutex::new(Vec::new()),
                 };
                 pool.insert(new_conn).await;
 

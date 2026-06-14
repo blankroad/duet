@@ -16,7 +16,7 @@ use crate::ssh::remote_exec::exec;
 use crate::types::{ConnectionId, DuetError, EntryKind, EntryRef, Location, SourceId};
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
@@ -322,10 +322,7 @@ pub async fn open_for_browse(
 
     match &archive.location.source {
         SourceId::Local => {
-            let dest = std::env::temp_dir()
-                .join("duet-archive")
-                .join(&token)
-                .join(&stem);
+            let dest = local_browse_root().join(&token).join(&stem);
             tokio::fs::create_dir_all(&dest)
                 .await
                 .map_err(|e| DuetError::Io(format!("create temp dir: {e}")))?;
@@ -355,6 +352,57 @@ pub async fn open_for_browse(
                 path: dest,
             })
         }
+    }
+}
+
+// === Browse 임시폴더 reap (Phase 2) ===
+//
+// browse 임시 디렉토리는 *앱 소유 ephemeral 추출물* 이지 사용자 데이터가 아니므로
+// CLAUDE.md §3(삭제=휴지통) 의 예외다 — journal 안 쓰고 직접 제거. 로컬은 시작 시
+// 전체 정리, 원격은 연결 종료 직전 세션이 살아있을 때 정확한 경로만 reap.
+
+/// 로컬 아카이브 browse 임시 루트 (`<temp>/duet-archive`).
+pub fn local_browse_root() -> PathBuf {
+    std::env::temp_dir().join("duet-archive")
+}
+
+/// 시작 시 호출 — 이전 실행/크래시에서 남은 로컬 browse 임시 디렉토리를 비운다.
+/// best-effort: 없으면 no-op, 실패해도 무시. 단일 인스턴스 운용 가정.
+pub async fn reap_local_browse_root() {
+    let _ = tokio::fs::remove_dir_all(local_browse_root()).await;
+}
+
+/// reap 안전 가드: 경로가 `.../.duet-tmp/browse-<...>` 형태인지 (탈출 방지).
+fn is_safe_browse_root(root: &Path) -> bool {
+    let name_ok = root
+        .file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.starts_with("browse-"));
+    let parent_ok = root
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n == ".duet-tmp");
+    name_ok && parent_ok
+}
+
+/// 연결 종료 직전 호출 — 이 연결로 만든 원격 browse 임시 루트들을 host-side 에서
+/// 제거 (세션이 살아있는 동안 russh exec, §9). best-effort. `.duet-tmp/browse-*`
+/// 형태만 rm 하여 경로 탈출을 막는다. 비의도적 disconnect 면 세션이 죽어 reap 불가
+/// → 해당 host temp 는 orphan 으로 남는다(후속 정리/호스트 tmp 정책에 의존).
+pub async fn reap_remote_browse_dirs(
+    pool: &Arc<ConnectionPool>,
+    connection_id: &ConnectionId,
+    roots: &[PathBuf],
+) {
+    for root in roots {
+        if !is_safe_browse_root(root) {
+            continue;
+        }
+        let Ok(escaped) = shell_escape_path(root) else {
+            continue;
+        };
+        let _ = run_host_command(pool, connection_id, &format!("rm -rf {escaped}")).await;
     }
 }
 
@@ -629,6 +677,26 @@ async fn compress_remote(
 mod tests {
     use super::*;
     use std::io::Write as _;
+
+    #[test]
+    fn is_safe_browse_root_only_matches_duet_tmp_browse() {
+        // 정확히 `.../.duet-tmp/browse-<...>` 만 reap 허용 (rm 경로 탈출 방지).
+        assert!(is_safe_browse_root(Path::new(
+            "/home/u/.duet-tmp/browse-abc123"
+        )));
+        assert!(!is_safe_browse_root(Path::new("/home/u/.duet-tmp/other")));
+        assert!(!is_safe_browse_root(Path::new(
+            "/home/u/important/browse-abc"
+        )));
+        assert!(!is_safe_browse_root(Path::new("/home/u/.duet-tmp")));
+        assert!(!is_safe_browse_root(Path::new("/")));
+    }
+
+    #[test]
+    fn local_browse_root_is_under_temp() {
+        assert!(local_browse_root().ends_with("duet-archive"));
+        assert!(local_browse_root().starts_with(std::env::temp_dir()));
+    }
 
     #[test]
     fn detect_format_by_extension() {

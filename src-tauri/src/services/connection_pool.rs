@@ -7,6 +7,7 @@ use crate::ssh::connection::AcceptAllHandler;
 use crate::types::{ConnectionId, DuetError, SourceId};
 use std::collections::HashMap;
 use std::net::IpAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -28,6 +29,9 @@ pub struct ActiveConnection {
     /// `None` = 미확인, `Some(true/false)` = 확인됨.
     /// MVP-3 same-host copy 의 첫 호출 때 detect 후 채움. 연결 재시작 시 reset.
     pub rsync_available: tokio::sync::Mutex<Option<bool>>,
+    /// 이 연결로 만든 아카이브 browse 임시 루트(`~/.duet-tmp/browse-<token>`) 들.
+    /// 연결 종료(`connection_close`) 시 host-side reap 대상 (Phase 2). 재연결 시 reset.
+    pub browse_temp_dirs: tokio::sync::Mutex<Vec<PathBuf>>,
 }
 
 /// Debug 수동 구현 — session 내용은 절대 출력하지 않음 (CLAUDE.md §5, 자격증명 보호).
@@ -40,6 +44,7 @@ impl std::fmt::Debug for ActiveConnection {
             .field("user", &self.user)
             .field("session", &"<russh::Handle>")
             .field("rsync_available", &"<cached>")
+            .field("browse_temp_dirs", &"<tracked>")
             .finish()
     }
 }
@@ -54,6 +59,16 @@ impl ActiveConnection {
             host_ip: self.host_ip,
             user: self.user.clone(),
         }
+    }
+
+    /// 아카이브 browse 임시 루트를 추적에 추가 (연결 종료 시 reap).
+    pub async fn track_browse_dir(&self, root: PathBuf) {
+        self.browse_temp_dirs.lock().await.push(root);
+    }
+
+    /// 추적된 browse 임시 루트들을 비우고 반환 (종료 시 reap 용).
+    pub async fn take_browse_dirs(&self) -> Vec<PathBuf> {
+        std::mem::take(&mut *self.browse_temp_dirs.lock().await)
     }
 }
 
@@ -108,7 +123,21 @@ mod tests {
             user: "test".to_string(),
             session: None, // 단위 테스트 전용 — 실제 SSH 서버 불필요
             rsync_available: tokio::sync::Mutex::new(None),
+            browse_temp_dirs: tokio::sync::Mutex::new(Vec::new()),
         }
+    }
+
+    #[tokio::test]
+    async fn track_and_take_browse_dirs() {
+        let conn = mk_conn("a", "10.0.0.1");
+        conn.track_browse_dir(PathBuf::from("/home/u/.duet-tmp/browse-1"))
+            .await;
+        conn.track_browse_dir(PathBuf::from("/home/u/.duet-tmp/browse-2"))
+            .await;
+        let taken = conn.take_browse_dirs().await;
+        assert_eq!(taken.len(), 2);
+        // 두 번째 take 는 비어 있어야 함.
+        assert!(conn.take_browse_dirs().await.is_empty());
     }
 
     #[tokio::test]

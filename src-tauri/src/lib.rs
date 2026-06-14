@@ -230,6 +230,8 @@ pub fn run() {
             }
             let task_queue = services::task_queue::TaskQueue::new(app.handle().clone());
             app.manage(task_queue);
+            // 이전 실행/크래시에서 남은 로컬 아카이브 browse 임시 디렉토리 정리 (Phase 2).
+            tauri::async_runtime::spawn(core::archive::reap_local_browse_root());
             let active_search = commands::search::ActiveSearch::new();
             app.manage(active_search);
             Ok(())

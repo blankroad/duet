@@ -400,7 +400,15 @@ pub async fn fs_archive_open_for_browse(
     archive: EntryRef,
     pool: tauri::State<'_, Arc<ConnectionPool>>,
 ) -> Result<Location, DuetError> {
-    archive::open_for_browse(archive, pool.inner()).await
+    let loc = archive::open_for_browse(archive, pool.inner()).await?;
+    // 원격 browse 면 임시 루트(`~/.duet-tmp/browse-<token>` = stem 의 부모)를 연결에
+    // 등록 — 연결 종료 시 reap (Phase 2). 등록 실패는 비치명적(reap 만 누락).
+    if let SourceId::Ssh { connection_id, .. } = &loc.source {
+        if let (Ok(conn), Some(root)) = (pool.get(connection_id).await, loc.path.parent()) {
+            conn.track_browse_dir(root.to_path_buf()).await;
+        }
+    }
+    Ok(loc)
 }
 
 #[tauri::command]

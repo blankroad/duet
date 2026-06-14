@@ -115,6 +115,7 @@ async fn open_and_register(
         user: host.user.clone(),
         session: Some(tokio::sync::Mutex::new(session.handle)),
         rsync_available: tokio::sync::Mutex::new(None),
+        browse_temp_dirs: tokio::sync::Mutex::new(Vec::new()),
     })
     .await;
 
@@ -210,6 +211,14 @@ pub async fn connection_close(
     app: tauri::AppHandle,
 ) -> Result<(), DuetError> {
     let snapshot = pool.get(&id).await.ok();
+    // 종료 전, 이 연결로 만든 원격 아카이브 browse 임시 디렉토리를 host-side 에서
+    // reap (세션이 살아있는 동안). best-effort — 이후 disconnect/remove 는 그대로 진행.
+    if let Some(conn) = snapshot.as_ref() {
+        let roots = conn.take_browse_dirs().await;
+        if !roots.is_empty() {
+            crate::core::archive::reap_remote_browse_dirs(pool.inner(), &id, &roots).await;
+        }
+    }
     if let Some(conn) = snapshot.as_ref() {
         if let Some(session_mutex) = conn.session.as_ref() {
             let handle = session_mutex.lock().await;
