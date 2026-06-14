@@ -28,7 +28,7 @@ import { usePanes, type PaneId, type SortKey, type ViewMode } from "@/stores/pan
 import { useUIDialogs } from "@/stores/ui-dialogs";
 import { useToast } from "@/stores/toast";
 import { useConnections } from "@/stores/connections";
-import { addBookmark } from "@/stores/bookmarks";
+import { bookmarkLocation } from "@/lib/bookmarkActions";
 import { addHostFavorite } from "@/stores/hostFavorites";
 import { childLocation } from "@/lib/entryDnd";
 import { triggerCopy, triggerMove, triggerRename, triggerMkdir, triggerDelete, triggerExtract, triggerCompress } from "@/lib/fileActions";
@@ -129,7 +129,7 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
     sep(),
     { id: "rename", label: "Rename", icon: <Pencil size={ICON} />, shortcut: "F2", disabled: multi, onSelect: () => triggerRename(open, showToast) },
     { id: "mkdir", label: "New folder", icon: <FolderPlus size={ICON} />, shortcut: "F7", onSelect: () => triggerMkdir(open) },
-    { id: "bookmark", label: "Add to bookmarks", icon: <Star size={ICON} />, onSelect: () => void addBookmark(entry.name, child) },
+    { id: "bookmark", label: "Add to bookmarks", icon: <Star size={ICON} />, onSelect: () => void bookmarkLocation(child, entry.name) },
   );
 
   if (alias) {
@@ -203,7 +203,7 @@ export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
     },
     { id: "hidden", label: "Toggle hidden files", icon: <Eye size={ICON} />, shortcut: "Ctrl+H", onSelect: () => p.toggleShowHidden(paneId) },
     sep(),
-    { id: "bookmark", label: "Add this folder to bookmarks", icon: <Star size={ICON} />, onSelect: () => void addBookmark(folderName(location), location) },
+    { id: "bookmark", label: "Add this folder to bookmarks", icon: <Star size={ICON} />, onSelect: () => void bookmarkLocation(location, folderName(location)) },
   ];
 
   if (alias) {

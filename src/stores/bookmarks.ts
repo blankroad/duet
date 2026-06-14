@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { commands } from "@/types/bindings";
 import type { Bookmark, Location } from "@/types/bindings";
+import { useHostFavorites, addHostFavorite } from "@/stores/hostFavorites";
+import { useToast } from "@/stores/toast";
 
 interface State {
   items: Bookmark[];
@@ -14,7 +16,33 @@ export const useBookmarks = create<State>((set) => ({
 
 export async function bootstrapBookmarks(): Promise<void> {
   const r = await commands.bookmarksList();
-  if (r.status === "ok") useBookmarks.getState().setAll(r.data);
+  if (r.status !== "ok") return;
+  useBookmarks.getState().setAll(r.data);
+  await migrateSshBookmarks(r.data);
+}
+
+/**
+ * 레거시 SSH 북마크(ephemeral connection_id 박힘 — 재접속 시 깨짐)를 호스트
+ * 즐겨찾기로 1회 이전. connection_id `"{alias}:{uuid}"` 에서 alias 추출.
+ * 멱등: 같은 (alias, path) 즐겨찾기가 이미 있으면 건너뜀.
+ */
+async function migrateSshBookmarks(items: Bookmark[]): Promise<void> {
+  const sshBms = items.filter((b) => b.location.source.kind === "ssh");
+  if (sshBms.length === 0) return;
+  let moved = 0;
+  for (const b of sshBms) {
+    if (b.location.source.kind !== "ssh") continue;
+    const alias = b.location.source.connection_id.split(":")[0] ?? "";
+    const path = String(b.location.path);
+    if (!alias) continue;
+    const exists = useHostFavorites
+      .getState()
+      .items.some((f) => f.host_alias === alias && String(f.path) === path);
+    if (!exists) await addHostFavorite(alias, b.name, path);
+    await removeBookmark(b.id);
+    moved += 1;
+  }
+  if (moved > 0) useToast.getState().show(`Moved ${moved} SSH bookmark(s) to host favorites`);
 }
 
 export async function addBookmark(

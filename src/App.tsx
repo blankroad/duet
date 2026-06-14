@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useState, useRef } from "react";
 import { Pane } from "@/components/pane/Pane";
 import { Sidebar } from "@/components/Sidebar";
 import { StatusBar } from "@/components/StatusBar";
@@ -35,6 +35,7 @@ import { useUIDialogs } from "@/stores/ui-dialogs";
 import { useToast } from "@/stores/toast";
 import { bootstrapSavedHosts } from "@/stores/savedHosts";
 import { bootstrapBookmarks, addBookmark, removeBookmark, findBookmarkId } from "@/stores/bookmarks";
+import { bookmarkLocation } from "@/lib/bookmarkActions";
 import { bootstrapHostFavorites, addHostFavorite } from "@/stores/hostFavorites";
 import { bootstrapUserAliases } from "@/stores/userAliases";
 import { useDynamicCommands } from "@/lib/dynamicCommands";
@@ -384,6 +385,10 @@ function App() {
       toggleBookmark: () => {
         const id = usePanes.getState().activePane;
         const tab = activeTab(usePanes.getState(), id);
+        if (tab.location.source.kind === "ssh") {
+          void bookmarkLocation(tab.location, folderName(tab.location));
+          return;
+        }
         const existing = findBookmarkId(tab.location);
         if (existing) void removeBookmark(existing);
         else void addBookmark(folderName(tab.location), tab.location);
@@ -490,22 +495,37 @@ function App() {
     [navigateTo],
   );
 
-  const onFavoriteActivate = useCallback(
-    (fav: HostFavorite) => {
-      const activeRecord = useConnections.getState().active;
-      const conn = Object.values(activeRecord).find((c) => c.alias === fav.host_alias);
-      if (!conn) {
-        showToast(`Connect to ${fav.host_alias} first`);
+  // 새 연결 다이얼로그 — 호스트 더블클릭/즐겨찾기 자동접속 시 alias 가 들어옴.
+  const [dialogAlias, setDialogAlias] = useState<string | null>(null);
+  // 연결 성공 후 이동할 (alias, path) — 호스트-인식 북마크/즐겨찾기 클릭이 세팅.
+  const pendingNav = useRef<{ alias: string; path: string } | null>(null);
+
+  /**
+   * 호스트 폴더로 이동 — 이미 연결돼 있으면 바로, 아니면 연결 다이얼로그를 띄우고
+   * 성공 시 그 경로로 이동(onConnected 가 pendingNav 처리). 호스트-인식 북마크의 핵심.
+   */
+  const connectAndNavigate = useCallback(
+    (hostAlias: string, path: string) => {
+      const conn = Object.values(useConnections.getState().active).find(
+        (c) => c.alias === hostAlias,
+      );
+      const id = usePanes.getState().activePane;
+      if (conn) {
+        void navigateTo(id, {
+          source: { kind: "ssh", connection_id: conn.id, host_ip: conn.host_ip, user: conn.user },
+          path,
+        });
         return;
       }
-      const id = usePanes.getState().activePane;
-      const location: Location = {
-        source: { kind: "ssh", connection_id: conn.id, host_ip: conn.host_ip, user: conn.user },
-        path: fav.path,
-      };
-      void navigateTo(id, location);
+      pendingNav.current = { alias: hostAlias, path };
+      setDialogAlias(hostAlias);
     },
-    [navigateTo, showToast],
+    [navigateTo],
+  );
+
+  const onFavoriteActivate = useCallback(
+    (fav: HostFavorite) => connectAndNavigate(fav.host_alias, String(fav.path)),
+    [connectAndNavigate],
   );
 
   const onAliasExecute = useCallback(
@@ -527,12 +547,10 @@ function App() {
     [navigateTo, showToast],
   );
 
-  /** 활성 탭 위치를 북마크에 추가 (prompt 없이 폴더명 자동). 이미 있으면 무시. */
+  /** 활성 탭 위치를 북마크 — SSH 면 호스트 즐겨찾기로(재접속 안전), 로컬이면 북마크. */
   const onAddBookmark = useCallback(() => {
-    const id = usePanes.getState().activePane;
-    const tab = activeTab(usePanes.getState(), id);
-    if (findBookmarkId(tab.location)) return;
-    void addBookmark(folderName(tab.location), tab.location);
+    const tab = activeTab(usePanes.getState(), usePanes.getState().activePane);
+    void bookmarkLocation(tab.location, folderName(tab.location));
   }, []);
 
 
@@ -556,8 +574,6 @@ function App() {
     if (name) void addHostFavorite(conn.alias, name, path);
   }, [showToast]);
 
-  // 새 연결 다이얼로그 — 호스트 더블클릭 시 alias 가 들어옴, 닫으면 null.
-  const [dialogAlias, setDialogAlias] = useState<string | null>(null);
   // ad-hoc connect 다이얼로그 (Sidebar + 버튼 또는 saved host 더블클릭)
   const [adHocOpen, setAdHocOpen] = useState(false);
   const [adHocPrefill, setAdHocPrefill] = useState<
@@ -602,10 +618,14 @@ function App() {
         user: dto.user,
       };
       const alias = dto.alias;
-      // 초기 경로 후보 우선순위: SFTP canonicalize(".") → "~" → "/"
+      // 호스트-인식 북마크/즐겨찾기로 접속한 경우 그 경로를 먼저 시도.
+      const pending = pendingNav.current;
+      pendingNav.current = null;
+      const candidates: string[] = [];
+      if (pending && pending.alias === alias) candidates.push(pending.path);
+      // 초기 경로 후보: 북마크 경로 → SFTP canonicalize(".") → "~" → "/"
       // 첫번째 성공한 listDirectory 가 패널에 적용됨.
       const homeRes = await commands.sshHomeDirectory(dto.id);
-      const candidates: string[] = [];
       if (homeRes.status === "ok") candidates.push(homeRes.data);
       else showToast(`ssh_home_directory failed: ${formatErr(homeRes.error)}`);
       candidates.push("~", "/");
@@ -645,8 +665,8 @@ function App() {
       await navigate("left", home);
       await navigate("right", home);
       void bootstrapSavedHosts();
-      void bootstrapBookmarks();
-      void bootstrapHostFavorites();
+      // 즐겨찾기 먼저 로드 → 북마크 마이그레이션이 중복을 정확히 걸러냄.
+      void bootstrapHostFavorites().then(() => bootstrapBookmarks());
       void bootstrapUserAliases();
     })();
     // navigate가 deps에 들어가면 무한 루프 — 마운트 1회만

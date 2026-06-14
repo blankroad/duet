@@ -8,6 +8,7 @@ import {
   sameBookmarkLocation,
 } from "@/stores/bookmarks";
 import { folderName } from "@/lib/entryMenu";
+import { bookmarkLocation } from "@/lib/bookmarkActions";
 
 interface PathBarProps {
   location: Location;
@@ -47,6 +48,10 @@ export function PathBar({ location, archive, canBack, canForward, onBack, onForw
   );
   const bookmarked = bookmarkId !== null;
   const toggleBookmark = () => {
+    if (location.source.kind === "ssh") {
+      void bookmarkLocation(location, folderName(location));
+      return;
+    }
     if (bookmarkId) void removeBookmark(bookmarkId);
     else void addBookmark(folderName(location), location);
   };
