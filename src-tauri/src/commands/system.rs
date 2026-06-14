@@ -383,11 +383,26 @@ fn list_volumes() -> Vec<Volume> {
     Vec::new() // 후속: GetLogicalDrives (platform/ 에서)
 }
 
-/// 마운트된 볼륨 목록 (읽기 전용). eject 는 후속(별도 승인).
+/// 마운트된 볼륨 목록 (읽기 전용). eject 는 `eject_volume`.
 #[tauri::command]
 #[specta::specta]
 pub async fn volumes() -> Result<Vec<Volume>, DuetError> {
     tokio::task::spawn_blocking(list_volumes)
         .await
         .map_err(|e| DuetError::Io(format!("volumes task join: {e}")))
+}
+
+/// 마운트된 볼륨을 eject (언마운트). macOS 만 지원, 그 외 `NotSupported`.
+///
+/// 실제 프로세스 spawn 은 `platform/` 레이어. 비가역 시스템 op 이므로
+/// `open_path`/`reveal_path` 처럼 journal 안 씀 — 안전장치는 frontend 확인.
+#[tauri::command]
+#[specta::specta]
+pub async fn eject_volume(path: PathBuf) -> Result<(), DuetError> {
+    if path.as_os_str().is_empty() {
+        return Err(DuetError::Io("eject: empty path".into()));
+    }
+    tokio::task::spawn_blocking(move || crate::platform::eject_volume(&path))
+        .await
+        .map_err(|e| DuetError::Io(format!("eject task join: {e}")))?
 }

@@ -71,6 +71,7 @@ export function Sidebar({
   onAddBookmark,
   onAddFavorite,
   onTrashActivate,
+  onEject,
 }: {
   onHostActivate: (alias: string) => void;
   onAdHocOpen: () => void;
@@ -83,6 +84,8 @@ export function Sidebar({
   onAddFavorite: () => void;
   /** 패널을 그 소스의 휴지통으로 이동 (삭제 항목 보기/복구). */
   onTrashActivate: (pane?: PaneId) => void;
+  /** 볼륨 eject (확인 다이얼로그 오픈). */
+  onEject: (volume: Volume) => void;
 }) {
   const open = useUI((s) => s.sidebarOpen);
   if (!open) return null;
@@ -90,7 +93,7 @@ export function Sidebar({
   return (
     <aside className="flex w-48 min-h-0 flex-col overflow-y-auto border-r border-border bg-subtle text-base">
       <PlacesSection onOpenLocation={onOpenLocation} onTrashActivate={onTrashActivate} />
-      <VolumesSection onOpenLocation={onOpenLocation} />
+      <VolumesSection onOpenLocation={onOpenLocation} onEject={onEject} />
       <HostsSection onHostActivate={onHostActivate} onAdHocOpen={onAdHocOpen} />
       <SavedHostsSection onActivate={onSavedActivate} />
       <BookmarksSection onOpen={onOpenLocation} onAdd={onAddBookmark} />
@@ -229,8 +232,10 @@ function TrashItem({ onTrashActivate }: { onTrashActivate: (pane?: PaneId) => vo
 
 function VolumesSection({
   onOpenLocation,
+  onEject,
 }: {
   onOpenLocation: (location: Location, pane: PaneId) => void;
+  onEject: (volume: Volume) => void;
 }) {
   const volumes = usePlaces((s) => s.volumes);
   // 사이드바가 열릴 때마다 재스캔 — 마운트/언마운트 반영.
@@ -258,7 +263,9 @@ function VolumesSection({
       {volumes.length === 0 ? (
         <Item label="(no mounted volumes)" muted />
       ) : (
-        volumes.map((v) => <VolumeItem key={String(v.path)} volume={v} onOpenLocation={onOpenLocation} />)
+        volumes.map((v) => (
+          <VolumeItem key={String(v.path)} volume={v} onOpenLocation={onOpenLocation} onEject={onEject} />
+        ))
       )}
     </Section>
   );
@@ -267,15 +274,19 @@ function VolumesSection({
 function VolumeItem({
   volume,
   onOpenLocation,
+  onEject,
 }: {
   volume: Volume;
   onOpenLocation: (location: Location, pane: PaneId) => void;
+  onEject: (volume: Volume) => void;
 }) {
   const path = String(volume.path);
   const menu: MenuEntry[] = [
     { id: "open", label: "Open", onSelect: () => onOpenLocation(localLocation(path), usePanes.getState().activePane) },
     { id: "open-other", label: "Open in other pane", onSelect: () => onOpenLocation(localLocation(path), otherPane()) },
     { id: "copy-path", label: "Copy path", onSelect: () => copyText(path) },
+    { kind: "separator" },
+    { id: "eject", label: "Eject", danger: true, onSelect: () => onEject(volume) },
   ];
   return (
     <button

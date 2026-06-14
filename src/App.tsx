@@ -40,7 +40,7 @@ import { bookmarkLocation } from "@/lib/bookmarkActions";
 import { bootstrapHostFavorites, addHostFavorite } from "@/stores/hostFavorites";
 import { bootstrapUserAliases } from "@/stores/userAliases";
 import { bootstrapAppLaunchers, setAppArgs } from "@/stores/appLaunchers";
-import { bootstrapPlaces } from "@/stores/places";
+import { bootstrapPlaces, refreshVolumes } from "@/stores/places";
 import { recordRecent } from "@/stores/recents";
 import { useDynamicCommands } from "@/lib/dynamicCommands";
 import { useConnections } from "@/stores/connections";
@@ -58,7 +58,7 @@ import { useTaskEvents } from "@/hooks/useTaskEvents";
 import { formatErr } from "@/lib/error";
 import { formatSize } from "@/lib/format";
 import { commands } from "@/types/bindings";
-import type { CompressFormat, ConnectionDto, CopyStrategy, DuetError, Entry, HostFavorite, Location, SearchHit, UserAlias } from "@/types/bindings";
+import type { CompressFormat, ConnectionDto, CopyStrategy, DuetError, Entry, HostFavorite, Location, SearchHit, UserAlias, Volume } from "@/types/bindings";
 
 /**
  * App 루트.
@@ -475,6 +475,25 @@ function App() {
     else showToast(`Delete failed: ${formatErr(r.error)}`);
   }, [dialog, closeDialog, refreshAffected, showToast]);
 
+  /** 볼륨 우클릭 "Eject" → 확인 다이얼로그 오픈. */
+  const onEject = useCallback(
+    (volume: Volume) => openDialog({ kind: "eject-confirm", volume }),
+    [openDialog],
+  );
+
+  const onEjectConfirm = useCallback(async () => {
+    if (dialog.kind !== "eject-confirm") return;
+    const { name, path } = dialog.volume;
+    closeDialog();
+    const r = await commands.ejectVolume(String(path));
+    if (r.status === "ok") {
+      showToast(`Ejected ${name}`);
+      void refreshVolumes();
+    } else {
+      showToast(`Eject failed: ${formatErr(r.error)}`);
+    }
+  }, [dialog, closeDialog, showToast]);
+
   const onCopyConfirm = useCallback(async () => {
     if (dialog.kind !== "copy-confirm") return;
     const plan = dialog.plan;
@@ -698,6 +717,7 @@ function App() {
           onAddBookmark={onAddBookmark}
           onAddFavorite={onAddFavorite}
           onTrashActivate={onTrashActivate}
+          onEject={onEject}
         />
         <Pane id="left" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} onBack={onBack} onForward={onForward} onUp={onUp} onEntryContextMenu={onEntryContextMenu} onEmptyContextMenu={onEmptyContextMenu} />
         <Pane id="right" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} onBack={onBack} onForward={onForward} onUp={onUp} onEntryContextMenu={onEntryContextMenu} onEmptyContextMenu={onEmptyContextMenu} />
@@ -761,6 +781,16 @@ function App() {
           ctaTone="neutral"
           onCancel={closeDialog}
           onConfirm={onDeleteConfirm}
+        />
+      )}
+      {dialog.kind === "eject-confirm" && (
+        <ConfirmDialog
+          title={`Eject “${dialog.volume.name}”?`}
+          body="The volume will be unmounted and safe to disconnect."
+          ctaLabel="Eject"
+          ctaTone="neutral"
+          onCancel={closeDialog}
+          onConfirm={onEjectConfirm}
         />
       )}
       {dialog.kind === "delete-danger" && (
