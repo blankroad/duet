@@ -34,6 +34,7 @@ export interface BuiltinDeps {
   toggleHidden: () => void;
   toggleSidebar: () => void;
   togglePreview: () => void;
+  quickLook: () => void;
   viewDetails: () => void;
   viewGrid: () => void;
   viewTiles: () => void;
@@ -68,6 +69,7 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
     { id: "view.toggleHidden", label: "Toggle hidden files", category: "View", defaultKey: "Ctrl+H", action: deps.toggleHidden },
     { id: "view.toggleSidebar", label: "Toggle sidebar", category: "View", defaultKey: "Ctrl+B", action: deps.toggleSidebar },
     { id: "view.togglePreview", label: "Toggle preview", category: "View", defaultKey: "F11", action: deps.togglePreview },
+    { id: "view.quickLook", label: "Quick Look (large preview)", category: "View", action: deps.quickLook },
     { id: "view.details", label: "View: Details", category: "View", action: deps.viewDetails },
     { id: "view.grid", label: "View: Grid", category: "View", action: deps.viewGrid },
     { id: "view.tiles", label: "View: Tiles", category: "View", action: deps.viewTiles },

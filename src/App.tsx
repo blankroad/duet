@@ -15,6 +15,7 @@ import { SettingsDialog } from "@/components/SettingsDialog";
 import { Toast } from "@/components/Toast";
 import { SearchPanel } from "@/components/SearchPanel";
 import { PreviewPane } from "@/components/pane/PreviewPane";
+import { QuickLook } from "@/components/pane/QuickLook";
 import { DragGhost } from "@/components/pane/DragGhost";
 import { CommandPalette } from "@/components/CommandPalette";
 import { ContextMenu } from "@/components/ContextMenu";
@@ -229,6 +230,11 @@ function App() {
     [onActivate],
   );
 
+  /** Space — Quick Look 대형 미리보기 토글 (Finder 관례). */
+  const onQuickLook = useCallback(() => {
+    useUI.getState().toggleQuickLook();
+  }, []);
+
   /** 우클릭한 디렉토리를 반대 패널에서 열기. */
   const onOpenInOtherPane = useCallback(
     (srcId: PaneId, entry: Entry) => {
@@ -297,7 +303,7 @@ function App() {
     [navigate],
   );
 
-  useKeyboardNav(onKeyboardActivate, onUp);
+  useKeyboardNav(onKeyboardActivate, onUp, onQuickLook);
   useGlobalShortcuts();
   useSshHosts();
   useConnectionEvents();
@@ -339,6 +345,7 @@ function App() {
   const toggleSidebar = useUI((s) => s.toggleSidebar);
   const togglePreview = useUI((s) => s.togglePreview);
   const previewOpen = useUI((s) => s.previewOpen);
+  const quickLookOpen = useUI((s) => s.quickLookOpen);
 
   useEffect(() => {
     const builtins = buildBuiltins({
@@ -364,6 +371,7 @@ function App() {
       toggleHidden: () => usePanes.getState().toggleShowHidden(usePanes.getState().activePane),
       toggleSidebar: () => toggleSidebar(),
       togglePreview: () => togglePreview(),
+      quickLook: () => useUI.getState().toggleQuickLook(),
       viewDetails: () => usePanes.getState().setViewMode(usePanes.getState().activePane, "details"),
       viewGrid: () => usePanes.getState().setViewMode(usePanes.getState().activePane, "grid"),
       viewTiles: () => usePanes.getState().setViewMode(usePanes.getState().activePane, "tiles"),
@@ -767,6 +775,7 @@ function App() {
         />
       )}
       {dialog.kind === "settings" && <SettingsDialog onClose={closeDialog} />}
+      {quickLookOpen && <QuickLook />}
       <Toast />
       <CommandPalette />
       <ContextMenu />

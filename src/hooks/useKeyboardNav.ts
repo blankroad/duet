@@ -12,6 +12,7 @@ import type { PaneId } from "@/stores/panes";
 export function useKeyboardNav(
   onActivate: (paneId: PaneId) => void,
   onUp: (paneId: PaneId) => void,
+  onQuickLook: (paneId: PaneId) => void,
 ) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -66,10 +67,15 @@ export function useKeyboardNav(
           break;
         case " ":
           e.preventDefault();
-          if (tab.cursorIndex >= 0) {
-            // displayed 기준 인덱싱(정렬/필터/".." 반영). ".." 는 선택 불가.
-            const entry = computeDisplayed(tab)[tab.cursorIndex];
-            if (entry && !isParentEntry(entry)) state.toggleSelected(id, entry.name);
+          // Finder 관례: Space = Quick Look, Ctrl/Cmd+Space = 선택 토글.
+          if (e.ctrlKey || e.metaKey) {
+            if (tab.cursorIndex >= 0) {
+              // displayed 기준 인덱싱(정렬/필터/".." 반영). ".." 는 선택 불가.
+              const entry = computeDisplayed(tab)[tab.cursorIndex];
+              if (entry && !isParentEntry(entry)) state.toggleSelected(id, entry.name);
+            }
+          } else {
+            onQuickLook(id);
           }
           break;
       }
@@ -77,5 +83,5 @@ export function useKeyboardNav(
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [onActivate, onUp]);
+  }, [onActivate, onUp, onQuickLook]);
 }

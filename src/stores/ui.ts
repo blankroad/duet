@@ -31,6 +31,10 @@ interface UIState {
   /** 미리보기 패널 표시 여부 (F11 토글). */
   previewOpen: boolean;
   togglePreview: () => void;
+  /** Quick Look 대형 오버레이 표시 여부 (Space 토글, 파인더 관례). */
+  quickLookOpen: boolean;
+  toggleQuickLook: () => void;
+  closeQuickLook: () => void;
   /** 사이드바 섹션/그룹 접힘 상태 (key → collapsed). 영속. */
   collapsed: Record<string, boolean>;
   toggleSection: (key: string) => void;
@@ -41,6 +45,9 @@ export const useUI = create<UIState>((set) => ({
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   previewOpen: false,
   togglePreview: () => set((s) => ({ previewOpen: !s.previewOpen })),
+  quickLookOpen: false,
+  toggleQuickLook: () => set((s) => ({ quickLookOpen: !s.quickLookOpen })),
+  closeQuickLook: () => set({ quickLookOpen: false }),
   collapsed: loadCollapsed(),
   toggleSection: (key) =>
     set((s) => {
