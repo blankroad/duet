@@ -30,7 +30,7 @@ const ROW_HEIGHT = 28;
 /**
  * 가상 스크롤 파일 리스트 + 정렬 가능 컬럼 헤더.
  * 헤더 클릭 시 onSortClick — 같은 key 재클릭은 order toggle (store).
- * 빈 영역 드래그 = 마키 선택, 행 드래그 = 패널↔패널 DnD (이동 기본 / Ctrl=복사).
+ * 빈 영역 드래그 = 마키 선택, 행 드래그 = 패널↔패널 DnD (복사 기본 / Ctrl=이동).
  */
 export function EntryList({
   id,

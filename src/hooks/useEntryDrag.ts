@@ -11,7 +11,8 @@ import { useToast } from "@/stores/toast";
 
 /**
  * 항목 행/셀의 포인터 기반 드래그 — 임계값을 넘으면 드래그 시작, mouseup 위치의
- * 패널/폴더로 드롭. 이동 기본 / Ctrl=복사, 항상 확인 다이얼로그 경유.
+ * 패널/폴더로 드롭. 복사 기본 / Ctrl=이동, 항상 확인 다이얼로그 경유.
+ * (드래그로 원본이 사라지는 사고 방지 — 이동은 Ctrl 명시적으로만.)
  *
  * HTML5 DnD 대신 포인터 이벤트만 사용 — Tauri dragDropEnabled(OS 드롭)와 충돌 없음,
  * SSH 소스 항목도 동일하게 동작. 드래그가 발생하면 뒤따르는 click(커서 이동) 은 억제.
@@ -74,7 +75,7 @@ export function useEntryDrag(id: PaneId) {
         const dst = d.folder ? childLocation(dstLoc, d.folder) : dstLoc;
         if (sameLocation(source, dst)) return;
         if (targets.some((t) => sameLocation(childLocation(t.location, t.name), dst))) return;
-        void planTransferTo(targets, dst, ev.ctrlKey ? "copy" : "move", open, showToast);
+        void planTransferTo(targets, dst, ev.ctrlKey ? "move" : "copy", open, showToast);
       };
 
       window.addEventListener("mousemove", onMove);
