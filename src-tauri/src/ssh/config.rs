@@ -7,9 +7,10 @@
 //!
 //! `ssh2-config` 0.4 는 `ProxyJump` 를 `UnsupportedField` 로 취급하므로
 //! `HostParams` 에 직접 필드가 없다. `ALLOW_UNSUPPORTED_FIELDS` 플래그로 파싱하면
-//! `host.params.unsupported_fields["ProxyJump"]` 에 raw 문자열로 보관된다.
-//! `query()` 는 unsupported_fields 를 merge 하지 않으므로, 호스트 고유 값만 읽는다
-//! (wildcard `Host *` ProxyJump 전파는 현재 지원 안 함 — Task 5 시 재검토).
+//! `host.params.unsupported_fields["proxyjump"]` (소문자 정규화 키) 에 raw
+//! 문자열로 보관된다. 쉼표/공백 구분 체인(`a,b,c`)을 그대로 `proxy_jump` Vec 으로
+//! 파싱하며, 연결 단계(`connection.rs`)에서 N-hop 으로 순차 터널링한다.
+//! (wildcard `Host *` ProxyJump 전파는 현재 지원 안 함.)
 
 use crate::types::DuetError;
 use std::path::{Path, PathBuf};
@@ -97,12 +98,13 @@ pub fn load_ssh_hosts_from(path: &Path) -> Result<Vec<SshHostEntry>, DuetError> 
         let identity_files = params.identity_file.clone().unwrap_or_default();
 
         // ProxyJump: unsupported_fields 에서 직접 읽음.
-        // query() 가 unsupported_fields 를 merge 하지 않으므로 host.params 에서 읽어야 함.
+        // ssh2-config 0.4 는 키를 소문자로 정규화하므로 "proxyjump" 로 조회한다
+        // (이전엔 "ProxyJump" 로 읽어 항상 빈 값이라 config 의 ProxyJump 가 무시됐다).
         // ProxyJump 값은 "host1,host2" 또는 "host1 host2" 형식 가능.
         let proxy_jump = host
             .params
             .unsupported_fields
-            .get("ProxyJump")
+            .get("proxyjump")
             .map(|args| {
                 args.iter()
                     .flat_map(|s| s.split([',', ' ']))
@@ -177,5 +179,19 @@ mod tests {
         assert_eq!(hosts.len(), 1);
         // current_user 가 채워져야 함 (테스트 환경의 $USER/$USERNAME 또는 fallback "root")
         assert!(!hosts[0].user.is_empty());
+    }
+
+    #[test]
+    fn parses_multi_hop_proxy_jump_comma_and_space() {
+        let f = write_config("Host t\n  Hostname t.example.com\n  ProxyJump b1,b2,b3\n");
+        let hosts = load_ssh_hosts_from(f.path()).unwrap();
+        let t = hosts.iter().find(|h| h.alias == "t").unwrap();
+        assert_eq!(t.proxy_jump, vec!["b1", "b2", "b3"]);
+
+        // 공백 구분도 동일하게 체인으로.
+        let f2 = write_config("Host t2\n  Hostname t2.example.com\n  ProxyJump b1 b2\n");
+        let hosts2 = load_ssh_hosts_from(f2.path()).unwrap();
+        let t2 = hosts2.iter().find(|h| h.alias == "t2").unwrap();
+        assert_eq!(t2.proxy_jump, vec!["b1", "b2"]);
     }
 }

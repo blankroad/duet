@@ -11,11 +11,12 @@
 //!
 //! 시스템 `ssh -J` 명령을 호출하지 않는다. russh 의 `channel_open_direct_tcpip`
 //! 으로 jump host 위에 TCP forwarding 채널을 열고, 그 `ChannelStream` 위에
-//! 새 SSH 핸드셰이크를 수행 (nested session). MVP-1 은 1-hop 만 지원;
-//! 다중 hop 은 후속 단계에서 재귀 확장.
+//! 새 SSH 핸드셰이크를 수행 (nested session). N-hop 체인 지원 — `ProxyJump`
+//! 의 `a,b,c` 를 순서대로 통과하며 각 hop 의 handle 위에 다음 hop 을 터널한다.
 //!
 //! Jump session 의 `Handle` 은 nested 세션이 살아있는 동안 drop 되면 안 됨
-//! (채널이 끊김). `SshSession::jump_sessions` 에 보관해서 같이 drop 되도록 유지.
+//! (채널이 끊김). `SshSession::_jump_sessions` 에 보관해서 같이 drop 되도록 유지하되,
+//! 안쪽(마지막 jump)이 먼저 닫히도록 역순으로 저장한다 (`connect_via_jump` 참조).
 
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::Path;
@@ -360,79 +361,114 @@ async fn connect_direct(host: &SshHostEntry) -> Result<SshSession, DuetError> {
     })
 }
 
-/// ProxyJump (1-hop) 통한 nested 연결.
+/// ProxyJump (N-hop) 통한 nested 연결.
 ///
-/// 1. jump host 에 직접 연결 (`connect_direct`).
-/// 2. jump session 위에서 `channel_open_direct_tcpip(target.hostname, target.port, ...)`.
-/// 3. 그 채널을 `into_stream()` 으로 AsyncRead+AsyncWrite 로 변환.
-/// 4. 그 스트림 위에 새 SSH 핸드셰이크 (nested) + target 자격증명으로 인증.
+/// `target.proxy_jump = [j0, j1, …, j_{k-1}]` 체인을 순서대로 통과:
+/// 1. j0 에 직접 연결 (`connect_direct`).
+/// 2. 각 다음 hop 은 *직전* hop 의 handle 위에서 `channel_open_direct_tcpip`
+///    → `into_stream()` → nested 핸드셰이크 + 그 hop 자격증명으로 인증.
+/// 3. 마지막 jump 의 handle 위에서 target 으로 같은 방식 — target 자격증명 인증.
 ///
-/// jump session 의 `Handle` 은 nested 세션이 살아있는 동안 유지되어야 하므로
-/// 결과 `SshSession::_jump_sessions` 에 보관한다 (drop 가드).
+/// 모든 alias 를 먼저 resolve 해 미지의 alias 는 네트워크 호출 전에 fail-fast.
+/// 중간 hop 은 키/agent 인증만 (비밀번호 fallback 은 target 단계만, §5).
 ///
-/// 다중 hop (`proxy_jump.len() > 1`) 은 현재 미지원 — 명시적으로 에러 반환.
+/// **Drop 순서:** target `handle` 이 먼저 drop 된 뒤 jump handle 들이
+/// *안쪽(마지막 jump)→바깥쪽(j0, TCP)* 순으로 닫혀야 한다 (안쪽 채널이 바깥
+/// 채널 위에 얹혀 있으므로). `Vec` 는 index 0 부터 drop 되므로 jump handle 을
+/// 역순(마지막 jump 가 index 0)으로 저장한다.
 async fn connect_via_jump(
     target: &SshHostEntry,
     all_hosts: &[SshHostEntry],
 ) -> Result<SshSession, DuetError> {
-    if target.proxy_jump.len() > 1 {
-        return Err(DuetError::ConnectionFailed(format!(
-            "multi-hop ProxyJump (len={}) not yet supported",
-            target.proxy_jump.len()
-        )));
+    // 1. 모든 jump alias 를 ssh config 에서 resolve (네트워크 전 fail-fast).
+    let mut jumps: Vec<&SshHostEntry> = Vec::with_capacity(target.proxy_jump.len());
+    for alias in &target.proxy_jump {
+        let h = all_hosts
+            .iter()
+            .find(|h| &h.alias == alias)
+            .ok_or_else(|| {
+                DuetError::ConnectionFailed(format!(
+                    "ProxyJump alias '{alias}' not found in ssh config"
+                ))
+            })?;
+        jumps.push(h);
     }
-    let jump_alias = &target.proxy_jump[0];
-    let jump_host = all_hosts
-        .iter()
-        .find(|h| &h.alias == jump_alias)
-        .ok_or_else(|| {
-            DuetError::ConnectionFailed(format!(
-                "ProxyJump alias '{jump_alias}' not found in ssh config"
-            ))
-        })?;
+    debug_assert!(!jumps.is_empty(), "connect() 가 비어있지 않음을 보장");
 
-    // 1. Jump host 직접 연결.
-    let jump_session = connect_direct(jump_host).await?;
-
-    // 2. Jump 위에서 target 으로 direct-tcpip 채널 open.
-    //    originator 는 관습적으로 127.0.0.1:0 — 서버는 보통 무시.
-    let channel = jump_session
-        .handle
-        .channel_open_direct_tcpip(
-            target.hostname.clone(),
-            u32::from(target.port),
-            "127.0.0.1",
-            0,
+    // 2. 첫 jump 는 직접 연결. 이후 jump 들은 직전 handle 위에 터널.
+    //    jump_handles[i] 의 인증은 jumps[i] 자신의 자격증명.
+    let mut jump_handles: Vec<Handle<AcceptAllHandler>> =
+        vec![connect_direct(jumps[0]).await?.handle];
+    for i in 1..jumps.len() {
+        let next = jumps[i];
+        let stream = open_tunnel(
+            jump_handles.last().expect("non-empty"),
+            &jumps[i - 1].alias,
+            &next.hostname,
+            next.port,
         )
-        .await
-        .map_err(|e| {
-            DuetError::ConnectionFailed(format!(
-                "channel_open_direct_tcpip via {} → {}:{}: {e}",
-                jump_host.alias, target.hostname, target.port
-            ))
-        })?;
+        .await?;
+        let mut handle = nested_handshake(stream, &jumps[i - 1].alias).await?;
+        auth_orchestrated_on_handle(&mut handle, next).await?;
+        jump_handles.push(handle);
+    }
 
-    // 3. 채널 → AsyncRead+AsyncWrite 스트림.
-    let stream = channel.into_stream();
-
-    // 4. host_ip 는 nested 라 peer_addr 불가 — 로컬 DNS 로 best-effort resolve.
-    //    이 IP 는 jump 의 관점이 아닌 클라이언트 관점이므로 부정확할 수 있음.
-    //    같은-호스트 판정은 host_ip + connection_id 조합으로 하므로 0.0.0.0 도 동작.
+    // 3. 마지막 jump 위에서 target 으로 터널 + nested 핸드셰이크 + target 인증.
+    let last_alias = &jumps[jumps.len() - 1].alias;
+    let stream = open_tunnel(
+        jump_handles.last().expect("non-empty"),
+        last_alias,
+        &target.hostname,
+        target.port,
+    )
+    .await?;
+    // host_ip 는 nested 라 peer_addr 불가 — 로컬 DNS best-effort (0.0.0.0 도 동작).
     let host_ip = resolve_target_ip(&target.hostname).await;
-
-    // 5. Nested 핸드셰이크 + target 자격증명으로 인증.
-    let mut handle = handshake_on_stream(stream).await.map_err(|e| match e {
-        DuetError::ConnectionFailed(msg) => {
-            DuetError::ConnectionFailed(format!("nested ssh via {}: {msg}", jump_host.alias))
-        }
-        other => other,
-    })?;
+    let mut handle = nested_handshake(stream, last_alias).await?;
     auth_orchestrated_on_handle(&mut handle, target).await?;
 
+    // Drop 가드: 안쪽 jump 가 먼저 닫히도록 역순 저장 (위 doc 참조).
+    jump_handles.reverse();
     Ok(SshSession {
         handle,
         host_ip,
-        _jump_sessions: vec![jump_session.handle],
+        _jump_sessions: jump_handles,
+    })
+}
+
+/// 직전 hop 의 handle 위에서 다음 목적지로 direct-tcpip 채널을 열어 스트림 반환.
+/// originator 는 관습적으로 127.0.0.1:0 (서버가 보통 무시). 구체 타입을 명시하지
+/// 않고 `impl Trait` 로 반환 — `handshake_on_stream` 의 제네릭 경계와 동일.
+async fn open_tunnel(
+    via_handle: &Handle<AcceptAllHandler>,
+    via_alias: &str,
+    dst_host: &str,
+    dst_port: u16,
+) -> Result<impl AsyncRead + AsyncWrite + Unpin + Send + 'static, DuetError> {
+    let channel = via_handle
+        .channel_open_direct_tcpip(dst_host.to_string(), u32::from(dst_port), "127.0.0.1", 0)
+        .await
+        .map_err(|e| {
+            DuetError::ConnectionFailed(format!(
+                "channel_open_direct_tcpip via {via_alias} → {dst_host}:{dst_port}: {e}"
+            ))
+        })?;
+    Ok(channel.into_stream())
+}
+
+/// nested 스트림 위 SSH 핸드셰이크 — 에러에 경유 jump alias 를 덧붙인다.
+async fn nested_handshake<S>(
+    stream: S,
+    via_alias: &str,
+) -> Result<Handle<AcceptAllHandler>, DuetError>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    handshake_on_stream(stream).await.map_err(|e| match e {
+        DuetError::ConnectionFailed(msg) => {
+            DuetError::ConnectionFailed(format!("nested ssh via {via_alias}: {msg}"))
+        }
+        other => other,
     })
 }
 
@@ -545,31 +581,45 @@ mod tests {
         }
     }
 
-    /// ProxyJump 가 다중 hop 이면 즉시 ConnectionFailed (현재 미지원).
+    /// 다중 hop 체인에서 *중간* alias 가 없으면, 카운트로 fail 하지 않고 해당
+    /// alias 를 resolve 하다 fail-fast (네트워크 호출 전, 체인 전체를 순회한다는 증거).
     #[tokio::test]
-    async fn connect_via_jump_multi_hop_unsupported() {
+    async fn connect_via_jump_resolves_whole_chain() {
         use crate::ssh::config::SshHostEntry;
         use crate::types::DuetError;
 
+        let b1 = SshHostEntry {
+            alias: "b1".into(),
+            hostname: "b1.example.com".into(),
+            port: 22,
+            user: "u".into(),
+            identity_files: vec![],
+            proxy_jump: vec![],
+        };
         let target = SshHostEntry {
             alias: "target".into(),
             hostname: "target.example.com".into(),
             port: 22,
             user: "u".into(),
             identity_files: vec![],
+            // b1 은 존재하지만 b2 는 목록에 없음 — 체인 끝까지 resolve 해야 발견.
             proxy_jump: vec!["b1".into(), "b2".into()],
         };
-        let all = vec![target.clone()];
+        let all = vec![target.clone(), b1];
 
         match super::connect(&target, &all).await {
             Err(DuetError::ConnectionFailed(msg)) => {
                 assert!(
-                    msg.contains("multi-hop"),
-                    "expected 'multi-hop' in error, got: {msg}"
+                    msg.contains("b2"),
+                    "expected unknown intermediate alias 'b2' in error, got: {msg}"
+                );
+                assert!(
+                    !msg.contains("multi-hop"),
+                    "should no longer reject multi-hop by count, got: {msg}"
                 );
             }
-            Err(other) => panic!("expected ConnectionFailed for multi-hop, got: {other:?}"),
-            Ok(_) => panic!("expected ConnectionFailed for multi-hop, got Ok"),
+            Err(other) => panic!("expected ConnectionFailed, got: {other:?}"),
+            Ok(_) => panic!("expected ConnectionFailed, got Ok"),
         }
     }
 
