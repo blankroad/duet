@@ -130,6 +130,38 @@ describe("panes — sort/hidden via active tab", () => {
   });
 });
 
+describe("panes — '..' parent row", () => {
+  beforeEach(reset);
+
+  it("prepends '..' at non-root, not at root", () => {
+    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/foo" }, [mk("a"), mk("b")]);
+    const out = selectDisplayedEntries("left", usePanes.getState());
+    expect(out.map((e) => e.name)).toEqual(["..", "a", "b"]);
+
+    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/" }, [mk("a")]);
+    expect(selectDisplayedEntries("left", usePanes.getState()).map((e) => e.name)).toEqual(["a"]);
+  });
+
+  it("'..' stays first even when sorted desc", () => {
+    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/foo" }, [mk("a"), mk("z")]);
+    usePanes.getState().setSort("left", "name", "desc");
+    const out = selectDisplayedEntries("left", usePanes.getState());
+    expect(out.map((e) => e.name)).toEqual(["..", "z", "a"]);
+  });
+
+  it("no '..' while filtering", () => {
+    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/foo" }, [mk("apple"), mk("banana")]);
+    usePanes.getState().setFilter("left", "an");
+    const out = selectDisplayedEntries("left", usePanes.getState());
+    expect(out.map((e) => e.name)).toEqual(["banana"]);
+  });
+
+  it("shows '..' in an empty non-root folder", () => {
+    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/foo" }, []);
+    expect(selectDisplayedEntries("left", usePanes.getState()).map((e) => e.name)).toEqual([".."]);
+  });
+});
+
 describe("panes — cursor & selection (legacy)", () => {
   beforeEach(reset);
 

@@ -1,8 +1,9 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useRef } from "react";
+import { FolderUp } from "lucide-react";
 import clsx from "clsx";
 import type { Entry } from "@/types/bindings";
-import { gridColumns, type PaneId } from "@/stores/panes";
+import { gridColumns, isParentEntry, type PaneId } from "@/stores/panes";
 import { formatSize, formatTime } from "@/lib/format";
 import { EntryIcon } from "@/lib/fileIcon";
 import { useMarquee } from "@/hooks/useMarquee";
@@ -94,7 +95,9 @@ export function EntryGrid({
       const el = parentRef.current;
       if (!el) return [];
       const c = mode === "grid" ? Math.max(1, colsRef.current) : 1;
-      return cellsInRect(rect, c, el.clientWidth / c, rowHeight, entries.length);
+      return cellsInRect(rect, c, el.clientWidth / c, rowHeight, entries.length).filter(
+        (i) => !isParentEntry(entries[i]!),
+      );
     },
   });
 
@@ -181,6 +184,25 @@ interface CellProps {
 }
 
 function GridCell({ entry, isCursor, isSelected, highlight, onMouseDown, onContextMenu, onClick, onDoubleClick }: CellProps) {
+  if (isParentEntry(entry)) {
+    return (
+      <div
+        data-entry={entry.name}
+        onMouseDown={onMouseDown}
+        onContextMenu={onContextMenu}
+        onClick={onClick}
+        onDoubleClick={onDoubleClick}
+        title="Parent folder"
+        className={clsx(
+          "m-1 flex flex-col items-center justify-center gap-1 rounded-panel border border-transparent p-2 cursor-default hover:bg-subtle",
+          isCursor && "border-accent",
+        )}
+      >
+        <FolderUp size={32} className="text-fg-muted" />
+        <span className="font-mono text-center text-meta text-fg-muted">..</span>
+      </div>
+    );
+  }
   return (
     <div
       data-entry={entry.name}
@@ -211,6 +233,25 @@ function GridCell({ entry, isCursor, isSelected, highlight, onMouseDown, onConte
 }
 
 function TileRow({ entry, isCursor, isSelected, highlight, onMouseDown, onContextMenu, onClick, onDoubleClick }: CellProps) {
+  if (isParentEntry(entry)) {
+    return (
+      <div
+        data-entry={entry.name}
+        onMouseDown={onMouseDown}
+        onContextMenu={onContextMenu}
+        onClick={onClick}
+        onDoubleClick={onDoubleClick}
+        title="Parent folder"
+        className={clsx(
+          "flex h-12 items-center gap-3 px-3 cursor-default hover:bg-subtle",
+          isCursor ? "border-l-2 border-l-accent pl-[10px]" : "border-l-2 border-l-transparent",
+        )}
+      >
+        <FolderUp size={24} className="text-fg-muted" />
+        <span className="font-mono text-fg-muted">..</span>
+      </div>
+    );
+  }
   return (
     <div
       data-entry={entry.name}

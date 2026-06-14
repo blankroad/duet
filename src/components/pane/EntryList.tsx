@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import clsx from "clsx";
 import type { Entry } from "@/types/bindings";
-import { type PaneId, type SortKey, type SortOrder } from "@/stores/panes";
+import { isParentEntry, type PaneId, type SortKey, type SortOrder } from "@/stores/panes";
 import { useMarquee } from "@/hooks/useMarquee";
 import { useEntryDrag } from "@/hooks/useEntryDrag";
 import { useDragState } from "@/stores/dragState";
@@ -63,7 +63,10 @@ export function EntryList({
     id,
     scrollRef: parentRef,
     entries,
-    hitTest: (rect) => rowsInRect(rect.y1, rect.y2, ROW_HEIGHT, entries.length),
+    hitTest: (rect) =>
+      rowsInRect(rect.y1, rect.y2, ROW_HEIGHT, entries.length).filter(
+        (i) => !isParentEntry(entries[i]!),
+      ),
   });
 
   useEffect(() => {
@@ -99,12 +102,13 @@ export function EntryList({
           {virtualizer.getVirtualItems().map((vi) => {
             const entry = entries[vi.index];
             if (entry === undefined) return null;
-            const isDir = entry.kind === "dir";
+            // ".." 부모 행은 드롭 대상/드래그 소스에서 제외.
+            const isDropFolder = entry.kind === "dir" && !isParentEntry(entry);
             return (
               <div
                 key={vi.key}
                 data-entry={entry.name}
-                data-drop-folder={isDir ? entry.name : undefined}
+                data-drop-folder={isDropFolder ? entry.name : undefined}
                 onMouseDown={(e) => onEntryMouseDown(e, entry)}
                 onContextMenu={(e) => onEntryContextMenu(e, entry, vi.index)}
                 className={clsx(dragActive && overFolder === entry.name && "ring-2 ring-inset ring-accent")}

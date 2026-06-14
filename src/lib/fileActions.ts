@@ -1,6 +1,6 @@
 import { commands } from "@/types/bindings";
 import type { DeleteMode, EntryRef, Location } from "@/types/bindings";
-import { usePanes, activeTab, type PaneId } from "@/stores/panes";
+import { usePanes, activeTab, computeDisplayed, isParentEntry, PARENT_NAME, type PaneId } from "@/stores/panes";
 import type { DialogState } from "@/stores/ui-dialogs";
 import { formatErr } from "@/lib/error";
 
@@ -27,13 +27,15 @@ export function resolveActiveTargets(): ActiveCtx {
   const active = state.activePane;
   const opposite: PaneId = active === "left" ? "right" : "left";
   const tab = activeTab(state, active);
-  const cursorEntry = tab.entries[tab.cursorIndex];
-  const names =
+  // cursorIndex 는 displayed(정렬/필터/".." 포함) 기준 — raw entries 인덱싱 금지.
+  const cursorEntry = computeDisplayed(tab)[tab.cursorIndex];
+  const names = (
     tab.selected.size > 0
       ? Array.from(tab.selected)
-      : cursorEntry
+      : cursorEntry && !isParentEntry(cursorEntry)
         ? [cursorEntry.name]
-        : [];
+        : []
+  ).filter((n) => n !== PARENT_NAME); // ".." 는 작업 대상에서 제외
   const targets: EntryRef[] = names.map((name) => ({ location: tab.location, name }));
   return { active, opposite, tab, targets };
 }

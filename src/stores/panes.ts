@@ -351,6 +351,24 @@ export function selectDisplayedEntries(id: PaneId, state: PanesState): Entry[] {
   return computeDisplayed(t);
 }
 
+/** 최상단 부모 이동 행의 sentinel 이름. */
+export const PARENT_NAME = "..";
+
+/** 합성 ".." 항목 (실제 listing 엔 절대 없는 이름이라 sentinel 안전). */
+const PARENT_ENTRY: Entry = {
+  name: PARENT_NAME,
+  kind: "dir",
+  size: null,
+  modified_ms: null,
+  permissions: null,
+  hidden: false,
+};
+
+/** entry 가 합성 ".." 부모 행인지. 작업/선택 대상에서 제외하는 가드용. */
+export function isParentEntry(e: Entry): boolean {
+  return e.name === PARENT_NAME;
+}
+
 export function computeDisplayed(t: TabState): Entry[] {
   let arr = t.entries;
   if (t.filter.length > 0) {
@@ -360,7 +378,13 @@ export function computeDisplayed(t: TabState): Entry[] {
   if (!t.showHidden) {
     arr = arr.filter((e) => !e.hidden);
   }
-  return sortEntries(arr, t.sortKey, t.sortOrder);
+  const sorted = sortEntries(arr, t.sortKey, t.sortOrder);
+  // 루트가 아니고 필터가 없을 때만 최상단에 ".." (부모/아카이브 나가기) 행.
+  // 정렬과 무관하게 항상 맨 위 고정. 빈 폴더에서도 돌아갈 수 있게 표시.
+  if (t.location.path !== "/" && t.location.path.length > 0 && t.filter.length === 0) {
+    return [PARENT_ENTRY, ...sorted];
+  }
+  return sorted;
 }
 
 function sortEntries(entries: Entry[], key: SortKey, order: SortOrder): Entry[] {

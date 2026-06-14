@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { usePanes, activeTab, type PaneId } from "@/stores/panes";
+import { usePanes, activeTab, isParentEntry, type PaneId } from "@/stores/panes";
 import type { Entry } from "@/types/bindings";
 import { exceedsThreshold } from "@/lib/marquee";
 import { useDragState } from "@/stores/dragState";
@@ -24,6 +24,7 @@ export function useEntryDrag(id: PaneId) {
   return useCallback(
     (e: React.MouseEvent, entry: Entry) => {
       if (e.button !== 0) return;
+      if (isParentEntry(entry)) return; // ".." 행은 드래그 소스 아님
       const sx = e.clientX;
       const sy = e.clientY;
       const tab = activeTab(usePanes.getState(), id);

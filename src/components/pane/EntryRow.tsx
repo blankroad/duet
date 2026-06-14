@@ -1,6 +1,8 @@
+import { FolderUp } from "lucide-react";
 import type { Entry } from "@/types/bindings";
 import { formatSize, formatTime } from "@/lib/format";
 import { EntryIcon } from "@/lib/fileIcon";
+import { isParentEntry } from "@/stores/panes";
 import clsx from "clsx";
 
 interface EntryRowProps {
@@ -19,6 +21,23 @@ interface EntryRowProps {
  * - 28px 행 높이 (보통 모드)
  */
 export function EntryRow({ entry, isCursor, isSelected, onClick, onDoubleClick }: EntryRowProps) {
+  // 합성 ".." 부모 행 — 아이콘 + ".." 만, 메타/선택 표시 없음.
+  if (isParentEntry(entry)) {
+    return (
+      <div
+        className={clsx(
+          "flex h-7 items-center gap-2 px-2 text-base cursor-default hover:bg-subtle",
+          isCursor ? "border-l-2 border-l-accent pl-[6px]" : "border-l-2 border-l-transparent",
+        )}
+        onClick={onClick}
+        onDoubleClick={onDoubleClick}
+        title="Parent folder"
+      >
+        <FolderUp size={14} className="text-fg-muted" />
+        <span className="font-mono flex-1 truncate text-fg-muted">..</span>
+      </div>
+    );
+  }
   return (
     <div
       className={clsx(

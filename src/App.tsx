@@ -26,7 +26,7 @@ import { useCommands } from "@/stores/commands";
 import { usePalette } from "@/stores/palette";
 import { buildBuiltins } from "@/lib/commands";
 import { useUI } from "@/stores/ui";
-import { usePanes, activeTab, type PaneId } from "@/stores/panes";
+import { usePanes, activeTab, computeDisplayed, type PaneId } from "@/stores/panes";
 import { useSearch } from "@/stores/search";
 import { useUIDialogs } from "@/stores/ui-dialogs";
 import { useToast } from "@/stores/toast";
@@ -104,9 +104,30 @@ function App() {
     [listDirectory, showToast],
   );
 
+  const onUp = useCallback(
+    (id: PaneId) => {
+      const tab = activeTab(usePanes.getState(), id);
+      // 아카이브 임시 루트에서 "위로" = 아카이브 빠져나가 원래 폴더로.
+      if (tab.archive && tab.location.path === tab.archive.root) {
+        void navigateTo(id, tab.archive.exitTo);
+        return;
+      }
+      const path = tab.location.path;
+      if (path === "/" || path.length === 0) return;
+      const parent = path.replace(/\/[^/]+\/?$/, "") || "/";
+      void navigate(id, parent);
+    },
+    [navigate, navigateTo],
+  );
+
   const onActivate = useCallback(
     (id: PaneId, entry: Entry) => {
       const tab = activeTab(usePanes.getState(), id);
+      // ".." 부모 행 — 위로(또는 아카이브 나가기).
+      if (entry.name === "..") {
+        onUp(id);
+        return;
+      }
       if (entry.kind === "dir") {
         const sep = tab.location.path.endsWith("/") ? "" : "/";
         void navigate(id, tab.location.path + sep + entry.name);
@@ -135,7 +156,7 @@ function App() {
         if (r.status === "error") showToast(`Cannot open ${entry.name} — ${formatErr(r.error)}`);
       })();
     },
-    [navigate, navigateTo, showToast],
+    [navigate, navigateTo, onUp, showToast],
   );
 
   const onRefresh = useCallback(
@@ -165,7 +186,8 @@ function App() {
   const onKeyboardActivate = useCallback(
     (id: PaneId) => {
       const tab = activeTab(usePanes.getState(), id);
-      const entry = tab.entries[tab.cursorIndex];
+      // displayed 기준 인덱싱 (정렬/필터/".." 반영).
+      const entry = computeDisplayed(tab)[tab.cursorIndex];
       if (entry) onActivate(id, entry);
     },
     [onActivate],
@@ -190,6 +212,8 @@ function App() {
       const s = usePanes.getState();
       s.setActivePane(id);
       s.setCursor(id, index);
+      // ".." 부모 행엔 파일 작업 메뉴 없음.
+      if (entry.name === "..") return;
       const tab = activeTab(s, id);
       const wasSelected = tab.selected.has(entry.name);
       if (!wasSelected) s.setSelected(id, [entry.name]);
@@ -218,22 +242,6 @@ function App() {
       useContextMenu.getState().openAt(e.clientX, e.clientY, items);
     },
     [onRefresh],
-  );
-
-  const onUp = useCallback(
-    (id: PaneId) => {
-      const tab = activeTab(usePanes.getState(), id);
-      // 아카이브 임시 루트에서 "위로" = 아카이브 빠져나가 원래 폴더로.
-      if (tab.archive && tab.location.path === tab.archive.root) {
-        void navigateTo(id, tab.archive.exitTo);
-        return;
-      }
-      const path = tab.location.path;
-      if (path === "/" || path.length === 0) return;
-      const parent = path.replace(/\/[^/]+\/?$/, "") || "/";
-      void navigate(id, parent);
-    },
-    [navigate, navigateTo],
   );
 
   const onPickHit = useCallback(

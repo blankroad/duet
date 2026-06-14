@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { usePanes, activeTab } from "@/stores/panes";
+import { usePanes, activeTab, computeDisplayed, isParentEntry } from "@/stores/panes";
 import type { PaneId } from "@/stores/panes";
 
 /**
@@ -67,8 +67,9 @@ export function useKeyboardNav(
         case " ":
           e.preventDefault();
           if (tab.cursorIndex >= 0) {
-            const entry = tab.entries[tab.cursorIndex];
-            if (entry) state.toggleSelected(id, entry.name);
+            // displayed 기준 인덱싱(정렬/필터/".." 반영). ".." 는 선택 불가.
+            const entry = computeDisplayed(tab)[tab.cursorIndex];
+            if (entry && !isParentEntry(entry)) state.toggleSelected(id, entry.name);
           }
           break;
       }
