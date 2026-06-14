@@ -7,6 +7,7 @@ import { ConnectionDialog } from "@/components/connection/ConnectionDialog";
 import { AdHocConnectDialog } from "@/components/connection/AdHocConnectDialog";
 import { RenameDialog } from "@/components/dialogs/RenameDialog";
 import { BatchRenameDialog } from "@/components/dialogs/BatchRenameDialog";
+import { CompareDialog } from "@/components/dialogs/CompareDialog";
 import { MkdirDialog } from "@/components/dialogs/MkdirDialog";
 import { CompressDialog } from "@/components/dialogs/CompressDialog";
 import { ArgsDialog } from "@/components/dialogs/ArgsDialog";
@@ -848,6 +849,7 @@ function App() {
           onConfirm={onDeleteConfirm}
         />
       )}
+      {dialog.kind === "compare" && <CompareDialog plan={dialog.plan} onClose={closeDialog} />}
       {dialog.kind === "sync-confirm" && (
         <ConfirmDialog
           title="Sync to other pane"

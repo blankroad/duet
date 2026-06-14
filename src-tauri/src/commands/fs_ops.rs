@@ -292,6 +292,19 @@ pub async fn fs_move_execute(
     Ok(task_id)
 }
 
+/// 두 패널 디렉토리 재귀 비교 (folder diff) — 읽기 전용. cross-source OK.
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_compare_dirs(
+    left: Location,
+    right: Location,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+) -> Result<crate::core::compare::ComparePlan, DuetError> {
+    let left_fs = fs_for(&left.source, pool.inner()).await?;
+    let right_fs = fs_for(&right.source, pool.inner()).await?;
+    crate::core::compare::compare_dirs(&*left_fs, left, &*right_fs, right).await
+}
+
 /// 단방향 미러 계획 — 활성 패널 dir(src) → 반대 패널 dir(dst). v1 local↔local 만.
 #[tauri::command]
 #[specta::specta]

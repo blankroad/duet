@@ -60,6 +60,20 @@ export function triggerBatchRename(open: OpenFn, showToast: ToastFn): void {
   open({ kind: "batch-rename", targets });
 }
 
+/** 두 패널 폴더 비교 — 활성=left, 반대=right. 결과를 비교 다이얼로그로. */
+export async function triggerCompare(open: OpenFn, showToast: ToastFn): Promise<void> {
+  const { active, opposite } = resolveActiveTargets();
+  const state = usePanes.getState();
+  const left = activeTab(state, active).location;
+  const right = activeTab(state, opposite).location;
+  const r = await commands.fsCompareDirs(left, right);
+  if (r.status === "error") {
+    showToast(`Compare: ${formatErr(r.error)}`);
+    return;
+  }
+  open({ kind: "compare", plan: r.data });
+}
+
 /** 단방향 미러 — 활성 패널 dir → 반대 패널 dir. plan 후 확인 다이얼로그. */
 export async function triggerSync(open: OpenFn, showToast: ToastFn): Promise<void> {
   const { active, opposite } = resolveActiveTargets();
