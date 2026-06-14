@@ -10,6 +10,7 @@ export type DialogState =
   | { kind: "copy-confirm"; plan: CopyPlan }
   | { kind: "move-confirm"; plan: MovePlan }
   | { kind: "compress"; items: EntryRef[]; defaultName: string }
+  | { kind: "app-args"; appId: string; name: string; args: string[] }
   | { kind: "progress"; title: string; taskId: string }
   | { kind: "settings" };
 

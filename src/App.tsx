@@ -8,6 +8,7 @@ import { AdHocConnectDialog } from "@/components/connection/AdHocConnectDialog";
 import { RenameDialog } from "@/components/dialogs/RenameDialog";
 import { MkdirDialog } from "@/components/dialogs/MkdirDialog";
 import { CompressDialog } from "@/components/dialogs/CompressDialog";
+import { ArgsDialog } from "@/components/dialogs/ArgsDialog";
 import { ConfirmDialog } from "@/components/dialogs/ConfirmDialog";
 import { DangerConfirmDialog } from "@/components/dialogs/DangerConfirmDialog";
 import { ProgressModal } from "@/components/dialogs/ProgressModal";
@@ -38,7 +39,7 @@ import { bootstrapBookmarks, addBookmark, removeBookmark, findBookmarkId } from 
 import { bookmarkLocation } from "@/lib/bookmarkActions";
 import { bootstrapHostFavorites, addHostFavorite } from "@/stores/hostFavorites";
 import { bootstrapUserAliases } from "@/stores/userAliases";
-import { bootstrapAppLaunchers } from "@/stores/appLaunchers";
+import { bootstrapAppLaunchers, setAppArgs } from "@/stores/appLaunchers";
 import { useDynamicCommands } from "@/lib/dynamicCommands";
 import { useConnections } from "@/stores/connections";
 import { useTauri } from "@/hooks/useTauri";
@@ -731,6 +732,18 @@ function App() {
           defaultName={dialog.defaultName}
           onClose={closeDialog}
           onSubmit={onCompressSubmit}
+        />
+      )}
+      {dialog.kind === "app-args" && (
+        <ArgsDialog
+          name={dialog.name}
+          initial={dialog.args}
+          onClose={closeDialog}
+          onSubmit={(args) => {
+            const appId = dialog.appId;
+            closeDialog();
+            void setAppArgs(appId, args);
+          }}
         />
       )}
       {dialog.kind === "delete-confirm" && (

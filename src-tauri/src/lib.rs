@@ -93,8 +93,14 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::apps::apps_list,
             commands::apps::apps_add,
             commands::apps::apps_rename,
+            commands::apps::apps_set_args,
             commands::apps::apps_remove,
             commands::apps::apps_reorder,
+            commands::apps::apps_group,
+            commands::apps::apps_move_into_folder,
+            commands::apps::apps_move_out,
+            commands::apps::apps_dissolve,
+            commands::apps::apps_reorder_in_folder,
             commands::apps::app_launch,
         ])
         .events(collect_events![
