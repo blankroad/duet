@@ -33,6 +33,7 @@ export function CompareDialog({ plan, onClose, onMerge }: CompareDialogProps) {
   const [query, setQuery] = useState("");
   const [sel, setSel] = useState(0);
   const selectedRowRef = useRef<HTMLTableRowElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   const counts = useMemo(() => {
     const c: Record<CompareStatus, number> = {
@@ -72,14 +73,16 @@ export function CompareDialog({ plan, onClose, onMerge }: CompareDialogProps) {
       return next;
     });
 
+  // 증감 기준을 raw sel 이 아니라 화면에 보이는 selClamped 로 — 필터/검색으로 rows 가
+  // 줄어든 직후에도 ↑↓ 가 보이는 위치에서 한 칸씩 움직인다(dead-zone 방지).
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (rows.length === 0) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setSel((i) => Math.min(i + 1, rows.length - 1));
+      setSel(Math.min(selClamped + 1, rows.length - 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      setSel((i) => Math.max(i - 1, 0));
+      setSel(Math.max(selClamped - 1, 0));
     }
   };
 
@@ -87,7 +90,14 @@ export function CompareDialog({ plan, onClose, onMerge }: CompareDialogProps) {
     <Dialog.Root open onOpenChange={(o) => !o && onClose()}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex max-h-[80vh] w-full max-w-3xl -translate-x-1/2 -translate-y-1/2 flex-col rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none">
+        <Dialog.Content
+          onOpenAutoFocus={(e) => {
+            // 기본은 헤더 Close 버튼에 포커스 → ↑↓ 가 죽음. 리스트에 포커스를 줘 즉시 키 내비.
+            e.preventDefault();
+            listRef.current?.focus();
+          }}
+          className="fixed left-1/2 top-1/2 z-50 flex max-h-[80vh] w-full max-w-3xl -translate-x-1/2 -translate-y-1/2 flex-col rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none"
+        >
           <div className="mb-2 flex items-start justify-between">
             <Dialog.Title className="flex items-center gap-1.5 text-title font-medium">
               <FolderGit2 size={15} /> Compare folders
@@ -169,10 +179,12 @@ export function CompareDialog({ plan, onClose, onMerge }: CompareDialogProps) {
           )}
 
           <div
+            ref={listRef}
             className="min-h-0 flex-1 overflow-y-auto rounded border border-border focus:outline-none focus:ring-1 focus:ring-accent"
             tabIndex={0}
             role="listbox"
             aria-label="비교 결과"
+            aria-activedescendant={rows.length === 0 ? undefined : `cmp-opt-${selClamped}`}
             onKeyDown={onKeyDown}
           >
             {rows.length === 0 ? (
@@ -188,7 +200,8 @@ export function CompareDialog({ plan, onClose, onMerge }: CompareDialogProps) {
                     const RowIcon = ICON[e.status];
                     return (
                     <tr
-                      key={`${e.rel}:${i}`}
+                      key={e.rel}
+                      id={`cmp-opt-${i}`}
                       ref={i === selClamped ? selectedRowRef : undefined}
                       role="option"
                       aria-selected={i === selClamped}
