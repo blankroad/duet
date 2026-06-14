@@ -248,6 +248,33 @@ pub async fn execute_undo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
                     .collect(),
             }
         }
+        UndoAction::UndoBidirMerge {
+            left_source,
+            left_created,
+            right_source,
+            right_created,
+        } => {
+            // 양쪽에 새로 복사된 것만 제거(충돌은 안 건드렸으니 복원할 백업 없음).
+            let mut refresh = std::collections::HashSet::<(SourceId, PathBuf)>::new();
+            for (source, created) in [(left_source, left_created), (right_source, right_created)] {
+                if let Ok(fs) = fs_for(source, pool).await {
+                    for p in created {
+                        let _ = fs.remove(p).await;
+                        if let Some(par) = p.parent() {
+                            refresh.insert((source.clone(), par.to_path_buf()));
+                        }
+                    }
+                }
+            }
+            UndoOutcome {
+                kind: UndoKind::Ok,
+                message: None,
+                refreshed_locations: refresh
+                    .into_iter()
+                    .map(|(s, p)| Location { source: s, path: p })
+                    .collect(),
+            }
+        }
     }
 }
 

@@ -90,6 +90,14 @@ pub enum OpKind {
         src: Location,
         dst: Location,
     },
+    /// 양방향 머지 — 한쪽에만 있던 파일을 반대편으로 복사(양쪽 모두). 충돌은 건드리지 않음.
+    Merge {
+        left: Location,
+        right: Location,
+        /// 오른쪽→왼쪽으로 복사한 개수 / 왼쪽→오른쪽으로 복사한 개수.
+        to_left: u32,
+        to_right: u32,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -123,6 +131,13 @@ pub enum UndoAction {
     UndoMkdir {
         source: SourceId,
         path: PathBuf,
+    },
+    /// 양방향 머지 되돌리기 — 양쪽에 새로 복사된 파일들을 제거(충돌은 안 건드렸으므로 복원할 백업 없음).
+    UndoBidirMerge {
+        left_source: SourceId,
+        left_created: Vec<PathBuf>,
+        right_source: SourceId,
+        right_created: Vec<PathBuf>,
     },
     Irreversible,
 }

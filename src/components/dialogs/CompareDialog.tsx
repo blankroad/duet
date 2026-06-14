@@ -6,6 +6,8 @@ import type { ComparePlan, CompareStatus } from "@/types/bindings";
 export interface CompareDialogProps {
   plan: ComparePlan;
   onClose: () => void;
+  /** 양방향 머지 실행 — 한쪽에만 있는 파일을 반대편으로 복사(충돌 미변경). */
+  onMerge: () => void;
 }
 
 const LABEL: Record<CompareStatus, string> = {
@@ -30,8 +32,9 @@ const TONE: Record<CompareStatus, string> = {
  * 두 패널 폴더 비교 결과 — 차이만 목록(좌측만/우측만/다름), 같은 항목은 숨김.
  * 읽기 전용. (양방향 머지 액션은 별도.)
  */
-export function CompareDialog({ plan, onClose }: CompareDialogProps) {
+export function CompareDialog({ plan, onClose, onMerge }: CompareDialogProps) {
   const diffs = plan.entries.filter((e) => e.status !== "same");
+  const mergeable = plan.left_only + plan.right_only;
   const base = (loc: { path: string }) => String(loc.path).split("/").filter(Boolean).pop() ?? "/";
 
   return (
@@ -95,14 +98,30 @@ export function CompareDialog({ plan, onClose }: CompareDialogProps) {
             )}
           </div>
 
-          <div className="mt-3 flex justify-end">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
-            >
-              Close
-            </button>
+          <div className="mt-3 flex items-center justify-between gap-2">
+            <span className="text-meta text-fg-muted">
+              {mergeable > 0
+                ? `머지: 한쪽에만 있는 ${mergeable}개를 반대편으로 복사 (차이는 미변경)`
+                : ""}
+            </span>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={onMerge}
+                disabled={mergeable === 0}
+                className="rounded bg-accent px-3 py-1 text-base text-white disabled:opacity-50"
+                title="한쪽에만 있는 파일을 양방향으로 복사 (덮어쓰기/삭제 없음, undo 가능)"
+              >
+                Merge ↔
+              </button>
+            </div>
           </div>
           <Dialog.Description className="sr-only">
             Recursive comparison of the two pane directories.

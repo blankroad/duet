@@ -618,6 +618,84 @@ async fn mirror_dir(
     Ok(())
 }
 
+// === Bidirectional merge (안전 — 한쪽에만 있는 파일을 반대편으로 복사, 충돌 미변경) ===
+
+/// 두 디렉토리를 양방향 머지 — `compare_dirs` 결과에서 LeftOnly 는 오른쪽으로,
+/// RightOnly 는 왼쪽으로 복사한다. **차이(differ/newer)·동일(same)은 절대 건드리지
+/// 않음** (덮어쓰기로 한쪽 편집을 잃지 않도록). 추가 전용이라 UndoBidirMerge 로
+/// 완전 복원(양쪽에 새로 만든 파일 제거). 진행률은 항목 개수 기준.
+pub async fn merge_bidir(
+    left_fs: &dyn FileSystem,
+    left: Location,
+    right_fs: &dyn FileSystem,
+    right: Location,
+    ctx: &OpCtx,
+    cancel_token: tokio_util::sync::CancellationToken,
+    progress: Option<crate::services::task_queue::ProgressEmitter>,
+) -> Result<JournalEntry, DuetError> {
+    use crate::core::compare::CompareStatus;
+    let plan =
+        crate::core::compare::compare_dirs(left_fs, left.clone(), right_fs, right.clone()).await?;
+    let to_copy: Vec<_> = plan
+        .entries
+        .iter()
+        .filter(|e| matches!(e.status, CompareStatus::LeftOnly | CompareStatus::RightOnly))
+        .collect();
+    let total = to_copy.len() as u64;
+    let mut done = 0u64;
+    let mut left_created = Vec::new();
+    let mut right_created = Vec::new();
+    for e in to_copy {
+        if cancel_token.is_cancelled() {
+            return Err(DuetError::Cancelled);
+        }
+        let rel = std::path::Path::new(&e.rel);
+        match e.status {
+            CompareStatus::LeftOnly => {
+                let s = left.path.join(rel);
+                let d = right.path.join(rel);
+                crate::fs::copy_relay(left_fs, &s, right_fs, &d).await?;
+                right_created.push(d);
+            }
+            CompareStatus::RightOnly => {
+                let s = right.path.join(rel);
+                let d = left.path.join(rel);
+                crate::fs::copy_relay(right_fs, &s, left_fs, &d).await?;
+                left_created.push(d);
+            }
+            _ => {}
+        }
+        done += 1;
+        if let Some(p) = &progress {
+            let percent = if total > 0 {
+                (done * 100 / total) as u8
+            } else {
+                100
+            };
+            p.emit(crate::services::task_events::ProgressInfo {
+                bytes_done: done,
+                bytes_total: Some(total),
+                speed_bps: None,
+                eta_sec: None,
+                percent: Some(percent),
+            });
+        }
+    }
+    let op = OpKind::Merge {
+        left: left.clone(),
+        right: right.clone(),
+        to_left: left_created.len() as u32,
+        to_right: right_created.len() as u32,
+    };
+    let undo = UndoAction::UndoBidirMerge {
+        left_source: left.source,
+        left_created,
+        right_source: right.source,
+        right_created,
+    };
+    ctx.journal.push(op, undo).await
+}
+
 // === Rename / Mkdir (단순 — plan 불필요) ===
 
 pub async fn rename(
@@ -1394,6 +1472,54 @@ mod tests {
         };
         let r = sync_plan(&fs, &fs, loc.clone(), loc).await;
         assert!(matches!(r, Err(DuetError::Io(_))));
+    }
+
+    #[tokio::test]
+    async fn merge_bidir_copies_both_ways_skips_conflict_then_undo() {
+        let dir = TempDir::new().unwrap();
+        let l = dir.path().join("L");
+        let r = dir.path().join("R");
+        std::fs::create_dir_all(&l).unwrap();
+        std::fs::create_dir_all(&r).unwrap();
+        std::fs::write(l.join("only_l.txt"), b"L").unwrap();
+        std::fs::write(r.join("only_r.txt"), b"R").unwrap();
+        // 충돌: 양쪽 다른 내용 — 절대 안 건드려야 함.
+        std::fs::write(l.join("conf.txt"), b"left-content").unwrap();
+        std::fs::write(r.join("conf.txt"), b"RIGHT").unwrap();
+
+        let fs = LocalFs::new();
+        let (ctx, _cd) = mk_ctx().await;
+        let mk = |p: &std::path::Path| Location {
+            source: SourceId::Local,
+            path: p.to_path_buf(),
+        };
+        let entry = merge_bidir(
+            &fs,
+            mk(&l),
+            &fs,
+            mk(&r),
+            &ctx,
+            tokio_util::sync::CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+
+        // 한쪽 전용 파일이 반대편에 생김.
+        assert_eq!(std::fs::read(r.join("only_l.txt")).unwrap(), b"L");
+        assert_eq!(std::fs::read(l.join("only_r.txt")).unwrap(), b"R");
+        // 충돌 파일은 양쪽 그대로 (덮어쓰지 않음).
+        assert_eq!(std::fs::read(l.join("conf.txt")).unwrap(), b"left-content");
+        assert_eq!(std::fs::read(r.join("conf.txt")).unwrap(), b"RIGHT");
+
+        // undo — 새로 복사된 것만 제거, 원본/충돌 그대로.
+        let pool = Arc::new(crate::services::connection_pool::ConnectionPool::new());
+        let outcome = crate::core::undo::execute_undo(&entry, &pool).await;
+        assert!(matches!(outcome.kind, crate::core::undo::UndoKind::Ok));
+        assert!(!r.join("only_l.txt").exists());
+        assert!(!l.join("only_r.txt").exists());
+        assert!(l.join("only_l.txt").exists(), "원본은 유지");
+        assert_eq!(std::fs::read(r.join("conf.txt")).unwrap(), b"RIGHT");
     }
 
     #[tokio::test]

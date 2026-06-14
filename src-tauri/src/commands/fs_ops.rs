@@ -377,6 +377,64 @@ pub async fn fs_sync_execute(
     Ok(task_id)
 }
 
+/// 양방향 머지 — 한쪽에만 있는 파일을 반대편으로 복사(양쪽). 충돌은 미변경.
+/// Task 로 enqueue (진행률/취소), UndoBidirMerge 로 복원.
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_merge_bidir(
+    left: Location,
+    right: Location,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+    settings: tauri::State<'_, Arc<SettingsStore>>,
+    journal: tauri::State<'_, Arc<Journal>>,
+    queue: tauri::State<'_, Arc<TaskQueue>>,
+    app: tauri::AppHandle,
+) -> Result<TaskId, DuetError> {
+    let host_key = host_key_for_op(&left.source, &right.source);
+    let title = format!("Merging {} ↔ {}", left.path.display(), right.path.display());
+    let pool_inner = pool.inner().clone();
+    let settings_inner = settings.inner().clone();
+    let journal_inner = journal.inner().clone();
+    let app_for_run = app.clone();
+    let affected = vec![left.clone(), right.clone()];
+    let (left_for_run, right_for_run) = (left, right);
+
+    let task_id = queue
+        .inner()
+        .clone()
+        .enqueue(
+            TaskKind::Sync,
+            title,
+            host_key,
+            affected,
+            Box::new(move |cancel_token, progress| {
+                Box::pin(async move {
+                    let left_fs = fs_for(&left_for_run.source, &pool_inner).await?;
+                    let right_fs = fs_for(&right_for_run.source, &pool_inner).await?;
+                    let ctx = OpCtx {
+                        settings: settings_inner,
+                        journal: journal_inner.clone(),
+                        pool: Some(pool_inner.clone()),
+                        app: Some(app_for_run.clone()),
+                    };
+                    let entry = ops::merge_bidir(
+                        &*left_fs,
+                        left_for_run,
+                        &*right_fs,
+                        right_for_run,
+                        &ctx,
+                        cancel_token,
+                        Some(progress),
+                    )
+                    .await?;
+                    Ok(emit_pushed(&app_for_run, entry))
+                })
+            }),
+        )
+        .await;
+    Ok(task_id)
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn fs_rename(

@@ -849,7 +849,24 @@ function App() {
           onConfirm={onDeleteConfirm}
         />
       )}
-      {dialog.kind === "compare" && <CompareDialog plan={dialog.plan} onClose={closeDialog} />}
+      {dialog.kind === "compare" && (
+        <CompareDialog
+          plan={dialog.plan}
+          onClose={closeDialog}
+          onMerge={() => {
+            const { left, right } = dialog.plan;
+            void (async () => {
+              const r = await commands.fsMergeBidir(left, right);
+              if (r.status === "ok") {
+                openDialog({ kind: "progress", title: "Merging…", taskId: r.data });
+              } else {
+                closeDialog();
+                showToast(`Merge failed: ${formatErr(r.error)}`);
+              }
+            })();
+          }}
+        />
+      )}
       {dialog.kind === "sync-confirm" && (
         <ConfirmDialog
           title="Sync to other pane"
