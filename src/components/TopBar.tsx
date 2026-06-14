@@ -1,4 +1,4 @@
-import { PanelLeft, PanelRight, Plus, Search, Command, Settings } from "lucide-react";
+import { PanelLeft, PanelRight, Search, Command, Settings } from "lucide-react";
 import clsx from "clsx";
 import { useUI } from "@/stores/ui";
 import { usePanes, activeTab } from "@/stores/panes";
@@ -18,7 +18,6 @@ export function TopBar() {
   const toggleSidebar = useUI((s) => s.toggleSidebar);
   const togglePreview = useUI((s) => s.togglePreview);
 
-  const newTab = () => usePanes.getState().openTab(usePanes.getState().activePane);
   const openSearch = () => {
     const id = usePanes.getState().activePane;
     useSearch.getState().open(id, activeTab(usePanes.getState(), id).location);
@@ -33,9 +32,6 @@ export function TopBar() {
       </IconBtn>
       <IconBtn label="Toggle preview (F11)" active={previewOpen} onClick={togglePreview}>
         <PanelRight size={14} />
-      </IconBtn>
-      <IconBtn label="New tab (Ctrl+T)" onClick={newTab}>
-        <Plus size={14} />
       </IconBtn>
 
       <div className="mx-2 flex min-w-0 flex-1 items-center overflow-hidden">

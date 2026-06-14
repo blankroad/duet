@@ -3,6 +3,7 @@ import {
   ArrowRight,
   ArrowUp,
   RefreshCw,
+  SquarePlus,
   FolderPlus,
   Copy,
   Scissors,
@@ -52,6 +53,7 @@ export function PaneToolbar({
   const showHidden = usePanes((s) => activeTab(s, id).showHidden);
   const setViewMode = usePanes((s) => s.setViewMode);
   const toggleShowHidden = usePanes((s) => s.toggleShowHidden);
+  const openTab = usePanes((s) => s.openTab);
   const open = useUIDialogs((s) => s.open);
   const showToast = useToast((s) => s.show);
 
@@ -68,6 +70,9 @@ export function PaneToolbar({
       </ToolButton>
       <ToolButton label="Refresh" onClick={onRefresh}>
         <RefreshCw size={14} />
+      </ToolButton>
+      <ToolButton label="New tab (Ctrl+T)" onClick={() => openTab(id)}>
+        <SquarePlus size={15} />
       </ToolButton>
 
       <Divider />
