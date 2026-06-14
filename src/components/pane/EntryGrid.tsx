@@ -4,6 +4,7 @@ import { FolderUp } from "lucide-react";
 import clsx from "clsx";
 import type { Entry } from "@/types/bindings";
 import { gridColumns, isParentEntry, type PaneId } from "@/stores/panes";
+import { setHoverEntry, clearHover } from "@/stores/previewHover";
 import { formatSize, formatTime } from "@/lib/format";
 import { EntryIcon } from "@/lib/fileIcon";
 import { useMarquee } from "@/hooks/useMarquee";
@@ -112,6 +113,7 @@ export function EntryGrid({
         paneHighlight && "ring-2 ring-inset ring-accent",
       )}
       onMouseDown={onContainerMouseDown}
+      onMouseLeave={clearHover}
       onContextMenu={(e) => {
         if (!(e.target as HTMLElement).closest("[data-entry]")) onEmptyContextMenu(e);
       }}
@@ -144,6 +146,7 @@ export function EntryGrid({
                   isCursor,
                   isSelected,
                   highlight: dragActive && overFolder === entry.name,
+                  onMouseEnter: () => setHoverEntry(id, entry),
                   onMouseDown: (e) => onEntryMouseDown(e, entry),
                   onContextMenu: (e) => onEntryContextMenu(e, entry, index),
                   onClick: () => onCursorMove(index),
@@ -177,17 +180,19 @@ interface CellProps {
   isCursor: boolean;
   isSelected: boolean;
   highlight: boolean;
+  onMouseEnter: () => void;
   onMouseDown: (e: React.MouseEvent) => void;
   onContextMenu: (e: React.MouseEvent) => void;
   onClick: () => void;
   onDoubleClick: () => void;
 }
 
-function GridCell({ entry, isCursor, isSelected, highlight, onMouseDown, onContextMenu, onClick, onDoubleClick }: CellProps) {
+function GridCell({ entry, isCursor, isSelected, highlight, onMouseEnter, onMouseDown, onContextMenu, onClick, onDoubleClick }: CellProps) {
   if (isParentEntry(entry)) {
     return (
       <div
         data-entry={entry.name}
+        onMouseEnter={onMouseEnter}
         onMouseDown={onMouseDown}
         onContextMenu={onContextMenu}
         onClick={onClick}
@@ -232,11 +237,12 @@ function GridCell({ entry, isCursor, isSelected, highlight, onMouseDown, onConte
   );
 }
 
-function TileRow({ entry, isCursor, isSelected, highlight, onMouseDown, onContextMenu, onClick, onDoubleClick }: CellProps) {
+function TileRow({ entry, isCursor, isSelected, highlight, onMouseEnter, onMouseDown, onContextMenu, onClick, onDoubleClick }: CellProps) {
   if (isParentEntry(entry)) {
     return (
       <div
         data-entry={entry.name}
+        onMouseEnter={onMouseEnter}
         onMouseDown={onMouseDown}
         onContextMenu={onContextMenu}
         onClick={onClick}

@@ -43,7 +43,7 @@ interface UIState {
 export const useUI = create<UIState>((set) => ({
   sidebarOpen: true,
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
-  previewOpen: false,
+  previewOpen: true,
   togglePreview: () => set((s) => ({ previewOpen: !s.previewOpen })),
   quickLookOpen: false,
   toggleQuickLook: () => set((s) => ({ quickLookOpen: !s.quickLookOpen })),

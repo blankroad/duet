@@ -1,8 +1,13 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { X } from "lucide-react";
 import { usePanes } from "@/stores/panes";
 import { useUI } from "@/stores/ui";
-import { cursorPreviewDep, usePreviewLoad, PreviewBody } from "@/components/pane/PreviewPane";
+import {
+  cursorPreviewDep,
+  cursorTarget,
+  usePreviewLoad,
+  PreviewBody,
+} from "@/components/pane/PreviewPane";
 
 /**
  * Quick Look 대형 오버레이 (Space) — 활성 패널 cursor 파일을 크게 미리보기.
@@ -14,8 +19,12 @@ import { cursorPreviewDep, usePreviewLoad, PreviewBody } from "@/components/pane
  */
 export function QuickLook() {
   const close = useUI((s) => s.closeQuickLook);
-  const dep = usePanes(cursorPreviewDep);
-  const state = usePreviewLoad(dep);
+  // 오버레이는 리스트를 덮으므로 호버 불가 — cursor 기준만.
+  const cursorKey = usePanes(cursorPreviewDep);
+  // cursorKey 는 cursorTarget()(비반응 getState) 재평가 트리거 — 의도적 의존성.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const target = useMemo(() => cursorTarget(), [cursorKey]);
+  const state = usePreviewLoad(target);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

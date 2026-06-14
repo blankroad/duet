@@ -1,15 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { commands } from "@/types/bindings";
 import type { Entry, Location, PreviewData } from "@/types/bindings";
 import { usePanes, activeTab, selectDisplayedEntries } from "@/stores/panes";
 import { useUI } from "@/stores/ui";
+import { usePreviewHover } from "@/stores/previewHover";
 import { formatErr } from "@/lib/error";
 import { PreviewView, Centered } from "@/components/pane/PreviewView";
 import { PreviewInspector } from "@/components/pane/PreviewInspector";
 
+export type PreviewTarget = { entry: Entry; location: Location };
+
 /** 활성 패널 cursor 항목(종류 무관, ".." 제외) + 그 Location. 없으면 null. */
-function cursorTarget(): { location: Location; entry: Entry } | null {
+export function cursorTarget(): PreviewTarget | null {
   const s = usePanes.getState();
   const tab = activeTab(s, s.activePane);
   const displayed = selectDisplayedEntries(s.activePane, s);
@@ -18,12 +21,6 @@ function cursorTarget(): { location: Location; entry: Entry } | null {
   const base = tab.location.path;
   const sep = base.endsWith("/") ? "" : "/";
   return { location: { source: tab.location.source, path: base + sep + entry.name }, entry };
-}
-
-/** 위 중 파일만 (미리보기 fetch 대상). */
-function cursorFileLocation(): { location: Location; entry: Entry } | null {
-  const t = cursorTarget();
-  return t && t.entry.kind === "file" ? t : null;
 }
 
 type LoadState =
@@ -42,30 +39,44 @@ export function cursorPreviewDep(s: ReturnType<typeof usePanes.getState>): strin
   return `${s.activePane}|${srcKey}|${tab.location.path}|${entry?.name ?? ""}|${entry?.kind ?? ""}`;
 }
 
-/** cursor 파일 미리보기 fetch (debounce). LoadState 를 setState 로 흘린다. */
-function usePreviewLoad(dep: string): LoadState {
+function locKey(loc: Location | null): string {
+  if (!loc) return "";
+  const src = loc.source.kind === "ssh" ? loc.source.connection_id.toString() : "local";
+  return `${src}|${loc.path}`;
+}
+
+/** target(파일)의 미리보기 fetch (debounce). 파일이 아니거나 null 이면 empty. */
+export function usePreviewLoad(target: PreviewTarget | null): LoadState {
+  const fileLoc = target && target.entry.kind === "file" ? target.location : null;
+  const name = target?.entry.name ?? "";
+  const key = locKey(fileLoc);
+  const locRef = useRef(fileLoc);
+  locRef.current = fileLoc;
+  const nameRef = useRef(name);
+  nameRef.current = name;
   const [state, setState] = useState<LoadState>({ phase: "empty" });
+
   useEffect(() => {
-    const target = cursorFileLocation();
-    if (!target) {
+    const loc = locRef.current;
+    const nm = nameRef.current;
+    if (!loc) {
       setState({ phase: "empty" });
       return;
     }
-    const name = target.entry.name;
     let cancelled = false;
-    setState({ phase: "loading", name });
+    setState({ phase: "loading", name: nm });
     const t = setTimeout(async () => {
-      const r = await commands.fsReadPreview(target.location);
+      const r = await commands.fsReadPreview(loc);
       if (cancelled) return;
-      if (r.status === "ok")
-        setState({ phase: "ready", name, location: target.location, data: r.data });
-      else setState({ phase: "error", name, message: formatErr(r.error) });
+      if (r.status === "ok") setState({ phase: "ready", name: nm, location: loc, data: r.data });
+      else setState({ phase: "error", name: nm, message: formatErr(r.error) });
     }, 150);
     return () => {
       cancelled = true;
       clearTimeout(t);
     };
-  }, [dep]);
+  }, [key]);
+
   return state;
 }
 
@@ -77,15 +88,19 @@ function PreviewBody({ state }: { state: LoadState }) {
 }
 
 /**
- * 미리보기 패널 — 듀얼 패널 우측 접이식 컬럼 (F11 토글).
- * 활성 패널 cursor 가 파일이면 fsReadPreview 호출 (debounce) → 텍스트/이미지/PDF/AV 렌더.
- * 파일 읽기는 백엔드 커맨드 경유 (CLAUDE.md §1).
+ * 미리보기 + 인스펙터 패널 — 듀얼 패널 우측 컬럼 (F11 토글, 기본 ON).
+ * 대상 = 호버한 항목(있으면) 아니면 활성 패널 cursor. 파일이면 미리보기 렌더,
+ * 폴더면 속성만. 파일 읽기는 백엔드 커맨드 경유 (CLAUDE.md §1).
  */
 export function PreviewPane() {
   const togglePreview = useUI((s) => s.togglePreview);
-  const dep = usePanes(cursorPreviewDep);
-  const state = usePreviewLoad(dep);
-  const target = cursorTarget();
+  const hover = usePreviewHover((s) => s.target);
+  const cursorKey = usePanes(cursorPreviewDep);
+  // 호버 우선, 없으면 cursor. cursorKey 는 cursorTarget()(비반응 getState)의
+  // 재평가 트리거라 의도적 의존성.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const target = useMemo(() => hover ?? cursorTarget(), [hover, cursorKey]);
+  const state = usePreviewLoad(target);
 
   return (
     <div className="flex w-80 shrink-0 flex-col overflow-hidden rounded-panel border border-border">
@@ -116,5 +131,5 @@ export function PreviewPane() {
 }
 
 /** Quick Look 오버레이가 동일 fetch 로직을 쓰도록 노출. */
-export { usePreviewLoad, PreviewBody };
+export { PreviewBody };
 export type { LoadState };

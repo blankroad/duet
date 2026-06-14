@@ -4,6 +4,7 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 import clsx from "clsx";
 import type { Entry } from "@/types/bindings";
 import { isParentEntry, type PaneId, type SortKey, type SortOrder } from "@/stores/panes";
+import { setHoverEntry, clearHover } from "@/stores/previewHover";
 import { useMarquee } from "@/hooks/useMarquee";
 import { useEntryDrag } from "@/hooks/useEntryDrag";
 import { useDragState } from "@/stores/dragState";
@@ -94,6 +95,7 @@ export function EntryList({
           paneHighlight && "ring-2 ring-inset ring-accent",
         )}
         onMouseDown={onContainerMouseDown}
+        onMouseLeave={clearHover}
         onContextMenu={(e) => {
           if (!(e.target as HTMLElement).closest("[data-entry]")) onEmptyContextMenu(e);
         }}
@@ -109,6 +111,7 @@ export function EntryList({
                 key={vi.key}
                 data-entry={entry.name}
                 data-drop-folder={isDropFolder ? entry.name : undefined}
+                onMouseEnter={() => setHoverEntry(id, entry)}
                 onMouseDown={(e) => onEntryMouseDown(e, entry)}
                 onContextMenu={(e) => onEntryContextMenu(e, entry, vi.index)}
                 className={clsx(dragActive && overFolder === entry.name && "ring-2 ring-inset ring-accent")}
