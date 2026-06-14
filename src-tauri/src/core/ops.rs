@@ -914,21 +914,112 @@ pub async fn merge_bidir(
     use crate::core::compare::CompareStatus;
     let plan =
         crate::core::compare::compare_dirs(left_fs, left.clone(), right_fs, right.clone()).await?;
-    let to_copy: Vec<_> = plan
+    // 비교가 상한에서 잘렸으면 머지 거부 — 5000번째 이후를 조용히 누락하면 §4 위반.
+    // (사용자가 범위를 좁히거나 후속 스트리밍 비교를 써야 함.)
+    if plan.truncated {
+        return Err(DuetError::Io(
+            "merge refused: comparison was truncated (too many entries) — narrow the scope".into(),
+        ));
+    }
+    // LeftOnly/RightOnly 만 복사(추가 전용). Unreadable·차이·동일은 자연 제외.
+    // (status, rel) 만 owned 로 추출 — plan 의 borrow 를 끊어 전략별 함수에 넘긴다.
+    let work: Vec<(CompareStatus, String)> = plan
         .entries
         .iter()
         .filter(|e| matches!(e.status, CompareStatus::LeftOnly | CompareStatus::RightOnly))
+        .map(|e| (e.status, e.rel.clone()))
         .collect();
-    let total = to_copy.len() as u64;
+
+    // 전략 분기: same-host 면 host-side 직접 복사(본인 PC 경유 0, §9). 그 외(로컬·relay)는
+    // in-Rust copy_relay. 둘 다 추가 전용이라 UndoBidirMerge(생성분 제거)로 완전 복원.
+    match crate::core::copy_strategy::decide(&left.source, &right.source) {
+        crate::core::copy_strategy::CopyStrategy::SshSameHost => {
+            merge_same_host(left, right, work, ctx, cancel_token, progress).await
+        }
+        _ => {
+            merge_relay(
+                left_fs,
+                left,
+                right_fs,
+                right,
+                work,
+                ctx,
+                cancel_token,
+                progress,
+            )
+            .await
+        }
+    }
+}
+
+/// merge 진행률 emit (항목 개수 기준).
+fn emit_merge_progress(
+    progress: &Option<crate::services::task_queue::ProgressEmitter>,
+    done: u64,
+    total: u64,
+) {
+    if let Some(p) = progress {
+        let percent = if total > 0 {
+            (done * 100 / total) as u8
+        } else {
+            100
+        };
+        p.emit(crate::services::task_events::ProgressInfo {
+            bytes_done: done,
+            bytes_total: Some(total),
+            speed_bps: None,
+            eta_sec: None,
+            percent: Some(percent),
+        });
+    }
+}
+
+/// merge 결과를 journal 에 기록 (relay/same-host 공통).
+async fn push_merge_journal(
+    ctx: &OpCtx,
+    left: Location,
+    right: Location,
+    left_created: Vec<PathBuf>,
+    right_created: Vec<PathBuf>,
+) -> Result<JournalEntry, DuetError> {
+    let op = OpKind::Merge {
+        left: left.clone(),
+        right: right.clone(),
+        to_left: left_created.len() as u32,
+        to_right: right_created.len() as u32,
+    };
+    let undo = UndoAction::UndoBidirMerge {
+        left_source: left.source,
+        left_created,
+        right_source: right.source,
+        right_created,
+    };
+    ctx.journal.push(op, undo).await
+}
+
+/// in-Rust 머지 (로컬·cross-host relay) — 본인 PC 를 거쳐 스트림 복사.
+#[allow(clippy::too_many_arguments)]
+async fn merge_relay(
+    left_fs: &dyn FileSystem,
+    left: Location,
+    right_fs: &dyn FileSystem,
+    right: Location,
+    work: Vec<(crate::core::compare::CompareStatus, String)>,
+    ctx: &OpCtx,
+    cancel_token: tokio_util::sync::CancellationToken,
+    progress: Option<crate::services::task_queue::ProgressEmitter>,
+) -> Result<JournalEntry, DuetError> {
+    use crate::core::compare::CompareStatus;
+    let total = work.len() as u64;
     let mut done = 0u64;
     let mut left_created = Vec::new();
     let mut right_created = Vec::new();
-    for e in to_copy {
+    for (status, rel) in &work {
         if cancel_token.is_cancelled() {
             return Err(DuetError::Cancelled);
         }
-        let rel = std::path::Path::new(&e.rel);
-        match e.status {
+        let rel = std::path::Path::new(rel);
+        match status {
             CompareStatus::LeftOnly => {
                 let s = left.path.join(rel);
                 let d = right.path.join(rel);
@@ -944,34 +1035,136 @@ pub async fn merge_bidir(
             _ => {}
         }
         done += 1;
-        if let Some(p) = &progress {
-            let percent = if total > 0 {
-                (done * 100 / total) as u8
-            } else {
-                100
-            };
-            p.emit(crate::services::task_events::ProgressInfo {
-                bytes_done: done,
-                bytes_total: Some(total),
-                speed_bps: None,
-                eta_sec: None,
-                percent: Some(percent),
-            });
-        }
+        emit_merge_progress(&progress, done, total);
     }
-    let op = OpKind::Merge {
-        left: left.clone(),
-        right: right.clone(),
-        to_left: left_created.len() as u32,
-        to_right: right_created.len() as u32,
+    push_merge_journal(ctx, left, right, left_created, right_created).await
+}
+
+/// same-host SSH 머지 — host-side cp/rsync (본인 PC 경유 0, §9 시스템 ssh 안 씀).
+///
+/// LeftOnly 는 left connection 으로 left→right, RightOnly 는 right connection 으로
+/// right→left 를 서버 내에서 직접 복사. 추가 전용(덮어쓰기 없음)이라 생성분 경로만
+/// 추적하면 UndoBidirMerge 로 완전 복원 — sync 의 itemize undo 난제를 우회한다.
+async fn merge_same_host(
+    left: Location,
+    right: Location,
+    work: Vec<(crate::core::compare::CompareStatus, String)>,
+    ctx: &OpCtx,
+    cancel_token: tokio_util::sync::CancellationToken,
+    progress: Option<crate::services::task_queue::ProgressEmitter>,
+) -> Result<JournalEntry, DuetError> {
+    use crate::core::compare::CompareStatus;
+    let pool = ctx
+        .pool
+        .as_ref()
+        .ok_or_else(|| DuetError::Io("OpCtx.pool required for same-host merge".into()))?;
+    let SourceId::Ssh {
+        connection_id: left_conn,
+        ..
+    } = &left.source
+    else {
+        return Err(DuetError::Io("same-host merge on non-ssh left".into()));
     };
-    let undo = UndoAction::UndoBidirMerge {
-        left_source: left.source,
-        left_created,
-        right_source: right.source,
-        right_created,
+    let SourceId::Ssh {
+        connection_id: right_conn,
+        ..
+    } = &right.source
+    else {
+        return Err(DuetError::Io("same-host merge on non-ssh right".into()));
     };
-    ctx.journal.push(op, undo).await
+
+    let total = work.len() as u64;
+    let mut done = 0u64;
+    let mut left_created = Vec::new();
+    let mut right_created = Vec::new();
+    for (status, rel) in &work {
+        if cancel_token.is_cancelled() {
+            return Err(DuetError::Cancelled);
+        }
+        let rel = std::path::Path::new(rel);
+        match status {
+            CompareStatus::LeftOnly => {
+                let s = left.path.join(rel);
+                let d = right.path.join(rel);
+                host_side_copy_one(pool, left_conn, &s, &d).await?;
+                right_created.push(d);
+            }
+            CompareStatus::RightOnly => {
+                let s = right.path.join(rel);
+                let d = left.path.join(rel);
+                host_side_copy_one(pool, right_conn, &s, &d).await?;
+                left_created.push(d);
+            }
+            _ => {}
+        }
+        done += 1;
+        emit_merge_progress(&progress, done, total);
+    }
+    push_merge_journal(ctx, left, right, left_created, right_created).await
+}
+
+/// 한 항목을 host-side cp/rsync 로 직접 복사 (지정 connection 의 세션에서 exec).
+/// dst 부모 디렉토리는 항상 존재(compare 가 양쪽-존재 디렉토리만 재귀하므로).
+async fn host_side_copy_one(
+    pool: &Arc<crate::services::connection_pool::ConnectionPool>,
+    conn_id: &crate::types::ConnectionId,
+    src: &std::path::Path,
+    dst: &std::path::Path,
+) -> Result<(), DuetError> {
+    use crate::core::copy_strategy::shell_escape_path;
+    use crate::ssh::remote_exec::exec;
+
+    let conn = pool.get(conn_id).await?;
+    let session_mutex = conn
+        .session
+        .as_ref()
+        .ok_or_else(|| DuetError::ConnectionFailed("no live session".into()))?;
+
+    // rsync 탐지(캐시) — 락 순서: rsync_available → session (데드락 회피).
+    let use_rsync = {
+        let mut cache = conn.rsync_available.lock().await;
+        match *cache {
+            Some(v) => v,
+            None => {
+                let handle = session_mutex.lock().await;
+                let d = exec(&handle, "command -v rsync")
+                    .await
+                    .map(|o| o.exit_status == 0)
+                    .unwrap_or(false);
+                *cache = Some(d);
+                d
+            }
+        }
+    };
+
+    let src_arg = shell_escape_path(src)?;
+    let cmd = if use_rsync {
+        // rsync 는 SRC(trailing-slash 없음)의 basename 을 DEST 디렉토리 안에 만든다 →
+        // dst 의 부모를 줘야 dst/<basename> 으로 떨어진다 (file/dir 동일).
+        let dst_parent = dst
+            .parent()
+            .ok_or_else(|| DuetError::Io("dst has no parent".into()))?;
+        let dst_parent_arg = shell_escape_path(dst_parent)?;
+        format!("rsync -a -- {src_arg} {dst_parent_arg}")
+    } else {
+        // cp 는 DEST 를 새 이름으로 → 최종 경로 그대로.
+        let dst_arg = shell_escape_path(dst)?;
+        format!("cp -a -- {src_arg} {dst_arg}")
+    };
+
+    let out = {
+        let handle = session_mutex.lock().await;
+        exec(&handle, &cmd).await?
+    };
+    if out.exit_status != 0 {
+        return Err(DuetError::Ssh(format!(
+            "{} failed (exit {}): {}",
+            if use_rsync { "rsync" } else { "cp" },
+            out.exit_status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+    Ok(())
 }
 
 // === Rename / Mkdir (단순 — plan 불필요) ===
