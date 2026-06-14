@@ -6,17 +6,24 @@ import { usePanes, activeTab, selectDisplayedEntries } from "@/stores/panes";
 import { useUI } from "@/stores/ui";
 import { formatErr } from "@/lib/error";
 import { PreviewView, Centered } from "@/components/pane/PreviewView";
+import { PreviewInspector } from "@/components/pane/PreviewInspector";
 
-/** 활성 패널 cursor entry 의 파일 Location 만들기 (디렉토리/없음이면 null). */
-function cursorFileLocation(): { location: Location; entry: Entry } | null {
+/** 활성 패널 cursor 항목(종류 무관, ".." 제외) + 그 Location. 없으면 null. */
+function cursorTarget(): { location: Location; entry: Entry } | null {
   const s = usePanes.getState();
   const tab = activeTab(s, s.activePane);
   const displayed = selectDisplayedEntries(s.activePane, s);
   const entry = displayed[tab.cursorIndex];
-  if (!entry || entry.kind !== "file") return null;
+  if (!entry || entry.name === "..") return null;
   const base = tab.location.path;
   const sep = base.endsWith("/") ? "" : "/";
   return { location: { source: tab.location.source, path: base + sep + entry.name }, entry };
+}
+
+/** 위 중 파일만 (미리보기 fetch 대상). */
+function cursorFileLocation(): { location: Location; entry: Entry } | null {
+  const t = cursorTarget();
+  return t && t.entry.kind === "file" ? t : null;
 }
 
 type LoadState =
@@ -78,13 +85,12 @@ export function PreviewPane() {
   const togglePreview = useUI((s) => s.togglePreview);
   const dep = usePanes(cursorPreviewDep);
   const state = usePreviewLoad(dep);
+  const target = cursorTarget();
 
   return (
     <div className="flex w-80 shrink-0 flex-col overflow-hidden rounded-panel border border-border">
       <div className="flex h-8 shrink-0 items-center justify-between border-b border-border px-2">
-        <span className="truncate text-meta text-fg-muted">
-          {state.phase === "empty" ? "Preview" : state.name}
-        </span>
+        <span className="truncate text-meta text-fg-muted">Info</span>
         <button
           type="button"
           title="Close preview (F11)"
@@ -96,7 +102,14 @@ export function PreviewPane() {
         </button>
       </div>
       <div className="flex-1 min-h-0 overflow-auto">
-        <PreviewBody state={state} />
+        {!target ? (
+          <Centered>Select a file or folder</Centered>
+        ) : (
+          <>
+            <PreviewInspector entry={target.entry} location={target.location} />
+            {target.entry.kind === "file" && <PreviewBody state={state} />}
+          </>
+        )}
       </div>
     </div>
   );
