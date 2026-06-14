@@ -1,10 +1,12 @@
-import { PanelLeft, PanelRight, Search, Command, Settings } from "lucide-react";
+import { PanelLeft, PanelRight, Search, Command, Settings, FolderGit2 } from "lucide-react";
 import clsx from "clsx";
 import { useUI } from "@/stores/ui";
 import { usePanes, activeTab } from "@/stores/panes";
 import { usePalette } from "@/stores/palette";
 import { useSearch } from "@/stores/search";
 import { useUIDialogs } from "@/stores/ui-dialogs";
+import { useToast } from "@/stores/toast";
+import { triggerCompare } from "@/lib/fileActions";
 import { AppLauncherStrip } from "@/components/AppLauncherStrip";
 
 /**
@@ -32,6 +34,12 @@ export function TopBar() {
       </IconBtn>
       <IconBtn label="Toggle preview (F11)" active={previewOpen} onClick={togglePreview}>
         <PanelRight size={14} />
+      </IconBtn>
+      <IconBtn
+        label="Compare folders (left ↔ right)"
+        onClick={() => void triggerCompare(useUIDialogs.getState().open, useToast.getState().show)}
+      >
+        <FolderGit2 size={14} />
       </IconBtn>
 
       <div className="mx-2 flex min-w-0 flex-1 items-center overflow-hidden">

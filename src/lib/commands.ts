@@ -5,6 +5,7 @@ export type CommandCategory =
   | "Sort"
   | "Filter"
   | "Search"
+  | "File"
   | "Connection"
   | "Settings"
   | "User";
@@ -47,6 +48,8 @@ export interface BuiltinDeps {
   // filter / search
   focusFilter: () => void;
   openSearch: () => void;
+  // file (two-pane)
+  compareFolders: () => void;
   // bookmark
   toggleBookmark: () => void;
   // settings / palette
@@ -81,6 +84,7 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
     { id: "bookmark.toggle", label: "Bookmark this folder", category: "Navigation", defaultKey: "Ctrl+D", action: deps.toggleBookmark },
     { id: "filter.focus", label: "Focus filter", category: "Filter", defaultKey: "Ctrl+F", action: deps.focusFilter },
     { id: "search.global", label: "Global search", category: "Search", defaultKey: "Ctrl+Shift+F", action: deps.openSearch },
+    { id: "file.compare", label: "Compare folders (left ↔ right)", category: "File", action: deps.compareFolders },
     { id: "settings.open", label: "Open settings", category: "Settings", defaultKey: "Ctrl+,", action: deps.openSettings },
     { id: "palette.open", label: "Command palette", category: "Settings", defaultKey: "Ctrl+P", action: deps.openPalette },
     { id: "app.quit", label: "Quit", category: "Settings", defaultKey: "Ctrl+Q", action: deps.quit },

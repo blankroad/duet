@@ -27,7 +27,7 @@ import { useContextMenu } from "@/stores/contextMenu";
 import { buildEntryMenu, buildEmptyMenu, folderName } from "@/lib/entryMenu";
 import { childLocation } from "@/lib/entryDnd";
 import { isArchiveName } from "@/lib/archive";
-import { resolveActiveTargets } from "@/lib/fileActions";
+import { resolveActiveTargets, triggerCompare } from "@/lib/fileActions";
 import { useCommands } from "@/stores/commands";
 import { usePalette } from "@/stores/palette";
 import { buildBuiltins } from "@/lib/commands";
@@ -414,6 +414,7 @@ function App() {
         const tab = activeTab(usePanes.getState(), id);
         useSearch.getState().open(id, tab.location);
       },
+      compareFolders: () => void triggerCompare(openDialog, showToast),
       openSettings: () => openDialog({ kind: "settings" }),
       openPalette: () => openPalette(),
       quit: () => {
@@ -426,7 +427,7 @@ function App() {
       },
     });
     setBuiltins(builtins);
-  }, [setBuiltins, openPalette, toggleSidebar, togglePreview, onBack, onForward, onRefresh, openDialog]);
+  }, [setBuiltins, openPalette, toggleSidebar, togglePreview, onBack, onForward, onRefresh, openDialog, showToast]);
 
   const onRenameSubmit = useCallback(
     async (newName: string) => {
