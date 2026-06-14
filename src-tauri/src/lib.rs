@@ -53,6 +53,8 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::host_favorites::host_favorites_add,
             commands::host_favorites::host_favorites_remove,
             commands::host_favorites::host_favorites_reorder,
+            commands::host_groups::host_groups_list,
+            commands::host_groups::host_groups_set,
             commands::saved_hosts::saved_hosts_list,
             commands::saved_hosts::saved_hosts_upsert,
             commands::saved_hosts::saved_hosts_remove,
@@ -182,6 +184,10 @@ pub fn run() {
         services::host_favorites::HostFavoritesStore::load_default().await
     })
     .expect("host favorites load");
+    let host_groups = tauri::async_runtime::block_on(async {
+        services::host_groups::HostGroupsStore::load_default().await
+    })
+    .expect("host groups load");
     let user_aliases = tauri::async_runtime::block_on(async {
         services::user_aliases::UserAliasesStore::load_default().await
     })
@@ -213,6 +219,7 @@ pub fn run() {
         .manage(secret_vault)
         .manage(bookmarks)
         .manage(host_favorites)
+        .manage(host_groups)
         .manage(user_aliases)
         .manage(app_launchers)
         .manage(keymap)

@@ -5,6 +5,7 @@ pub mod bookmarks;
 pub mod connection;
 pub mod fs_ops;
 pub mod host_favorites;
+pub mod host_groups;
 pub mod keymap;
 pub mod pane;
 pub mod saved_hosts;

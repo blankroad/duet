@@ -31,6 +31,14 @@ import {
 } from "@/stores/hostFavorites";
 import { usePlaces, refreshVolumes } from "@/stores/places";
 import { useRecents, type RecentEntry } from "@/stores/recents";
+import {
+  useHostGroups,
+  createGroup,
+  renameGroup,
+  deleteGroup,
+  assignToGroup,
+  moveGroup,
+} from "@/stores/sidebarGroups";
 import { usePanes, type PaneId } from "@/stores/panes";
 import { useContextMenu, type MenuEntry } from "@/stores/contextMenu";
 import { useToast } from "@/stores/toast";
@@ -39,6 +47,7 @@ import type {
   SavedHost,
   Bookmark as BookmarkType,
   HostFavorite,
+  HostGroup,
   Location,
   Place,
   Volume,
@@ -393,9 +402,16 @@ function RecentItem({
 
 function SavedHostsSection({ onActivate }: { onActivate: (host: SavedHost) => void }) {
   const hosts = useSavedHosts((s) => s.hosts);
+  const groups = useHostGroups((s) => s.groups);
+  const byAlias = new Map(hosts.map((h) => [h.alias, h]));
+  // 그룹에 배정된 alias 집합 (live 호스트만 — dangling 멤버 무시).
+  const grouped = new Set<string>();
+  for (const g of groups) for (const m of g.members) if (byAlias.has(m)) grouped.add(m);
+  const ungrouped = hosts.filter((h) => !grouped.has(h.alias));
+  // 재정렬 DnD 는 ungrouped 항목만 (그룹 내부는 메뉴로 관리).
   const { dragKey, insertBeforeKey, onItemMouseDown } = useReorderable({
     group: "saved",
-    keys: hosts.map((h) => h.alias),
+    keys: ungrouped.map((h) => h.alias),
     onCommit: (next) => void reorderSavedHosts(next),
   });
   return (
@@ -403,48 +419,153 @@ function SavedHostsSection({ onActivate }: { onActivate: (host: SavedHost) => vo
       {hosts.length === 0 ? (
         <Item label="(none — Save host on connect)" muted />
       ) : (
-        hosts.map((h) => (
-          <Fragment key={h.alias}>
-            {dragKey && insertBeforeKey === h.alias && <DropLine />}
-            <SavedHostItem
-              host={h}
+        <>
+          {groups.map((g, gi) => (
+            <HostGroupFolder
+              key={g.id}
+              group={g}
+              members={g.members.map((a) => byAlias.get(a)).filter((h): h is SavedHost => !!h)}
+              groups={groups}
               onActivate={onActivate}
-              dragging={dragKey === h.alias}
-              onMouseDown={(e) => onItemMouseDown(e, h.alias)}
+              isFirst={gi === 0}
+              isLast={gi === groups.length - 1}
             />
-          </Fragment>
-        ))
+          ))}
+          {ungrouped.map((h) => (
+            <Fragment key={h.alias}>
+              {dragKey && insertBeforeKey === h.alias && <DropLine />}
+              <SavedHostItem
+                host={h}
+                currentGroupId={null}
+                groups={groups}
+                onActivate={onActivate}
+                reorder={{ dragging: dragKey === h.alias, onMouseDown: (e) => onItemMouseDown(e, h.alias) }}
+              />
+            </Fragment>
+          ))}
+          {dragKey && insertBeforeKey === null && <DropLine />}
+        </>
       )}
-      {dragKey && insertBeforeKey === null && <DropLine />}
     </Section>
+  );
+}
+
+/** "Move to group ▸" 서브메뉴 — New / 다른 그룹 / Remove from group. */
+function moveToGroupEntry(
+  host: SavedHost,
+  currentGroupId: string | null,
+  groups: HostGroup[],
+): MenuEntry {
+  const children: MenuEntry[] = [
+    {
+      id: "new-group",
+      label: "New group…",
+      onSelect: () => {
+        const name = window.prompt("New group name");
+        if (name && name.trim()) void createGroup(name.trim(), host.alias);
+      },
+    },
+  ];
+  const others = groups.filter((g) => g.id !== currentGroupId);
+  if (others.length > 0) {
+    children.push({ kind: "separator" });
+    for (const g of others) {
+      children.push({ id: `to-${g.id}`, label: g.name, onSelect: () => void assignToGroup(host.alias, g.id) });
+    }
+  }
+  if (currentGroupId) {
+    children.push({ kind: "separator" });
+    children.push({
+      id: "ungroup",
+      label: "Remove from group",
+      onSelect: () => void assignToGroup(host.alias, null),
+    });
+  }
+  return { id: "move-group", label: "Move to group", children };
+}
+
+function HostGroupFolder({
+  group,
+  members,
+  groups,
+  onActivate,
+  isFirst,
+  isLast,
+}: {
+  group: HostGroup;
+  members: SavedHost[];
+  groups: HostGroup[];
+  onActivate: (host: SavedHost) => void;
+  isFirst: boolean;
+  isLast: boolean;
+}) {
+  const collapsed = useUI((s) => s.collapsed[`hostgroup:${group.id}`]);
+  const toggle = useUI((s) => s.toggleSection);
+  const menu: MenuEntry[] = [
+    {
+      id: "rename",
+      label: "Rename…",
+      onSelect: () => {
+        const n = window.prompt("Group name", group.name);
+        if (n && n.trim()) void renameGroup(group.id, n.trim());
+      },
+    },
+    { id: "up", label: "Move up", disabled: isFirst, onSelect: () => void moveGroup(group.id, -1) },
+    { id: "down", label: "Move down", disabled: isLast, onSelect: () => void moveGroup(group.id, 1) },
+    { kind: "separator" },
+    { id: "delete", label: "Delete group", danger: true, onSelect: () => void deleteGroup(group.id) },
+  ];
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => toggle(`hostgroup:${group.id}`)}
+        onContextMenu={(e) => openMenu(e, menu)}
+        className="flex w-full items-center gap-1 px-2 text-meta text-fg-muted hover:text-fg"
+        title={group.name}
+      >
+        {collapsed ? <ChevronRight size={10} /> : <ChevronDown size={10} />}
+        <Folder size={11} className="shrink-0" />
+        <span className="truncate">{group.name}</span>
+        <span className="ml-auto opacity-50">{members.length}</span>
+      </button>
+      {!collapsed &&
+        members.map((h) => (
+          <div key={h.alias} className="pl-2">
+            <SavedHostItem host={h} currentGroupId={group.id} groups={groups} onActivate={onActivate} />
+          </div>
+        ))}
+    </div>
   );
 }
 
 function SavedHostItem({
   host,
+  currentGroupId,
+  groups,
   onActivate,
-  dragging,
-  onMouseDown,
+  reorder,
 }: {
   host: SavedHost;
+  currentGroupId: string | null;
+  groups: HostGroup[];
   onActivate: (host: SavedHost) => void;
-  dragging: boolean;
-  onMouseDown: (e: React.MouseEvent) => void;
+  reorder?: { dragging: boolean; onMouseDown: (e: React.MouseEvent) => void };
 }) {
   const menu: MenuEntry[] = [
     { id: "connect", label: "Connect / Edit…", onSelect: () => onActivate(host) },
+    moveToGroupEntry(host, currentGroupId, groups),
     { kind: "separator" },
     { id: "remove", label: "Remove", danger: true, onSelect: () => void removeSavedHost(host.alias) },
   ];
   return (
     <div
-      data-reorder-key={host.alias}
-      data-reorder-group="saved"
-      onMouseDown={onMouseDown}
+      {...(reorder ? { "data-reorder-key": host.alias, "data-reorder-group": "saved" } : {})}
+      onMouseDown={reorder?.onMouseDown}
       onDoubleClick={() => onActivate(host)}
       onContextMenu={(e) => openMenu(e, menu)}
       title={`${host.user}@${host.host}:${host.port}${host.key_path ? ` (key: ${host.key_path})` : ""}`}
-      className={clsx(rowClass, dragging && "opacity-50")}
+      className={clsx(rowClass, reorder?.dragging && "opacity-50")}
     >
       <Bookmark size={11} className="shrink-0 text-fg-muted" />
       <span className="truncate">{host.alias}</span>

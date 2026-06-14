@@ -43,6 +43,7 @@ import { bootstrapUserAliases } from "@/stores/userAliases";
 import { bootstrapAppLaunchers, setAppArgs } from "@/stores/appLaunchers";
 import { bootstrapPlaces, refreshVolumes } from "@/stores/places";
 import { recordRecent } from "@/stores/recents";
+import { bootstrapHostGroups } from "@/stores/sidebarGroups";
 import { useDynamicCommands } from "@/lib/dynamicCommands";
 import { useConnections } from "@/stores/connections";
 import { useTauri } from "@/hooks/useTauri";
@@ -741,6 +742,7 @@ function App() {
       void bootstrapUserAliases();
       void bootstrapAppLaunchers();
       void bootstrapPlaces();
+      void bootstrapHostGroups();
     })();
     // navigate가 deps에 들어가면 무한 루프 — 마운트 1회만
     // eslint-disable-next-line react-hooks/exhaustive-deps
