@@ -6,10 +6,15 @@ import { usePanes, activeTab, selectDisplayedEntries } from "@/stores/panes";
 import { useUI } from "@/stores/ui";
 import { formatSize } from "@/lib/format";
 import { formatErr } from "@/lib/error";
+import { previewStreamUrl } from "@/lib/previewUrl";
 
 // 구문 강조(highlight.js)/마크다운 스택은 무거워 lazy-load — 시작 번들에서 분리.
 const PreviewContent = lazy(() =>
   import("@/components/pane/PreviewContent").then((m) => ({ default: m.PreviewContent })),
+);
+// pdf.js 스택도 무거워 lazy-load.
+const PreviewPdf = lazy(() =>
+  import("@/components/pane/PreviewPdf").then((m) => ({ default: m.PreviewPdf })),
 );
 
 /** 활성 패널 cursor entry 의 파일 Location 만들기 (디렉토리/없음이면 null). */
@@ -28,7 +33,7 @@ type LoadState =
   | { phase: "empty" }
   | { phase: "loading"; name: string }
   | { phase: "error"; name: string; message: string }
-  | { phase: "ready"; name: string; data: PreviewData };
+  | { phase: "ready"; name: string; location: Location; data: PreviewData };
 
 /**
  * 미리보기 패널 — 듀얼 패널 우측 접이식 컬럼 (F11 토글).
@@ -61,7 +66,8 @@ export function PreviewPane() {
     const t = setTimeout(async () => {
       const r = await commands.fsReadPreview(target.location);
       if (cancelled) return;
-      if (r.status === "ok") setState({ phase: "ready", name, data: r.data });
+      if (r.status === "ok")
+        setState({ phase: "ready", name, location: target.location, data: r.data });
       else setState({ phase: "error", name, message: formatErr(r.error) });
     }, 150);
     return () => {
@@ -121,6 +127,19 @@ function PreviewBody({ state }: { state: LoadState }) {
           />
         </div>
       );
+    case "pdf":
+      return (
+        <Suspense fallback={<Centered>Loading…</Centered>}>
+          <PreviewPdf
+            url={previewStreamUrl(state.location)}
+            onFallback={() => void commands.openPath(state.location)}
+          />
+        </Suspense>
+      );
+    case "audio":
+    case "video":
+      // location 변경 시 remount 로 error 상태 리셋.
+      return <MediaPreview key={state.location.path} kind={data.kind} location={state.location} />;
     case "binary":
       return (
         <Centered>
@@ -134,6 +153,40 @@ function PreviewBody({ state }: { state: LoadState }) {
         </Centered>
       );
   }
+}
+
+/** 오디오/비디오 미리보기 — 코덱 미지원(특히 Linux/WebKitGTK) 시 외부 앱 폴백. */
+function MediaPreview({ kind, location }: { kind: "audio" | "video"; location: Location }) {
+  const [failed, setFailed] = useState(false);
+  const url = previewStreamUrl(location);
+  if (failed) {
+    return (
+      <Centered>
+        <div className="flex flex-col items-center gap-2">
+          <span>Cannot play {kind} here</span>
+          <button
+            type="button"
+            onClick={() => void commands.openPath(location)}
+            className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
+          >
+            Open in default app
+          </button>
+        </div>
+      </Centered>
+    );
+  }
+  if (kind === "audio") {
+    return (
+      <div className="flex h-full items-center justify-center p-3">
+        <audio controls src={url} className="w-full" onError={() => setFailed(true)} />
+      </div>
+    );
+  }
+  return (
+    <div className="flex h-full items-center justify-center bg-black/80 p-1">
+      <video controls src={url} className="max-h-full max-w-full" onError={() => setFailed(true)} />
+    </div>
+  );
 }
 
 function Centered({
