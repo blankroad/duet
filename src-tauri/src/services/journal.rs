@@ -100,6 +100,14 @@ pub enum OpKind {
         to_left: u32,
         to_right: u32,
     },
+    /// 비교창에서 행별 방향을 골라 적용 — 생성 + 덮어쓰기(백업 후) 혼합.
+    CompareApply {
+        left: Location,
+        right: Location,
+        /// 실제 복사한 항목 수 / 그중 덮어쓰기(백업 생성)한 수.
+        applied: u32,
+        overwritten: u32,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -148,6 +156,16 @@ pub enum UndoAction {
         created: Vec<PathBuf>,
         backups_to_restore: Vec<BackupRestore>,
         pruned: Vec<TrashItem>,
+    },
+    /// 비교 적용 되돌리기 — 양쪽 각각 새로 생성분 제거 + 덮어쓴 백업 복원.
+    /// (방향이 ToLeft/ToRight 혼합이라 양쪽 모두 추적.)
+    UndoCompareApply {
+        left_source: SourceId,
+        right_source: SourceId,
+        left_created: Vec<PathBuf>,
+        right_created: Vec<PathBuf>,
+        left_backups: Vec<BackupRestore>,
+        right_backups: Vec<BackupRestore>,
     },
     Irreversible,
 }

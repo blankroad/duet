@@ -1244,6 +1244,308 @@ async fn host_side_copy_one(
     Ok(true)
 }
 
+// === Compare apply (행별 방향 적용 — 생성 + 덮어쓰기(백업)) ===
+
+/// 비교 한 행의 적용 방향.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum ApplyDirection {
+    /// 왼쪽 → 오른쪽.
+    ToRight,
+    /// 오른쪽 → 왼쪽.
+    ToLeft,
+    /// 적용 안 함.
+    Skip,
+}
+
+/// 비교 적용 결정(행별).
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct ApplyDecision {
+    pub rel: String,
+    pub direction: ApplyDirection,
+}
+
+/// 적용 진행 중 생성/백업 추적 — undo(UndoCompareApply) 입력.
+#[derive(Default)]
+struct ApplyState {
+    left_created: Vec<PathBuf>,
+    right_created: Vec<PathBuf>,
+    left_backups: Vec<BackupRestore>,
+    right_backups: Vec<BackupRestore>,
+}
+
+/// 비교창에서 고른 행별 방향을 적용 — 생성은 추적, 덮어쓰기는 `.bak` 백업 후 복사.
+/// 전부 단일 JournalEntry(UndoCompareApply)로 묶여 Ctrl+Z 한 번에 복원(§4).
+/// same-host 는 host-side(PC 경유 0), 그 외는 in-Rust relay. Skip 은 제외.
+#[allow(clippy::too_many_arguments)]
+pub async fn apply_compare(
+    left_fs: &dyn FileSystem,
+    left: Location,
+    right_fs: &dyn FileSystem,
+    right: Location,
+    decisions: Vec<ApplyDecision>,
+    ctx: &OpCtx,
+    cancel_token: tokio_util::sync::CancellationToken,
+    progress: Option<crate::services::task_queue::ProgressEmitter>,
+) -> Result<JournalEntry, DuetError> {
+    let work: Vec<(ApplyDirection, String)> = decisions
+        .into_iter()
+        .filter(|d| !matches!(d.direction, ApplyDirection::Skip))
+        .map(|d| (d.direction, d.rel))
+        .collect();
+    match crate::core::copy_strategy::decide(&left.source, &right.source) {
+        crate::core::copy_strategy::CopyStrategy::SshSameHost => {
+            apply_same_host(left, right, work, ctx, cancel_token, progress).await
+        }
+        _ => {
+            apply_relay(
+                left_fs,
+                left,
+                right_fs,
+                right,
+                work,
+                ctx,
+                cancel_token,
+                progress,
+            )
+            .await
+        }
+    }
+}
+
+/// 적용 결과를 journal 에 기록 (relay/same-host 공통).
+async fn push_compare_apply_journal(
+    ctx: &OpCtx,
+    left: Location,
+    right: Location,
+    st: ApplyState,
+) -> Result<JournalEntry, DuetError> {
+    let overwritten = (st.left_backups.len() + st.right_backups.len()) as u32;
+    let applied = (st.left_created.len() + st.right_created.len()) as u32 + overwritten;
+    let op = OpKind::CompareApply {
+        left: left.clone(),
+        right: right.clone(),
+        applied,
+        overwritten,
+    };
+    let undo = UndoAction::UndoCompareApply {
+        left_source: left.source,
+        right_source: right.source,
+        left_created: st.left_created,
+        right_created: st.right_created,
+        left_backups: st.left_backups,
+        right_backups: st.right_backups,
+    };
+    ctx.journal.push(op, undo).await
+}
+
+/// 한 행을 relay 로 적용 — dst 존재면 백업 후 복사, 아니면 생성 기록 후 복사.
+#[allow(clippy::too_many_arguments)]
+async fn apply_one_relay(
+    direction: &ApplyDirection,
+    rel: &std::path::Path,
+    left_fs: &dyn FileSystem,
+    left: &Location,
+    right_fs: &dyn FileSystem,
+    right: &Location,
+    st: &mut ApplyState,
+) -> Result<(), DuetError> {
+    let (src_fs, src_path, dst_fs, dst_path, dst_is_left) = match direction {
+        ApplyDirection::ToRight => (
+            left_fs,
+            left.path.join(rel),
+            right_fs,
+            right.path.join(rel),
+            false,
+        ),
+        ApplyDirection::ToLeft => (
+            right_fs,
+            right.path.join(rel),
+            left_fs,
+            left.path.join(rel),
+            true,
+        ),
+        ApplyDirection::Skip => return Ok(()),
+    };
+    if dst_fs.metadata(&dst_path).await.is_ok() {
+        let parent = dst_path
+            .parent()
+            .ok_or_else(|| DuetError::Io("dst has no parent".into()))?;
+        let name = dst_path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| DuetError::Io("dst has no name".into()))?;
+        let backup = pick_backup_path(dst_fs, parent, name).await?;
+        dst_fs.rename(&dst_path, &backup).await?;
+        let br = BackupRestore {
+            backup_path: backup,
+            original_path: dst_path.clone(),
+        };
+        if dst_is_left {
+            st.left_backups.push(br);
+        } else {
+            st.right_backups.push(br);
+        }
+    } else if dst_is_left {
+        st.left_created.push(dst_path.clone());
+    } else {
+        st.right_created.push(dst_path.clone());
+    }
+    crate::fs::copy_relay(src_fs, &src_path, dst_fs, &dst_path).await
+}
+
+/// in-Rust relay 적용 (로컬·cross-host). 실패/취소여도 부분 진행분을 journal 에 기록(§4).
+#[allow(clippy::too_many_arguments)]
+async fn apply_relay(
+    left_fs: &dyn FileSystem,
+    left: Location,
+    right_fs: &dyn FileSystem,
+    right: Location,
+    work: Vec<(ApplyDirection, String)>,
+    ctx: &OpCtx,
+    cancel_token: tokio_util::sync::CancellationToken,
+    progress: Option<crate::services::task_queue::ProgressEmitter>,
+) -> Result<JournalEntry, DuetError> {
+    let total = work.len() as u64;
+    let mut done = 0u64;
+    let mut st = ApplyState::default();
+    let mut outcome: Result<(), DuetError> = Ok(());
+    for (direction, rel) in &work {
+        if cancel_token.is_cancelled() {
+            outcome = Err(DuetError::Cancelled);
+            break;
+        }
+        let rel_path = std::path::Path::new(rel);
+        if let Err(e) = apply_one_relay(
+            direction, rel_path, left_fs, &left, right_fs, &right, &mut st,
+        )
+        .await
+        {
+            outcome = Err(e);
+            break;
+        }
+        done += 1;
+        emit_merge_progress(&progress, done, total);
+    }
+    let entry = push_compare_apply_journal(ctx, left, right, st).await?;
+    outcome?;
+    Ok(entry)
+}
+
+/// same-host SSH 적용 — dst 백업(SFTP rename)으로 부재화 후 host-side cp/rsync 복사.
+async fn apply_same_host(
+    left: Location,
+    right: Location,
+    work: Vec<(ApplyDirection, String)>,
+    ctx: &OpCtx,
+    cancel_token: tokio_util::sync::CancellationToken,
+    progress: Option<crate::services::task_queue::ProgressEmitter>,
+) -> Result<JournalEntry, DuetError> {
+    let pool = ctx
+        .pool
+        .as_ref()
+        .ok_or_else(|| DuetError::Io("OpCtx.pool required for same-host apply".into()))?;
+    let SourceId::Ssh {
+        connection_id: left_conn,
+        ..
+    } = &left.source
+    else {
+        return Err(DuetError::Io("same-host apply on non-ssh left".into()));
+    };
+    let SourceId::Ssh {
+        connection_id: right_conn,
+        ..
+    } = &right.source
+    else {
+        return Err(DuetError::Io("same-host apply on non-ssh right".into()));
+    };
+
+    let total = work.len() as u64;
+    let mut done = 0u64;
+    let mut st = ApplyState::default();
+    let mut outcome: Result<(), DuetError> = Ok(());
+    for (direction, rel) in &work {
+        if cancel_token.is_cancelled() {
+            outcome = Err(DuetError::Cancelled);
+            break;
+        }
+        let rel_path = std::path::Path::new(rel);
+        if let Err(e) = apply_one_same_host(
+            direction, rel_path, &left, left_conn, &right, right_conn, pool, &mut st,
+        )
+        .await
+        {
+            outcome = Err(e);
+            break;
+        }
+        done += 1;
+        emit_merge_progress(&progress, done, total);
+    }
+    let entry = push_compare_apply_journal(ctx, left, right, st).await?;
+    outcome?;
+    Ok(entry)
+}
+
+/// 한 행을 host-side 로 적용 — dst 존재면 SFTP 백업으로 부재화 후 cp/rsync exec.
+#[allow(clippy::too_many_arguments)]
+async fn apply_one_same_host(
+    direction: &ApplyDirection,
+    rel: &std::path::Path,
+    left: &Location,
+    left_conn: &crate::types::ConnectionId,
+    right: &Location,
+    right_conn: &crate::types::ConnectionId,
+    pool: &Arc<crate::services::connection_pool::ConnectionPool>,
+    st: &mut ApplyState,
+) -> Result<(), DuetError> {
+    let (src_path, src_conn, dst_path, dst_conn, dst_is_left) = match direction {
+        ApplyDirection::ToRight => (
+            left.path.join(rel),
+            left_conn,
+            right.path.join(rel),
+            right_conn,
+            false,
+        ),
+        ApplyDirection::ToLeft => (
+            right.path.join(rel),
+            right_conn,
+            left.path.join(rel),
+            left_conn,
+            true,
+        ),
+        ApplyDirection::Skip => return Ok(()),
+    };
+    // dst 존재면 SFTP rename 으로 백업 → dst 부재화(이후 host_side_copy_one 이 복사).
+    let dst_fs = crate::fs::SshFs::new(pool.get(dst_conn).await?);
+    if dst_fs.metadata(&dst_path).await.is_ok() {
+        let parent = dst_path
+            .parent()
+            .ok_or_else(|| DuetError::Io("dst has no parent".into()))?;
+        let name = dst_path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| DuetError::Io("dst has no name".into()))?;
+        let backup = pick_backup_path(&dst_fs, parent, name).await?;
+        dst_fs.rename(&dst_path, &backup).await?;
+        let br = BackupRestore {
+            backup_path: backup,
+            original_path: dst_path.clone(),
+        };
+        if dst_is_left {
+            st.left_backups.push(br);
+        } else {
+            st.right_backups.push(br);
+        }
+    } else if dst_is_left {
+        st.left_created.push(dst_path.clone());
+    } else {
+        st.right_created.push(dst_path.clone());
+    }
+    // dst 부재 보장됨 → host_side_copy_one 은 실제 복사(Ok(true)) 후 반환.
+    host_side_copy_one(pool, src_conn, &src_path, &dst_path).await?;
+    Ok(())
+}
+
 // === Rename / Mkdir (단순 — plan 불필요) ===
 
 pub async fn rename(
@@ -2216,6 +2518,120 @@ mod tests {
             assert!(dir.path().join(n).exists(), "{n} restored");
         }
         assert!(!dir.path().join("p_a.txt").exists());
+    }
+
+    /// apply_compare(local): 생성 + 덮어쓰기(백업) 혼합 후 undo 로 완전 복원.
+    #[tokio::test]
+    async fn apply_compare_creates_and_overwrites_then_undo() {
+        let dir = TempDir::new().unwrap();
+        let l = dir.path().join("L");
+        let r = dir.path().join("R");
+        std::fs::create_dir_all(&l).unwrap();
+        std::fs::create_dir_all(&r).unwrap();
+        std::fs::write(l.join("only_l.txt"), b"L").unwrap(); // ToRight → 생성
+        std::fs::write(r.join("only_r.txt"), b"R").unwrap(); // ToLeft → 생성
+        std::fs::write(l.join("both.txt"), b"left-new").unwrap();
+        std::fs::write(r.join("both.txt"), b"right-old").unwrap(); // ToRight → 덮어쓰기(백업)
+
+        let fs = LocalFs::new();
+        let (ctx, _cd) = mk_ctx().await;
+        let mk = |p: &std::path::Path| Location {
+            source: SourceId::Local,
+            path: p.to_path_buf(),
+        };
+        let decisions = vec![
+            ApplyDecision {
+                rel: "only_l.txt".into(),
+                direction: ApplyDirection::ToRight,
+            },
+            ApplyDecision {
+                rel: "only_r.txt".into(),
+                direction: ApplyDirection::ToLeft,
+            },
+            ApplyDecision {
+                rel: "both.txt".into(),
+                direction: ApplyDirection::ToRight,
+            },
+        ];
+        let entry = apply_compare(
+            &fs,
+            mk(&l),
+            &fs,
+            mk(&r),
+            decisions,
+            &ctx,
+            tokio_util::sync::CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(std::fs::read(r.join("only_l.txt")).unwrap(), b"L");
+        assert_eq!(std::fs::read(l.join("only_r.txt")).unwrap(), b"R");
+        // 덮어써져 right both.txt = left 내용.
+        assert_eq!(std::fs::read(r.join("both.txt")).unwrap(), b"left-new");
+        match &entry.op {
+            OpKind::CompareApply {
+                applied,
+                overwritten,
+                ..
+            } => {
+                assert_eq!(*applied, 3);
+                assert_eq!(*overwritten, 1);
+            }
+            other => panic!("expected CompareApply, got {other:?}"),
+        }
+
+        // undo — 생성분 제거 + 덮어쓴 백업 복원.
+        let pool = Arc::new(crate::services::connection_pool::ConnectionPool::new());
+        let outcome = crate::core::undo::execute_undo(&entry, &pool).await;
+        assert!(matches!(outcome.kind, crate::core::undo::UndoKind::Ok));
+        assert!(!r.join("only_l.txt").exists(), "생성분 제거");
+        assert!(!l.join("only_r.txt").exists(), "생성분 제거");
+        assert_eq!(
+            std::fs::read(r.join("both.txt")).unwrap(),
+            b"right-old",
+            "덮어쓴 파일은 백업에서 복원"
+        );
+        assert!(l.join("only_l.txt").exists(), "원본 유지");
+    }
+
+    /// dst 가 이미 있으면 skip 방향이어도 안 건드림 — Skip 결정은 작업에서 제외.
+    #[tokio::test]
+    async fn apply_compare_skip_is_excluded() {
+        let dir = TempDir::new().unwrap();
+        let l = dir.path().join("L");
+        let r = dir.path().join("R");
+        std::fs::create_dir_all(&l).unwrap();
+        std::fs::create_dir_all(&r).unwrap();
+        std::fs::write(l.join("a.txt"), b"L").unwrap();
+
+        let fs = LocalFs::new();
+        let (ctx, _cd) = mk_ctx().await;
+        let mk = |p: &std::path::Path| Location {
+            source: SourceId::Local,
+            path: p.to_path_buf(),
+        };
+        let entry = apply_compare(
+            &fs,
+            mk(&l),
+            &fs,
+            mk(&r),
+            vec![ApplyDecision {
+                rel: "a.txt".into(),
+                direction: ApplyDirection::Skip,
+            }],
+            &ctx,
+            tokio_util::sync::CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(!r.join("a.txt").exists(), "skip 은 적용 안 됨");
+        match &entry.op {
+            OpKind::CompareApply { applied, .. } => assert_eq!(*applied, 0),
+            other => panic!("expected CompareApply, got {other:?}"),
+        }
     }
 
     // prune_pass 의 src 존재 판정 검증용 최소 mock — metadata/list/trash 만 구현.

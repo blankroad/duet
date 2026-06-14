@@ -351,6 +351,60 @@ pub async fn execute_undo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
                     .collect(),
             }
         }
+        UndoAction::UndoCompareApply {
+            left_source,
+            right_source,
+            left_created,
+            right_created,
+            left_backups,
+            right_backups,
+        } => {
+            let mut refresh = std::collections::HashSet::<(SourceId, PathBuf)>::new();
+            for (source, created, backups) in [
+                (left_source, left_created, left_backups),
+                (right_source, right_created, right_backups),
+            ] {
+                let fs = match fs_for(source, pool).await {
+                    Ok(f) => f,
+                    Err(e) => return error("source unreachable", e),
+                };
+                // 1) 새로 생성분 제거.
+                for p in created {
+                    if fs.metadata(p).await.is_ok() {
+                        if let Err(e) = fs.remove(p).await {
+                            return error("remove created", e);
+                        }
+                    }
+                    if let Some(par) = p.parent() {
+                        refresh.insert((source.clone(), par.to_path_buf()));
+                    }
+                }
+                // 2) 덮어쓴 백업 복원 — remove-then-rename(SFTP rename-over-existing 회피).
+                for b in backups {
+                    if fs.metadata(&b.backup_path).await.is_ok() {
+                        if fs.metadata(&b.original_path).await.is_ok() {
+                            if let Err(e) = fs.remove(&b.original_path).await {
+                                return error("remove applied before restore", e);
+                            }
+                        }
+                        if let Err(e) = fs.rename(&b.backup_path, &b.original_path).await {
+                            return error("restore backup", e);
+                        }
+                    }
+                    if let Some(par) = b.original_path.parent() {
+                        refresh.insert((source.clone(), par.to_path_buf()));
+                    }
+                }
+            }
+            UndoOutcome {
+                kind: UndoKind::Ok,
+                message: None,
+                refreshed_locations: refresh
+                    .into_iter()
+                    .map(|(s, p)| Location { source: s, path: p })
+                    .collect(),
+            }
+        }
     }
 }
 

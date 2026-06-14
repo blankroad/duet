@@ -8,7 +8,8 @@ use std::sync::Arc;
 use crate::core::archive::{self, CompressFormat, CompressPlan, ExtractPlan};
 use crate::core::copy_strategy::{decide as decide_strategy, CopyStrategy};
 use crate::core::ops::{
-    self, BatchRenamePlan, CopyPlan, DeletePlan, MovePlan, OpCtx, RenameRule, SyncPlan,
+    self, ApplyDecision, BatchRenamePlan, CopyPlan, DeletePlan, MovePlan, OpCtx, RenameRule,
+    SyncPlan,
 };
 use crate::fs::{FileSystem, LocalFs, SshFs};
 use crate::services::connection_pool::ConnectionPool;
@@ -422,6 +423,71 @@ pub async fn fs_merge_bidir(
                         left_for_run,
                         &*right_fs,
                         right_for_run,
+                        &ctx,
+                        cancel_token,
+                        Some(progress),
+                    )
+                    .await?;
+                    Ok(emit_pushed(&app_for_run, entry))
+                })
+            }),
+        )
+        .await;
+    Ok(task_id)
+}
+
+/// 비교창에서 고른 행별 방향을 적용 — 생성 + 덮어쓰기(백업). Task 로 enqueue
+/// (진행률/취소), UndoCompareApply 로 Ctrl+Z 한 번에 복원.
+#[tauri::command]
+#[specta::specta]
+#[allow(clippy::too_many_arguments)] // IPC command — 입력 + tauri State 주입들.
+pub async fn fs_apply_compare(
+    left: Location,
+    right: Location,
+    decisions: Vec<ApplyDecision>,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+    settings: tauri::State<'_, Arc<SettingsStore>>,
+    journal: tauri::State<'_, Arc<Journal>>,
+    queue: tauri::State<'_, Arc<TaskQueue>>,
+    app: tauri::AppHandle,
+) -> Result<TaskId, DuetError> {
+    let host_key = host_key_for_op(&left.source, &right.source);
+    let title = format!(
+        "Applying {} ↔ {}",
+        left.path.display(),
+        right.path.display()
+    );
+    let pool_inner = pool.inner().clone();
+    let settings_inner = settings.inner().clone();
+    let journal_inner = journal.inner().clone();
+    let app_for_run = app.clone();
+    let affected = vec![left.clone(), right.clone()];
+    let (left_for_run, right_for_run) = (left, right);
+
+    let task_id = queue
+        .inner()
+        .clone()
+        .enqueue(
+            TaskKind::Sync,
+            title,
+            host_key,
+            affected,
+            Box::new(move |cancel_token, progress| {
+                Box::pin(async move {
+                    let left_fs = fs_for(&left_for_run.source, &pool_inner).await?;
+                    let right_fs = fs_for(&right_for_run.source, &pool_inner).await?;
+                    let ctx = OpCtx {
+                        settings: settings_inner,
+                        journal: journal_inner.clone(),
+                        pool: Some(pool_inner.clone()),
+                        app: Some(app_for_run.clone()),
+                    };
+                    let entry = ops::apply_compare(
+                        &*left_fs,
+                        left_for_run,
+                        &*right_fs,
+                        right_for_run,
+                        decisions,
                         &ctx,
                         cancel_token,
                         Some(progress),
