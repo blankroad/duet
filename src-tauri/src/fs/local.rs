@@ -116,6 +116,17 @@ impl FileSystem for LocalFs {
         tokio::fs::read(path).await.map_err(DuetError::from)
     }
 
+    async fn read_head(&self, path: &Path, max: usize) -> Result<(Vec<u8>, bool), DuetError> {
+        let mut file = tokio::fs::File::open(path).await.map_err(DuetError::from)?;
+        let mut buf = vec![0u8; max.saturating_add(1)];
+        let n = crate::fs::read_upto(&mut file, &mut buf)
+            .await
+            .map_err(DuetError::from)?;
+        let truncated = n > max;
+        buf.truncate(n.min(max));
+        Ok((buf, truncated))
+    }
+
     async fn write_full(&self, path: &Path, bytes: &[u8]) -> Result<(), DuetError> {
         tokio::fs::write(path, bytes).await.map_err(DuetError::from)
     }
@@ -371,6 +382,21 @@ mod tests {
         let m = local.metadata(&dir.path().join("a")).await.unwrap();
         assert_eq!(m.kind, EntryKind::File);
         assert_eq!(m.size, Some(5));
+    }
+
+    #[tokio::test]
+    async fn read_head_truncates_and_flags() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("big"), b"0123456789").await.unwrap();
+        let local = LocalFs::new();
+        // 앞 4바이트만 + 더 있음.
+        let (head, truncated) = local.read_head(&dir.path().join("big"), 4).await.unwrap();
+        assert_eq!(head, b"0123");
+        assert!(truncated);
+        // cap 이 전체 이상이면 truncated=false.
+        let (full, t2) = local.read_head(&dir.path().join("big"), 100).await.unwrap();
+        assert_eq!(full, b"0123456789");
+        assert!(!t2);
     }
 
     #[tokio::test]

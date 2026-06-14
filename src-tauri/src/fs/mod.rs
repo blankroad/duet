@@ -42,6 +42,35 @@ pub trait FileSystem: Send + Sync {
     async fn read_full(&self, path: &Path) -> Result<Vec<u8>, DuetError>;
     /// 단일 파일 전체 쓰기.
     async fn write_full(&self, path: &Path, bytes: &[u8]) -> Result<(), DuetError>;
+    /// 파일 앞부분만 읽기 (미리보기용) — 최대 `max` 바이트, 더 있으면 `truncated=true`.
+    ///
+    /// 기본 구현은 `read_full` 후 절단(큰 파일 비효율) — impl 별 override 로
+    /// 부분 읽기 권장.
+    async fn read_head(&self, path: &Path, max: usize) -> Result<(Vec<u8>, bool), DuetError> {
+        let full = self.read_full(path).await?;
+        let truncated = full.len() > max;
+        let mut head = full;
+        head.truncate(max);
+        Ok((head, truncated))
+    }
+}
+
+/// reader 에서 최대 `buf.len()` 바이트 채울 때까지 반복 read (짧은 read 대응).
+/// 반환값은 실제 채운 바이트 수 (EOF 면 buf 보다 작음).
+pub(crate) async fn read_upto<R>(reader: &mut R, buf: &mut [u8]) -> std::io::Result<usize>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    use tokio::io::AsyncReadExt;
+    let mut total = 0;
+    while total < buf.len() {
+        let n = reader.read(&mut buf[total..]).await?;
+        if n == 0 {
+            break;
+        }
+        total += n;
+    }
+    Ok(total)
 }
 
 /// 본인 PC 통한 stream copy. local↔ssh 양방향 OK; ssh↔ssh 는 호출 전에

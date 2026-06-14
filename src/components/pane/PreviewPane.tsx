@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, lazy, Suspense } from "react";
 import { X } from "lucide-react";
 import { commands } from "@/types/bindings";
 import type { Entry, Location, PreviewData } from "@/types/bindings";
@@ -6,6 +6,11 @@ import { usePanes, activeTab, selectDisplayedEntries } from "@/stores/panes";
 import { useUI } from "@/stores/ui";
 import { formatSize } from "@/lib/format";
 import { formatErr } from "@/lib/error";
+
+// 구문 강조(highlight.js)/마크다운 스택은 무거워 lazy-load — 시작 번들에서 분리.
+const PreviewContent = lazy(() =>
+  import("@/components/pane/PreviewContent").then((m) => ({ default: m.PreviewContent })),
+);
 
 /** 활성 패널 cursor entry 의 파일 Location 만들기 (디렉토리/없음이면 null). */
 function cursorFileLocation(): { location: Location; entry: Entry } | null {
@@ -102,7 +107,9 @@ function PreviewBody({ state }: { state: LoadState }) {
   switch (data.kind) {
     case "text":
       return (
-        <pre className="whitespace-pre-wrap break-all p-2 font-mono text-meta">{data.text}</pre>
+        <Suspense fallback={<Centered>Loading…</Centered>}>
+          <PreviewContent name={state.name} text={data.text ?? ""} truncated={data.truncated} />
+        </Suspense>
       );
     case "image":
       return (

@@ -482,6 +482,7 @@ fn image_mime(path: &std::path::Path) -> Option<&'static str> {
         "jpg" | "jpeg" => "image/jpeg",
         "gif" => "image/gif",
         "webp" => "image/webp",
+        "avif" => "image/avif",
         "bmp" => "image/bmp",
         "svg" => "image/svg+xml",
         "ico" => "image/x-icon",
@@ -531,24 +532,13 @@ pub async fn fs_read_preview(
         return Err(DuetError::Io("not a regular file".into()));
     }
     let total_size = meta.size.unwrap_or(0);
-    let mime = image_mime(&location.path);
-    let cap = if mime.is_some() {
-        PREVIEW_IMAGE_CAP
-    } else {
-        PREVIEW_TEXT_CAP
-    };
-    if total_size > cap {
-        return Ok(PreviewData {
-            kind: PreviewKind::TooLarge,
-            text: None,
-            bytes_base64: None,
-            mime: None,
-            truncated: false,
-            total_size,
-        });
-    }
-    let bytes = fs.read_full(&location.path).await?;
-    if let Some(mime) = mime {
+
+    // 이미지: 부분 렌더 불가 → cap 초과 시 TooLarge, 아니면 전체 읽어 base64.
+    if let Some(mime) = image_mime(&location.path) {
+        if total_size > PREVIEW_IMAGE_CAP {
+            return Ok(too_large(total_size));
+        }
+        let bytes = fs.read_full(&location.path).await?;
         return Ok(PreviewData {
             kind: PreviewKind::Image,
             text: None,
@@ -558,23 +548,55 @@ pub async fn fs_read_preview(
             total_size,
         });
     }
-    match String::from_utf8(bytes) {
-        Ok(text) => Ok(PreviewData {
-            kind: PreviewKind::Text,
-            text: Some(text),
-            bytes_base64: None,
-            mime: None,
-            truncated: false,
-            total_size,
-        }),
-        Err(_) => Ok(PreviewData {
+
+    // 텍스트/바이너리: cap 이하는 전체, 초과는 head 만 읽어 truncated 표시.
+    if total_size <= PREVIEW_TEXT_CAP {
+        let bytes = fs.read_full(&location.path).await?;
+        Ok(decode_text(&bytes, false, total_size))
+    } else {
+        let (head, _had_more) = fs.read_head(&location.path, PREVIEW_TEXT_CAP as usize).await?;
+        Ok(decode_text(&head, true, total_size))
+    }
+}
+
+/// TooLarge 미리보기 결과 (이미지 전용).
+fn too_large(total_size: u64) -> PreviewData {
+    PreviewData {
+        kind: PreviewKind::TooLarge,
+        text: None,
+        bytes_base64: None,
+        mime: None,
+        truncated: false,
+        total_size,
+    }
+}
+
+/// 바이트를 텍스트로 디코드 — 유효 UTF-8 prefix 만 사용(head 절단 시 멀티바이트
+/// 경계 보호). prefix 가 비면 Binary.
+fn decode_text(bytes: &[u8], truncated: bool, total_size: u64) -> PreviewData {
+    let valid_len = match std::str::from_utf8(bytes) {
+        Ok(_) => bytes.len(),
+        Err(e) => e.valid_up_to(),
+    };
+    if valid_len == 0 && !bytes.is_empty() {
+        return PreviewData {
             kind: PreviewKind::Binary,
             text: None,
             bytes_base64: None,
             mime: None,
             truncated: false,
             total_size,
-        }),
+        };
+    }
+    // valid_len 까지는 유효 UTF-8 보장.
+    let text = String::from_utf8_lossy(&bytes[..valid_len]).into_owned();
+    PreviewData {
+        kind: PreviewKind::Text,
+        text: Some(text),
+        bytes_base64: None,
+        mime: None,
+        truncated,
+        total_size,
     }
 }
 
@@ -617,8 +639,44 @@ fn format_move_title(plan: &MovePlan) -> String {
 
 #[cfg(test)]
 mod preview_tests {
-    use super::{base64_encode, image_mime};
+    use super::{base64_encode, decode_text, image_mime};
+    use crate::types::PreviewKind;
     use std::path::Path;
+
+    #[test]
+    fn decode_text_plain_utf8() {
+        let d = decode_text(b"hello", false, 5);
+        assert_eq!(d.kind, PreviewKind::Text);
+        assert_eq!(d.text.as_deref(), Some("hello"));
+        assert!(!d.truncated);
+    }
+
+    #[test]
+    fn decode_text_truncated_flag() {
+        let d = decode_text(b"partial", true, 9999);
+        assert_eq!(d.kind, PreviewKind::Text);
+        assert!(d.truncated);
+    }
+
+    #[test]
+    fn decode_text_cut_multibyte_keeps_valid_prefix() {
+        // "a€" = 61 E2 82 AC. head 가 멀티바이트 중간(61 E2)에서 잘린 경우.
+        let d = decode_text(&[0x61, 0xE2], true, 4);
+        assert_eq!(d.kind, PreviewKind::Text);
+        assert_eq!(d.text.as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn decode_text_binary_when_no_valid_prefix() {
+        let d = decode_text(&[0xFF, 0xFE, 0x00], false, 3);
+        assert_eq!(d.kind, PreviewKind::Binary);
+        assert!(d.text.is_none());
+    }
+
+    #[test]
+    fn image_mime_includes_avif() {
+        assert_eq!(image_mime(Path::new("a.avif")), Some("image/avif"));
+    }
 
     #[test]
     fn base64_matches_known_vectors() {
