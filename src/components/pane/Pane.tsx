@@ -20,6 +20,8 @@ interface PaneProps {
   onUp: (id: PaneId) => void;
   onEntryContextMenu: (id: PaneId, entry: Entry, index: number, e: React.MouseEvent) => void;
   onEmptyContextMenu: (id: PaneId, e: React.MouseEvent) => void;
+  /** 아카이브 browse 중 "Update archive" repack 트리거. */
+  onUpdateArchive: (id: PaneId) => void;
 }
 
 /**
@@ -27,7 +29,7 @@ interface PaneProps {
  * dumb component — IPC 호출은 App.tsx 가 일괄 처리.
  * displayed entries 는 store selector (raw → filter → hidden → sort) 결과.
  */
-export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward, onUp, onEntryContextMenu, onEmptyContextMenu }: PaneProps) {
+export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward, onUp, onEntryContextMenu, onEmptyContextMenu, onUpdateArchive }: PaneProps) {
   const isActive = usePanes((s) => s.activePane === id);
   const setActivePane = usePanes((s) => s.setActivePane);
   const setCursor = usePanes((s) => s.setCursor);
@@ -60,6 +62,7 @@ export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward,
         onUp={goUp}
         onSegmentClick={(p) => onNavigate(id, p)}
         onRefresh={() => onRefresh(id)}
+        onUpdateArchive={tab.archive ? () => onUpdateArchive(id) : undefined}
       />
       <PaneToolbar
         id={id}

@@ -529,6 +529,59 @@ pub async fn compress_execute(
     ctx.journal.push(op, undo).await
 }
 
+/// 아카이브 browse 세션을 원본 아카이브로 다시 묶는 계획 (Phase 3 — repack).
+///
+/// `browse_root`(임시 추출 폴더)의 top-level 항목들을 원본 아카이브 경로로 재압축
+/// 하는 `CompressPlan` 을 만든다 — 실행은 `compress_execute` 를 그대로 재사용.
+/// 원본 아카이브는 dest 충돌로 처리돼 `.bak.<ts>` 로 보존되고 Ctrl+Z(UndoCopy)로
+/// 복원된다(§4 — 모든 OS 에서 reliable. macOS 로컬 trash-restore 미지원 회피).
+///
+/// 원본이 `.tar`/`.gz` 면 `CompressFormat` 으로 매핑 불가 → `NotSupported`
+/// (사용자 파일 포맷을 임의로 바꾸지 않음). 원격은 host-side 압축(PC 경유 0).
+pub async fn repack_plan(
+    fs: &dyn FileSystem,
+    browse_root: Location,
+    original_archive: EntryRef,
+) -> Result<CompressPlan, DuetError> {
+    // 같은 source(같은 호스트/로컬)여야 host-side 재압축이 성립.
+    if browse_root.source != original_archive.location.source {
+        return Err(DuetError::Io(
+            "repack: browse folder and archive must be on the same source".into(),
+        ));
+    }
+    let fmt = detect_format(&original_archive.name)
+        .ok_or_else(|| DuetError::Io(format!("not an archive: {}", original_archive.name)))?;
+    let format = match fmt {
+        ArchiveFormat::Zip => CompressFormat::Zip,
+        ArchiveFormat::TarGz => CompressFormat::TarGz,
+        ArchiveFormat::Tar => {
+            return Err(DuetError::NotSupported(
+                "repack into .tar is not supported (only .zip / .tar.gz)".into(),
+            ))
+        }
+        ArchiveFormat::Gz => {
+            return Err(DuetError::NotSupported(
+                "repack into .gz is not supported (only .zip / .tar.gz)".into(),
+            ))
+        }
+    };
+    let entries = fs.list(&browse_root.path).await?;
+    if entries.is_empty() {
+        return Err(DuetError::Io("nothing to repack (folder is empty)".into()));
+    }
+    let item_names: Vec<String> = entries.into_iter().map(|e| e.name).collect();
+    let dest_path = original_archive.location.path.join(&original_archive.name);
+    let conflict = fs.metadata(&dest_path).await.is_ok();
+    Ok(CompressPlan {
+        source: browse_root.source.clone(),
+        src_dir: browse_root,
+        item_names,
+        format,
+        dest_path,
+        conflict,
+    })
+}
+
 /// 로컬 압축 — blocking IO 라 spawn_blocking.
 async fn compress_local(
     src_dir: &Path,
@@ -830,5 +883,65 @@ mod tests {
         extract_local_blocking(&archive, &dest, ArchiveFormat::Zip).unwrap();
         assert_eq!(std::fs::read(dest.join("top.txt")).unwrap(), b"top");
         assert_eq!(std::fs::read(dest.join("inner/leaf.txt")).unwrap(), b"leaf");
+    }
+
+    #[tokio::test]
+    async fn repack_plan_maps_format_and_targets_original() {
+        let dir = tempfile::tempdir().unwrap();
+        // browse 추출 폴더.
+        let browse = dir.path().join("browse").join("data");
+        std::fs::create_dir_all(&browse).unwrap();
+        std::fs::write(browse.join("a.txt"), b"a").unwrap();
+        std::fs::write(browse.join("b.txt"), b"b").unwrap();
+        // 원본 아카이브.
+        let archive_dir = dir.path().join("dl");
+        std::fs::create_dir_all(&archive_dir).unwrap();
+        std::fs::write(archive_dir.join("data.zip"), b"old").unwrap();
+
+        let fs = crate::fs::LocalFs::new();
+        let browse_root = Location {
+            source: SourceId::Local,
+            path: browse.clone(),
+        };
+        let original = EntryRef {
+            location: Location {
+                source: SourceId::Local,
+                path: archive_dir.clone(),
+            },
+            name: "data.zip".into(),
+        };
+        let plan = repack_plan(&fs, browse_root, original).await.unwrap();
+        assert_eq!(plan.format, CompressFormat::Zip);
+        assert_eq!(plan.dest_path, archive_dir.join("data.zip"));
+        assert!(plan.conflict, "original archive exists → conflict(backup)");
+        assert_eq!(plan.item_names.len(), 2);
+        assert!(plan.item_names.contains(&"a.txt".to_string()));
+    }
+
+    #[tokio::test]
+    async fn repack_plan_rejects_tar_and_gz() {
+        let dir = tempfile::tempdir().unwrap();
+        let browse = dir.path().join("b");
+        std::fs::create_dir_all(&browse).unwrap();
+        std::fs::write(browse.join("x"), b"x").unwrap();
+        let fs = crate::fs::LocalFs::new();
+        for name in ["data.tar", "log.txt.gz"] {
+            let browse_root = Location {
+                source: SourceId::Local,
+                path: browse.clone(),
+            };
+            let original = EntryRef {
+                location: Location {
+                    source: SourceId::Local,
+                    path: dir.path().to_path_buf(),
+                },
+                name: name.into(),
+            };
+            let r = repack_plan(&fs, browse_root, original).await;
+            assert!(
+                matches!(r, Err(DuetError::NotSupported(_))),
+                "{name} should be NotSupported"
+            );
+        }
     }
 }

@@ -484,6 +484,19 @@ pub async fn fs_compress_plan(
     archive::compress_plan(&*fs, items, archive_name, format).await
 }
 
+/// 아카이브 browse 세션 → 원본 아카이브 재압축 계획 (Phase 3). 실행은 기존
+/// `fs_compress_execute` 재사용 (원본은 .bak 백업 + UndoCopy 로 복원).
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_repack_plan(
+    browse_root: Location,
+    original_archive: EntryRef,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+) -> Result<CompressPlan, DuetError> {
+    let fs = fs_for(&browse_root.source, pool.inner()).await?;
+    archive::repack_plan(&*fs, browse_root, original_archive).await
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn fs_compress_execute(

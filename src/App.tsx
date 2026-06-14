@@ -59,7 +59,7 @@ import { useTaskEvents } from "@/hooks/useTaskEvents";
 import { formatErr } from "@/lib/error";
 import { formatSize } from "@/lib/format";
 import { commands } from "@/types/bindings";
-import type { CompressFormat, ConnectionDto, CopyStrategy, DuetError, Entry, HostFavorite, Location, SearchHit, UserAlias, Volume } from "@/types/bindings";
+import type { CompressFormat, ConnectionDto, CopyStrategy, DuetError, Entry, EntryRef, HostFavorite, Location, SearchHit, UserAlias, Volume } from "@/types/bindings";
 
 /**
  * App 루트.
@@ -479,6 +479,37 @@ function App() {
     [dialog, closeDialog, showToast],
   );
 
+  /** 아카이브 browse 중 "Update archive" — 편집을 원본 아카이브로 repack (확인). */
+  const onUpdateArchive = useCallback(
+    (id: PaneId) => {
+      const tab = activeTab(usePanes.getState(), id);
+      if (!tab.archive) return;
+      const archive = tab.archive;
+      void (async () => {
+        const original: EntryRef = { location: archive.exitTo, name: archive.label };
+        const r = await commands.fsRepackPlan(tab.location, original);
+        if (r.status === "error") {
+          showToast(`Update archive failed: ${formatErr(r.error)}`);
+          return;
+        }
+        openDialog({ kind: "repack-confirm", plan: r.data, label: archive.label });
+      })();
+    },
+    [showToast, openDialog],
+  );
+
+  const onRepackConfirm = useCallback(async () => {
+    if (dialog.kind !== "repack-confirm") return;
+    const plan = dialog.plan;
+    const r = await commands.fsCompressExecute(plan);
+    if (r.status === "ok") {
+      openDialog({ kind: "progress", title: "Updating archive…", taskId: r.data });
+    } else {
+      closeDialog();
+      showToast(`Update archive failed: ${formatErr(r.error)}`);
+    }
+  }, [dialog, openDialog, closeDialog, showToast]);
+
   const onDeleteConfirm = useCallback(async () => {
     if (dialog.kind !== "delete-confirm" && dialog.kind !== "delete-danger") return;
     const plan = dialog.plan;
@@ -732,8 +763,8 @@ function App() {
           onTrashActivate={onTrashActivate}
           onEject={onEject}
         />
-        <Pane id="left" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} onBack={onBack} onForward={onForward} onUp={onUp} onEntryContextMenu={onEntryContextMenu} onEmptyContextMenu={onEmptyContextMenu} />
-        <Pane id="right" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} onBack={onBack} onForward={onForward} onUp={onUp} onEntryContextMenu={onEntryContextMenu} onEmptyContextMenu={onEmptyContextMenu} />
+        <Pane id="left" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} onBack={onBack} onForward={onForward} onUp={onUp} onEntryContextMenu={onEntryContextMenu} onEmptyContextMenu={onEmptyContextMenu} onUpdateArchive={onUpdateArchive} />
+        <Pane id="right" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} onBack={onBack} onForward={onForward} onUp={onUp} onEntryContextMenu={onEntryContextMenu} onEmptyContextMenu={onEmptyContextMenu} onUpdateArchive={onUpdateArchive} />
         {previewOpen && <PreviewPane />}
       </main>
 
@@ -801,6 +832,16 @@ function App() {
           ctaTone="neutral"
           onCancel={closeDialog}
           onConfirm={onDeleteConfirm}
+        />
+      )}
+      {dialog.kind === "repack-confirm" && (
+        <ConfirmDialog
+          title={`Update “${dialog.label}”?`}
+          body={`Repack ${dialog.plan.item_names.length} item(s) into the archive. The previous version is kept as a .bak backup and can be restored with Undo.`}
+          ctaLabel="Update"
+          ctaTone="neutral"
+          onCancel={closeDialog}
+          onConfirm={onRepackConfirm}
         />
       )}
       {dialog.kind === "eject-confirm" && (

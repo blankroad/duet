@@ -21,6 +21,8 @@ interface PathBarProps {
   onUp?: () => void;
   onRefresh?: () => void;
   onSegmentClick?: (path: string) => void;
+  /** 아카이브 browse 중 "Update archive" — 편집을 원본 아카이브로 repack. */
+  onUpdateArchive?: (() => void) | undefined;
 }
 
 /**
@@ -29,7 +31,7 @@ interface PathBarProps {
  *
  * MVP-0: breadcrumb 표시 + 새로고침. 직접 입력 모드(Ctrl+L)는 추후.
  */
-export function PathBar({ location, archive, canBack, canForward, onBack, onForward, onUp, onRefresh, onSegmentClick }: PathBarProps) {
+export function PathBar({ location, archive, canBack, canForward, onBack, onForward, onUp, onRefresh, onSegmentClick, onUpdateArchive }: PathBarProps) {
   const sourceLabel = location.source.kind === "local" ? "Local" : `${location.source.user}@${location.source.host_ip}`;
   const segments = location.path.split("/").filter(Boolean);
 
@@ -99,7 +101,17 @@ export function PathBar({ location, archive, canBack, canForward, onBack, onForw
               </button>
             </span>
           ))}
-          <span className="ml-1 shrink-0 rounded bg-subtle px-1 text-meta text-fg-muted">read-only</span>
+          {onUpdateArchive ? (
+            <button
+              onClick={onUpdateArchive}
+              className="ml-1 shrink-0 rounded bg-accent/10 px-1.5 text-meta text-accent hover:bg-accent/20"
+              title="Repack your edits back into the archive (previous version kept as .bak — undoable)"
+            >
+              Update archive
+            </button>
+          ) : (
+            <span className="ml-1 shrink-0 rounded bg-subtle px-1 text-meta text-fg-muted">read-only</span>
+          )}
         </div>
       ) : (
         <>

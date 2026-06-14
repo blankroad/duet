@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { CopyPlan, DeletePlan, MovePlan, EntryRef, Location, Volume } from "@/types/bindings";
+import type { CopyPlan, DeletePlan, MovePlan, EntryRef, Location, Volume, CompressPlan } from "@/types/bindings";
 
 export type DialogState =
   | { kind: "none" }
@@ -11,6 +11,7 @@ export type DialogState =
   | { kind: "copy-confirm"; plan: CopyPlan }
   | { kind: "move-confirm"; plan: MovePlan }
   | { kind: "compress"; items: EntryRef[]; defaultName: string }
+  | { kind: "repack-confirm"; plan: CompressPlan; label: string }
   | { kind: "app-args"; appId: string; name: string; args: string[] }
   | { kind: "eject-confirm"; volume: Volume }
   | { kind: "progress"; title: string; taskId: string }
