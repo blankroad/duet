@@ -44,6 +44,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::system::places,
             commands::system::volumes,
             commands::system::eject_volume,
+            commands::system::local_abs_paths,
             commands::connection::ssh_config_hosts,
             commands::connection::connection_open,
             commands::connection::connection_open_adhoc,
@@ -216,6 +217,7 @@ pub fn run() {
         })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_os::init())
+        .plugin(tauri_plugin_drag::init())
         .manage(pool)
         .manage(settings)
         .manage(journal)

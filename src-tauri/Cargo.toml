@@ -21,6 +21,7 @@ tauri-build = { version = "2.0", features = [] }
 tauri = { version = "2.1", features = ["devtools"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-os = "2"
+tauri-plugin-drag = "2"      # duet→OS 파일 드래그-아웃 (crabnebula drag-rs, §6 승인)
 
 # === Async ===
 tokio = { version = "1", features = ["full"] }

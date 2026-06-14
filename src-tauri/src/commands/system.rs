@@ -406,3 +406,20 @@ pub async fn eject_volume(path: PathBuf) -> Result<(), DuetError> {
         .await
         .map_err(|e| DuetError::Io(format!("eject task join: {e}")))?
 }
+
+/// 로컬 항목들의 절대경로 — OS 드래그-아웃(파일 export)용. 경로 결합은 `Path`(§7).
+/// SSH 항목은 로컬 경로가 없어 `NotSupported` (원격 드래그-아웃은 후속 — 임시 다운로드 필요).
+#[tauri::command]
+#[specta::specta]
+pub async fn local_abs_paths(items: Vec<EntryRef>) -> Result<Vec<PathBuf>, DuetError> {
+    let mut out = Vec::with_capacity(items.len());
+    for it in &items {
+        if !matches!(it.location.source, SourceId::Local) {
+            return Err(DuetError::NotSupported(
+                "drag-out supports local files only".into(),
+            ));
+        }
+        out.push(it.location.path.join(&it.name));
+    }
+    Ok(out)
+}
