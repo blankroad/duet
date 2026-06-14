@@ -10,6 +10,7 @@ import {
   ChevronDown,
   ChevronRight,
   Trash2,
+  Home,
 } from "lucide-react";
 import { useUI } from "@/stores/ui";
 import { useConnections, type Host, type ConnectionState } from "@/stores/connections";
@@ -48,6 +49,7 @@ export function Sidebar({
   onFavoriteActivate,
   onAddBookmark,
   onAddFavorite,
+  onLocalHome,
   onTrashActivate,
 }: {
   onHostActivate: (alias: string) => void;
@@ -57,6 +59,8 @@ export function Sidebar({
   onFavoriteActivate: (favorite: HostFavorite) => void;
   onAddBookmark: () => void;
   onAddFavorite: () => void;
+  /** 활성 패널을 로컬 홈으로 이동. */
+  onLocalHome: () => void;
   /** 활성 패널을 그 소스의 휴지통으로 이동 (삭제 항목 보기/복구). */
   onTrashActivate: () => void;
 }) {
@@ -66,7 +70,15 @@ export function Sidebar({
   return (
     <aside className="flex w-48 min-h-0 flex-col overflow-y-auto border-r border-border bg-subtle text-base">
       <Section sectionKey="local" title="Local" icon={<Folder size={14} />}>
-        <Item label="Home" />
+        <button
+          type="button"
+          onClick={onLocalHome}
+          className={clsx(rowClass, "w-full text-left")}
+          title="Go to home directory"
+        >
+          <Home size={11} className="shrink-0 text-fg-muted" />
+          <span className="truncate">Home</span>
+        </button>
         <button
           type="button"
           onClick={onTrashActivate}

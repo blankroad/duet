@@ -110,6 +110,16 @@ function App() {
     [listDirectory, showToast],
   );
 
+  /** 활성 패널을 로컬 홈 디렉토리로 이동. */
+  const onLocalHome = useCallback(() => {
+    const id = usePanes.getState().activePane;
+    void (async () => {
+      const r = await commands.homeDirectory();
+      if (r.status === "ok") await navigateTo(id, { source: { kind: "local" }, path: r.data });
+      else showToast(`Home unavailable — ${formatErr(r.error)}`);
+    })();
+  }, [navigateTo, showToast]);
+
   /** 활성 패널을 그 소스의 휴지통으로 이동 — 삭제 항목 보기/복구(복사·이동으로). */
   const onTrashActivate = useCallback(() => {
     const id = usePanes.getState().activePane;
@@ -690,6 +700,7 @@ function App() {
           onFavoriteActivate={onFavoriteActivate}
           onAddBookmark={onAddBookmark}
           onAddFavorite={onAddFavorite}
+          onLocalHome={onLocalHome}
           onTrashActivate={onTrashActivate}
         />
         <Pane id="left" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} onBack={onBack} onForward={onForward} onUp={onUp} onEntryContextMenu={onEntryContextMenu} onEmptyContextMenu={onEmptyContextMenu} />
