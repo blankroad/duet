@@ -89,6 +89,14 @@ pub enum CompareStatus {
     Unreadable,
 }
 
+/// 이동/이름변경으로 인식된 쌍 — 왼쪽 `from_rel` 의 내용이 오른쪽 `to_rel` 과 동일.
+/// detect_renames 시 LeftOnly+RightOnly 두 줄 대신 한 줄로 묶어 표시 + merge 중복복제 차단.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct MoveInfo {
+    pub from_rel: String,
+    pub to_rel: String,
+}
+
 /// 비교 결과 + 카운트. `truncated` 면 항목 상한 초과로 일부만 담김.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct ComparePlan {
@@ -104,6 +112,10 @@ pub struct ComparePlan {
     /// 머지/싱크가 어떤 경로로 실행될지 (⚡same-host 직접 / ↔PC 경유 / 로컬).
     /// 읽기 전용 — `decide(left.source, right.source)`. FE 가 대역폭 배지로 표시.
     pub strategy: CopyStrategy,
+    /// detect_renames 로 인식된 이동/이름변경 쌍 (기본 빈 Vec). 해당 항목은 entries 에서
+    /// 제외되고 left_only/right_only 카운트에서도 빠진다.
+    #[serde(default)]
+    pub moves: Vec<MoveInfo>,
 }
 
 /// 비교 규칙 — 노이즈/오탐 제거. 기본값(빈 globs, tol 0)은 종전 동작과 동일.
@@ -230,6 +242,7 @@ pub async fn compare_dirs_progress(
         same: counts[3],
         truncated,
         strategy,
+        moves: Vec::new(),
     })
 }
 

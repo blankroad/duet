@@ -1101,18 +1101,24 @@ async fn sync_preview_same_host(
 /// RightOnly 는 왼쪽으로 복사한다. **차이(differ/newer)·동일(same)은 절대 건드리지
 /// 않음** (덮어쓰기로 한쪽 편집을 잃지 않도록). 추가 전용이라 UndoBidirMerge 로
 /// 완전 복원(양쪽에 새로 만든 파일 제거). 진행률은 항목 개수 기준.
+#[allow(clippy::too_many_arguments)]
 pub async fn merge_bidir(
     left_fs: &dyn FileSystem,
     left: Location,
     right_fs: &dyn FileSystem,
     right: Location,
+    detect_renames_opt: bool,
     ctx: &OpCtx,
     cancel_token: tokio_util::sync::CancellationToken,
     progress: Option<crate::services::task_queue::ProgressEmitter>,
 ) -> Result<JournalEntry, DuetError> {
     use crate::core::compare::CompareStatus;
-    let plan =
+    let mut plan =
         crate::core::compare::compare_dirs(left_fs, left.clone(), right_fs, right.clone()).await?;
+    // 이동/이름변경 감지 시 — 이동 쌍을 entries 에서 제외해 양쪽 중복복제를 차단(핵심 안전).
+    if detect_renames_opt {
+        detect_renames(&mut plan, left_fs, right_fs, ctx.pool.as_ref()).await?;
+    }
     // 비교가 상한에서 잘렸으면 머지 거부 — 5000번째 이후를 조용히 누락하면 §4 위반.
     // (사용자가 범위를 좁히거나 후속 스트리밍 비교를 써야 함.)
     if plan.truncated {
@@ -1852,6 +1858,192 @@ async fn verify_same_host(
         out.push(VerifyResult { rel, equal });
     }
     Ok(out)
+}
+
+// === Rename/move 감지 (이동을 '양쪽 신규'로 오인한 중복복제 차단) ===
+
+/// 후보 파일이 너무 크면 로컬 시그니처(전체 읽기) 생략 — 그 rel 은 고유 sig 로 매칭 제외.
+const RENAME_SIG_CAP: u64 = 64 * 1024 * 1024;
+/// 후보가 이보다 많으면 감지 생략(비용 보호).
+const RENAME_MAX_CANDIDATES: usize = 1000;
+
+/// 이동/이름변경 감지 — LeftOnly+RightOnly 파일 중 *내용 동일* 1:1 쌍을 MoveInfo 로 묶고
+/// entries/카운트에서 제외. local + same-host 만(cross-host 후속). 반환: 제외된 rel 집합
+/// (merge 가 복사에서 빼는 데 사용). 모호(같은 내용 다수)는 강등(이동 아님).
+pub async fn detect_renames(
+    plan: &mut crate::core::compare::ComparePlan,
+    left_fs: &dyn FileSystem,
+    right_fs: &dyn FileSystem,
+    pool: Option<&Arc<crate::services::connection_pool::ConnectionPool>>,
+) -> Result<std::collections::HashSet<String>, DuetError> {
+    use crate::core::compare::{CompareStatus, MoveInfo};
+    use std::collections::{HashMap, HashSet};
+
+    let strategy = crate::core::copy_strategy::decide(&plan.left.source, &plan.right.source);
+    let same_host = matches!(
+        strategy,
+        crate::core::copy_strategy::CopyStrategy::SshSameHost
+    );
+    let local = matches!(
+        strategy,
+        crate::core::copy_strategy::CopyStrategy::LocalToLocal
+    );
+    if !same_host && !local {
+        return Ok(HashSet::new()); // cross-host 는 v1 미지원
+    }
+
+    let left_c: Vec<(String, u64)> = plan
+        .entries
+        .iter()
+        .filter(|e| e.status == CompareStatus::LeftOnly && e.kind == crate::types::EntryKind::File)
+        .map(|e| (e.rel.clone(), e.left_size.unwrap_or(0)))
+        .collect();
+    let right_c: Vec<(String, u64)> = plan
+        .entries
+        .iter()
+        .filter(|e| e.status == CompareStatus::RightOnly && e.kind == crate::types::EntryKind::File)
+        .map(|e| (e.rel.clone(), e.right_size.unwrap_or(0)))
+        .collect();
+    if left_c.is_empty() || right_c.is_empty() {
+        return Ok(HashSet::new());
+    }
+    // 양쪽 공통 size 만 후보 — 그 외는 매칭 불가.
+    let lsizes: HashSet<u64> = left_c.iter().map(|(_, s)| *s).collect();
+    let rsizes: HashSet<u64> = right_c.iter().map(|(_, s)| *s).collect();
+    let common: HashSet<u64> = lsizes.intersection(&rsizes).copied().collect();
+    let left_c: Vec<(String, u64)> = left_c
+        .into_iter()
+        .filter(|(_, s)| common.contains(s))
+        .collect();
+    let right_c: Vec<(String, u64)> = right_c
+        .into_iter()
+        .filter(|(_, s)| common.contains(s))
+        .collect();
+    if left_c.is_empty()
+        || right_c.is_empty()
+        || left_c.len() + right_c.len() > RENAME_MAX_CANDIDATES
+    {
+        return Ok(HashSet::new());
+    }
+
+    let left_sig = compute_sigs(left_fs, &plan.left, &left_c, same_host, pool).await?;
+    let right_sig = compute_sigs(right_fs, &plan.right, &right_c, same_host, pool).await?;
+
+    let mut lby: HashMap<String, Vec<String>> = HashMap::new();
+    for (rel, sig) in left_sig {
+        lby.entry(sig).or_default().push(rel);
+    }
+    let mut rby: HashMap<String, Vec<String>> = HashMap::new();
+    for (rel, sig) in right_sig {
+        rby.entry(sig).or_default().push(rel);
+    }
+
+    let mut moves: Vec<MoveInfo> = Vec::new();
+    let mut moved: HashSet<String> = HashSet::new();
+    for (sig, lrels) in &lby {
+        if let Some(rrels) = rby.get(sig) {
+            // 1:1 만 확신 — 다대다/다대일은 모호하므로 이동으로 보지 않음(강등).
+            if lrels.len() == 1 && rrels.len() == 1 {
+                moves.push(MoveInfo {
+                    from_rel: lrels[0].clone(),
+                    to_rel: rrels[0].clone(),
+                });
+                moved.insert(lrels[0].clone());
+                moved.insert(rrels[0].clone());
+            }
+        }
+    }
+
+    if !moved.is_empty() {
+        plan.entries.retain(|e| {
+            !(matches!(e.status, CompareStatus::LeftOnly | CompareStatus::RightOnly)
+                && moved.contains(&e.rel))
+        });
+        plan.left_only = plan.left_only.saturating_sub(moves.len() as u32);
+        plan.right_only = plan.right_only.saturating_sub(moves.len() as u32);
+    }
+    moves.sort_by(|a, b| a.to_rel.cmp(&b.to_rel));
+    plan.moves = moves;
+    Ok(moved)
+}
+
+/// 후보들의 내용 시그니처 — same-host 는 host-side sha256, local 은 바이트 해시.
+async fn compute_sigs(
+    fs: &dyn FileSystem,
+    root: &Location,
+    cands: &[(String, u64)],
+    same_host: bool,
+    pool: Option<&Arc<crate::services::connection_pool::ConnectionPool>>,
+) -> Result<Vec<(String, String)>, DuetError> {
+    if same_host {
+        let pool =
+            pool.ok_or_else(|| DuetError::Io("pool required for same-host rename".into()))?;
+        sigs_same_host(root, cands, pool).await
+    } else {
+        let mut out = Vec::with_capacity(cands.len());
+        for (rel, size) in cands {
+            let sig = if *size > RENAME_SIG_CAP {
+                format!("__big__{rel}") // 고유 — 매칭 안 됨
+            } else {
+                match fs.read_full(&root.path.join(rel)).await {
+                    Ok(bytes) => {
+                        use std::hash::{Hash, Hasher};
+                        let mut h = std::collections::hash_map::DefaultHasher::new();
+                        bytes.hash(&mut h);
+                        format!("{:016x}:{}", h.finish(), size)
+                    }
+                    Err(_) => format!("__err__{rel}"),
+                }
+            };
+            out.push((rel.clone(), sig));
+        }
+        Ok(out)
+    }
+}
+
+/// host-side sha256(없으면 shasum -a 256) 으로 후보 일괄 해시 — PC 다운로드 0.
+async fn sigs_same_host(
+    root: &Location,
+    cands: &[(String, u64)],
+    pool: &Arc<crate::services::connection_pool::ConnectionPool>,
+) -> Result<Vec<(String, String)>, DuetError> {
+    use crate::core::copy_strategy::shell_escape_path;
+    use crate::ssh::remote_exec::exec;
+    let SourceId::Ssh { connection_id, .. } = &root.source else {
+        return Err(DuetError::Io("same-host rename on non-ssh".into()));
+    };
+    let conn = pool.get(connection_id).await?;
+    let session_mutex = conn
+        .session
+        .as_ref()
+        .ok_or_else(|| DuetError::ConnectionFailed("no live session".into()))?;
+    // 인자 순서대로 출력 → order-based 매핑(경로 공백 안전). args 순서 == cands 순서.
+    let mut args = String::new();
+    for (rel, _) in cands {
+        args.push(' ');
+        args.push_str(&shell_escape_path(&root.path.join(rel))?);
+    }
+    let cmd = format!(
+        "if command -v sha256sum >/dev/null 2>&1; then sha256sum --{args}; else shasum -a 256 --{args}; fi"
+    );
+    let out = {
+        let handle = session_mutex.lock().await;
+        exec(&handle, &cmd).await?
+    };
+    let s = String::from_utf8_lossy(&out.stdout);
+    let hashes: Vec<&str> = s
+        .lines()
+        .filter_map(|l| l.split_whitespace().next())
+        .collect();
+    if hashes.len() != cands.len() {
+        // 정렬 깨짐(누락/에러) — 안전하게 감지 생략.
+        return Ok(Vec::new());
+    }
+    Ok(cands
+        .iter()
+        .zip(hashes)
+        .map(|((rel, _), h)| (rel.clone(), h.to_string()))
+        .collect())
 }
 
 // === Rename / Mkdir (단순 — plan 불필요) ===
@@ -2656,6 +2848,7 @@ mod tests {
             mk(&l),
             &fs,
             mk(&r),
+            false,
             &ctx,
             tokio_util::sync::CancellationToken::new(),
             None,
@@ -2940,6 +3133,47 @@ mod tests {
             OpKind::CompareApply { applied, .. } => assert_eq!(*applied, 0),
             other => panic!("expected CompareApply, got {other:?}"),
         }
+    }
+
+    /// detect_renames(local): 이동된 파일을 LeftOnly+RightOnly 가 아니라 move 로 인식.
+    #[tokio::test]
+    async fn detect_renames_local_pairs_move() {
+        let dir = TempDir::new().unwrap();
+        let l = dir.path().join("L");
+        let r = dir.path().join("R");
+        std::fs::create_dir_all(&l).unwrap();
+        std::fs::create_dir_all(&r).unwrap();
+        // 같은 내용을 left=old.txt, right=new.txt 로 — 이동.
+        std::fs::write(l.join("old.txt"), b"moved-content").unwrap();
+        std::fs::write(r.join("new.txt"), b"moved-content").unwrap();
+        // 진짜 한쪽전용(내용 다름) — 이동 아님.
+        std::fs::write(l.join("only.txt"), b"unique-left").unwrap();
+
+        let fs = LocalFs::new();
+        let loc = |p: &std::path::Path| Location {
+            source: SourceId::Local,
+            path: p.to_path_buf(),
+        };
+        let mut plan = crate::core::compare::compare_dirs(&fs, loc(&l), &fs, loc(&r))
+            .await
+            .unwrap();
+        // 감지 전: old.txt(LeftOnly), new.txt(RightOnly), only.txt(LeftOnly).
+        assert_eq!(plan.left_only, 2);
+        assert_eq!(plan.right_only, 1);
+
+        let moved = detect_renames(&mut plan, &fs, &fs, None).await.unwrap();
+        assert!(moved.contains("old.txt") && moved.contains("new.txt"));
+        assert_eq!(plan.moves.len(), 1);
+        assert_eq!(plan.moves[0].from_rel, "old.txt");
+        assert_eq!(plan.moves[0].to_rel, "new.txt");
+        // 이동 쌍은 entries 에서 빠지고 카운트도 보정 — only.txt 만 LeftOnly 로 남음.
+        assert_eq!(plan.left_only, 1);
+        assert_eq!(plan.right_only, 0);
+        assert!(plan
+            .entries
+            .iter()
+            .all(|e| e.rel != "old.txt" && e.rel != "new.txt"));
+        assert!(plan.entries.iter().any(|e| e.rel == "only.txt"));
     }
 
     /// sync_preview(local): 복사 대상(신규/변경) + prune 대상(dst 전용) 산출.

@@ -328,6 +328,7 @@ pub async fn fs_compare_dirs(
     left: Location,
     right: Location,
     rules: crate::core::compare::CompareRules,
+    detect_renames: bool,
     pool: tauri::State<'_, Arc<ConnectionPool>>,
     active: tauri::State<'_, Arc<ActiveCompare>>,
     app: tauri::AppHandle,
@@ -347,7 +348,7 @@ pub async fn fs_compare_dirs(
             let _ = CompareProgressEvent { scanned }.emit(&app_for_emit);
         }
     };
-    crate::core::compare::compare_dirs_progress(
+    let mut plan = crate::core::compare::compare_dirs_progress(
         &*left_fs,
         left,
         &*right_fs,
@@ -356,7 +357,11 @@ pub async fn fs_compare_dirs(
         &cancel,
         &on_progress,
     )
-    .await
+    .await?;
+    if detect_renames {
+        ops::detect_renames(&mut plan, &*left_fs, &*right_fs, Some(pool.inner())).await?;
+    }
+    Ok(plan)
 }
 
 /// 진행 중인 비교 스캔 취소.
@@ -481,9 +486,11 @@ pub async fn fs_sync_execute(
 /// Task 로 enqueue (진행률/취소), UndoBidirMerge 로 복원.
 #[tauri::command]
 #[specta::specta]
+#[allow(clippy::too_many_arguments)]
 pub async fn fs_merge_bidir(
     left: Location,
     right: Location,
+    detect_renames: bool,
     pool: tauri::State<'_, Arc<ConnectionPool>>,
     settings: tauri::State<'_, Arc<SettingsStore>>,
     journal: tauri::State<'_, Arc<Journal>>,
@@ -522,6 +529,7 @@ pub async fn fs_merge_bidir(
                         left_for_run,
                         &*right_fs,
                         right_for_run,
+                        detect_renames,
                         &ctx,
                         cancel_token,
                         Some(progress),

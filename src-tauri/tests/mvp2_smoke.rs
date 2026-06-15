@@ -233,6 +233,7 @@ async fn smoke_permanent_delete_blocked_then_allowed() {
     env.settings
         .apply(SettingsPatch {
             permanent_delete_enabled: Some(true),
+            ..Default::default()
         })
         .await
         .unwrap();
