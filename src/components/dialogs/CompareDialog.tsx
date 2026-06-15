@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { save } from "@tauri-apps/plugin-dialog";
 import * as Dialog from "@radix-ui/react-dialog";
 import { X, FolderGit2 } from "lucide-react";
 import clsx from "clsx";
@@ -81,6 +82,21 @@ export function CompareDialog({
       setVerifyNote(`검증 실패: ${r.error.kind}`);
     }
     setVerifying(false);
+  };
+
+  // 비교 결과 CSV/JSON 내보내기 — OS 저장 다이얼로그로 경로 선택 후 backend 가 기록.
+  const onExport = async () => {
+    const dest = await save({
+      defaultPath: "compare.csv",
+      filters: [
+        { name: "CSV", extensions: ["csv"] },
+        { name: "JSON", extensions: ["json"] },
+      ],
+    });
+    if (!dest) return;
+    const format = dest.toLowerCase().endsWith(".json") ? "json" : "csv";
+    const r = await commands.fsExportCompare(plan, dest, format);
+    setVerifyNote(r.status === "ok" ? `내보냄: ${dest}` : `내보내기 실패: ${r.error.kind}`);
   };
 
   // 기본 필터: 차이만(same 숨김). unreadable 은 경고라 기본 표시.
@@ -252,7 +268,15 @@ export function CompareDialog({
               />
               이동 감지
             </label>
-            {verifyNote && <span>{verifyNote}</span>}
+            <button
+              type="button"
+              onClick={() => void onExport()}
+              className="rounded border border-border px-2 py-0.5 hover:bg-subtle"
+              title="비교 결과를 CSV/JSON 파일로 내보내기"
+            >
+              내보내기
+            </button>
+            {verifyNote && <span className="truncate">{verifyNote}</span>}
           </div>
 
           {counts.unreadable > 0 && (
