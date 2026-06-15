@@ -6,4 +6,5 @@ pub mod copy_progress;
 pub mod copy_strategy;
 pub mod ops;
 pub mod search;
+pub mod three_way;
 pub mod undo;

@@ -397,6 +397,22 @@ pub async fn fs_compare_verify(
     .await
 }
 
+/// 3-way 비교 (base 대비 left/right) — '추가 vs 삭제' 구별. 읽기 전용.
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_compare_three_way(
+    base: Location,
+    left: Location,
+    right: Location,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+) -> Result<crate::core::three_way::ThreeWayPlan, DuetError> {
+    let base_fs = fs_for(&base.source, pool.inner()).await?;
+    let left_fs = fs_for(&left.source, pool.inner()).await?;
+    let right_fs = fs_for(&right.source, pool.inner()).await?;
+    crate::core::three_way::compare_three_way(&*base_fs, base, &*left_fs, left, &*right_fs, right)
+        .await
+}
+
 /// 원격 `~/.duet-trash` 누적 용량 조회 — 읽기 전용. 로컬은 available=false.
 #[tauri::command]
 #[specta::specta]
