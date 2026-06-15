@@ -36,7 +36,16 @@ const CONFLICT_SET = new Set<ThreeWayStatus>(["both_changed", "add_conflict", "d
  * 3-way 비교 결과 — base 대비 left/right 변화를 '추가 vs 삭제'까지 구별해 표시.
  * 읽기 전용(자동해결/충돌 적용은 후속). 충돌만 보기 토글.
  */
-export function ThreeWayDialog({ plan, onClose }: { plan: ThreeWayPlan; onClose: () => void }) {
+export function ThreeWayDialog({
+  plan,
+  onClose,
+  onApply,
+}: {
+  plan: ThreeWayPlan;
+  onClose: () => void;
+  /** 자동 해결 가능분 적용 (충돌 제외). */
+  onApply: () => void;
+}) {
   const [onlyConflicts, setOnlyConflicts] = useState(false);
   const base = (loc: { path: string }) => String(loc.path).split("/").filter(Boolean).pop() ?? "/";
   const rows = plan.entries.filter((e) => !onlyConflicts || CONFLICT_SET.has(e.status));
@@ -122,15 +131,31 @@ export function ThreeWayDialog({ plan, onClose }: { plan: ThreeWayPlan; onClose:
 
           <div className="mt-3 flex items-center justify-between gap-2">
             <span className="text-meta text-fg-muted">
-              base 대비 변화로 '추가 vs 삭제'를 구별 — 충돌만 사용자 판단 필요. (적용은 후속)
+              자동 해결분만 적용(충돌 {plan.conflicts}개는 건너뜀). 덮어쓰기는 .bak, 삭제는
+              휴지통 — undo 가능.
             </span>
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
-            >
-              Close
-            </button>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={onApply}
+                disabled={plan.auto === 0 || plan.truncated}
+                className="rounded bg-accent px-3 py-1 text-base text-white disabled:opacity-50"
+                title={
+                  plan.truncated
+                    ? "비교가 잘려 적용할 수 없습니다 — 범위를 좁히세요"
+                    : "자동 해결 가능한 항목을 반대편에 반영 (충돌 제외, undo 가능)"
+                }
+              >
+                자동 해결 적용 ({plan.auto})
+              </button>
+            </div>
           </div>
           <Dialog.Description className="sr-only">
             Three-way comparison of left and right against a common base directory.

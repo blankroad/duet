@@ -862,7 +862,22 @@ function App() {
       )}
       {dialog.kind === "compare-scanning" && <CompareScanningDialog />}
       {dialog.kind === "three-way" && (
-        <ThreeWayDialog plan={dialog.plan} onClose={closeDialog} />
+        <ThreeWayDialog
+          plan={dialog.plan}
+          onClose={closeDialog}
+          onApply={() => {
+            const { base, left, right } = dialog.plan;
+            void (async () => {
+              const r = await commands.fsApplyThreeWay(base, left, right);
+              if (r.status === "ok") {
+                openDialog({ kind: "progress", title: "3-way 적용…", taskId: r.data });
+              } else {
+                closeDialog();
+                showToast(`3-way apply failed: ${formatErr(r.error)}`);
+              }
+            })();
+          }}
+        />
       )}
       {dialog.kind === "compare" && (
         <CompareDialog
