@@ -13,6 +13,7 @@ import {
 } from "@/types/bindings";
 import { DIFF_STATUSES, strategyBadge, defaultDirection, isCreate } from "./compareView";
 import { CompareList } from "./CompareList";
+import { CompareTree } from "./CompareTree";
 import { CompareRulesBar } from "./CompareRulesBar";
 import { CompareFilterBar } from "./CompareFilterBar";
 import { CompareFooter } from "./CompareFooter";
@@ -86,6 +87,8 @@ export function CompareDialog({
   // 인라인 미리보기 — 선택 행(CompareList 가 보고) + 표시 토글.
   const [selectedEntry, setSelectedEntry] = useState<CompareEntry | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+  // 보기 모드 — 평면 목록(키보드 내비) / 디렉토리 트리(접기·롤업).
+  const [view, setView] = useState<"list" | "tree">("list");
   // 행별 적용 방향(rel → dir) — 상태별 기본값으로 초기화.
   const [decisions, setDecisions] = useState<Record<string, ApplyDirection>>(() => {
     const d: Record<string, ApplyDirection> = {};
@@ -226,6 +229,14 @@ export function CompareDialog({
             >
               미리보기
             </button>
+            <button
+              type="button"
+              onClick={() => setView((v) => (v === "list" ? "tree" : "list"))}
+              className="rounded border border-border px-2 py-0.5 hover:bg-subtle"
+              title="평면 목록(키보드 ↑↓←→) ↔ 디렉토리 트리(접기/롤업) 전환"
+            >
+              {view === "list" ? "트리 보기" : "목록 보기"}
+            </button>
             {verifyNote && <span>{verifyNote}</span>}
           </div>
 
@@ -240,14 +251,18 @@ export function CompareDialog({
             </div>
           )}
 
-          <CompareList
-            rows={rows}
-            entriesEmpty={plan.entries.length === 0}
-            dirOf={dirOf}
-            setDir={setDir}
-            listRef={listRef}
-            onSelect={setSelectedEntry}
-          />
+          {view === "tree" ? (
+            <CompareTree rows={rows} dirOf={dirOf} setDir={setDir} onSelect={setSelectedEntry} />
+          ) : (
+            <CompareList
+              rows={rows}
+              entriesEmpty={plan.entries.length === 0}
+              dirOf={dirOf}
+              setDir={setDir}
+              listRef={listRef}
+              onSelect={setSelectedEntry}
+            />
+          )}
 
           {showPreview && (
             <CompareDiffPreview entry={selectedEntry} left={plan.left} right={plan.right} />
