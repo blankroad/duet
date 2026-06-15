@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { X, AlertTriangle, FilePlus2, Trash2, Loader2 } from "lucide-react";
 import clsx from "clsx";
-import { commands, type Location, type SyncPreview } from "@/types/bindings";
+import { commands, type Location, type SyncPreview, type TrashUsage } from "@/types/bindings";
 import { formatErr } from "@/lib/error";
+import { formatSize } from "@/lib/format";
 
 export interface SyncDialogProps {
   srcLabel: string;
@@ -23,6 +24,7 @@ export function SyncDialog({ srcLabel, dstLabel, src, dst, onClose, onConfirm }:
   const [prune, setPrune] = useState(false);
   const [preview, setPreview] = useState<SyncPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [trash, setTrash] = useState<TrashUsage | null>(null);
 
   useEffect(() => {
     let stale = false;
@@ -31,6 +33,21 @@ export function SyncDialog({ srcLabel, dstLabel, src, dst, onClose, onConfirm }:
       if (stale) return;
       if (r.status === "ok") setPreview(r.data);
       else setError(formatErr(r.error));
+    })();
+    return () => {
+      stale = true;
+    };
+  }, [src, dst]);
+
+  // 원격 휴지통 누적 — prune/백업이 쌓이는 곳(dst 우선). 로컬↔로컬이면 생략.
+  useEffect(() => {
+    const sshSource =
+      dst.source.kind === "ssh" ? dst.source : src.source.kind === "ssh" ? src.source : null;
+    if (!sshSource) return;
+    let stale = false;
+    void (async () => {
+      const r = await commands.fsTrashUsage(sshSource);
+      if (!stale && r.status === "ok" && r.data.available) setTrash(r.data);
     })();
     return () => {
       stale = true;
@@ -100,6 +117,14 @@ export function SyncDialog({ srcLabel, dstLabel, src, dst, onClose, onConfirm }:
               </span>
             </span>
           </label>
+
+          {trash && (
+            <div className="mt-2 text-meta text-fg-muted">
+              원격 휴지통(<span className="font-mono">~/.duet-trash</span>) 누적:{" "}
+              <b className={trash.bytes > 0 ? "text-fg" : ""}>{formatSize(trash.bytes)}</b>
+              {trash.bytes > 0 && " — prune/덮어쓰기 백업이 이 호스트에 쌓입니다."}
+            </div>
+          )}
 
           {prune && (
             <div className="mt-2 flex items-start gap-1.5 rounded border border-amber-500/40 bg-amber-500/10 p-2 text-meta text-amber-600">
