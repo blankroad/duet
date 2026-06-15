@@ -23,7 +23,7 @@ export interface CompareDialogProps {
   plan: ComparePlan;
   onClose: () => void;
   /** 양방향 머지 실행 — 한쪽에만 있는 파일을 반대편으로 복사(충돌 미변경). */
-  onMerge: () => void;
+  onMerge: (detectRenames: boolean) => void;
   /** 행별 방향 적용 — 생성 + 덮어쓰기(백업, undo 가능). */
   onApply: (decisions: ApplyDecision[]) => void;
 }
@@ -41,13 +41,17 @@ export function CompareDialog({
   // plan 은 규칙 변경 시 Re-compare 로 교체되므로 로컬 상태로 보유(seed=prop).
   const [plan, setPlan] = useState(initialPlan);
   const [recomparing, setRecomparing] = useState(false);
+  // 이동/이름변경 감지(기본 off). 토글 후 Re-compare 로 적용(머지에도 동일 적용).
+  const [detectRenames, setDetectRenames] = useState(false);
 
   const onRecompare = async (rules: CompareRules) => {
     setRecomparing(true);
-    const r = await commands.fsCompareDirs(plan.left, plan.right, rules);
+    const r = await commands.fsCompareDirs(plan.left, plan.right, rules, detectRenames);
     if (r.status === "ok") setPlan(r.data);
     setRecomparing(false);
   };
+
+  const moves = plan.moves ?? [];
 
   // 내용 검증 — Same 항목을 해시/바이트로 재검증해 '틀린 Same' 을 Differ 로 격상.
   const [verifying, setVerifying] = useState(false);
@@ -237,6 +241,17 @@ export function CompareDialog({
             >
               {view === "list" ? "트리 보기" : "목록 보기"}
             </button>
+            <label
+              className="flex items-center gap-1 text-fg-muted"
+              title="이동/이름변경(내용 동일, 경로만 다름)을 한 쌍으로 인식 — 머지의 중복복제 차단. local·same-host. Re-compare 로 적용."
+            >
+              <input
+                type="checkbox"
+                checked={detectRenames}
+                onChange={(e) => setDetectRenames(e.target.checked)}
+              />
+              이동 감지
+            </label>
             {verifyNote && <span>{verifyNote}</span>}
           </div>
 
@@ -248,6 +263,23 @@ export function CompareDialog({
           {plan.truncated && (
             <div className="mb-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-meta text-amber-600">
               비교 항목이 많아 일부만 표시했습니다 (상한 도달) — 머지/적용은 비활성화됩니다.
+            </div>
+          )}
+
+          {moves.length > 0 && (
+            <div className="mb-2 max-h-20 overflow-auto rounded border border-border bg-subtle/40 px-2 py-1 text-meta">
+              <div className="text-fg-muted">
+                ↔ 이동/이름변경 <b className="text-fg">{moves.length}</b> — 복사하지 않음(중복 방지)
+              </div>
+              {moves.map((m) => (
+                <div
+                  key={`${m.from_rel}=>${m.to_rel}`}
+                  className="truncate font-mono text-fg-muted"
+                  title={`${m.from_rel} ⇒ ${m.to_rel}`}
+                >
+                  {m.from_rel} <span className="text-accent">⇒</span> {m.to_rel}
+                </div>
+              ))}
             </div>
           )}
 
@@ -275,7 +307,7 @@ export function CompareDialog({
             mergeable={mergeable}
             truncated={plan.truncated}
             onClose={onClose}
-            onMerge={onMerge}
+            onMerge={() => onMerge(detectRenames)}
             onApply={() => onApply(apply.payload)}
           />
           <Dialog.Description className="sr-only">

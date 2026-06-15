@@ -77,7 +77,7 @@ export async function triggerCompare(open: OpenFn, showToast: ToastFn): Promise<
       mtime_tolerance_ms: sg.data.compare_mtime_tolerance_ms ?? 0,
     };
   }
-  const r = await commands.fsCompareDirs(left, right, rules);
+  const r = await commands.fsCompareDirs(left, right, rules, false);
   if (r.status === "error") {
     // 취소는 조용히 닫기, 그 외는 토스트.
     if (r.error.kind !== "Cancelled") showToast(`Compare: ${formatErr(r.error)}`);
