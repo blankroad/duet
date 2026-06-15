@@ -85,6 +85,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::fs_ops::fs_merge_bidir,
             commands::fs_ops::fs_apply_compare,
             commands::fs_ops::fs_compare_verify,
+            commands::fs_ops::fs_trash_usage,
             commands::fs_ops::fs_sync_preview,
             commands::fs_ops::fs_sync_plan,
             commands::fs_ops::fs_sync_execute,

@@ -397,6 +397,16 @@ pub async fn fs_compare_verify(
     .await
 }
 
+/// 원격 `~/.duet-trash` 누적 용량 조회 — 읽기 전용. 로컬은 available=false.
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_trash_usage(
+    source: SourceId,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+) -> Result<ops::TrashUsage, DuetError> {
+    ops::trash_usage(&source, pool.inner()).await
+}
+
 /// 단방향 미러 dry-run — 복사/prune 목록(SyncDialog 가 사전 표시). 읽기 전용.
 #[tauri::command]
 #[specta::specta]

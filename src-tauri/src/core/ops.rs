@@ -1860,6 +1860,49 @@ async fn verify_same_host(
     Ok(out)
 }
 
+// === Trash/백업 용량 가시화 (읽기 전용) ===
+
+/// 원격 `~/.duet-trash` 누적 용량 — 휴지통 prune + same-host sync 백업이 쌓이는 곳.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct TrashUsage {
+    /// 누적 바이트. `available=false` 면 의미 없음(로컬은 OS 휴지통이라 측정 비대상).
+    pub bytes: u64,
+    pub available: bool,
+}
+
+/// 원격 호스트의 `~/.duet-trash` 누적 용량 조회 — host-side `du -sk`(russh exec, §9).
+/// 로컬은 OS 휴지통이라 측정 대상이 아님(available=false).
+pub async fn trash_usage(
+    source: &SourceId,
+    pool: &Arc<crate::services::connection_pool::ConnectionPool>,
+) -> Result<TrashUsage, DuetError> {
+    use crate::ssh::remote_exec::exec;
+    let SourceId::Ssh { connection_id, .. } = source else {
+        return Ok(TrashUsage {
+            bytes: 0,
+            available: false,
+        });
+    };
+    let conn = pool.get(connection_id).await?;
+    let session_mutex = conn
+        .session
+        .as_ref()
+        .ok_or_else(|| DuetError::ConnectionFailed("no live session".into()))?;
+    // du -sk 는 1024바이트 단위(POSIX -k) — BSD(macOS)/GNU 공통. 없으면 0.
+    let out = {
+        let handle = session_mutex.lock().await;
+        exec(&handle, "du -sk ~/.duet-trash 2>/dev/null | cut -f1").await?
+    };
+    let kb = String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse::<u64>()
+        .unwrap_or(0);
+    Ok(TrashUsage {
+        bytes: kb.saturating_mul(1024),
+        available: true,
+    })
+}
+
 // === Rename/move 감지 (이동을 '양쪽 신규'로 오인한 중복복제 차단) ===
 
 /// 후보 파일이 너무 크면 로컬 시그니처(전체 읽기) 생략 — 그 rel 은 고유 sig 로 매칭 제외.
@@ -3133,6 +3176,15 @@ mod tests {
             OpKind::CompareApply { applied, .. } => assert_eq!(*applied, 0),
             other => panic!("expected CompareApply, got {other:?}"),
         }
+    }
+
+    /// trash_usage(local): OS 휴지통이라 측정 비대상(available=false).
+    #[tokio::test]
+    async fn trash_usage_local_unavailable() {
+        let pool = Arc::new(crate::services::connection_pool::ConnectionPool::new());
+        let u = trash_usage(&SourceId::Local, &pool).await.unwrap();
+        assert!(!u.available);
+        assert_eq!(u.bytes, 0);
     }
 
     /// detect_renames(local): 이동된 파일을 LeftOnly+RightOnly 가 아니라 move 로 인식.
