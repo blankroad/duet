@@ -406,6 +406,65 @@ async fn compare_into(
     Ok(())
 }
 
+/// 비교 결과를 CSV 또는 JSON 텍스트로 직렬화 (리포트 export). 읽기 전용.
+pub fn export_plan(plan: &ComparePlan, as_json: bool) -> Result<String, DuetError> {
+    if as_json {
+        return serde_json::to_string_pretty(plan)
+            .map_err(|e| DuetError::Io(format!("export json: {e}")));
+    }
+    let mut s = String::from("status,rel,kind,left_size,right_size,left_mtime_ms,right_mtime_ms\n");
+    let num = |v: Option<i64>| v.map(|x| x.to_string()).unwrap_or_default();
+    let unum = |v: Option<u64>| v.map(|x| x.to_string()).unwrap_or_default();
+    for e in &plan.entries {
+        s.push_str(&format!(
+            "{},{},{},{},{},{},{}\n",
+            status_csv(e.status),
+            csv_field(&e.rel),
+            kind_csv(e.kind),
+            unum(e.left_size),
+            unum(e.right_size),
+            num(e.left_mtime_ms),
+            num(e.right_mtime_ms),
+        ));
+    }
+    for m in &plan.moves {
+        s.push_str(&format!(
+            "moved,{},,,,,\n",
+            csv_field(&format!("{} => {}", m.from_rel, m.to_rel))
+        ));
+    }
+    Ok(s)
+}
+
+fn status_csv(s: CompareStatus) -> &'static str {
+    match s {
+        CompareStatus::LeftOnly => "left_only",
+        CompareStatus::RightOnly => "right_only",
+        CompareStatus::Same => "same",
+        CompareStatus::NewerLeft => "newer_left",
+        CompareStatus::NewerRight => "newer_right",
+        CompareStatus::Differ => "differ",
+        CompareStatus::Unreadable => "unreadable",
+    }
+}
+
+fn kind_csv(k: EntryKind) -> &'static str {
+    match k {
+        EntryKind::File => "file",
+        EntryKind::Dir => "dir",
+        _ => "other",
+    }
+}
+
+/// CSV 필드 escape — 쉼표/따옴표/개행 포함 시 따옴표로 감싸고 내부 " 는 "" 로.
+fn csv_field(v: &str) -> String {
+    if v.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", v.replace('"', "\"\""))
+    } else {
+        v.to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -451,6 +510,23 @@ mod tests {
         assert_eq!(plan.left_only, 1);
         assert_eq!(plan.right_only, 1);
         assert!(!plan.truncated);
+    }
+
+    #[tokio::test]
+    async fn export_plan_csv_and_json() {
+        let dir = TempDir::new().unwrap();
+        let l = dir.path().join("L");
+        let r = dir.path().join("R");
+        std::fs::create_dir_all(&l).unwrap();
+        std::fs::create_dir_all(&r).unwrap();
+        std::fs::write(l.join("a.txt"), b"a").unwrap();
+        let fs = LocalFs::new();
+        let plan = compare_dirs(&fs, loc(&l), &fs, loc(&r)).await.unwrap();
+        let csv = export_plan(&plan, false).unwrap();
+        assert!(csv.starts_with("status,rel,kind,left_size"));
+        assert!(csv.contains("left_only,a.txt,file"));
+        let json = export_plan(&plan, true).unwrap();
+        assert!(json.contains("\"entries\""));
     }
 
     #[tokio::test]

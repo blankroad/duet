@@ -397,6 +397,29 @@ pub async fn fs_compare_verify(
     .await
 }
 
+/// 비교 결과 export 포맷.
+#[derive(serde::Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportFormat {
+    Csv,
+    Json,
+}
+
+/// 비교 결과를 로컬 파일(CSV/JSON)로 내보내기 — dest 는 로컬 절대경로(§1 backend write).
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_export_compare(
+    plan: crate::core::compare::ComparePlan,
+    dest: std::path::PathBuf,
+    format: ExportFormat,
+) -> Result<(), DuetError> {
+    let text = crate::core::compare::export_plan(&plan, matches!(format, ExportFormat::Json))?;
+    tokio::fs::write(&dest, text)
+        .await
+        .map_err(DuetError::from)?;
+    Ok(())
+}
+
 /// 3-way 비교 (base 대비 left/right) — '추가 vs 삭제' 구별. 읽기 전용.
 #[tauri::command]
 #[specta::specta]
