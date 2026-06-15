@@ -924,15 +924,22 @@ pub async fn fs_read_preview(
     pool: tauri::State<'_, Arc<ConnectionPool>>,
 ) -> Result<PreviewData, DuetError> {
     let fs = fs_for(&location.source, pool.inner()).await?;
-    let meta = fs.metadata(&location.path).await?;
+    build_preview(&*fs, &location.path).await
+}
+
+/// 단일 파일의 미리보기 데이터 구성 (fs_read_preview / pair-preview 공용).
+async fn build_preview(
+    fs: &dyn FileSystem,
+    path: &std::path::Path,
+) -> Result<PreviewData, DuetError> {
+    let meta = fs.metadata(path).await?;
     if meta.kind != EntryKind::File {
         return Err(DuetError::Io("not a regular file".into()));
     }
     let total_size = meta.size.unwrap_or(0);
 
     // PDF/오디오/비디오: 바이트를 IPC 로 안 싣고 duet-preview:// 로 스트리밍.
-    // mime 만 채워 프론트가 <video>/<audio>/pdf.js 로 렌더.
-    if let Some((kind, mime)) = stream_media(&location.path) {
+    if let Some((kind, mime)) = stream_media(path) {
         return Ok(PreviewData {
             kind,
             text: None,
@@ -944,11 +951,11 @@ pub async fn fs_read_preview(
     }
 
     // 이미지: 부분 렌더 불가 → cap 초과 시 TooLarge, 아니면 전체 읽어 base64.
-    if let Some(mime) = image_mime(&location.path) {
+    if let Some(mime) = image_mime(path) {
         if total_size > PREVIEW_IMAGE_CAP {
             return Ok(too_large(total_size));
         }
-        let bytes = fs.read_full(&location.path).await?;
+        let bytes = fs.read_full(path).await?;
         return Ok(PreviewData {
             kind: PreviewKind::Image,
             text: None,
@@ -961,14 +968,46 @@ pub async fn fs_read_preview(
 
     // 텍스트/바이너리: cap 이하는 전체, 초과는 head 만 읽어 truncated 표시.
     if total_size <= PREVIEW_TEXT_CAP {
-        let bytes = fs.read_full(&location.path).await?;
+        let bytes = fs.read_full(path).await?;
         Ok(decode_text(&bytes, false, total_size))
     } else {
-        let (head, _had_more) = fs
-            .read_head(&location.path, PREVIEW_TEXT_CAP as usize)
-            .await?;
+        let (head, _had_more) = fs.read_head(path, PREVIEW_TEXT_CAP as usize).await?;
         Ok(decode_text(&head, true, total_size))
     }
+}
+
+/// 비교 한 행(rel)의 좌/우 미리보기 쌍 — 인라인 diff 용. 경로 결합은 backend(§7).
+#[derive(serde::Serialize, serde::Deserialize, specta::Type)]
+pub struct ComparePairPreview {
+    pub left: PreviewData,
+    pub right: PreviewData,
+}
+
+/// 비교 한 행의 좌/우 미리보기를 함께 반환 (rel 을 backend 에서 양쪽 루트에 join).
+/// rel 은 비교 결과의 상대경로 — `..` 컴포넌트는 거부(경로 이탈 방지).
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_compare_pair_preview(
+    left: Location,
+    right: Location,
+    rel: String,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+) -> Result<ComparePairPreview, DuetError> {
+    let rel_path = std::path::Path::new(&rel);
+    if rel_path
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err(DuetError::Io("invalid rel (.. not allowed)".into()));
+    }
+    let lp = left.path.join(rel_path);
+    let rp = right.path.join(rel_path);
+    let left_fs = fs_for(&left.source, pool.inner()).await?;
+    let right_fs = fs_for(&right.source, pool.inner()).await?;
+    Ok(ComparePairPreview {
+        left: build_preview(&*left_fs, &lp).await?,
+        right: build_preview(&*right_fs, &rp).await?,
+    })
 }
 
 /// TooLarge 미리보기 결과 (이미지 전용).
