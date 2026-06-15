@@ -14,11 +14,19 @@ pub struct Settings {
     /// 영구 삭제 (Shift+Delete) 메뉴 활성화. CLAUDE.md §3 — 디폴트 false.
     #[serde(default)]
     pub permanent_delete_enabled: bool,
+    /// 비교창 기본 무시 패턴(glob) — 마지막 사용 규칙 영속.
+    #[serde(default)]
+    pub compare_ignore_globs: Vec<String>,
+    /// 비교창 기본 mtime 허용오차(ms).
+    #[serde(default)]
+    pub compare_mtime_tolerance_ms: i64,
 }
 
 #[derive(Debug, Clone, Deserialize, Type, Default)]
 pub struct SettingsPatch {
     pub permanent_delete_enabled: Option<bool>,
+    pub compare_ignore_globs: Option<Vec<String>>,
+    pub compare_mtime_tolerance_ms: Option<i64>,
 }
 
 /// In-memory cache + on-disk TOML. 동시 접근은 RwLock.
@@ -58,6 +66,12 @@ impl SettingsStore {
         let mut s = self.inner.write().await;
         if let Some(v) = patch.permanent_delete_enabled {
             s.permanent_delete_enabled = v;
+        }
+        if let Some(v) = patch.compare_ignore_globs {
+            s.compare_ignore_globs = v;
+        }
+        if let Some(v) = patch.compare_mtime_tolerance_ms {
+            s.compare_mtime_tolerance_ms = v;
         }
         let snapshot = s.clone();
         // 디스크 동기화 — write lock 잡은 채로 (race 방지)
@@ -104,6 +118,7 @@ mod tests {
         let updated = store
             .apply(SettingsPatch {
                 permanent_delete_enabled: Some(true),
+                ..Default::default()
             })
             .await
             .unwrap();
@@ -112,6 +127,25 @@ mod tests {
         // 새 store 로 다시 읽어서 영속 확인
         let store2 = SettingsStore::load_from(&path).await.unwrap();
         assert!(store2.get().await.permanent_delete_enabled);
+    }
+
+    #[tokio::test]
+    async fn compare_rules_round_trip() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        let store = SettingsStore::load_from(&path).await.unwrap();
+        store
+            .apply(SettingsPatch {
+                compare_ignore_globs: Some(vec!["node_modules".into(), "*.log".into()]),
+                compare_mtime_tolerance_ms: Some(2000),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let store2 = SettingsStore::load_from(&path).await.unwrap();
+        let s = store2.get().await;
+        assert_eq!(s.compare_ignore_globs, vec!["node_modules", "*.log"]);
+        assert_eq!(s.compare_mtime_tolerance_ms, 2000);
     }
 
     #[tokio::test]
