@@ -1,19 +1,19 @@
 import { useMemo, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { X, FolderGit2, Search } from "lucide-react";
+import { X, FolderGit2 } from "lucide-react";
 import clsx from "clsx";
-import type { ApplyDecision, ApplyDirection, ComparePlan, CompareStatus } from "@/types/bindings";
 import {
-  ALL_STATUSES,
-  DIFF_STATUSES,
-  LABEL,
-  TONE,
-  ICON,
-  strategyBadge,
-  defaultDirection,
-  isCreate,
-} from "./compareView";
+  commands,
+  type ApplyDecision,
+  type ApplyDirection,
+  type CompareRules,
+  type ComparePlan,
+  type CompareStatus,
+} from "@/types/bindings";
+import { DIFF_STATUSES, strategyBadge, defaultDirection, isCreate } from "./compareView";
 import { CompareList } from "./CompareList";
+import { CompareRulesBar } from "./CompareRulesBar";
+import { CompareFilterBar } from "./CompareFilterBar";
 
 export interface CompareDialogProps {
   plan: ComparePlan;
@@ -28,7 +28,23 @@ export interface CompareDialogProps {
  * 두 패널 폴더 비교 결과 — 상태 필터칩 + 경로검색 + 양쪽 메타 + 행별 방향 적용.
  * 리스트/키보드는 CompareList 가 담당. 머지/적용은 truncated 면 비활성.
  */
-export function CompareDialog({ plan, onClose, onMerge, onApply }: CompareDialogProps) {
+export function CompareDialog({
+  plan: initialPlan,
+  onClose,
+  onMerge,
+  onApply,
+}: CompareDialogProps) {
+  // plan 은 규칙 변경 시 Re-compare 로 교체되므로 로컬 상태로 보유(seed=prop).
+  const [plan, setPlan] = useState(initialPlan);
+  const [recomparing, setRecomparing] = useState(false);
+
+  const onRecompare = async (rules: CompareRules) => {
+    setRecomparing(true);
+    const r = await commands.fsCompareDirs(plan.left, plan.right, rules);
+    if (r.status === "ok") setPlan(r.data);
+    setRecomparing(false);
+  };
+
   // 기본 필터: 차이만(same 숨김). unreadable 은 경고라 기본 표시.
   const [active, setActive] = useState<Set<CompareStatus>>(
     () => new Set<CompareStatus>([...DIFF_STATUSES, "unreadable"]),
@@ -142,39 +158,15 @@ export function CompareDialog({ plan, onClose, onMerge, onApply }: CompareDialog
             </div>
           </div>
 
-          {/* 필터칩(상태별 카운트, 클릭 토글) + 경로 검색 */}
-          <div className="mb-2 flex flex-wrap items-center gap-1.5">
-            {ALL_STATUSES.filter((s) => counts[s] > 0).map((s) => {
-              const on = active.has(s);
-              const Icon = ICON[s];
-              return (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => toggle(s)}
-                  aria-pressed={on}
-                  className={clsx(
-                    "flex items-center gap-1 rounded border px-1.5 py-0.5 text-meta",
-                    on ? "border-border bg-subtle" : "border-transparent text-fg-muted opacity-60",
-                  )}
-                  title={`${LABEL[s]} 토글`}
-                >
-                  <Icon size={11} className={TONE[s]} />
-                  <span>{LABEL[s]}</span>
-                  <b className="text-fg">{counts[s]}</b>
-                </button>
-              );
-            })}
-            <div className="ml-auto flex items-center gap-1 rounded border border-border bg-subtle px-1.5">
-              <Search size={11} className="text-fg-muted" />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="경로 검색"
-                className="w-32 bg-transparent py-0.5 text-meta focus:outline-none"
-              />
-            </div>
-          </div>
+          <CompareFilterBar
+            counts={counts}
+            active={active}
+            toggle={toggle}
+            query={query}
+            setQuery={setQuery}
+          />
+
+          <CompareRulesBar onRecompare={onRecompare} busy={recomparing} />
 
           {counts.unreadable > 0 && (
             <div className="mb-2 rounded border border-danger/40 bg-danger/10 px-2 py-1 text-meta text-danger">
