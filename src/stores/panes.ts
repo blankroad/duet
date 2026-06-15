@@ -86,6 +86,10 @@ interface PanesState {
   // NEW
   back: (id: PaneId) => Location | null;
   forward: (id: PaneId) => Location | null;
+  /** 좌/우 패널 내용 통째 교환 (포커스 위치는 유지). */
+  swapPanes: () => void;
+  /** 활성 패널의 현재 탭을 반대 패널로 이동(포커스도 따라감). */
+  moveActiveTabToOther: () => void;
 }
 
 const home = (): Location => ({
@@ -357,6 +361,37 @@ export const usePanes = create<PanesState>((set, get) => ({
     }));
     return loc;
   },
+  swapPanes: () =>
+    set((s) => ({
+      // 내용만 교환 — 포커스(activePane)는 그대로라 같은 쪽에 swap 된 내용이 보인다.
+      panes: { left: s.panes.right, right: s.panes.left },
+    })),
+  moveActiveTabToOther: () =>
+    set((s) => {
+      const from = s.activePane;
+      const to: PaneId = from === "left" ? "right" : "left";
+      const src = s.panes[from];
+      const dst = s.panes[to];
+      const tab = src.tabs[src.activeTabIndex];
+      if (!tab) return s;
+      // 소스에서 제거 — 마지막 1개였으면 빈 split 방지 위해 fresh tab 으로 대체.
+      let srcTabs = src.tabs.slice();
+      srcTabs.splice(src.activeTabIndex, 1);
+      let srcActive = Math.max(0, src.activeTabIndex - 1);
+      if (srcTabs.length === 0) {
+        srcTabs = [initialTab()];
+        srcActive = 0;
+      }
+      const dstTabs = [...dst.tabs, tab];
+      return {
+        panes: {
+          ...s.panes,
+          [from]: { tabs: srcTabs, activeTabIndex: srcActive },
+          [to]: { tabs: dstTabs, activeTabIndex: dstTabs.length - 1 },
+        },
+        activePane: to, // 이동한 탭을 따라 포커스 이동
+      };
+    }),
 }));
 
 /** 표시 entries — 활성 탭 기준. raw → filter → hidden → sort. */

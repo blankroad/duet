@@ -418,6 +418,8 @@ function App() {
       },
       compareFolders: () => void triggerCompare(openDialog, showToast),
       syncFolders: () => void triggerSync(openDialog, showToast),
+      swapPanes: () => usePanes.getState().swapPanes(),
+      moveTabToOther: () => usePanes.getState().moveActiveTabToOther(),
       openSettings: () => openDialog({ kind: "settings" }),
       openPalette: () => openPalette(),
       quit: () => {

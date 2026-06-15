@@ -289,3 +289,41 @@ describe("panes — setSelected", () => {
     expect(activeTab(usePanes.getState(), "left").selected.size).toBe(0);
   });
 });
+
+describe("panes — swap / move tab", () => {
+  beforeEach(reset);
+
+  it("swapPanes exchanges left/right content, keeps focus side", () => {
+    const st = usePanes.getState();
+    st.setEntries("left", { source: { kind: "local" }, path: "/foo" }, []);
+    st.setEntries("right", { source: { kind: "local" }, path: "/bar" }, []);
+    st.setActivePane("left");
+    usePanes.getState().swapPanes();
+    const s = usePanes.getState();
+    expect(activeTab(s, "left").location.path).toBe("/bar");
+    expect(activeTab(s, "right").location.path).toBe("/foo");
+    expect(s.activePane).toBe("left"); // 포커스 위치 유지
+  });
+
+  it("moveActiveTabToOther moves the active tab and follows focus", () => {
+    const st = usePanes.getState();
+    st.setActivePane("left");
+    st.setEntries("left", { source: { kind: "local" }, path: "/from" }, []);
+    st.openTab("left", { source: { kind: "local" }, path: "/extra" }); // left 2 tabs, active=extra
+    usePanes.getState().moveActiveTabToOther();
+    const s = usePanes.getState();
+    expect(s.activePane).toBe("right");
+    expect(activeTab(s, "right").location.path).toBe("/extra"); // 이동됨
+    expect(s.panes.left.tabs.length).toBe(1); // 소스에서 제거
+  });
+
+  it("moving the only tab leaves a fresh tab (no empty split)", () => {
+    const st = usePanes.getState();
+    st.setActivePane("left");
+    st.setEntries("left", { source: { kind: "local" }, path: "/solo" }, []);
+    usePanes.getState().moveActiveTabToOther();
+    const s = usePanes.getState();
+    expect(s.panes.left.tabs.length).toBe(1); // fresh tab
+    expect(activeTab(s, "right").location.path).toBe("/solo");
+  });
+});

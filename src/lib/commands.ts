@@ -51,6 +51,8 @@ export interface BuiltinDeps {
   // file (two-pane)
   compareFolders: () => void;
   syncFolders: () => void;
+  swapPanes: () => void;
+  moveTabToOther: () => void;
   // bookmark
   toggleBookmark: () => void;
   // settings / palette
@@ -66,6 +68,7 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
     { id: "tab.close", label: "Close tab", category: "Tab", defaultKey: "Ctrl+W", action: deps.closeActiveTab },
     { id: "tab.next", label: "Next tab", category: "Tab", defaultKey: "Ctrl+Tab", action: deps.nextTab },
     { id: "tab.prev", label: "Previous tab", category: "Tab", defaultKey: "Ctrl+Shift+Tab", action: deps.prevTab },
+    { id: "tab.moveToOther", label: "Move tab to other panel", category: "Tab", action: deps.moveTabToOther },
     { id: "nav.back", label: "Go back", category: "Navigation", defaultKey: "Alt+Left", action: deps.back },
     { id: "nav.forward", label: "Go forward", category: "Navigation", defaultKey: "Alt+Right", action: deps.forward },
     { id: "view.refresh", label: "Refresh", category: "View", defaultKey: "Ctrl+R", action: deps.refresh },
@@ -87,6 +90,7 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
     { id: "search.global", label: "Global search", category: "Search", defaultKey: "Ctrl+Shift+F", action: deps.openSearch },
     { id: "file.compare", label: "Compare folders (left ↔ right)", category: "File", action: deps.compareFolders },
     { id: "file.sync", label: "Sync to other pane (mirror)", category: "File", action: deps.syncFolders },
+    { id: "pane.swap", label: "Swap panels (left ↔ right)", category: "View", defaultKey: "Ctrl+U", action: deps.swapPanes },
     { id: "settings.open", label: "Open settings", category: "Settings", defaultKey: "Ctrl+,", action: deps.openSettings },
     { id: "palette.open", label: "Command palette", category: "Settings", defaultKey: "Ctrl+P", action: deps.openPalette },
     { id: "app.quit", label: "Quit", category: "Settings", defaultKey: "Ctrl+Q", action: deps.quit },
