@@ -3,7 +3,15 @@ import { ChevronRight, ChevronDown, Folder } from "lucide-react";
 import clsx from "clsx";
 import type { ApplyDirection, CompareEntry, CompareStatus } from "@/types/bindings";
 import { buildCompareTree, type TreeNode } from "@/lib/compareTree";
-import { LABEL, TONE, ICON, sizeText, mtimeText, DirectionToggle } from "./compareView";
+import {
+  LABEL,
+  TONE,
+  ICON,
+  sizeText,
+  mtimeText,
+  DirectionToggle,
+  allowedDirections,
+} from "./compareView";
 
 const ROLLUP_STATUSES: CompareStatus[] = [
   "left_only",
@@ -103,18 +111,29 @@ function TreeRow({
   // folder — 합성 컨테이너
   const isCollapsed = collapsed.has(node.rel);
   const Chevron = isCollapsed ? ChevronRight : ChevronDown;
+  // 폴더 방향 일괄 지정 — 서브트리 모든 leaf 에 전파(허용 안 되는 방향은 skip).
+  const setFolderDir = (dir: ApplyDirection) => {
+    const walk = (n: TreeNode) => {
+      if (n.entry) {
+        setDir(n.entry.rel, allowedDirections(n.entry.status).includes(dir) ? dir : "skip");
+      } else n.children?.forEach(walk);
+    };
+    walk(node);
+  };
   return (
     <>
-      <div
-        onClick={() => toggle(node.rel)}
-        className="flex cursor-pointer items-center px-2 py-0.5 hover:bg-subtle/40"
-      >
-        <span style={pad} className="flex min-w-0 flex-1 items-center gap-1">
+      <div className="flex items-center px-2 py-0.5 hover:bg-subtle/40">
+        <span
+          onClick={() => toggle(node.rel)}
+          style={pad}
+          className="flex min-w-0 flex-1 cursor-pointer items-center gap-1"
+        >
           <Chevron size={12} className="text-fg-muted" />
           <Folder size={11} className="text-fg-muted" />
           <span className="truncate font-medium">{node.name}/</span>
           <Rollup rollup={node.rollup} />
         </span>
+        <FolderDirSet onSet={setFolderDir} />
       </div>
       {!isCollapsed &&
         node.children?.map((c) => (
@@ -130,6 +149,30 @@ function TreeRow({
           />
         ))}
     </>
+  );
+}
+
+/** 폴더 행의 서브트리 일괄 방향 지정 (← · →) — 클릭 시 자손 leaf 전체에 전파. */
+function FolderDirSet({ onSet }: { onSet: (dir: ApplyDirection) => void }) {
+  const btn = (dir: ApplyDirection, label: string, title: string) => (
+    <button
+      type="button"
+      onClick={(ev) => {
+        ev.stopPropagation();
+        onSet(dir);
+      }}
+      title={title}
+      className="px-1 leading-none text-fg-muted hover:text-fg"
+    >
+      {label}
+    </button>
+  );
+  return (
+    <span className="flex w-14 shrink-0 items-center justify-end font-mono">
+      {btn("to_left", "←", "이 폴더 전체: 오른쪽 → 왼쪽")}
+      {btn("skip", "·", "이 폴더 전체: 건너뜀")}
+      {btn("to_right", "→", "이 폴더 전체: 왼쪽 → 오른쪽")}
+    </span>
   );
 }
 
