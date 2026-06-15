@@ -115,9 +115,71 @@ pub fn parse_rsync_itemize_created_file(line: &str) -> Option<String> {
     Some(path.to_string())
 }
 
+/// itemize 한 줄에서 *전송되는(생성/갱신) 파일*의 상대경로 추출 (dry-run 미리보기용).
+/// Y∈`<>c`(전송/변경), X==`f`(파일). 미변경(`.f...`)·디렉토리는 제외.
+pub fn parse_rsync_itemize_transfer_file(line: &str) -> Option<String> {
+    let line = line.trim_end_matches(['\r', '\n']);
+    let fb = line.as_bytes();
+    if fb.len() < 12 {
+        return None;
+    }
+    if !(fb[0] == b'<' || fb[0] == b'>' || fb[0] == b'c') {
+        return None;
+    }
+    if fb[1] != b'f' {
+        return None;
+    }
+    let path = line[11..].trim_start();
+    if path.is_empty() {
+        return None;
+    }
+    Some(path.to_string())
+}
+
+/// itemize 의 삭제 라인(`*deleting <path>`)에서 상대경로 추출 (prune 미리보기용).
+pub fn parse_rsync_itemize_delete(line: &str) -> Option<String> {
+    let line = line.trim_end_matches(['\r', '\n']);
+    let rest = line.trim_start().strip_prefix("*deleting")?;
+    let path = rest.trim();
+    if path.is_empty() {
+        None
+    } else {
+        Some(path.trim_end_matches('/').to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn itemize_transfer_and_delete() {
+        assert_eq!(
+            parse_rsync_itemize_transfer_file(">f+++++++++ new.txt").as_deref(),
+            Some("new.txt")
+        );
+        assert_eq!(
+            parse_rsync_itemize_transfer_file(">f.st...... up.txt").as_deref(),
+            Some("up.txt")
+        );
+        assert_eq!(
+            parse_rsync_itemize_transfer_file("cd+++++++++ newdir/"),
+            None
+        );
+        assert_eq!(
+            parse_rsync_itemize_transfer_file(".f          same.txt"),
+            None
+        );
+        assert_eq!(
+            parse_rsync_itemize_delete("*deleting   old.txt").as_deref(),
+            Some("old.txt")
+        );
+        assert_eq!(
+            parse_rsync_itemize_delete("*deleting   olddir/").as_deref(),
+            Some("olddir")
+        );
+        assert_eq!(parse_rsync_itemize_delete(">f+++++++++ new.txt"), None);
+    }
 
     #[test]
     fn itemize_detects_created_files_only() {

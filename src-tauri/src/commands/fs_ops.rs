@@ -392,6 +392,19 @@ pub async fn fs_compare_verify(
     .await
 }
 
+/// 단방향 미러 dry-run — 복사/prune 목록(SyncDialog 가 사전 표시). 읽기 전용.
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_sync_preview(
+    src: Location,
+    dst: Location,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+) -> Result<ops::SyncPreview, DuetError> {
+    let src_fs = fs_for(&src.source, pool.inner()).await?;
+    let dst_fs = fs_for(&dst.source, pool.inner()).await?;
+    ops::sync_preview(&*src_fs, &src, &*dst_fs, &dst, Some(pool.inner())).await
+}
+
 /// 단방향 미러 계획 — 활성 패널 dir(src) → 반대 패널 dir(dst). v1 local↔local 만.
 #[tauri::command]
 #[specta::specta]

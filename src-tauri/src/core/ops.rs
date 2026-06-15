@@ -906,6 +906,195 @@ async fn collect_backup_files(
     }
 }
 
+// === Sync preview (dry-run — 복사/prune 목록) ===
+
+/// 단방향 미러 dry-run 결과 — 실제 sync 와 같은 판정으로 산출.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct SyncPreview {
+    /// src→dst 복사될 항목(상대경로).
+    pub copy: Vec<String>,
+    /// prune(삭제 전파) 시 dst 에서 휴지통으로 갈 항목(상대경로).
+    pub prune: Vec<String>,
+    /// 상한 초과로 일부만 담겼는지.
+    pub truncated: bool,
+}
+
+const SYNC_PREVIEW_CAP: usize = 2000;
+
+fn rel_join(rel: &str, name: &str) -> String {
+    if rel.is_empty() {
+        name.to_string()
+    } else {
+        format!("{rel}/{name}") // 표시용 상대경로(실경로는 PathBuf::join, §7)
+    }
+}
+
+/// 단방향 미러 dry-run — 복사/prune 목록. local/relay 는 in-Rust 워크(entry_differs
+/// 로 실제 sync 와 동일 판정), same-host 는 `rsync -ain --delete` itemize.
+pub async fn sync_preview(
+    src_fs: &dyn FileSystem,
+    src: &Location,
+    dst_fs: &dyn FileSystem,
+    dst: &Location,
+    pool: Option<&Arc<crate::services::connection_pool::ConnectionPool>>,
+) -> Result<SyncPreview, DuetError> {
+    match crate::core::copy_strategy::decide(&src.source, &dst.source) {
+        crate::core::copy_strategy::CopyStrategy::SshSameHost => {
+            let pool = pool
+                .ok_or_else(|| DuetError::Io("pool required for same-host sync preview".into()))?;
+            sync_preview_same_host(src, dst, pool).await
+        }
+        _ => {
+            let mut p = SyncPreview {
+                copy: Vec::new(),
+                prune: Vec::new(),
+                truncated: false,
+            };
+            preview_copy_walk(src_fs, &src.path, dst_fs, &dst.path, "", &mut p).await?;
+            preview_prune_walk(src_fs, &src.path, dst_fs, &dst.path, "", &mut p).await?;
+            Ok(p)
+        }
+    }
+}
+
+/// src 트리를 걸어 복사 대상(dst 없음 또는 entry_differs)을 모은다.
+async fn preview_copy_walk(
+    src_fs: &dyn FileSystem,
+    src_dir: &std::path::Path,
+    dst_fs: &dyn FileSystem,
+    dst_dir: &std::path::Path,
+    rel: &str,
+    out: &mut SyncPreview,
+) -> Result<(), DuetError> {
+    for e in src_fs.list(src_dir).await.unwrap_or_default() {
+        if out.copy.len() >= SYNC_PREVIEW_CAP {
+            out.truncated = true;
+            return Ok(());
+        }
+        let rel_name = rel_join(rel, &e.name);
+        let s = src_dir.join(&e.name);
+        let d = dst_dir.join(&e.name);
+        match e.kind {
+            crate::types::EntryKind::Dir => {
+                Box::pin(preview_copy_walk(src_fs, &s, dst_fs, &d, &rel_name, out)).await?;
+            }
+            crate::types::EntryKind::File => {
+                let needs = match dst_fs.metadata(&d).await {
+                    Ok(dm) => entry_differs(&e, &dm),
+                    Err(_) => true, // dst 없음(또는 접근불가) → 복사 대상
+                };
+                if needs {
+                    out.copy.push(rel_name);
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// dst 트리를 걸어 src 에 없는(NotFound) 항목을 prune 후보로 모은다.
+async fn preview_prune_walk(
+    src_fs: &dyn FileSystem,
+    src_dir: &std::path::Path,
+    dst_fs: &dyn FileSystem,
+    dst_dir: &std::path::Path,
+    rel: &str,
+    out: &mut SyncPreview,
+) -> Result<(), DuetError> {
+    for e in dst_fs.list(dst_dir).await.unwrap_or_default() {
+        if out.prune.len() >= SYNC_PREVIEW_CAP {
+            out.truncated = true;
+            return Ok(());
+        }
+        let rel_name = rel_join(rel, &e.name);
+        let sp = src_dir.join(&e.name);
+        let dp = dst_dir.join(&e.name);
+        match src_fs.metadata(&sp).await {
+            Ok(_) => {
+                if e.kind == crate::types::EntryKind::Dir {
+                    Box::pin(preview_prune_walk(src_fs, &sp, dst_fs, &dp, &rel_name, out)).await?;
+                }
+            }
+            Err(DuetError::NotFound(_)) => out.prune.push(rel_name),
+            Err(_) => {} // 일시적 오류 — preview 에서 제외(오인 prune 방지)
+        }
+    }
+    Ok(())
+}
+
+/// same-host: `rsync -ain --delete` itemize 로 복사/삭제 목록.
+async fn sync_preview_same_host(
+    src: &Location,
+    dst: &Location,
+    pool: &Arc<crate::services::connection_pool::ConnectionPool>,
+) -> Result<SyncPreview, DuetError> {
+    use crate::core::copy_progress::{
+        parse_rsync_itemize_delete, parse_rsync_itemize_transfer_file,
+    };
+    use crate::core::copy_strategy::shell_escape_path;
+    use crate::ssh::remote_exec::exec;
+    let SourceId::Ssh { connection_id, .. } = &src.source else {
+        return Err(DuetError::Io("same-host sync preview on non-ssh".into()));
+    };
+    let conn = pool.get(connection_id).await?;
+    let session_mutex = conn
+        .session
+        .as_ref()
+        .ok_or_else(|| DuetError::ConnectionFailed("no live session".into()))?;
+    let use_rsync = {
+        let mut cache = conn.rsync_available.lock().await;
+        match *cache {
+            Some(v) => v,
+            None => {
+                let handle = session_mutex.lock().await;
+                let d = exec(&handle, "command -v rsync")
+                    .await
+                    .map(|o| o.exit_status == 0)
+                    .unwrap_or(false);
+                *cache = Some(d);
+                d
+            }
+        }
+    };
+    if !use_rsync {
+        return Err(DuetError::NotSupported(
+            "same-host sync preview requires rsync".into(),
+        ));
+    }
+    let src_arg = shell_escape_path(&src.path)?;
+    let dst_arg = shell_escape_path(&dst.path)?;
+    let cmd = format!("LC_ALL=C rsync -ain --delete -- {src_arg}/ {dst_arg}");
+    let out = {
+        let handle = session_mutex.lock().await;
+        exec(&handle, &cmd).await?
+    };
+    if out.exit_status != 0 {
+        return Err(DuetError::Ssh(format!(
+            "rsync preview failed (exit {}): {}",
+            out.exit_status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+    let mut p = SyncPreview {
+        copy: Vec::new(),
+        prune: Vec::new(),
+        truncated: false,
+    };
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        if p.copy.len() + p.prune.len() >= SYNC_PREVIEW_CAP * 2 {
+            p.truncated = true;
+            break;
+        }
+        if let Some(rel) = parse_rsync_itemize_transfer_file(line) {
+            p.copy.push(rel);
+        } else if let Some(rel) = parse_rsync_itemize_delete(line) {
+            p.prune.push(rel);
+        }
+    }
+    Ok(p)
+}
+
 // === Bidirectional merge (안전 — 한쪽에만 있는 파일을 반대편으로 복사, 충돌 미변경) ===
 
 /// 두 디렉토리를 양방향 머지 — `compare_dirs` 결과에서 LeftOnly 는 오른쪽으로,
@@ -2751,6 +2940,36 @@ mod tests {
             OpKind::CompareApply { applied, .. } => assert_eq!(*applied, 0),
             other => panic!("expected CompareApply, got {other:?}"),
         }
+    }
+
+    /// sync_preview(local): 복사 대상(신규/변경) + prune 대상(dst 전용) 산출.
+    #[tokio::test]
+    async fn sync_preview_local_lists() {
+        let dir = TempDir::new().unwrap();
+        let s = dir.path().join("S");
+        let d = dir.path().join("D");
+        std::fs::create_dir_all(&s).unwrap();
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(s.join("new.txt"), b"n").unwrap(); // dst 없음 → 복사
+        std::fs::write(s.join("same.txt"), b"x").unwrap();
+        std::fs::write(d.join("same.txt"), b"x").unwrap(); // 동일 → skip
+        std::fs::write(s.join("chg.txt"), b"aaaa").unwrap();
+        std::fs::write(d.join("chg.txt"), b"bb").unwrap(); // 크기 다름 → 복사
+        std::fs::write(d.join("extra.txt"), b"e").unwrap(); // dst 전용 → prune
+
+        let fs = LocalFs::new();
+        let mk = |p: &std::path::Path| Location {
+            source: SourceId::Local,
+            path: p.to_path_buf(),
+        };
+        let p = sync_preview(&fs, &mk(&s), &fs, &mk(&d), None)
+            .await
+            .unwrap();
+        let mut copy = p.copy.clone();
+        copy.sort();
+        assert_eq!(copy, vec!["chg.txt".to_string(), "new.txt".to_string()]);
+        assert_eq!(p.prune, vec!["extra.txt".to_string()]);
+        assert!(!p.truncated);
     }
 
     /// verify_compare(local): 내용 같음/다름(같은 크기)/크기 다름/없음 판정.
