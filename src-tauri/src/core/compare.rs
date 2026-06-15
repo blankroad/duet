@@ -106,6 +106,46 @@ pub struct ComparePlan {
     pub strategy: CopyStrategy,
 }
 
+/// 비교 규칙 — 노이즈/오탐 제거. 기본값(빈 globs, tol 0)은 종전 동작과 동일.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+pub struct CompareRules {
+    /// 무시할 glob 패턴(basename 매칭) — 예: `["node_modules", ".git", "*.log"]`.
+    /// 매칭된 항목/디렉토리는 통째 제외(재귀 안 함).
+    pub ignore_globs: Vec<String>,
+    /// mtime 허용 오차(ms). 크기 같고 mtime 차가 이 이내면 Same — SSH↔로컬의 초/ms
+    /// 반올림 오탐을 흡수. 0 이면 정확 일치만 Same.
+    pub mtime_tolerance_ms: i64,
+}
+
+/// 아주 단순한 glob — `*`(0+ 임의), `?`(1개). basename(세그먼트) 매칭, 슬래시 비매칭.
+/// 백트래킹 two-pointer. (`node_modules`·`.git`·`*.log` 같은 흔한 케이스 커버.)
+fn glob_match(pattern: &str, text: &str) -> bool {
+    let p: Vec<char> = pattern.chars().collect();
+    let t: Vec<char> = text.chars().collect();
+    let (mut pi, mut ti) = (0usize, 0usize);
+    let (mut star, mut star_t): (Option<usize>, usize) = (None, 0);
+    while ti < t.len() {
+        if pi < p.len() && (p[pi] == '?' || p[pi] == t[ti]) {
+            pi += 1;
+            ti += 1;
+        } else if pi < p.len() && p[pi] == '*' {
+            star = Some(pi);
+            star_t = ti;
+            pi += 1;
+        } else if let Some(s) = star {
+            pi = s + 1;
+            star_t += 1;
+            ti = star_t;
+        } else {
+            return false;
+        }
+    }
+    while pi < p.len() && p[pi] == '*' {
+        pi += 1;
+    }
+    pi == p.len()
+}
+
 /// IPC 페이로드 폭주 방지 상한. 초과분은 `truncated=true` 로 알림(조용히 누락 금지).
 const MAX_ENTRIES: usize = 5000;
 
@@ -123,20 +163,23 @@ pub async fn compare_dirs(
         left,
         right_fs,
         right,
+        &CompareRules::default(),
         &tokio_util::sync::CancellationToken::new(),
         &|_| {},
     )
     .await
 }
 
-/// `compare_dirs` + 취소(CancellationToken)·진행률(`on_progress(scanned)`).
-/// 대형/원격 트리 스캔용 — 명령 레이어가 토큰 등록 + 이벤트 emit 에 사용.
+/// `compare_dirs` + 규칙(CompareRules)·취소·진행률(`on_progress(scanned)`).
+/// 대형/원격 트리 스캔용 — 명령 레이어가 규칙 전달 + 토큰 등록 + 이벤트 emit 에 사용.
 /// `on_progress` 는 스캔 중 누적 항목 수로 자주 호출되므로 호출측에서 throttle 한다.
+#[allow(clippy::too_many_arguments)]
 pub async fn compare_dirs_progress(
     left_fs: &dyn FileSystem,
     left: Location,
     right_fs: &dyn FileSystem,
     right: Location,
+    rules: &CompareRules,
     cancel: &tokio_util::sync::CancellationToken,
     on_progress: &(dyn Fn(u64) + Send + Sync),
 ) -> Result<ComparePlan, DuetError> {
@@ -157,6 +200,7 @@ pub async fn compare_dirs_progress(
         "",
         &mut out,
         &mut truncated,
+        rules,
         cancel,
         on_progress,
     )
@@ -206,8 +250,13 @@ fn join_rel(rel: &str, name: &str) -> String {
 /// 주의: sync 미러의 `ops::entry_differs` 는 *단방향 복사 필요 여부* 라는 다른 관심사
 /// (크기 다르거나 src 가 더 최신이면 복사)라서 이 6-way 와 1:1 대응되지 않는다 —
 /// 의도적으로 분리 유지. 향후 통합 시 sync 의 덮어쓰기 의미가 바뀌므로 별도 결정 필요.
-pub(crate) fn classify_files(l: &Entry, r: &Entry) -> CompareStatus {
-    if l.size == r.size && l.modified_ms == r.modified_ms {
+pub(crate) fn classify_files(l: &Entry, r: &Entry, mtime_tolerance_ms: i64) -> CompareStatus {
+    let mtime_close = match (l.modified_ms, r.modified_ms) {
+        (Some(a), Some(b)) => (a - b).abs() <= mtime_tolerance_ms,
+        (None, None) => true,
+        _ => false,
+    };
+    if l.size == r.size && mtime_close {
         return CompareStatus::Same;
     }
     match (l.modified_ms, r.modified_ms) {
@@ -226,6 +275,7 @@ async fn compare_into(
     rel: &str,
     out: &mut Vec<CompareEntry>,
     truncated: &mut bool,
+    rules: &CompareRules,
     cancel: &tokio_util::sync::CancellationToken,
     on_progress: &(dyn Fn(u64) + Send + Sync),
 ) -> Result<(), DuetError> {
@@ -279,6 +329,10 @@ async fn compare_into(
         if cancel.is_cancelled() {
             return Err(DuetError::Cancelled);
         }
+        // ignore glob 매칭 항목은 통째 제외(디렉토리면 재귀 안 함).
+        if rules.ignore_globs.iter().any(|g| glob_match(g, name)) {
+            continue;
+        }
         if out.len() >= MAX_ENTRIES {
             *truncated = true;
             return Ok(());
@@ -309,6 +363,7 @@ async fn compare_into(
                         &rel_name,
                         out,
                         truncated,
+                        rules,
                         cancel,
                         on_progress,
                     ))
@@ -319,7 +374,7 @@ async fn compare_into(
                         EntryKind::File,
                         l,
                         r,
-                        classify_files(l, r),
+                        classify_files(l, r, rules.mtime_tolerance_ms),
                     ));
                 } else {
                     // 타입 불일치(한쪽 dir, 한쪽 file 등).
@@ -405,7 +460,16 @@ mod tests {
         let fs = LocalFs::new();
         let cancel = tokio_util::sync::CancellationToken::new();
         cancel.cancel(); // 미리 취소
-        let res = compare_dirs_progress(&fs, loc(&l), &fs, loc(&r), &cancel, &|_| {}).await;
+        let res = compare_dirs_progress(
+            &fs,
+            loc(&l),
+            &fs,
+            loc(&r),
+            &CompareRules::default(),
+            &cancel,
+            &|_| {},
+        )
+        .await;
         assert!(matches!(res, Err(DuetError::Cancelled)));
     }
 
@@ -422,9 +486,17 @@ mod tests {
         let fs = LocalFs::new();
         let count = std::sync::atomic::AtomicU64::new(0);
         let cancel = tokio_util::sync::CancellationToken::new();
-        compare_dirs_progress(&fs, loc(&l), &fs, loc(&r), &cancel, &|_| {
-            count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        })
+        compare_dirs_progress(
+            &fs,
+            loc(&l),
+            &fs,
+            loc(&r),
+            &CompareRules::default(),
+            &cancel,
+            &|_| {
+                count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            },
+        )
         .await
         .unwrap();
         assert!(count.load(std::sync::atomic::Ordering::Relaxed) > 0);
@@ -442,29 +514,83 @@ mod tests {
         };
         // 크기+mtime 동일 → Same.
         assert_eq!(
-            classify_files(&e(Some(10), Some(5)), &e(Some(10), Some(5))),
+            classify_files(&e(Some(10), Some(5)), &e(Some(10), Some(5)), 0),
             CompareStatus::Same
         );
         // 왼쪽이 더 최신.
         assert_eq!(
-            classify_files(&e(Some(10), Some(9)), &e(Some(10), Some(5))),
+            classify_files(&e(Some(10), Some(9)), &e(Some(10), Some(5)), 0),
             CompareStatus::NewerLeft
         );
         // 오른쪽이 더 최신.
         assert_eq!(
-            classify_files(&e(Some(10), Some(5)), &e(Some(10), Some(9))),
+            classify_files(&e(Some(10), Some(5)), &e(Some(10), Some(9)), 0),
             CompareStatus::NewerRight
         );
         // 크기 다르고 mtime 같음 → 방향 불가 → Differ.
         assert_eq!(
-            classify_files(&e(Some(10), Some(5)), &e(Some(20), Some(5))),
+            classify_files(&e(Some(10), Some(5)), &e(Some(20), Some(5)), 0),
             CompareStatus::Differ
         );
         // mtime 둘 다 없음 → Differ.
         assert_eq!(
-            classify_files(&e(Some(10), None), &e(Some(20), None)),
+            classify_files(&e(Some(10), None), &e(Some(20), None), 0),
             CompareStatus::Differ
         );
+        // tolerance 안 mtime 차 + 같은 크기 → Same (SSH↔로컬 오탐 흡수).
+        assert_eq!(
+            classify_files(&e(Some(10), Some(1500)), &e(Some(10), Some(1000)), 2000),
+            CompareStatus::Same
+        );
+        // tolerance 밖 → NewerLeft.
+        assert_eq!(
+            classify_files(&e(Some(10), Some(5000)), &e(Some(10), Some(1000)), 2000),
+            CompareStatus::NewerLeft
+        );
+    }
+
+    #[test]
+    fn glob_match_basics() {
+        assert!(glob_match("node_modules", "node_modules"));
+        assert!(glob_match("*.log", "server.log"));
+        assert!(glob_match("*.log", ".log"));
+        assert!(!glob_match("*.log", "log.txt"));
+        assert!(glob_match("a?c", "abc"));
+        assert!(!glob_match("a?c", "ac"));
+        assert!(glob_match("*", "anything"));
+        assert!(!glob_match("node_modules", "node_modules2"));
+    }
+
+    #[tokio::test]
+    async fn ignore_globs_exclude_subtrees() {
+        let dir = TempDir::new().unwrap();
+        let l = dir.path().join("L");
+        let r = dir.path().join("R");
+        std::fs::create_dir_all(l.join("node_modules")).unwrap();
+        std::fs::create_dir_all(&r).unwrap();
+        std::fs::write(l.join("node_modules/x.js"), b"x").unwrap(); // 무시
+        std::fs::write(l.join("keep.txt"), b"k").unwrap(); // 유지
+        std::fs::write(l.join("debug.log"), b"d").unwrap(); // *.log 무시
+
+        let fs = LocalFs::new();
+        let rules = CompareRules {
+            ignore_globs: vec!["node_modules".into(), "*.log".into()],
+            mtime_tolerance_ms: 0,
+        };
+        let plan = compare_dirs_progress(
+            &fs,
+            loc(&l),
+            &fs,
+            loc(&r),
+            &rules,
+            &tokio_util::sync::CancellationToken::new(),
+            &|_| {},
+        )
+        .await
+        .unwrap();
+        assert!(plan.entries.iter().any(|e| e.rel == "keep.txt"));
+        assert!(!plan.entries.iter().any(|e| e.rel.contains("node_modules")));
+        assert!(!plan.entries.iter().any(|e| e.rel == "debug.log"));
     }
 
     // 나열 실패를 주입하는 최소 mock — compare 가 호출하는 list/metadata 만 구현.

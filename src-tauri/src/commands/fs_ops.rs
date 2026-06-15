@@ -323,9 +323,11 @@ impl ActiveCompare {
 /// 대형/원격 트리용: 진행률(CompareProgressEvent) emit + 취소(fs_compare_cancel).
 #[tauri::command]
 #[specta::specta]
+#[allow(clippy::too_many_arguments)]
 pub async fn fs_compare_dirs(
     left: Location,
     right: Location,
+    rules: crate::core::compare::CompareRules,
     pool: tauri::State<'_, Arc<ConnectionPool>>,
     active: tauri::State<'_, Arc<ActiveCompare>>,
     app: tauri::AppHandle,
@@ -350,6 +352,7 @@ pub async fn fs_compare_dirs(
         left,
         &*right_fs,
         right,
+        &rules,
         &cancel,
         &on_progress,
     )
