@@ -893,6 +893,8 @@ function App() {
         <SyncDialog
           srcLabel={dialog.srcLabel}
           dstLabel={dialog.dstLabel}
+          src={dialog.plan.src}
+          dst={dialog.plan.dst}
           onClose={closeDialog}
           onConfirm={(prune) => void onSyncConfirm(prune)}
         />

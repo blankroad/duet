@@ -1,28 +1,47 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { X, AlertTriangle } from "lucide-react";
+import { X, AlertTriangle, FilePlus2, Trash2, Loader2 } from "lucide-react";
 import clsx from "clsx";
+import { commands, type Location, type SyncPreview } from "@/types/bindings";
+import { formatErr } from "@/lib/error";
 
 export interface SyncDialogProps {
   srcLabel: string;
   dstLabel: string;
+  src: Location;
+  dst: Location;
   onClose: () => void;
   /** prune=true 면 src 에 없는 dst 파일을 휴지통으로(삭제 전파). */
   onConfirm: (prune: boolean) => void;
 }
 
 /**
- * 단방향 미러 확인 — 방향 표시 + prune(삭제 전파) 토글.
- * prune 은 기본 OFF. 켜면 src 에 없는 dst 파일을 휴지통으로 보냄(undo 가능,
- * macOS 로컬은 Finder 수동 복원). 켰을 때 CTA 가 danger 색 + 경고.
+ * 단방향 미러 확인 — 방향 + dry-run(복사/삭제 목록 사전 표시) + prune 토글.
+ * prune 은 기본 OFF. 켜면 대상 전용 파일을 휴지통으로(undo 가능). 켰을 때 CTA danger.
  */
-export function SyncDialog({ srcLabel, dstLabel, onClose, onConfirm }: SyncDialogProps) {
+export function SyncDialog({ srcLabel, dstLabel, src, dst, onClose, onConfirm }: SyncDialogProps) {
   const [prune, setPrune] = useState(false);
+  const [preview, setPreview] = useState<SyncPreview | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let stale = false;
+    void (async () => {
+      const r = await commands.fsSyncPreview(src, dst);
+      if (stale) return;
+      if (r.status === "ok") setPreview(r.data);
+      else setError(formatErr(r.error));
+    })();
+    return () => {
+      stale = true;
+    };
+  }, [src, dst]);
+
   return (
     <Dialog.Root open onOpenChange={(o) => !o && onClose()}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none">
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex max-h-[80vh] w-full max-w-md -translate-x-1/2 -translate-y-1/2 flex-col rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none">
           <div className="mb-3 flex items-start justify-between">
             <Dialog.Title className="text-title font-medium">Sync to other pane</Dialog.Title>
             <Dialog.Close className="rounded p-1 text-fg-muted hover:bg-border" aria-label="Close">
@@ -35,10 +54,37 @@ export function SyncDialog({ srcLabel, dstLabel, onClose, onConfirm }: SyncDialo
             <span className="mx-2 text-fg-muted">→</span>
             <span className="font-mono">{dstLabel}</span>
           </div>
-          <p className="mt-1 text-meta text-fg-muted">
-            한쪽 방향 미러 — 새/변경 파일을 복사하고 미변경은 건너뜁니다. 덮어쓰는 파일은
-            백업되어 Undo 로 복원됩니다.
-          </p>
+
+          {/* dry-run 요약 + 목록 */}
+          <div className="mt-3 min-h-0 flex-1">
+            {error ? (
+              <div className="rounded border border-danger/40 bg-danger/10 px-2 py-1 text-meta text-danger">
+                미리보기 실패: {error}
+              </div>
+            ) : preview == null ? (
+              <div className="flex items-center gap-2 text-meta text-fg-muted">
+                <Loader2 size={13} className="animate-spin" /> 변경 계산 중…
+              </div>
+            ) : (
+              <div className="space-y-2 text-meta">
+                <Section
+                  icon={<FilePlus2 size={12} className="text-accent" />}
+                  label="복사(새/변경)"
+                  items={preview.copy}
+                  tone="text-fg"
+                />
+                <Section
+                  icon={<Trash2 size={12} className={prune ? "text-danger" : "text-fg-muted"} />}
+                  label={prune ? "삭제(휴지통)" : "대상 전용 (미삭제)"}
+                  items={preview.prune}
+                  tone={prune ? "text-danger" : "text-fg-muted"}
+                />
+                {preview.truncated && (
+                  <div className="text-amber-600">목록이 많아 일부만 표시했습니다.</div>
+                )}
+              </div>
+            )}
+          </div>
 
           <label className="mt-3 flex cursor-pointer items-start gap-2 text-base">
             <input
@@ -50,7 +96,7 @@ export function SyncDialog({ srcLabel, dstLabel, onClose, onConfirm }: SyncDialo
             <span>
               source 에 없는 파일도 삭제 (mirror)
               <span className="block text-meta text-fg-muted">
-                대상에만 있는 파일을 휴지통으로 보냅니다.
+                대상에만 있는 파일{preview ? ` ${preview.prune.length}개` : ""}를 휴지통으로 보냅니다.
               </span>
             </span>
           </label>
@@ -76,10 +122,7 @@ export function SyncDialog({ srcLabel, dstLabel, onClose, onConfirm }: SyncDialo
             <button
               type="button"
               onClick={() => onConfirm(prune)}
-              className={clsx(
-                "rounded px-3 py-1 text-base text-white",
-                prune ? "bg-danger" : "bg-accent",
-              )}
+              className={clsx("rounded px-3 py-1 text-base text-white", prune ? "bg-danger" : "bg-accent")}
             >
               {prune ? "Sync + delete" : "Sync"}
             </button>
@@ -90,5 +133,42 @@ export function SyncDialog({ srcLabel, dstLabel, onClose, onConfirm }: SyncDialo
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+  );
+}
+
+function Section({
+  icon,
+  label,
+  items,
+  tone,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  items: string[];
+  tone: string;
+}) {
+  return (
+    <div>
+      <div className="flex items-center gap-1.5 text-fg-muted">
+        {icon}
+        <span>
+          {label}: <b className="text-fg">{items.length}</b>
+        </span>
+      </div>
+      {items.length > 0 && (
+        <div
+          className={clsx(
+            "mt-1 max-h-24 overflow-auto rounded border border-border bg-subtle/40 px-2 py-1 font-mono",
+            tone,
+          )}
+        >
+          {items.slice(0, 200).map((rel) => (
+            <div key={rel} className="truncate" title={rel}>
+              {rel}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
