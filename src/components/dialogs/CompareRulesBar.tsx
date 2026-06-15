@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Filter, RefreshCw } from "lucide-react";
-import type { CompareRules } from "@/types/bindings";
+import { commands, type CompareRules } from "@/types/bindings";
 
 /**
  * 비교 규칙 바 — 무시 패턴(glob) + mtime 허용오차 입력 후 Re-compare.
- * 입력 상태는 이 컴포넌트가 소유; 실제 재비교는 부모(onRecompare)가 수행.
+ * 마지막 규칙은 settings 에 영속(다음 비교 기본값). 재비교는 부모(onRecompare)가 수행.
  */
 export function CompareRulesBar({
   onRecompare,
@@ -16,12 +16,29 @@ export function CompareRulesBar({
   const [ignore, setIgnore] = useState("");
   const [tol, setTol] = useState(0);
 
+  // 마운트 시 저장된 규칙으로 프리필.
+  useEffect(() => {
+    void (async () => {
+      const r = await commands.settingsGet();
+      if (r.status === "ok") {
+        setIgnore((r.data.compare_ignore_globs ?? []).join(" "));
+        setTol(r.data.compare_mtime_tolerance_ms ?? 0);
+      }
+    })();
+  }, []);
+
   const run = () => {
     const globs = ignore
       .split(/[\s,]+/)
       .map((s) => s.trim())
       .filter(Boolean);
     onRecompare({ ignore_globs: globs, mtime_tolerance_ms: tol });
+    // 다음 비교 기본값으로 영속.
+    void commands.settingsSet({
+      permanent_delete_enabled: null,
+      compare_ignore_globs: globs,
+      compare_mtime_tolerance_ms: tol,
+    });
   };
 
   return (

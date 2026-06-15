@@ -68,8 +68,16 @@ export async function triggerCompare(open: OpenFn, showToast: ToastFn): Promise<
   const right = activeTab(state, opposite).location;
   // 스캔 중 다이얼로그(진행률+취소) 표시 — 대형/원격 트리에서 UI 멈춤 방지.
   open({ kind: "compare-scanning" });
-  // 초기 비교는 규칙 없이(빈 globs, tol 0). 규칙은 비교창에서 Re-compare 로 적용.
-  const r = await commands.fsCompareDirs(left, right, { ignore_globs: [], mtime_tolerance_ms: 0 });
+  // 저장된 비교 규칙으로 초기 비교(없으면 빈 규칙). 비교창에서 Re-compare 로 갱신/저장.
+  let rules = { ignore_globs: [] as string[], mtime_tolerance_ms: 0 };
+  const sg = await commands.settingsGet();
+  if (sg.status === "ok") {
+    rules = {
+      ignore_globs: sg.data.compare_ignore_globs ?? [],
+      mtime_tolerance_ms: sg.data.compare_mtime_tolerance_ms ?? 0,
+    };
+  }
+  const r = await commands.fsCompareDirs(left, right, rules);
   if (r.status === "error") {
     // 취소는 조용히 닫기, 그 외는 토스트.
     if (r.error.kind !== "Cancelled") showToast(`Compare: ${formatErr(r.error)}`);

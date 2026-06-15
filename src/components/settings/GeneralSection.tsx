@@ -22,7 +22,11 @@ export function GeneralSection() {
   const togglePermanent = async () => {
     if (!settings) return;
     const next = !settings.permanent_delete_enabled;
-    const r = await commands.settingsSet({ permanent_delete_enabled: next });
+    const r = await commands.settingsSet({
+      permanent_delete_enabled: next,
+      compare_ignore_globs: null,
+      compare_mtime_tolerance_ms: null,
+    });
     if (r.status === "ok") setSettings(r.data);
   };
 
