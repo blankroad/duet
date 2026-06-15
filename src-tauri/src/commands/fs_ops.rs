@@ -369,6 +369,29 @@ pub async fn fs_compare_cancel(
     Ok(())
 }
 
+/// 선택 rel 들의 내용 검증 (size+mtime 의 '틀린 Same' 잡기) — 읽기 전용.
+/// same-host 는 host-side sha256(PC 다운로드 0), 그 외는 바이트 비교(64MB 이하).
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_compare_verify(
+    left: Location,
+    right: Location,
+    rels: Vec<String>,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+) -> Result<Vec<ops::VerifyResult>, DuetError> {
+    let left_fs = fs_for(&left.source, pool.inner()).await?;
+    let right_fs = fs_for(&right.source, pool.inner()).await?;
+    ops::verify_compare(
+        &*left_fs,
+        &left,
+        &*right_fs,
+        &right,
+        rels,
+        Some(pool.inner()),
+    )
+    .await
+}
+
 /// 단방향 미러 계획 — 활성 패널 dir(src) → 반대 패널 dir(dst). v1 local↔local 만.
 #[tauri::command]
 #[specta::specta]

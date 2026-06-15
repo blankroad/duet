@@ -1546,6 +1546,125 @@ async fn apply_one_same_host(
     Ok(())
 }
 
+// === Compare verify (내용 검증 — size+mtime 휴리스틱의 '틀린 Same' 잡기) ===
+
+/// 비교 행 내용 검증 결과.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct VerifyResult {
+    pub rel: String,
+    /// `Some(true)`=내용 동일, `Some(false)`=다름, `None`=검증 불가(너무 큼/접근 실패).
+    pub equal: Option<bool>,
+}
+
+/// relay/local 바이트 비교 상한 — 초과 파일은 None(검증 불가, 네트워크/메모리 보호).
+const VERIFY_MAX_BYTES: u64 = 64 * 1024 * 1024;
+
+/// 선택된 rel 들의 내용을 검증 — size+mtime 만으로 Same 판정된 항목의 '틀린 Same'
+/// (mtime 같지만 내용 다른 빌드산출물·touch·rsync 복원분 등)을 잡는다.
+/// same-host 는 host-side sha256(PC 다운로드 0), 그 외는 바이트 비교(64MB 이하).
+pub async fn verify_compare(
+    left_fs: &dyn FileSystem,
+    left: &Location,
+    right_fs: &dyn FileSystem,
+    right: &Location,
+    rels: Vec<String>,
+    pool: Option<&Arc<crate::services::connection_pool::ConnectionPool>>,
+) -> Result<Vec<VerifyResult>, DuetError> {
+    match crate::core::copy_strategy::decide(&left.source, &right.source) {
+        crate::core::copy_strategy::CopyStrategy::SshSameHost => {
+            let pool =
+                pool.ok_or_else(|| DuetError::Io("pool required for same-host verify".into()))?;
+            verify_same_host(left, right, rels, pool).await
+        }
+        _ => verify_relay(left_fs, left, right_fs, right, rels).await,
+    }
+}
+
+/// 바이트 비교(로컬·cross-host relay). 크기 다르면 즉시 다름, 64MB 초과는 None.
+async fn verify_relay(
+    left_fs: &dyn FileSystem,
+    left: &Location,
+    right_fs: &dyn FileSystem,
+    right: &Location,
+    rels: Vec<String>,
+) -> Result<Vec<VerifyResult>, DuetError> {
+    let mut out = Vec::with_capacity(rels.len());
+    for rel in rels {
+        let rel_path = std::path::Path::new(&rel);
+        let lp = left.path.join(rel_path);
+        let rp = right.path.join(rel_path);
+        let equal = match (left_fs.metadata(&lp).await, right_fs.metadata(&rp).await) {
+            (Ok(lm), Ok(rm)) => {
+                if lm.size != rm.size {
+                    Some(false)
+                } else if lm.size.unwrap_or(0) > VERIFY_MAX_BYTES {
+                    None
+                } else {
+                    match (left_fs.read_full(&lp).await, right_fs.read_full(&rp).await) {
+                        (Ok(a), Ok(b)) => Some(a == b),
+                        _ => None,
+                    }
+                }
+            }
+            _ => None,
+        };
+        out.push(VerifyResult { rel, equal });
+    }
+    Ok(out)
+}
+
+/// host-side sha256(없으면 shasum -a 256)으로 양쪽 해시 비교 — PC 다운로드 0.
+async fn verify_same_host(
+    left: &Location,
+    right: &Location,
+    rels: Vec<String>,
+    pool: &Arc<crate::services::connection_pool::ConnectionPool>,
+) -> Result<Vec<VerifyResult>, DuetError> {
+    use crate::core::copy_strategy::shell_escape_path;
+    use crate::ssh::remote_exec::exec;
+    let SourceId::Ssh {
+        connection_id: left_conn,
+        ..
+    } = &left.source
+    else {
+        return Err(DuetError::Io("same-host verify on non-ssh".into()));
+    };
+    let conn = pool.get(left_conn).await?;
+    let session_mutex = conn
+        .session
+        .as_ref()
+        .ok_or_else(|| DuetError::ConnectionFailed("no live session".into()))?;
+
+    let mut out = Vec::with_capacity(rels.len());
+    for rel in rels {
+        let rel_path = std::path::Path::new(&rel);
+        let lp = shell_escape_path(&left.path.join(rel_path))?;
+        let rp = shell_escape_path(&right.path.join(rel_path))?;
+        // 두 파일을 한 exec 로 해시 → 정확히 2개 해시 라인이면 비교, 아니면 None.
+        let cmd = format!(
+            "if command -v sha256sum >/dev/null 2>&1; then sha256sum -- {lp} {rp}; \
+             else shasum -a 256 -- {lp} {rp}; fi"
+        );
+        let res = {
+            let handle = session_mutex.lock().await;
+            exec(&handle, &cmd).await
+        };
+        let equal = match res {
+            Ok(o) if o.exit_status == 0 => {
+                let s = String::from_utf8_lossy(&o.stdout);
+                let mut it = s.lines().filter_map(|l| l.split_whitespace().next());
+                match (it.next(), it.next(), it.next()) {
+                    (Some(a), Some(b), None) => Some(a == b),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        out.push(VerifyResult { rel, equal });
+    }
+    Ok(out)
+}
+
 // === Rename / Mkdir (단순 — plan 불필요) ===
 
 pub async fn rename(
@@ -2632,6 +2751,49 @@ mod tests {
             OpKind::CompareApply { applied, .. } => assert_eq!(*applied, 0),
             other => panic!("expected CompareApply, got {other:?}"),
         }
+    }
+
+    /// verify_compare(local): 내용 같음/다름(같은 크기)/크기 다름/없음 판정.
+    #[tokio::test]
+    async fn verify_compare_local_byte_compare() {
+        let dir = TempDir::new().unwrap();
+        let l = dir.path().join("L");
+        let r = dir.path().join("R");
+        std::fs::create_dir_all(&l).unwrap();
+        std::fs::create_dir_all(&r).unwrap();
+        std::fs::write(l.join("same.txt"), b"hello").unwrap();
+        std::fs::write(r.join("same.txt"), b"hello").unwrap();
+        std::fs::write(l.join("diff.txt"), b"aaaaa").unwrap(); // 같은 크기, 다른 내용
+        std::fs::write(r.join("diff.txt"), b"bbbbb").unwrap();
+        std::fs::write(l.join("size.txt"), b"short").unwrap(); // 크기 다름
+        std::fs::write(r.join("size.txt"), b"longer-content").unwrap();
+        std::fs::write(l.join("only_l.txt"), b"x").unwrap(); // 한쪽 없음
+
+        let fs = LocalFs::new();
+        let mk = |p: &std::path::Path| Location {
+            source: SourceId::Local,
+            path: p.to_path_buf(),
+        };
+        let res = verify_compare(
+            &fs,
+            &mk(&l),
+            &fs,
+            &mk(&r),
+            vec![
+                "same.txt".into(),
+                "diff.txt".into(),
+                "size.txt".into(),
+                "only_l.txt".into(),
+            ],
+            None,
+        )
+        .await
+        .unwrap();
+        let by = |rel: &str| res.iter().find(|v| v.rel == rel).unwrap().equal;
+        assert_eq!(by("same.txt"), Some(true));
+        assert_eq!(by("diff.txt"), Some(false), "같은 크기·다른 내용 → 다름");
+        assert_eq!(by("size.txt"), Some(false), "크기 다름 → 다름");
+        assert_eq!(by("only_l.txt"), None, "한쪽 없음 → 검증 불가");
     }
 
     // prune_pass 의 src 존재 판정 검증용 최소 mock — metadata/list/trash 만 구현.
