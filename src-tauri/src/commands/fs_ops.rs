@@ -436,6 +436,73 @@ pub async fn fs_compare_three_way(
         .await
 }
 
+/// 3-way 자동 해결 적용 — base 대비 변경/추가/삭제를 반대편에 반영(충돌 제외).
+/// Task 로 enqueue, UndoThreeWayApply 로 Ctrl+Z.
+#[tauri::command]
+#[specta::specta]
+#[allow(clippy::too_many_arguments)]
+pub async fn fs_apply_three_way(
+    base: Location,
+    left: Location,
+    right: Location,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+    settings: tauri::State<'_, Arc<SettingsStore>>,
+    journal: tauri::State<'_, Arc<Journal>>,
+    queue: tauri::State<'_, Arc<TaskQueue>>,
+    app: tauri::AppHandle,
+) -> Result<TaskId, DuetError> {
+    let host_key = host_key_for_op(&left.source, &right.source);
+    let title = format!(
+        "3-way apply {} ↔ {}",
+        left.path.display(),
+        right.path.display()
+    );
+    let pool_inner = pool.inner().clone();
+    let settings_inner = settings.inner().clone();
+    let journal_inner = journal.inner().clone();
+    let app_for_run = app.clone();
+    let affected = vec![left.clone(), right.clone()];
+    let (base_run, left_run, right_run) = (base, left, right);
+
+    let task_id = queue
+        .inner()
+        .clone()
+        .enqueue(
+            TaskKind::Sync,
+            title,
+            host_key,
+            affected,
+            Box::new(move |cancel_token, progress| {
+                Box::pin(async move {
+                    let base_fs = fs_for(&base_run.source, &pool_inner).await?;
+                    let left_fs = fs_for(&left_run.source, &pool_inner).await?;
+                    let right_fs = fs_for(&right_run.source, &pool_inner).await?;
+                    let ctx = OpCtx {
+                        settings: settings_inner,
+                        journal: journal_inner.clone(),
+                        pool: Some(pool_inner.clone()),
+                        app: Some(app_for_run.clone()),
+                    };
+                    let entry = ops::apply_three_way(
+                        &*base_fs,
+                        base_run,
+                        &*left_fs,
+                        left_run,
+                        &*right_fs,
+                        right_run,
+                        &ctx,
+                        cancel_token,
+                        Some(progress),
+                    )
+                    .await?;
+                    Ok(emit_pushed(&app_for_run, entry))
+                })
+            }),
+        )
+        .await;
+    Ok(task_id)
+}
+
 /// 원격 `~/.duet-trash` 누적 용량 조회 — 읽기 전용. 로컬은 available=false.
 #[tauri::command]
 #[specta::specta]

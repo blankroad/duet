@@ -1741,6 +1741,143 @@ async fn apply_one_same_host(
     Ok(())
 }
 
+// === 3-way 자동 적용 (base 대비 변경/추가/삭제를 반대편에 반영) ===
+
+/// 한 rel 을 root 에서 휴지통으로 보내고 추적(undo 복원용).
+async fn trash_rel(
+    fs: &dyn FileSystem,
+    root: &Location,
+    rel: &std::path::Path,
+    batch: &str,
+    out: &mut Vec<TrashItem>,
+) -> Result<(), DuetError> {
+    let p = root.path.join(rel);
+    let loc = fs.trash(&p, batch).await?;
+    let trash_path = match &loc {
+        TrashLocation::Local { trash_id } => trash_id.clone(),
+        TrashLocation::Remote { trash_path } => trash_path.to_string_lossy().into_owned(),
+    };
+    out.push(TrashItem {
+        trash_path,
+        original_path: p,
+    });
+    Ok(())
+}
+
+/// 3-way 자동 해결 적용 — base 대비 한쪽만 변경/추가면 반대편에 복사(덮어쓰기는 .bak),
+/// 한쪽 삭제면 반대편도 휴지통으로. **충돌은 건너뜀**(사용자 resolve 후속). 전부 단일
+/// UndoThreeWayApply(생성 rm + 백업 복원 + 휴지통 복원)로 Ctrl+Z. 실패해도 부분 기록(§4).
+#[allow(clippy::too_many_arguments)]
+pub async fn apply_three_way(
+    base_fs: &dyn FileSystem,
+    base: Location,
+    left_fs: &dyn FileSystem,
+    left: Location,
+    right_fs: &dyn FileSystem,
+    right: Location,
+    ctx: &OpCtx,
+    cancel_token: tokio_util::sync::CancellationToken,
+    progress: Option<crate::services::task_queue::ProgressEmitter>,
+) -> Result<JournalEntry, DuetError> {
+    use crate::core::three_way::{compare_three_way, ThreeWayStatus as S};
+    let plan = compare_three_way(
+        base_fs,
+        base.clone(),
+        left_fs,
+        left.clone(),
+        right_fs,
+        right.clone(),
+    )
+    .await?;
+    if plan.truncated {
+        return Err(DuetError::Io(
+            "three-way apply refused: comparison truncated — narrow the scope".into(),
+        ));
+    }
+    let same_host = matches!(
+        crate::core::copy_strategy::decide(&left.source, &right.source),
+        crate::core::copy_strategy::CopyStrategy::SshSameHost
+    );
+    let conns = match (&left.source, &right.source) {
+        (
+            SourceId::Ssh {
+                connection_id: lc, ..
+            },
+            SourceId::Ssh {
+                connection_id: rc, ..
+            },
+        ) if same_host => Some((lc.clone(), rc.clone())),
+        _ => None,
+    };
+    let pool = ctx.pool.clone();
+
+    let mut st = ApplyState::default();
+    let mut trashed_left: Vec<TrashItem> = Vec::new();
+    let mut trashed_right: Vec<TrashItem> = Vec::new();
+    let batch = crate::services::trash::new_batch_id();
+    let conflicts = plan.conflicts;
+    let total = plan.auto as u64;
+    let mut done = 0u64;
+    let mut outcome: Result<(), DuetError> = Ok(());
+
+    for entry in &plan.entries {
+        if cancel_token.is_cancelled() {
+            outcome = Err(DuetError::Cancelled);
+            break;
+        }
+        if entry.status.is_conflict() {
+            continue;
+        }
+        let rel = std::path::Path::new(&entry.rel);
+        let res = match entry.status {
+            // base 대비 한쪽만 변경/추가 → 반대편에 복사(덮어쓰기는 apply_one_* 가 .bak).
+            S::LeftChanged | S::LeftAdded | S::RightChanged | S::RightAdded => {
+                let dir = if matches!(entry.status, S::LeftChanged | S::LeftAdded) {
+                    ApplyDirection::ToRight
+                } else {
+                    ApplyDirection::ToLeft
+                };
+                if let (Some((lc, rc)), Some(pool)) = (&conns, &pool) {
+                    apply_one_same_host(&dir, rel, &left, lc, &right, rc, pool, &mut st).await
+                } else {
+                    apply_one_relay(&dir, rel, left_fs, &left, right_fs, &right, &mut st).await
+                }
+            }
+            // 한쪽 삭제 → 반대편에서도 휴지통으로(삭제 전파).
+            S::LeftDeleted => trash_rel(right_fs, &right, rel, &batch, &mut trashed_right).await,
+            S::RightDeleted => trash_rel(left_fs, &left, rel, &batch, &mut trashed_left).await,
+            _ => Ok(()),
+        };
+        if let Err(e) = res {
+            outcome = Err(e);
+            break;
+        }
+        done += 1;
+        emit_merge_progress(&progress, done, total);
+    }
+
+    let op = OpKind::ThreeWayApply {
+        base,
+        left: left.clone(),
+        right: right.clone(),
+        applied: done as u32,
+        conflicts,
+    };
+    let undo = UndoAction::UndoThreeWayApply {
+        left_source: left.source,
+        right_source: right.source,
+        left_created: st.left_created,
+        right_created: st.right_created,
+        left_backups: st.left_backups,
+        right_backups: st.right_backups,
+        trashed_left,
+        trashed_right,
+    };
+    let entry = ctx.journal.push(op, undo).await?;
+    outcome?;
+    Ok(entry)
+}
+
 // === Compare verify (내용 검증 — size+mtime 휴리스틱의 '틀린 Same' 잡기) ===
 
 /// 비교 행 내용 검증 결과.

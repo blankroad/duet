@@ -108,6 +108,15 @@ pub enum OpKind {
         applied: u32,
         overwritten: u32,
     },
+    /// 3-way 자동 해결 적용 — base 대비 한쪽 변경/추가/삭제를 반대편에 반영.
+    ThreeWayApply {
+        base: Location,
+        left: Location,
+        right: Location,
+        /// 자동 적용한 항목 수 / 건너뛴 충돌 수.
+        applied: u32,
+        conflicts: u32,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -166,6 +175,17 @@ pub enum UndoAction {
         right_created: Vec<PathBuf>,
         left_backups: Vec<BackupRestore>,
         right_backups: Vec<BackupRestore>,
+    },
+    /// 3-way 적용 되돌리기 — 생성분 제거 + 덮어쓴 백업 복원 + 삭제(휴지통)분 복원.
+    UndoThreeWayApply {
+        left_source: SourceId,
+        right_source: SourceId,
+        left_created: Vec<PathBuf>,
+        right_created: Vec<PathBuf>,
+        left_backups: Vec<BackupRestore>,
+        right_backups: Vec<BackupRestore>,
+        trashed_left: Vec<TrashItem>,
+        trashed_right: Vec<TrashItem>,
     },
     Irreversible,
 }

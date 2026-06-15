@@ -405,6 +405,88 @@ pub async fn execute_undo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
                     .collect(),
             }
         }
+        UndoAction::UndoThreeWayApply {
+            left_source,
+            right_source,
+            left_created,
+            right_created,
+            left_backups,
+            right_backups,
+            trashed_left,
+            trashed_right,
+        } => {
+            let mut refresh = std::collections::HashSet::<(SourceId, PathBuf)>::new();
+            let mut trash_failed = false;
+            for (source, created, backups, trashed) in [
+                (left_source, left_created, left_backups, trashed_left),
+                (right_source, right_created, right_backups, trashed_right),
+            ] {
+                let fs = match fs_for(source, pool).await {
+                    Ok(f) => f,
+                    Err(e) => return error("source unreachable", e),
+                };
+                // 1) 생성분 제거.
+                for p in created {
+                    if fs.metadata(p).await.is_ok() {
+                        if let Err(e) = fs.remove(p).await {
+                            return error("remove created", e);
+                        }
+                    }
+                    if let Some(par) = p.parent() {
+                        refresh.insert((source.clone(), par.to_path_buf()));
+                    }
+                }
+                // 2) 덮어쓴 백업 복원 — remove-then-rename.
+                for b in backups {
+                    if fs.metadata(&b.backup_path).await.is_ok() {
+                        if fs.metadata(&b.original_path).await.is_ok() {
+                            if let Err(e) = fs.remove(&b.original_path).await {
+                                return error("remove applied before restore", e);
+                            }
+                        }
+                        if let Err(e) = fs.rename(&b.backup_path, &b.original_path).await {
+                            return error("restore backup", e);
+                        }
+                    }
+                    if let Some(par) = b.original_path.parent() {
+                        refresh.insert((source.clone(), par.to_path_buf()));
+                    }
+                }
+                // 3) 삭제(휴지통)분 복원 — best-effort(macOS 로컬은 NotSupported).
+                for item in trashed {
+                    let loc = match source {
+                        SourceId::Local => TrashLocation::Local {
+                            trash_id: item.trash_path.clone(),
+                        },
+                        SourceId::Ssh { .. } => TrashLocation::Remote {
+                            trash_path: PathBuf::from(&item.trash_path),
+                        },
+                    };
+                    if fs
+                        .restore_from_trash(&loc, &item.original_path)
+                        .await
+                        .is_err()
+                    {
+                        trash_failed = true;
+                    }
+                    if let Some(par) = item.original_path.parent() {
+                        refresh.insert((source.clone(), par.to_path_buf()));
+                    }
+                }
+            }
+            UndoOutcome {
+                kind: UndoKind::Ok,
+                message: if trash_failed {
+                    Some("일부 삭제 항목은 휴지통에서 수동 복원 필요 (macOS).".into())
+                } else {
+                    None
+                },
+                refreshed_locations: refresh
+                    .into_iter()
+                    .map(|(s, p)| Location { source: s, path: p })
+                    .collect(),
+            }
+        }
     }
 }
 
