@@ -6,6 +6,7 @@ import {
   commands,
   type ApplyDecision,
   type ApplyDirection,
+  type CompareEntry,
   type CompareRules,
   type ComparePlan,
   type CompareStatus,
@@ -15,6 +16,7 @@ import { CompareList } from "./CompareList";
 import { CompareRulesBar } from "./CompareRulesBar";
 import { CompareFilterBar } from "./CompareFilterBar";
 import { CompareFooter } from "./CompareFooter";
+import { CompareDiffPreview } from "./CompareDiffPreview";
 
 export interface CompareDialogProps {
   plan: ComparePlan;
@@ -81,6 +83,9 @@ export function CompareDialog({
     () => new Set<CompareStatus>([...DIFF_STATUSES, "unreadable"]),
   );
   const [query, setQuery] = useState("");
+  // 인라인 미리보기 — 선택 행(CompareList 가 보고) + 표시 토글.
+  const [selectedEntry, setSelectedEntry] = useState<CompareEntry | null>(null);
+  const [showPreview, setShowPreview] = useState(false);
   // 행별 적용 방향(rel → dir) — 상태별 기본값으로 초기화.
   const [decisions, setDecisions] = useState<Record<string, ApplyDirection>>(() => {
     const d: Record<string, ApplyDirection> = {};
@@ -209,6 +214,18 @@ export function CompareDialog({
             >
               {verifying ? "검증 중…" : `내용 검증 (Same ${counts.same})`}
             </button>
+            <button
+              type="button"
+              onClick={() => setShowPreview((v) => !v)}
+              aria-pressed={showPreview}
+              className={clsx(
+                "rounded border px-2 py-0.5 hover:bg-subtle",
+                showPreview ? "border-border bg-subtle text-fg" : "border-border",
+              )}
+              title="선택 행의 좌/우 내용을 인라인으로 비교(텍스트 diff / 이미지)"
+            >
+              미리보기
+            </button>
             {verifyNote && <span>{verifyNote}</span>}
           </div>
 
@@ -229,7 +246,12 @@ export function CompareDialog({
             dirOf={dirOf}
             setDir={setDir}
             listRef={listRef}
+            onSelect={setSelectedEntry}
           />
+
+          {showPreview && (
+            <CompareDiffPreview entry={selectedEntry} left={plan.left} right={plan.right} />
+          )}
 
           <CompareFooter
             create={apply.create}

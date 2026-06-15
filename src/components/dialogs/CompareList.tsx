@@ -20,13 +20,22 @@ export interface CompareListProps {
   setDir: (rel: string, dir: ApplyDirection) => void;
   /** 다이얼로그 열릴 때 포커스를 줄 대상(부모가 onOpenAutoFocus 에서 사용). */
   listRef: RefObject<HTMLDivElement>;
+  /** 선택 행이 바뀔 때 호출 — 부모가 인라인 미리보기 등에 사용(안정적 setter 권장). */
+  onSelect?: (entry: CompareEntry | null) => void;
 }
 
 /**
  * 비교 결과 리스트 — 키보드(↑↓ 행 이동, ←→ 선택행 방향) + roving 선택.
  * 선택 상태는 이 컴포넌트가 소유(부모는 decisions 만 관리). 메타 컬럼 + 방향 토글.
  */
-export function CompareList({ rows, entriesEmpty, dirOf, setDir, listRef }: CompareListProps) {
+export function CompareList({
+  rows,
+  entriesEmpty,
+  dirOf,
+  setDir,
+  listRef,
+  onSelect,
+}: CompareListProps) {
   const [sel, setSel] = useState(0);
   const selectedRowRef = useRef<HTMLTableRowElement>(null);
   const selClamped = useMemo(
@@ -36,6 +45,10 @@ export function CompareList({ rows, entriesEmpty, dirOf, setDir, listRef }: Comp
   useEffect(() => {
     selectedRowRef.current?.scrollIntoView({ block: "nearest" });
   }, [selClamped, rows.length]);
+  // 선택 행을 부모로 보고(인라인 미리보기용). onSelect 는 안정적 setter 가정.
+  useEffect(() => {
+    onSelect?.(rows[selClamped] ?? null);
+  }, [selClamped, rows, onSelect]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (rows.length === 0) return;
