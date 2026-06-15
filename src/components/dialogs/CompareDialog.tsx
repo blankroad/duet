@@ -14,6 +14,7 @@ import { DIFF_STATUSES, strategyBadge, defaultDirection, isCreate } from "./comp
 import { CompareList } from "./CompareList";
 import { CompareRulesBar } from "./CompareRulesBar";
 import { CompareFilterBar } from "./CompareFilterBar";
+import { CompareFooter } from "./CompareFooter";
 
 export interface CompareDialogProps {
   plan: ComparePlan;
@@ -43,6 +44,36 @@ export function CompareDialog({
     const r = await commands.fsCompareDirs(plan.left, plan.right, rules);
     if (r.status === "ok") setPlan(r.data);
     setRecomparing(false);
+  };
+
+  // 내용 검증 — Same 항목을 해시/바이트로 재검증해 '틀린 Same' 을 Differ 로 격상.
+  const [verifying, setVerifying] = useState(false);
+  const [verifyNote, setVerifyNote] = useState<string | null>(null);
+  const onVerify = async () => {
+    const sameRels = plan.entries.filter((e) => e.status === "same").map((e) => e.rel);
+    if (sameRels.length === 0) return;
+    setVerifying(true);
+    setVerifyNote(null);
+    const r = await commands.fsCompareVerify(plan.left, plan.right, sameRels);
+    if (r.status === "ok") {
+      const differ = new Set(r.data.filter((v) => v.equal === false).map((v) => v.rel));
+      const unver = r.data.filter((v) => v.equal === null).length;
+      if (differ.size > 0) {
+        setPlan((p) => ({
+          ...p,
+          entries: p.entries.map((e) =>
+            differ.has(e.rel) && e.status === "same" ? { ...e, status: "differ" as const } : e,
+          ),
+        }));
+      }
+      setVerifyNote(
+        `검증 ${sameRels.length}개 — 실제로 다름 ${differ.size}` +
+          (unver > 0 ? `, 검증불가 ${unver}` : ""),
+      );
+    } else {
+      setVerifyNote(`검증 실패: ${r.error.kind}`);
+    }
+    setVerifying(false);
   };
 
   // 기본 필터: 차이만(same 숨김). unreadable 은 경고라 기본 표시.
@@ -168,6 +199,19 @@ export function CompareDialog({
 
           <CompareRulesBar onRecompare={onRecompare} busy={recomparing} />
 
+          <div className="mb-2 flex items-center gap-2 text-meta text-fg-muted">
+            <button
+              type="button"
+              onClick={() => void onVerify()}
+              disabled={counts.same === 0 || verifying}
+              className="rounded border border-border px-2 py-0.5 hover:bg-subtle disabled:opacity-50"
+              title="Same 로 분류된 항목의 내용을 해시/바이트로 재검증 (틀린 Same 잡기). same-host 는 host-side sha256(PC 다운로드 0)."
+            >
+              {verifying ? "검증 중…" : `내용 검증 (Same ${counts.same})`}
+            </button>
+            {verifyNote && <span>{verifyNote}</span>}
+          </div>
+
           {counts.unreadable > 0 && (
             <div className="mb-2 rounded border border-danger/40 bg-danger/10 px-2 py-1 text-meta text-danger">
               {counts.unreadable}개 디렉토리를 읽지 못했습니다 — 머지/동기화에서 제외됩니다.
@@ -187,48 +231,16 @@ export function CompareDialog({
             listRef={listRef}
           />
 
-          <div className="mt-3 flex items-center justify-between gap-2">
-            <span className="text-meta text-fg-muted">
-              적용: 생성 <b className="text-fg">{apply.create}</b> · 덮어쓰기{" "}
-              <b className="text-fg">{apply.overwrite}</b>
-              {apply.overwrite > 0 && " (백업 후, undo 가능)"}
-            </span>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={onClose}
-                className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
-              >
-                Close
-              </button>
-              <button
-                type="button"
-                onClick={onMerge}
-                disabled={mergeable === 0 || plan.truncated}
-                className="rounded border border-border px-3 py-1 text-base hover:bg-subtle disabled:opacity-50"
-                title={
-                  plan.truncated
-                    ? "비교가 잘려 머지할 수 없습니다 — 범위를 좁히세요"
-                    : "한쪽에만 있는 파일을 양방향으로 복사 (덮어쓰기/삭제 없음, undo 가능)"
-                }
-              >
-                Merge ↔
-              </button>
-              <button
-                type="button"
-                onClick={() => onApply(apply.payload)}
-                disabled={apply.payload.length === 0 || plan.truncated}
-                className="rounded bg-accent px-3 py-1 text-base text-white disabled:opacity-50"
-                title={
-                  plan.truncated
-                    ? "비교가 잘려 적용할 수 없습니다 — 범위를 좁히세요"
-                    : "고른 방향대로 적용 (덮어쓰기는 .bak 백업, undo 가능)"
-                }
-              >
-                Apply ({apply.payload.length})
-              </button>
-            </div>
-          </div>
+          <CompareFooter
+            create={apply.create}
+            overwrite={apply.overwrite}
+            applyCount={apply.payload.length}
+            mergeable={mergeable}
+            truncated={plan.truncated}
+            onClose={onClose}
+            onMerge={onMerge}
+            onApply={() => onApply(apply.payload)}
+          />
           <Dialog.Description className="sr-only">
             Recursive comparison of the two pane directories.
           </Dialog.Description>
