@@ -9,6 +9,7 @@ import { RenameDialog } from "@/components/dialogs/RenameDialog";
 import { BatchRenameDialog } from "@/components/dialogs/BatchRenameDialog";
 import { CompareDialog } from "@/components/dialogs/CompareDialog";
 import { CompareScanningDialog } from "@/components/dialogs/CompareScanningDialog";
+import { ThreeWayDialog } from "@/components/dialogs/ThreeWayDialog";
 import { SyncDialog } from "@/components/dialogs/SyncDialog";
 import { MkdirDialog } from "@/components/dialogs/MkdirDialog";
 import { CompressDialog } from "@/components/dialogs/CompressDialog";
@@ -29,7 +30,7 @@ import { useContextMenu } from "@/stores/contextMenu";
 import { buildEntryMenu, buildEmptyMenu, folderName } from "@/lib/entryMenu";
 import { childLocation } from "@/lib/entryDnd";
 import { isArchiveName } from "@/lib/archive";
-import { resolveActiveTargets, triggerCompare, triggerSync } from "@/lib/fileActions";
+import { resolveActiveTargets, triggerCompare, triggerSync, triggerThreeWay } from "@/lib/fileActions";
 import { useCommands } from "@/stores/commands";
 import { usePalette } from "@/stores/palette";
 import { buildBuiltins } from "@/lib/commands";
@@ -417,6 +418,7 @@ function App() {
         useSearch.getState().open(id, tab.location);
       },
       compareFolders: () => void triggerCompare(openDialog, showToast),
+      threeWayCompare: () => void triggerThreeWay(openDialog, showToast),
       syncFolders: () => void triggerSync(openDialog, showToast),
       swapPanes: () => usePanes.getState().swapPanes(),
       moveTabToOther: () => usePanes.getState().moveActiveTabToOther(),
@@ -859,6 +861,9 @@ function App() {
         />
       )}
       {dialog.kind === "compare-scanning" && <CompareScanningDialog />}
+      {dialog.kind === "three-way" && (
+        <ThreeWayDialog plan={dialog.plan} onClose={closeDialog} />
+      )}
       {dialog.kind === "compare" && (
         <CompareDialog
           plan={dialog.plan}

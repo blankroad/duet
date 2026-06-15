@@ -50,6 +50,7 @@ export interface BuiltinDeps {
   openSearch: () => void;
   // file (two-pane)
   compareFolders: () => void;
+  threeWayCompare: () => void;
   syncFolders: () => void;
   swapPanes: () => void;
   moveTabToOther: () => void;
@@ -89,6 +90,7 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
     { id: "filter.focus", label: "Focus filter", category: "Filter", defaultKey: "Ctrl+F", action: deps.focusFilter },
     { id: "search.global", label: "Global search", category: "Search", defaultKey: "Ctrl+Shift+F", action: deps.openSearch },
     { id: "file.compare", label: "Compare folders (left ↔ right)", category: "File", action: deps.compareFolders },
+    { id: "file.threeWay", label: "3-way compare (base ↔ left ↔ right)", category: "File", action: deps.threeWayCompare },
     { id: "file.sync", label: "Sync to other pane (mirror)", category: "File", action: deps.syncFolders },
     { id: "pane.swap", label: "Swap panels (left ↔ right)", category: "View", defaultKey: "Ctrl+U", action: deps.swapPanes },
     { id: "settings.open", label: "Open settings", category: "Settings", defaultKey: "Ctrl+,", action: deps.openSettings },

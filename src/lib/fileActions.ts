@@ -87,6 +87,23 @@ export async function triggerCompare(open: OpenFn, showToast: ToastFn): Promise<
   open({ kind: "compare", plan: r.data });
 }
 
+/** 3-way 비교 — base(공통 조상) 대비 left/right. base 경로는 left 소스 기준. */
+export async function triggerThreeWay(open: OpenFn, showToast: ToastFn): Promise<void> {
+  const { active, opposite } = resolveActiveTargets();
+  const state = usePanes.getState();
+  const left = activeTab(state, active).location;
+  const right = activeTab(state, opposite).location;
+  const input = window.prompt("base(공통 조상) 디렉토리 경로 — left 소스 기준:", String(left.path));
+  if (input == null || input.trim() === "") return;
+  const baseLoc: Location = { source: left.source, path: input.trim() };
+  const r = await commands.fsCompareThreeWay(baseLoc, left, right);
+  if (r.status === "error") {
+    showToast(`3-way: ${formatErr(r.error)}`);
+    return;
+  }
+  open({ kind: "three-way", plan: r.data });
+}
+
 /** 단방향 미러 — 활성 패널 dir → 반대 패널 dir. plan 후 확인 다이얼로그. */
 export async function triggerSync(open: OpenFn, showToast: ToastFn): Promise<void> {
   const { active, opposite } = resolveActiveTargets();

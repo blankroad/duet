@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { CopyPlan, DeletePlan, MovePlan, EntryRef, Location, Volume, CompressPlan, SyncPlan, ComparePlan } from "@/types/bindings";
+import type { CopyPlan, DeletePlan, MovePlan, EntryRef, Location, Volume, CompressPlan, SyncPlan, ComparePlan, ThreeWayPlan } from "@/types/bindings";
 
 export type DialogState =
   | { kind: "none" }
@@ -15,6 +15,7 @@ export type DialogState =
   | { kind: "sync-confirm"; plan: SyncPlan; srcLabel: string; dstLabel: string }
   | { kind: "compare"; plan: ComparePlan }
   | { kind: "compare-scanning" }
+  | { kind: "three-way"; plan: ThreeWayPlan }
   | { kind: "app-args"; appId: string; name: string; args: string[] }
   | { kind: "eject-confirm"; volume: Volume }
   | { kind: "progress"; title: string; taskId: string }
