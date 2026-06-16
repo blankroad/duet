@@ -1,6 +1,34 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, ArrowUp, RotateCw, Star, FileArchive, Pencil } from "lucide-react";
+import { ArrowLeft, ArrowRight, ArrowUp, RotateCw, Star, FileArchive, Pencil, Monitor, Server } from "lucide-react";
+import { platform } from "@tauri-apps/plugin-os";
 import type { Location } from "@/types/bindings";
+
+type Crumb = { label: string; path: string };
+
+/**
+ * 경로 → breadcrumb 조각. 소스에 맞는 구분자로 **클릭 시 이동할 절대경로**를 만든다.
+ * - 원격(SSH): POSIX (`/`).
+ * - 로컬 Windows: `\` (드라이브 루트 `C:\` 처리). 이게 없으면 `/`로 join 돼
+ *   `/C:\...` 같은 깨진 경로 → OS error 13(EACCES). (CLAUDE.md §7 — 표시용 분기는
+ *   소스 기준으로만, 실제 경로 결합은 여기 한 곳.)
+ * 화면상 구분자는 시각적 `/` 로 통일하고, 실제 path 만 올바른 구분자를 쓴다.
+ */
+function buildCrumbs(path: string, winLocal: boolean): Crumb[] {
+  const parts = path.split(/[/\\]/).filter(Boolean);
+  const crumbs: Crumb[] = [];
+  let acc = "";
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i]!;
+    if (winLocal) {
+      if (i === 0 && /^[A-Za-z]:$/.test(p)) acc = p + "\\";
+      else acc = acc.endsWith("\\") ? acc + p : acc + "\\" + p;
+    } else {
+      acc = acc + "/" + p;
+    }
+    crumbs.push({ label: p, path: acc });
+  }
+  return crumbs;
+}
 import type { ArchiveBrowse } from "@/stores/panes";
 import {
   useBookmarks,
@@ -36,8 +64,13 @@ interface PathBarProps {
  * MVP-0: breadcrumb 표시 + 새로고침. 직접 입력 모드(Ctrl+L)는 추후.
  */
 export function PathBar({ location, archive, canBack, canForward, onBack, onForward, onUp, onRefresh, onSegmentClick, onUpdateArchive, editNonce, editActive }: PathBarProps) {
-  const sourceLabel = location.source.kind === "local" ? "Local" : `${location.source.user}@${location.source.host_ip}`;
-  const segments = location.path.split("/").filter(Boolean);
+  const isLocal = location.source.kind === "local";
+  const sourceTitle =
+    location.source.kind === "local"
+      ? "Local"
+      : `${location.source.user}@${location.source.host_ip}`;
+  const winLocal = isLocal && platform() === "windows";
+  const crumbs = buildCrumbs(String(location.path), winLocal);
 
   // 경로 직접 입력 모드 (탐색기 주소창 / Ctrl+L). 아카이브 임시경로에선 비활성.
   const [editing, setEditing] = useState(false);
@@ -162,26 +195,30 @@ export function PathBar({ location, archive, canBack, canForward, onBack, onForw
         />
       ) : (
         <>
-          <span className="ml-2 font-mono truncate text-fg-muted">{sourceLabel}</span>
-          <span className="text-fg-muted">:</span>
-          <div className="flex items-center gap-0.5 font-mono truncate">
-            <button onClick={() => onSegmentClick?.("/")} className="rounded px-1 hover:bg-border">
-              /
-            </button>
-            {segments.map((seg, i) => {
-              const cumulative = "/" + segments.slice(0, i + 1).join("/");
-              return (
-                <span key={cumulative} className="flex items-center">
-                  <button
-                    onClick={() => onSegmentClick?.(cumulative)}
-                    className="rounded px-1 hover:bg-border"
-                  >
-                    {seg}
-                  </button>
-                  {i < segments.length - 1 && <span className="text-fg-muted">/</span>}
-                </span>
-              );
-            })}
+          <span
+            title={sourceTitle}
+            aria-label={sourceTitle}
+            className="ml-2 flex shrink-0 items-center text-fg-muted"
+          >
+            {isLocal ? <Monitor size={14} /> : <Server size={14} />}
+          </span>
+          <div className="ml-1 flex items-center gap-0.5 font-mono truncate">
+            {!winLocal && (
+              <button onClick={() => onSegmentClick?.("/")} className="rounded px-1 hover:bg-border">
+                /
+              </button>
+            )}
+            {crumbs.map((c, i) => (
+              <span key={c.path} className="flex items-center">
+                <button
+                  onClick={() => onSegmentClick?.(c.path)}
+                  className="rounded px-1 hover:bg-border"
+                >
+                  {c.label}
+                </button>
+                {i < crumbs.length - 1 && <span className="text-fg-muted">/</span>}
+              </span>
+            ))}
           </div>
         </>
       )}
