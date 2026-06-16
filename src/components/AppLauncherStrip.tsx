@@ -1,4 +1,5 @@
-import { Fragment, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Plus } from "lucide-react";
 import clsx from "clsx";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -83,28 +84,45 @@ function mergeCls(merge: boolean, dragging: boolean): string {
   return clsx(dragging && "opacity-50", merge && "scale-110 ring-2 ring-accent");
 }
 
+/**
+ * 앱 글리프 — 실제 OS 아이콘이 있으면 `<img>`, 없으면 이름 첫 글자 모노그램.
+ * 아이콘 추출(backend)이 들어오면 `app.icon`(data URL) 만 채우면 자동 전환.
+ */
+function AppGlyph({ app, px }: { app: AppItem; px: number }) {
+  const icon = (app as AppItem & { icon?: string | null }).icon;
+  if (icon) {
+    return (
+      <img
+        src={icon}
+        alt=""
+        width={px}
+        height={px}
+        draggable={false}
+        className="pointer-events-none shrink-0 object-contain"
+        style={{ width: px, height: px }}
+      />
+    );
+  }
+  return (
+    <span
+      className="pointer-events-none select-none font-semibold leading-none"
+      style={{ fontSize: Math.round(px * 0.6) }}
+    >
+      {app.name.charAt(0).toUpperCase()}
+    </span>
+  );
+}
+
 function openArgsDialog(app: AppItem): void {
   useUIDialogs
     .getState()
     .open({ kind: "app-args", appId: app.id, name: app.name, args: app.args ?? [] });
 }
 
-/** 단일 앱 버튼 — 클릭 실행(인자 포함), 우클릭 메뉴. `inFolder` 면 메뉴에 "Move out". */
-function AppButton({
-  app,
-  merge,
-  dragging,
-  onMouseDown,
-  folderId,
-}: {
-  app: AppItem;
-  merge?: boolean;
-  dragging?: boolean;
-  onMouseDown: (e: React.MouseEvent) => void;
-  folderId?: string;
-}) {
+/** 우클릭 메뉴 구성 — 앱 공통(실행/인자/이름변경/[폴더밖]/제거). */
+function appMenu(app: AppItem, folderId?: string): MenuEntry[] {
   const args = app.args ?? [];
-  const menu: MenuEntry[] = [
+  return [
     { id: "launch", label: "Launch", onSelect: () => void launchApp(String(app.path), args) },
     { id: "args", label: "Edit arguments…", onSelect: () => openArgsDialog(app) },
     {
@@ -116,31 +134,52 @@ function AppButton({
       },
     },
     ...(folderId
-      ? [{ id: "out", label: "Move out of folder", onSelect: () => void moveOutOfFolder(app.id, folderId) }]
+      ? [
+          {
+            id: "out",
+            label: "Move out of folder",
+            onSelect: () => void moveOutOfFolder(app.id, folderId),
+          },
+        ]
       : []),
     { kind: "separator" as const },
     { id: "remove", label: "Remove", danger: true, onSelect: () => void removeAppLauncher(app.id) },
   ];
+}
+
+/** 단일 앱 버튼(스트립 타일) — 클릭 실행(인자 포함), 우클릭 메뉴. */
+function AppButton({
+  app,
+  merge,
+  dragging,
+  onMouseDown,
+}: {
+  app: AppItem;
+  merge?: boolean;
+  dragging?: boolean;
+  onMouseDown: (e: React.MouseEvent) => void;
+}) {
+  const args = app.args ?? [];
   return (
     <button
       type="button"
       data-reorder-key={app.id}
-      data-reorder-group={folderId ? `folder-${folderId}` : "apps"}
+      data-reorder-group="apps"
       onMouseDown={onMouseDown}
       onClick={() => void launchApp(String(app.path), args)}
       onContextMenu={(e) => {
         e.preventDefault();
-        useContextMenu.getState().openAt(e.clientX, e.clientY, menu);
+        useContextMenu.getState().openAt(e.clientX, e.clientY, appMenu(app));
       }}
       title={`${app.name}${args.length ? ` ${args.join(" ")}` : ""}\n${app.path}`}
-      className={clsx(tileBase, "text-meta font-semibold", mergeCls(!!merge, !!dragging))}
+      className={clsx(tileBase, mergeCls(!!merge, !!dragging))}
     >
-      {app.name.charAt(0).toUpperCase()}
+      <AppGlyph app={app} px={16} />
     </button>
   );
 }
 
-/** 폴더 타일 — 자식 첫 4개 미니그리드. 클릭 = 플라이아웃, 우클릭 = 이름변경/해체. */
+/** 폴더 타일 — 자식 첫 4개 미니그리드. 클릭 = 플라이아웃(포털), 우클릭 = 이름변경/해체. */
 function FolderTile({
   folder,
   merge,
@@ -152,7 +191,8 @@ function FolderTile({
   dragging: boolean;
   onMouseDown: (e: React.MouseEvent) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [flyoutOpen, setFlyoutOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
   const children = folder.children ?? [];
   const menu: MenuEntry[] = [
     {
@@ -166,13 +206,14 @@ function FolderTile({
     { id: "dissolve", label: "Dissolve folder", onSelect: () => void dissolveFolder(folder.id) },
   ];
   return (
-    <div className="relative shrink-0">
+    <div className="shrink-0">
       <button
+        ref={btnRef}
         type="button"
         data-reorder-key={folder.id}
         data-reorder-group="apps"
         onMouseDown={onMouseDown}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => setFlyoutOpen((o) => !o)}
         onContextMenu={(e) => {
           e.preventDefault();
           useContextMenu.getState().openAt(e.clientX, e.clientY, menu);
@@ -184,33 +225,115 @@ function FolderTile({
           {children.slice(0, 4).map((c) => (
             <span
               key={c.id}
-              className="flex h-2.5 w-2.5 items-center justify-center rounded-[2px] bg-base text-[7px] font-semibold leading-none text-fg-muted"
+              className="flex h-2.5 w-2.5 items-center justify-center overflow-hidden rounded-[2px] bg-base"
             >
-              {c.name.charAt(0).toUpperCase()}
+              <AppGlyph app={c} px={8} />
             </span>
           ))}
         </span>
       </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-40" onMouseDown={() => setOpen(false)} />
-          <div className="absolute left-0 top-full z-50 mt-1 rounded-md border border-border bg-base p-2 shadow-lg">
-            <div className="mb-1 px-1 text-meta text-fg-muted">{folder.name}</div>
-            <div className="flex max-w-[15rem] flex-wrap gap-1">
-              {children.map((c) => (
-                <FolderChild key={c.id} app={c} folderId={folder.id} />
-              ))}
-            </div>
-          </div>
-        </>
+      {flyoutOpen && (
+        <FolderFlyout
+          folder={folder}
+          anchor={btnRef.current}
+          onClose={() => setFlyoutOpen(false)}
+        />
       )}
     </div>
   );
 }
 
-/** 폴더 플라이아웃 안의 자식 — 드래그 재정렬/머지 없음(단일 레벨). */
-function FolderChild({ app, folderId }: { app: AppItem; folderId: string }) {
-  return <AppButton app={app} onMouseDown={() => {}} folderId={folderId} />;
+/**
+ * 폴더 플라이아웃 — 모바일 런처 그룹창 스타일. 포털로 body 에 렌더해
+ * 상단바 `overflow-hidden` 클리핑을 회피(앵커 버튼 rect 기준 fixed 배치).
+ */
+function FolderFlyout({
+  folder,
+  anchor,
+  onClose,
+}: {
+  folder: AppItem;
+  anchor: HTMLElement | null;
+  onClose: () => void;
+}) {
+  const cardRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const children = folder.children ?? [];
+
+  // 마운트 후 카드 크기 측정 → 앵커 아래, 뷰포트 안으로 클램프
+  useLayoutEffect(() => {
+    const card = cardRef.current;
+    if (!anchor || !card) return;
+    const a = anchor.getBoundingClientRect();
+    const c = card.getBoundingClientRect();
+    const left = Math.max(8, Math.min(a.left, window.innerWidth - c.width - 8));
+    const top = Math.min(a.bottom + 6, window.innerHeight - c.height - 8);
+    setPos({ left, top });
+  }, [anchor]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return createPortal(
+    <>
+      <div className="fixed inset-0 z-40" onMouseDown={onClose} />
+      <div
+        ref={cardRef}
+        className="fixed z-50 rounded-xl border border-border bg-base p-3 shadow-panel"
+        style={{
+          left: pos?.left ?? -9999,
+          top: pos?.top ?? -9999,
+          visibility: pos ? "visible" : "hidden",
+        }}
+      >
+        <div className="mb-2 px-1 text-meta font-medium text-fg-muted">{folder.name}</div>
+        <div className="grid max-w-[18rem] grid-cols-4 gap-1">
+          {children.map((c) => (
+            <FolderChild key={c.id} app={c} folderId={folder.id} onLaunched={onClose} />
+          ))}
+        </div>
+      </div>
+    </>,
+    document.body,
+  );
+}
+
+/** 폴더 플라이아웃 셀 — 아이콘 타일 + 이름. 클릭 실행, 우클릭 메뉴. */
+function FolderChild({
+  app,
+  folderId,
+  onLaunched,
+}: {
+  app: AppItem;
+  folderId: string;
+  onLaunched: () => void;
+}) {
+  const args = app.args ?? [];
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void launchApp(String(app.path), args);
+        onLaunched();
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        useContextMenu.getState().openAt(e.clientX, e.clientY, appMenu(app, folderId));
+      }}
+      title={`${app.name}${args.length ? ` ${args.join(" ")}` : ""}\n${app.path}`}
+      className="group flex w-16 flex-col items-center gap-1 rounded-lg p-1.5 hover:bg-subtle"
+    >
+      <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-subtle text-fg group-hover:bg-base">
+        <AppGlyph app={app} px={20} />
+      </span>
+      <span className="w-full truncate text-center text-meta text-fg-muted">{app.name}</span>
+    </button>
+  );
 }
 
 function DropLine() {
