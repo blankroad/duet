@@ -109,14 +109,23 @@ pub async fn delete_plan(
     })
 }
 
+/// 영구삭제 확인 단어 — 사용자가 DangerConfirm 다이얼로그에 타이핑해야 하는 값.
+pub const PERMANENT_DELETE_CONFIRM_WORD: &str = "delete";
+
 pub async fn delete_execute(
     fs: &dyn FileSystem,
     plan: DeletePlan,
     ctx: &OpCtx,
+    confirm_word: &str,
 ) -> Result<JournalEntry, DuetError> {
     if matches!(plan.mode, DeleteMode::Permanent) {
         let s = ctx.settings.get().await;
         if !s.permanent_delete_enabled {
+            return Err(DuetError::NotPermitted);
+        }
+        // §3: 영구삭제는 단어-타이핑 확인을 백엔드에서 강제 (프론트-전용 게이트 아님).
+        // command 직접 호출 시에도 확인 단어 없이는 비가역 삭제 불가.
+        if confirm_word != PERMANENT_DELETE_CONFIRM_WORD {
             return Err(DuetError::NotPermitted);
         }
     }
@@ -2946,9 +2955,43 @@ mod tests {
             .unwrap();
 
         let (ctx, _ctx_dir) = mk_ctx().await;
-        let result = delete_execute(&local, plan, &ctx).await;
+        let result = delete_execute(&local, plan, &ctx, "delete").await;
         assert!(matches!(result, Err(DuetError::NotPermitted)));
         assert!(dir.path().join("a").exists());
+    }
+
+    #[tokio::test]
+    async fn permanent_delete_requires_confirm_word() {
+        let dir = TempDir::new().unwrap();
+        tokio::fs::write(dir.path().join("a"), b"x").await.unwrap();
+        let local = LocalFs::new();
+        let parent = dir.path().to_path_buf();
+
+        let mk_plan = || async {
+            delete_plan(&local, vec![mk_target(&parent, "a")], DeleteMode::Permanent)
+                .await
+                .unwrap()
+        };
+
+        let (ctx, _d) = mk_ctx().await;
+        // 영구삭제 활성화 (단어 검증만 분리해 테스트).
+        ctx.settings
+            .apply(crate::services::settings::SettingsPatch {
+                permanent_delete_enabled: Some(true),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        // 틀린 단어 → 거부, 파일 보존.
+        let bad = delete_execute(&local, mk_plan().await, &ctx, "wrong").await;
+        assert!(matches!(bad, Err(DuetError::NotPermitted)));
+        assert!(dir.path().join("a").exists());
+
+        // 올바른 단어 → 삭제.
+        let ok = delete_execute(&local, mk_plan().await, &ctx, "delete").await;
+        assert!(ok.is_ok());
+        assert!(!dir.path().join("a").exists());
     }
 
     /// 2번째 trash 호출에서 실패하는 mock — 부분실패 저널 기록(§4, A1) 검증용.
@@ -3041,7 +3084,7 @@ mod tests {
         };
         let (ctx, _d) = mk_ctx().await;
         let fs = FailingTrashFs::default();
-        let result = delete_execute(&fs, plan, &ctx).await;
+        let result = delete_execute(&fs, plan, &ctx, "").await;
         assert!(result.is_err(), "2번째 항목 실패로 에러여야 함");
         let hist = ctx.journal.history(10).await;
         assert_eq!(hist.len(), 1, "부분 진행분이 journal 에 1건 기록되어야 함");

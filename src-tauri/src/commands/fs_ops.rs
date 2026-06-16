@@ -81,6 +81,7 @@ pub async fn fs_delete_plan(
 #[specta::specta]
 pub async fn fs_delete_execute(
     plan: DeletePlan,
+    confirm_word: String,
     pool: tauri::State<'_, Arc<ConnectionPool>>,
     settings: tauri::State<'_, Arc<SettingsStore>>,
     journal: tauri::State<'_, Arc<Journal>>,
@@ -96,6 +97,7 @@ pub async fn fs_delete_execute(
             pool.inner().clone(),
             app.clone(),
         ),
+        &confirm_word,
     )
     .await?;
     Ok(emit_pushed(&app, entry))
