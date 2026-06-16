@@ -9,7 +9,8 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
+use tokio_util::sync::CancellationToken;
 
 /// 활성 SSH 연결 한 개의 메타데이터 + 세션.
 ///
@@ -76,6 +77,10 @@ impl ActiveConnection {
 #[derive(Default)]
 pub struct ConnectionPool {
     inner: RwLock<HashMap<ConnectionId, Arc<ActiveConnection>>>,
+    /// in-flight 재연결(reconnect_loop)의 취소 토큰. id 당 최대 1개.
+    /// `connection_close` 가 cancel 해서, 사용자가 종료한 연결이 재연결로 되살아나는
+    /// (resurrection) 경합을 차단한다. reconnect 시작 시 생성, 종료 시 정리.
+    reconnect_cancels: Mutex<HashMap<ConnectionId, CancellationToken>>,
 }
 
 impl ConnectionPool {
@@ -108,6 +113,29 @@ impl ConnectionPool {
     /// 모든 활성 연결 목록.
     pub async fn list(&self) -> Vec<Arc<ActiveConnection>> {
         self.inner.read().await.values().cloned().collect()
+    }
+
+    /// 재연결 시작 — 이 id 의 새 취소 토큰을 만들어 저장하고 반환.
+    /// (이전 토큰이 있으면 덮어씀 — id 당 supervisor 는 한 번에 하나.)
+    pub async fn begin_reconnect(&self, id: &ConnectionId) -> CancellationToken {
+        let token = CancellationToken::new();
+        self.reconnect_cancels
+            .lock()
+            .await
+            .insert(id.clone(), token.clone());
+        token
+    }
+
+    /// in-flight 재연결을 취소 — `connection_close` 가 호출. reconnect 중이 아니면 no-op.
+    pub async fn cancel_reconnect(&self, id: &ConnectionId) {
+        if let Some(token) = self.reconnect_cancels.lock().await.get(id) {
+            token.cancel();
+        }
+    }
+
+    /// 재연결 종료(성공/실패/취소) 후 토큰 정리. 누수 방지.
+    pub async fn end_reconnect(&self, id: &ConnectionId) {
+        self.reconnect_cancels.lock().await.remove(id);
     }
 }
 
@@ -194,5 +222,27 @@ mod tests {
         pool.insert(mk_conn("a", "10.0.0.99")).await; // 같은 id, 다른 IP
         let got = pool.get(&ConnectionId("a".into())).await.unwrap();
         assert_eq!(got.host_ip.to_string(), "10.0.0.99");
+    }
+
+    #[tokio::test]
+    async fn reconnect_cancel_token_lifecycle() {
+        let pool = ConnectionPool::new();
+        let id = ConnectionId("x".into());
+        let tok = pool.begin_reconnect(&id).await;
+        assert!(!tok.is_cancelled());
+        // close 가 in-flight reconnect 를 취소.
+        pool.cancel_reconnect(&id).await;
+        assert!(tok.is_cancelled());
+        // 종료 정리 후 새 reconnect 는 깨끗한 토큰.
+        pool.end_reconnect(&id).await;
+        let tok2 = pool.begin_reconnect(&id).await;
+        assert!(!tok2.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn cancel_reconnect_noop_when_not_reconnecting() {
+        let pool = ConnectionPool::new();
+        // reconnect 중이 아니면 cancel 은 패닉 없이 no-op.
+        pool.cancel_reconnect(&ConnectionId("none".into())).await;
     }
 }

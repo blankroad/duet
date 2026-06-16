@@ -67,6 +67,7 @@ pub fn spawn_supervisor(pool: Arc<ConnectionPool>, app: AppHandle, id: Connectio
                 let user = conn.user.clone();
                 drop(conn); // Arc 풀어서 새 insert 가 동기화 충돌 안 나도록
                 reconnect_loop(pool.clone(), app.clone(), id.clone(), alias, user).await;
+                pool.end_reconnect(&id).await; // 이 reconnect 의 취소 토큰 정리(누수 방지)
                 return; // 성공이든 실패든 이 supervisor 는 종료 (성공 시 새 supervisor spawn 됨)
             }
         }
@@ -87,6 +88,8 @@ async fn reconnect_loop(
     alias: String,
     user: String,
 ) {
+    // 이 재연결 시도의 취소 토큰 — connection_close 가 cancel 하면 부활을 막는다.
+    let cancel = pool.begin_reconnect(&id).await;
     for (i, delay) in BACKOFF_STEPS.iter().enumerate() {
         let _ = ConnectionStateEvent {
             id: id.clone(),
@@ -97,7 +100,11 @@ async fn reconnect_loop(
         }
         .emit(&app);
 
-        tokio::time::sleep(*delay).await;
+        // 사용자가 close 하면 백오프 대기 중에도 즉시 중단.
+        tokio::select! {
+            _ = cancel.cancelled() => return,
+            _ = tokio::time::sleep(*delay) => {}
+        }
 
         // 매 시도마다 ssh config 재로드 — 사용자가 그 사이에 config 수정한
         // 경우도 반영. 비용은 작음.
@@ -126,8 +133,17 @@ async fn reconnect_loop(
         };
 
         // 재연결은 known_hosts 학습/교체 안 함 — 키가 바뀌었으면 조용히 신뢰하지 않고 실패.
-        match connect(&host, &all_hosts, false, false).await {
+        // connect 는 수초 IO — 그 사이 close 되면 즉시 중단.
+        let connect_res = tokio::select! {
+            _ = cancel.cancelled() => return,
+            r = connect(&host, &all_hosts, false, false) => r,
+        };
+        match connect_res {
             Ok(session) => {
+                // connect 동안 사용자가 close 했으면 insert 직전 재확인 — 끊긴 연결 부활 차단.
+                if cancel.is_cancelled() {
+                    return;
+                }
                 let host_ip = session.host_ip;
                 let new_conn = ActiveConnection {
                     id: id.clone(),

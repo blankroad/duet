@@ -285,6 +285,83 @@ async fn run_host_command(
     Ok(())
 }
 
+/// 아카이브 엔트리가 추출 dest 밖으로 탈출하는지 — 절대경로(`/`·`\\`·드라이브)거나
+/// `..` 컴포넌트 포함. zip-slip / 절대경로 덮어쓰기 차단용.
+fn entry_escapes(entry: &str) -> bool {
+    if entry.starts_with('/') || entry.starts_with('\\') {
+        return true;
+    }
+    // Windows 드라이브 (C:\ 등) — 원격은 POSIX 지만 방어적으로.
+    let bytes = entry.as_bytes();
+    if bytes.len() >= 2 && bytes[1] == b':' {
+        return true;
+    }
+    entry.split(['/', '\\']).any(|comp| comp == "..")
+}
+
+/// 호스트의 아카이브 *목록* 명령 (이름만). 추출 전 검증용.
+fn remote_list_command(archive: &Path, fmt: ArchiveFormat) -> Result<String, DuetError> {
+    let a = shell_escape_path(archive)?;
+    Ok(match fmt {
+        ArchiveFormat::Zip => format!("unzip -Z1 {a}"),
+        ArchiveFormat::Tar => format!("tar -tf {a}"),
+        ArchiveFormat::TarGz => format!("tar -tzf {a}"),
+        ArchiveFormat::Gz => {
+            return Err(DuetError::NotSupported(
+                "remote single-file .gz extract".into(),
+            ))
+        }
+    })
+}
+
+/// 한 호스트 셸 명령을 실행하고 stdout 반환 (exit!=0 → Err).
+async fn run_host_command_stdout(
+    pool: &Arc<ConnectionPool>,
+    connection_id: &ConnectionId,
+    cmd: &str,
+) -> Result<String, DuetError> {
+    let conn = pool.get(connection_id).await?;
+    let session_mutex = conn
+        .session
+        .as_ref()
+        .ok_or_else(|| DuetError::ConnectionFailed("no live session".into()))?;
+    let handle = session_mutex.lock().await;
+    let out = exec(&handle, cmd).await?;
+    if out.exit_status != 0 {
+        return Err(DuetError::Ssh(format!(
+            "host command failed (exit {}): {}",
+            out.exit_status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// 원격 추출 전 아카이브 엔트리를 나열해 dest 밖으로 탈출하는 항목을 거부한다.
+/// host-side tar/unzip 의 버전별 보호 동작에 의존하지 않고 명시적으로 zip-slip 을 차단.
+/// (로컬 경로의 zip crate `enclosed_name` 방어와 의미를 맞춤.)
+async fn validate_remote_archive(
+    pool: &Arc<ConnectionPool>,
+    connection_id: &ConnectionId,
+    archive: &Path,
+    fmt: ArchiveFormat,
+) -> Result<(), DuetError> {
+    let list_cmd = remote_list_command(archive, fmt)?;
+    let listing = run_host_command_stdout(pool, connection_id, &list_cmd).await?;
+    for entry in listing.lines() {
+        let entry = entry.trim();
+        if entry.is_empty() {
+            continue;
+        }
+        if entry_escapes(entry) {
+            return Err(DuetError::Io(format!(
+                "archive contains path-traversal entry (zip-slip), refusing to extract: {entry}"
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// 원격 아카이브 해제 — 호스트의 unzip/tar 를 exec (dest 는 caller 가 생성).
 async fn extract_remote(
     pool: &Arc<ConnectionPool>,
@@ -293,6 +370,7 @@ async fn extract_remote(
     dest: &Path,
     fmt: ArchiveFormat,
 ) -> Result<(), DuetError> {
+    validate_remote_archive(pool, connection_id, archive, fmt).await?;
     let cmd = remote_extract_command(archive, dest, fmt)?;
     run_host_command(pool, connection_id, &cmd).await
 }
@@ -333,6 +411,8 @@ pub async fn open_for_browse(
             })
         }
         SourceId::Ssh { connection_id, .. } => {
+            // 추출 전 zip-slip 검증 (extract_remote 와 동일 가드 — browse 도 호스트에 씀).
+            validate_remote_archive(pool, connection_id, &archive_path, format).await?;
             // 호스트 home 아래 임시 디렉토리 — 절대경로로 만들어 shell-escape.
             let conn = pool.get(connection_id).await?;
             let home = SshFs::new(conn).home().await?;
@@ -749,6 +829,23 @@ mod tests {
     fn local_browse_root_is_under_temp() {
         assert!(local_browse_root().ends_with("duet-archive"));
         assert!(local_browse_root().starts_with(std::env::temp_dir()));
+    }
+
+    #[test]
+    fn entry_escapes_detects_traversal() {
+        // 탈출 — 거부 대상
+        assert!(entry_escapes("../evil"));
+        assert!(entry_escapes("a/../../etc/passwd"));
+        assert!(entry_escapes("foo/.."));
+        assert!(entry_escapes("/etc/passwd"));
+        assert!(entry_escapes("\\windows\\system32"));
+        assert!(entry_escapes("C:\\x"));
+        // 안전 — 허용
+        assert!(!entry_escapes("safe/dir/file.txt"));
+        assert!(!entry_escapes("file.txt"));
+        assert!(!entry_escapes("a/b/c"));
+        assert!(!entry_escapes("..foo/bar")); // ".." 가 컴포넌트가 아님
+        assert!(!entry_escapes("foo..bar"));
     }
 
     #[test]

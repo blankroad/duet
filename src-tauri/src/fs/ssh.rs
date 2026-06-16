@@ -75,10 +75,18 @@ impl SshFs {
     ) -> Result<(), DuetError> {
         let from_s = remote_path_str(from)?;
         let to_s = remote_path_str(to)?;
-        if sftp.rename(from_s, to_s).await.is_ok() {
-            return Ok(());
+        match sftp.rename(from_s.clone(), to_s).await {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                // EXDEV(다른 마운트) 만 cp 폴백 대상. NotFound/PermissionDenied 는
+                // cross-device 가 아니므로 그대로 전파 — 잘못된 cp+삭제 방지.
+                let mapped = map_sftp_error(e, &from_s);
+                if !should_cp_fallback(&mapped) {
+                    return Err(mapped);
+                }
+            }
         }
-        // rename 실패 — 보통 EXDEV(다른 마운트). mv 처럼 cp -a 후 원본 제거.
+        // cross-device 추정 — mv 처럼 cp -a 후 원본 제거.
         self.exec_cp(from, to).await?;
         Box::pin(remove_recursive(sftp, from)).await
     }
@@ -490,6 +498,16 @@ fn map_sftp_error(e: russh_sftp::client::error::Error, path: &str) -> DuetError 
     }
 }
 
+/// rename 실패를 cp+remove 폴백으로 처리할지 판정.
+///
+/// SFTP 프로토콜은 cross-device(EXDEV)를 generic `FAILURE` 로만 보고해 콕 집어
+/// 구분할 수 없다. 대신 *명백히* cross-device 가 아닌 경우(NotFound/PermissionDenied)
+/// 를 제외하고, 나머지(generic failure = EXDEV 포함)만 폴백한다. 권한오류 등을
+/// cp+삭제로 보내 엉뚱한 동작/원본 위협하는 일을 차단한다.
+fn should_cp_fallback(err: &DuetError) -> bool {
+    !matches!(err, DuetError::NotFound(_) | DuetError::PermissionDenied(_))
+}
+
 #[cfg(test)]
 mod tests {
     // 실제 SFTP 통합 테스트는 외부 SSH/SFTP 서버 필요 — docker compose 로 후속.
@@ -500,6 +518,20 @@ mod tests {
     #[test]
     fn ssh_fs_constructor_compiles() {
         let _ = SshFs::new;
+    }
+
+    #[test]
+    fn cp_fallback_excludes_classified_errors() {
+        // 명백히 cross-device 가 아닌 에러 → 폴백 안 함(전파).
+        assert!(!super::should_cp_fallback(&DuetError::PermissionDenied(
+            "x".into()
+        )));
+        assert!(!super::should_cp_fallback(&DuetError::NotFound("x".into())));
+        // SFTP generic failure(EXDEV 가 여기로 옴) → cp 폴백.
+        assert!(super::should_cp_fallback(&DuetError::Ssh(
+            "sftp: failure".into()
+        )));
+        assert!(super::should_cp_fallback(&DuetError::Io("other".into())));
     }
 
     #[test]

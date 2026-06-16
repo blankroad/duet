@@ -16,7 +16,7 @@ pub async fn undo_last(
     journal: tauri::State<'_, Arc<Journal>>,
     app: tauri::AppHandle,
 ) -> Result<UndoOutcome, DuetError> {
-    let entry = match journal.pop_undoable().await? {
+    let entry = match journal.peek_undoable().await? {
         Some(e) => e,
         None => {
             return Ok(UndoOutcome {
@@ -27,11 +27,16 @@ pub async fn undo_last(
         }
     };
     let outcome = execute_undo(&entry, pool.inner()).await;
-    let _ = JournalChangedEvent {
-        entry,
-        change: "undone".into(),
+    // 성공(Ok) 또는 비가역 종결(Irreversible — 재시도 무의미)일 때만 undone 확정.
+    // Error 면 엔트리를 남겨 다음 undo 시 재시도 가능 — 실행 실패로 인한 영구 손실 방지.
+    if matches!(outcome.kind, UndoKind::Ok | UndoKind::Irreversible) {
+        journal.commit_undone(entry.id).await?;
+        let _ = JournalChangedEvent {
+            entry,
+            change: "undone".into(),
+        }
+        .emit(&app);
     }
-    .emit(&app);
     Ok(outcome)
 }
 

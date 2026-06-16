@@ -49,19 +49,36 @@ import { usePalette } from "@/stores/palette";
 import { buildBuiltins } from "@/lib/commands";
 import { useUI } from "@/stores/ui";
 import { useAppSettings } from "@/stores/settings";
-import { usePanes, activeTab, computeDisplayed, applyTabDefaults, type PaneId, type SortKey, type ViewMode } from "@/stores/panes";
+import {
+  usePanes,
+  activeTab,
+  computeDisplayed,
+  applyTabDefaults,
+  type PaneId,
+  type SortKey,
+  type ViewMode,
+} from "@/stores/panes";
 import { applyTheme } from "@/lib/theme";
 import { useSearch } from "@/stores/search";
 import { useUIDialogs } from "@/stores/ui-dialogs";
 import { useToast } from "@/stores/toast";
 import { bootstrapSavedHosts } from "@/stores/savedHosts";
-import { bootstrapBookmarks, addBookmark, removeBookmark, findBookmarkId } from "@/stores/bookmarks";
+import {
+  bootstrapBookmarks,
+  addBookmark,
+  removeBookmark,
+  findBookmarkId,
+} from "@/stores/bookmarks";
 import { bookmarkLocation } from "@/lib/bookmarkActions";
-import { bootstrapHostFavorites, addHostFavorite } from "@/stores/hostFavorites";
+import {
+  bootstrapHostFavorites,
+  addHostFavorite,
+} from "@/stores/hostFavorites";
 import { bootstrapUserAliases } from "@/stores/userAliases";
 import { bootstrapAppLaunchers, setAppArgs } from "@/stores/appLaunchers";
 import { bootstrapPlaces, refreshVolumes } from "@/stores/places";
 import { recordRecent } from "@/stores/recents";
+import { loadSession, initSessionPersist } from "@/stores/session";
 import { bootstrapHostGroups } from "@/stores/sidebarGroups";
 import { useDynamicCommands } from "@/lib/dynamicCommands";
 import { useConnections } from "@/stores/connections";
@@ -80,7 +97,19 @@ import { formatSize } from "@/lib/format";
 import { platform } from "@tauri-apps/plugin-os";
 import { confirm as tauriConfirm } from "@tauri-apps/plugin-dialog";
 import { commands } from "@/types/bindings";
-import type { CompressFormat, ConnectionDto, CopyStrategy, DuetError, Entry, EntryRef, HostFavorite, Location, SearchHit, UserAlias, Volume } from "@/types/bindings";
+import type {
+  CompressFormat,
+  ConnectionDto,
+  CopyStrategy,
+  DuetError,
+  Entry,
+  EntryRef,
+  HostFavorite,
+  Location,
+  SearchHit,
+  UserAlias,
+  Volume,
+} from "@/types/bindings";
 
 /**
  * App 루트.
@@ -100,7 +129,9 @@ function App() {
       const location = { ...activeTab(state, id).location, path };
       try {
         const entries = await listDirectory(location);
-        state.setEntries(id, location, entries, { pushHistory: opts.pushHistory ?? true });
+        state.setEntries(id, location, entries, {
+          pushHistory: opts.pushHistory ?? true,
+        });
         // navigate 성공 후 watcher 갱신. 실패는 silent — fs:changed 알림 안 옴
         // 정도의 영향. (사용자가 명시 새로고침으로 우회 가능.)
         void commands.paneWatchSet(id, location);
@@ -119,10 +150,16 @@ function App() {
 
   /** location 전체를 받아 해당 패널을 이동 — Bookmark(SSH 포함) 에서 사용. */
   const navigateTo = useCallback(
-    async (id: PaneId, location: Location, opts: { pushHistory?: boolean } = {}) => {
+    async (
+      id: PaneId,
+      location: Location,
+      opts: { pushHistory?: boolean } = {},
+    ) => {
       try {
         const entries = await listDirectory(location);
-        usePanes.getState().setEntries(id, location, entries, { pushHistory: opts.pushHistory ?? true });
+        usePanes.getState().setEntries(id, location, entries, {
+          pushHistory: opts.pushHistory ?? true,
+        });
         void commands.paneWatchSet(id, location);
         if (opts.pushHistory !== false) recordRecent(location);
       } catch (e) {
@@ -143,26 +180,30 @@ function App() {
   );
 
   /** 활성 패널을 그 소스의 휴지통으로 이동 — 삭제 항목 보기/복구(복사·이동으로). */
-  const onTrashActivate = useCallback((pane?: PaneId) => {
-    const id = pane ?? usePanes.getState().activePane;
-    const src = activeTab(usePanes.getState(), id).location.source;
-    void (async () => {
-      // Windows 로컬 휴지통은 셸 가상폴더($I/$R)라 패널 탐색이 불가 →
-      // 시스템 휴지통(재활용 통)을 탐색기로 연다.
-      if (src.kind === "local" && platform() === "windows") {
-        const r = await commands.openRecycleBin();
-        if (r.status === "error") showToast(`Recycle Bin — ${formatErr(r.error)}`);
-        return;
-      }
-      const r = await commands.trashLocation(src);
-      if (r.status === "error") {
-        showToast(`Trash unavailable — ${formatErr(r.error)}`);
-        return;
-      }
-      await navigateTo(id, r.data);
-      usePanes.getState().setTrashRoot(id, r.data.path);
-    })();
-  }, [navigateTo, showToast]);
+  const onTrashActivate = useCallback(
+    (pane?: PaneId) => {
+      const id = pane ?? usePanes.getState().activePane;
+      const src = activeTab(usePanes.getState(), id).location.source;
+      void (async () => {
+        // Windows 로컬 휴지통은 셸 가상폴더($I/$R)라 패널 탐색이 불가 →
+        // 시스템 휴지통(재활용 통)을 탐색기로 연다.
+        if (src.kind === "local" && platform() === "windows") {
+          const r = await commands.openRecycleBin();
+          if (r.status === "error")
+            showToast(`Recycle Bin — ${formatErr(r.error)}`);
+          return;
+        }
+        const r = await commands.trashLocation(src);
+        if (r.status === "error") {
+          showToast(`Trash unavailable — ${formatErr(r.error)}`);
+          return;
+        }
+        await navigateTo(id, r.data);
+        usePanes.getState().setTrashRoot(id, r.data.path);
+      })();
+    },
+    [navigateTo, showToast],
+  );
 
   /** 휴지통 항목 "Put back" — 원본 위치로 복원(원격) 후 휴지통 뷰 갱신. */
   const onPutBack = useCallback(() => {
@@ -216,7 +257,10 @@ function App() {
       // 아카이브 파일 — 임시 추출 후 그 폴더로 진입(탐색기처럼 내부 열람).
       if (isArchiveName(entry.name)) {
         void (async () => {
-          const r = await commands.fsArchiveOpenForBrowse({ location: tab.location, name: entry.name });
+          const r = await commands.fsArchiveOpenForBrowse({
+            location: tab.location,
+            name: entry.name,
+          });
           if (r.status === "error") {
             showToast(`Cannot open ${entry.name} — ${formatErr(r.error)}`);
             return;
@@ -232,8 +276,11 @@ function App() {
       }
       // 일반 파일 — OS 기본 앱으로 열기 (원격은 backend 가 temp 다운로드 후 열기).
       void (async () => {
-        const r = await commands.openPath(childLocation(tab.location, entry.name));
-        if (r.status === "error") showToast(`Cannot open ${entry.name} — ${formatErr(r.error)}`);
+        const r = await commands.openPath(
+          childLocation(tab.location, entry.name),
+        );
+        if (r.status === "error")
+          showToast(`Cannot open ${entry.name} — ${formatErr(r.error)}`);
       })();
     },
     [navigate, navigateTo, onUp, showToast],
@@ -325,7 +372,11 @@ function App() {
       const s = usePanes.getState();
       s.setActivePane(id);
       const tab = activeTab(s, id);
-      const items = buildEmptyMenu({ paneId: id, location: tab.location, onRefresh });
+      const items = buildEmptyMenu({
+        paneId: id,
+        location: tab.location,
+        onRefresh,
+      });
       useContextMenu.getState().openAt(e.clientX, e.clientY, items);
     },
     [onRefresh],
@@ -391,7 +442,8 @@ function App() {
 
   useEffect(() => {
     const builtins = buildBuiltins({
-      openTab: () => usePanes.getState().openTab(usePanes.getState().activePane),
+      openTab: () =>
+        usePanes.getState().openTab(usePanes.getState().activePane),
       closeActiveTab: () => {
         const id = usePanes.getState().activePane;
         const p = usePanes.getState().panes[id];
@@ -400,29 +452,60 @@ function App() {
       nextTab: () => {
         const id = usePanes.getState().activePane;
         const p = usePanes.getState().panes[id];
-        usePanes.getState().selectTab(id, (p.activeTabIndex + 1) % p.tabs.length);
+        usePanes
+          .getState()
+          .selectTab(id, (p.activeTabIndex + 1) % p.tabs.length);
       },
       prevTab: () => {
         const id = usePanes.getState().activePane;
         const p = usePanes.getState().panes[id];
-        usePanes.getState().selectTab(id, (p.activeTabIndex - 1 + p.tabs.length) % p.tabs.length);
+        usePanes
+          .getState()
+          .selectTab(
+            id,
+            (p.activeTabIndex - 1 + p.tabs.length) % p.tabs.length,
+          );
       },
       back: () => onBack(usePanes.getState().activePane),
       forward: () => onForward(usePanes.getState().activePane),
-      editPath: () => useUI.getState().requestEditPath(usePanes.getState().activePane),
+      editPath: () =>
+        useUI.getState().requestEditPath(usePanes.getState().activePane),
       refresh: () => onRefresh(usePanes.getState().activePane),
-      toggleHidden: () => usePanes.getState().toggleShowHidden(usePanes.getState().activePane),
+      toggleHidden: () =>
+        usePanes.getState().toggleShowHidden(usePanes.getState().activePane),
       toggleSidebar: () => toggleSidebar(),
       togglePreview: () => togglePreview(),
       quickLook: () => useUI.getState().toggleQuickLook(),
-      viewDetails: () => usePanes.getState().setViewMode(usePanes.getState().activePane, "details"),
-      viewGrid: () => usePanes.getState().setViewMode(usePanes.getState().activePane, "grid"),
-      viewTiles: () => usePanes.getState().setViewMode(usePanes.getState().activePane, "tiles"),
-      sortByName: () => usePanes.getState().toggleSortKey(usePanes.getState().activePane, "name"),
-      sortBySize: () => usePanes.getState().toggleSortKey(usePanes.getState().activePane, "size"),
-      sortByMtime: () => usePanes.getState().toggleSortKey(usePanes.getState().activePane, "mtime"),
-      sortByKind: () => usePanes.getState().toggleSortKey(usePanes.getState().activePane, "kind"),
-      sortByExt: () => usePanes.getState().toggleSortKey(usePanes.getState().activePane, "ext"),
+      viewDetails: () =>
+        usePanes
+          .getState()
+          .setViewMode(usePanes.getState().activePane, "details"),
+      viewGrid: () =>
+        usePanes.getState().setViewMode(usePanes.getState().activePane, "grid"),
+      viewTiles: () =>
+        usePanes
+          .getState()
+          .setViewMode(usePanes.getState().activePane, "tiles"),
+      sortByName: () =>
+        usePanes
+          .getState()
+          .toggleSortKey(usePanes.getState().activePane, "name"),
+      sortBySize: () =>
+        usePanes
+          .getState()
+          .toggleSortKey(usePanes.getState().activePane, "size"),
+      sortByMtime: () =>
+        usePanes
+          .getState()
+          .toggleSortKey(usePanes.getState().activePane, "mtime"),
+      sortByKind: () =>
+        usePanes
+          .getState()
+          .toggleSortKey(usePanes.getState().activePane, "kind"),
+      sortByExt: () =>
+        usePanes
+          .getState()
+          .toggleSortKey(usePanes.getState().activePane, "ext"),
       toggleBookmark: () => {
         const id = usePanes.getState().activePane;
         const tab = activeTab(usePanes.getState(), id);
@@ -434,7 +517,10 @@ function App() {
         if (existing) void removeBookmark(existing);
         else void addBookmark(folderName(tab.location), tab.location);
       },
-      focusFilter: () => usePanes.getState().setFilterFocused(usePanes.getState().activePane, true),
+      focusFilter: () =>
+        usePanes
+          .getState()
+          .setFilterFocused(usePanes.getState().activePane, true),
       openSearch: () => {
         const id = usePanes.getState().activePane;
         const tab = activeTab(usePanes.getState(), id);
@@ -465,7 +551,10 @@ function App() {
       copyName: () => void copySelectionNames(showToast),
       undo: () => void triggerUndo(showToast),
       setupKeyAuth: () => {
-        const src = activeTab(usePanes.getState(), usePanes.getState().activePane).location.source;
+        const src = activeTab(
+          usePanes.getState(),
+          usePanes.getState().activePane,
+        ).location.source;
         if (src.kind !== "ssh") {
           showToast("Active panel is not a remote host");
           return;
@@ -487,7 +576,17 @@ function App() {
       },
     });
     setBuiltins(builtins);
-  }, [setBuiltins, openPalette, toggleSidebar, togglePreview, onBack, onForward, onRefresh, openDialog, showToast]);
+  }, [
+    setBuiltins,
+    openPalette,
+    toggleSidebar,
+    togglePreview,
+    onBack,
+    onForward,
+    onRefresh,
+    openDialog,
+    showToast,
+  ]);
 
   const onRenameSubmit = useCallback(
     async (newName: string) => {
@@ -537,7 +636,8 @@ function App() {
       }
       // execute 는 task 로 — 완료 시 affected_locations 자동 새로고침 (useTaskEvents).
       const exec = await commands.fsCompressExecute(plan.data);
-      if (exec.status === "error") showToast(`Compress failed: ${formatErr(exec.error)}`);
+      if (exec.status === "error")
+        showToast(`Compress failed: ${formatErr(exec.error)}`);
     },
     [dialog, closeDialog, showToast],
   );
@@ -549,13 +649,20 @@ function App() {
       if (!tab.archive) return;
       const archive = tab.archive;
       void (async () => {
-        const original: EntryRef = { location: archive.exitTo, name: archive.label };
+        const original: EntryRef = {
+          location: archive.exitTo,
+          name: archive.label,
+        };
         const r = await commands.fsRepackPlan(tab.location, original);
         if (r.status === "error") {
           showToast(`Update archive failed: ${formatErr(r.error)}`);
           return;
         }
-        openDialog({ kind: "repack-confirm", plan: r.data, label: archive.label });
+        openDialog({
+          kind: "repack-confirm",
+          plan: r.data,
+          label: archive.label,
+        });
       })();
     },
     [showToast, openDialog],
@@ -566,21 +673,31 @@ function App() {
     const plan = dialog.plan;
     const r = await commands.fsCompressExecute(plan);
     if (r.status === "ok") {
-      openDialog({ kind: "progress", title: "Updating archive…", taskId: r.data });
+      openDialog({
+        kind: "progress",
+        title: "Updating archive…",
+        taskId: r.data,
+      });
     } else {
       closeDialog();
       showToast(`Update archive failed: ${formatErr(r.error)}`);
     }
   }, [dialog, openDialog, closeDialog, showToast]);
 
-  const onDeleteConfirm = useCallback(async () => {
-    if (dialog.kind !== "delete-confirm" && dialog.kind !== "delete-danger") return;
-    const plan = dialog.plan;
-    closeDialog();
-    const r = await commands.fsDeleteExecute(plan);
-    if (r.status === "ok") refreshAffected([plan.source_location]);
-    else showToast(`Delete failed: ${formatErr(r.error)}`);
-  }, [dialog, closeDialog, refreshAffected, showToast]);
+  const onDeleteConfirm = useCallback(
+    async (confirmWord = "") => {
+      if (dialog.kind !== "delete-confirm" && dialog.kind !== "delete-danger")
+        return;
+      const plan = dialog.plan;
+      closeDialog();
+      // 휴지통(delete-confirm)은 confirmWord 무시, 영구삭제(delete-danger)는
+      // 사용자가 타이핑한 단어를 백엔드가 검증(§3).
+      const r = await commands.fsDeleteExecute(plan, confirmWord);
+      if (r.status === "ok") refreshAffected([plan.source_location]);
+      else showToast(`Delete failed: ${formatErr(r.error)}`);
+    },
+    [dialog, closeDialog, refreshAffected, showToast],
+  );
 
   /** 볼륨 우클릭 "Eject" → 확인 다이얼로그 오픈. */
   const onEject = useCallback(
@@ -656,7 +773,12 @@ function App() {
       );
       if (conn) {
         void navigateTo(pane, {
-          source: { kind: "ssh", connection_id: conn.id, host_ip: conn.host_ip, user: conn.user },
+          source: {
+            kind: "ssh",
+            connection_id: conn.id,
+            host_ip: conn.host_ip,
+            user: conn.user,
+          },
           path,
         });
         return;
@@ -691,7 +813,6 @@ function App() {
     const tab = activeTab(usePanes.getState(), usePanes.getState().activePane);
     void bookmarkLocation(tab.location, folderName(tab.location));
   }, []);
-
 
   const onAddFavorite = useCallback(() => {
     const id = usePanes.getState().activePane;
@@ -738,11 +859,17 @@ function App() {
 
   // 팔레트/동적 커맨드용 — 활성 패널 기준 래퍼.
   const onBookmarkActivate = useCallback(
-    (location: Location) => onOpenLocation(location, usePanes.getState().activePane),
+    (location: Location) =>
+      onOpenLocation(location, usePanes.getState().activePane),
     [onOpenLocation],
   );
   const onFavoriteActivate = useCallback(
-    (fav: HostFavorite) => onOpenHostPath(fav.host_alias, String(fav.path), usePanes.getState().activePane),
+    (fav: HostFavorite) =>
+      onOpenHostPath(
+        fav.host_alias,
+        String(fav.path),
+        usePanes.getState().activePane,
+      ),
     [onOpenHostPath],
   );
 
@@ -800,7 +927,9 @@ function App() {
         }
       }
       if (!succeeded) {
-        showToast(`Connected ${alias}, but list failed:\n${failures.join("\n")}`);
+        showToast(
+          `Connected ${alias}, but list failed:\n${failures.join("\n")}`,
+        );
       }
     },
     [listDirectory, showToast],
@@ -811,8 +940,27 @@ function App() {
     (async () => {
       const result = await commands.homeDirectory();
       const home = result.status === "ok" ? result.data : "/";
-      await navigate("left", home);
-      await navigate("right", home);
+      // 세션 복원: 저장된 탭 레이아웃(로컬 탭)이 있으면 그걸로, 없으면 양쪽 home.
+      const saved = loadSession();
+      if (saved) {
+        usePanes.getState().restoreLayout(saved);
+        // 복원된 탭들은 entries 캐시가 비어 있으므로 각 탭을 navigate 해 적재. 끝나면 원래 active 로.
+        for (const pane of ["left", "right"] as PaneId[]) {
+          const tabPaths = usePanes
+            .getState()
+            .panes[pane].tabs.map((t) => String(t.location.path));
+          const savedActive = usePanes.getState().panes[pane].activeTabIndex;
+          for (let i = 0; i < tabPaths.length; i++) {
+            usePanes.getState().selectTab(pane, i);
+            await navigate(pane, tabPaths[i]!, { pushHistory: false });
+          }
+          usePanes.getState().selectTab(pane, savedActive);
+        }
+        usePanes.getState().setActivePane(saved.activePane);
+      } else {
+        await navigate("left", home);
+        await navigate("right", home);
+      }
       // 탐색기 "Open in duet" 로 폴더 경로가 argv 로 들어왔으면 왼쪽 패널을 그 폴더로.
       const startup = await commands.startupOpenPath();
       if (startup.status === "ok" && startup.data) {
@@ -834,9 +982,13 @@ function App() {
             viewMode: (r.data.default_view ?? "details") as ViewMode,
             showHidden: r.data.show_hidden_default ?? false,
           });
-          useAppSettings.getState().setSingleClickOpen(r.data.single_click_open ?? false);
+          useAppSettings
+            .getState()
+            .setSingleClickOpen(r.data.single_click_open ?? false);
         }
       });
+      // 탭 레이아웃 영속 구독 시작 — 복원 navigate 가 끝난 뒤라야 churn 없음.
+      initSessionPersist();
     })();
     // navigate가 deps에 들어가면 무한 루프 — 마운트 1회만
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -859,8 +1011,30 @@ function App() {
           onTrashActivate={onTrashActivate}
           onEject={onEject}
         />
-        <Pane id="left" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} onBack={onBack} onForward={onForward} onUp={onUp} onEntryContextMenu={onEntryContextMenu} onEmptyContextMenu={onEmptyContextMenu} onUpdateArchive={onUpdateArchive} />
-        <Pane id="right" onNavigate={navigate} onActivate={onActivate} onRefresh={onRefresh} onBack={onBack} onForward={onForward} onUp={onUp} onEntryContextMenu={onEntryContextMenu} onEmptyContextMenu={onEmptyContextMenu} onUpdateArchive={onUpdateArchive} />
+        <Pane
+          id="left"
+          onNavigate={navigate}
+          onActivate={onActivate}
+          onRefresh={onRefresh}
+          onBack={onBack}
+          onForward={onForward}
+          onUp={onUp}
+          onEntryContextMenu={onEntryContextMenu}
+          onEmptyContextMenu={onEmptyContextMenu}
+          onUpdateArchive={onUpdateArchive}
+        />
+        <Pane
+          id="right"
+          onNavigate={navigate}
+          onActivate={onActivate}
+          onRefresh={onRefresh}
+          onBack={onBack}
+          onForward={onForward}
+          onUp={onUp}
+          onEntryContextMenu={onEntryContextMenu}
+          onEmptyContextMenu={onEmptyContextMenu}
+          onUpdateArchive={onUpdateArchive}
+        />
         {previewOpen && <PreviewPane />}
       </main>
 
@@ -940,7 +1114,11 @@ function App() {
             void (async () => {
               const r = await commands.fsApplyThreeWay(base, left, right);
               if (r.status === "ok") {
-                openDialog({ kind: "progress", title: "Applying 3-way…", taskId: r.data });
+                openDialog({
+                  kind: "progress",
+                  title: "Applying 3-way…",
+                  taskId: r.data,
+                });
               } else {
                 closeDialog();
                 showToast(`3-way apply failed: ${formatErr(r.error)}`);
@@ -958,7 +1136,11 @@ function App() {
             void (async () => {
               const r = await commands.fsMergeBidir(left, right, detectRenames);
               if (r.status === "ok") {
-                openDialog({ kind: "progress", title: "Merging…", taskId: r.data });
+                openDialog({
+                  kind: "progress",
+                  title: "Merging…",
+                  taskId: r.data,
+                });
               } else {
                 closeDialog();
                 showToast(`Merge failed: ${formatErr(r.error)}`);
@@ -970,7 +1152,11 @@ function App() {
             void (async () => {
               const r = await commands.fsApplyCompare(left, right, decisions);
               if (r.status === "ok") {
-                openDialog({ kind: "progress", title: "Applying…", taskId: r.data });
+                openDialog({
+                  kind: "progress",
+                  title: "Applying…",
+                  taskId: r.data,
+                });
               } else {
                 closeDialog();
                 showToast(`Apply failed: ${formatErr(r.error)}`);

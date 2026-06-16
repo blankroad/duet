@@ -109,61 +109,99 @@ pub async fn delete_plan(
     })
 }
 
+/// 영구삭제 확인 단어 — 사용자가 DangerConfirm 다이얼로그에 타이핑해야 하는 값.
+pub const PERMANENT_DELETE_CONFIRM_WORD: &str = "delete";
+
 pub async fn delete_execute(
     fs: &dyn FileSystem,
     plan: DeletePlan,
     ctx: &OpCtx,
+    confirm_word: &str,
 ) -> Result<JournalEntry, DuetError> {
     if matches!(plan.mode, DeleteMode::Permanent) {
         let s = ctx.settings.get().await;
         if !s.permanent_delete_enabled {
             return Err(DuetError::NotPermitted);
         }
+        // §3: 영구삭제는 단어-타이핑 확인을 백엔드에서 강제 (프론트-전용 게이트 아님).
+        // command 직접 호출 시에도 확인 단어 없이는 비가역 삭제 불가.
+        if confirm_word != PERMANENT_DELETE_CONFIRM_WORD {
+            return Err(DuetError::NotPermitted);
+        }
     }
 
-    let undo = match plan.mode {
+    // §4: 항목별로 진행하며 누적하고, 중간 실패 시에도 '여기까지'를 journal 에 기록한 뒤
+    // 에러를 전파한다. 그래야 이미 휴지통으로 옮겨진 1..N-1 항목을 Ctrl+Z 로 복원할 수 있다.
+    match plan.mode {
         DeleteMode::Trash => {
             let batch_id = crate::services::trash::new_batch_id();
             let mut items = Vec::new();
+            let mut outcome: Result<(), DuetError> = Ok(());
             for t in &plan.targets {
                 let p = t.location.path.join(&t.name);
-                let loc = fs.trash(&p, &batch_id).await?;
-                let trash_path = match &loc {
-                    TrashLocation::Local { trash_id } => trash_id.clone(),
-                    TrashLocation::Remote { trash_path } => {
-                        trash_path.to_string_lossy().into_owned()
+                match fs.trash(&p, &batch_id).await {
+                    Ok(loc) => {
+                        let trash_path = match &loc {
+                            TrashLocation::Local { trash_id } => trash_id.clone(),
+                            TrashLocation::Remote { trash_path } => {
+                                trash_path.to_string_lossy().into_owned()
+                            }
+                        };
+                        items.push(TrashItem {
+                            trash_path,
+                            original_path: p,
+                        });
                     }
-                };
-                items.push(TrashItem {
-                    trash_path,
-                    original_path: p,
-                });
+                    Err(e) => {
+                        outcome = Err(e);
+                        break;
+                    }
+                }
             }
-            UndoAction::RestoreFromTrash {
+            if items.is_empty() {
+                // 아무 것도 휴지통으로 못 옮김 — 복원할 게 없으니 phantom 엔트리 안 남김.
+                outcome?;
+                return Err(DuetError::Io("delete affected nothing".into()));
+            }
+            let op = OpKind::Trash {
+                count: items.len() as u32,
+                location: plan.source_location.clone(),
+            };
+            let undo = UndoAction::RestoreFromTrash {
                 source: plan.source.clone(),
                 items,
-            }
+            };
+            let entry = ctx.journal.push(op, undo).await?;
+            outcome?;
+            Ok(entry)
         }
         DeleteMode::Permanent => {
+            let mut removed = 0u32;
+            let mut outcome: Result<(), DuetError> = Ok(());
             for t in &plan.targets {
                 let p = t.location.path.join(&t.name);
-                fs.remove(&p).await?;
+                match fs.remove(&p).await {
+                    Ok(()) => removed += 1,
+                    Err(e) => {
+                        outcome = Err(e);
+                        break;
+                    }
+                }
             }
-            UndoAction::Irreversible
+            if removed == 0 {
+                outcome?;
+                return Err(DuetError::Io("delete affected nothing".into()));
+            }
+            // 영구삭제는 undo 불가(Irreversible) — push 는 audit log 성격(실제 삭제 개수 기록).
+            let op = OpKind::PermanentDelete {
+                count: removed,
+                location: plan.source_location.clone(),
+            };
+            let entry = ctx.journal.push(op, UndoAction::Irreversible).await?;
+            outcome?;
+            Ok(entry)
         }
-    };
-
-    let op = match plan.mode {
-        DeleteMode::Trash => OpKind::Trash {
-            count: plan.total_count,
-            location: plan.source_location.clone(),
-        },
-        DeleteMode::Permanent => OpKind::PermanentDelete {
-            count: plan.total_count,
-            location: plan.source_location.clone(),
-        },
-    };
-    ctx.journal.push(op, undo).await
+    }
 }
 
 // === Copy ===
@@ -277,71 +315,89 @@ async fn copy_execute_relay(
 
     let mut copied = Vec::new();
     let mut backups = Vec::new();
+    let mut outcome: Result<(), DuetError> = Ok(());
     for it in &plan.items {
         // 항목 경계 cancel check
         if cancel_token.is_cancelled() {
-            return Err(DuetError::Cancelled);
+            outcome = Err(DuetError::Cancelled);
+            break;
         }
+        // 한 항목 처리 — 내부 ?/return 은 이 async 블록만 빠져나와 아래 outcome 으로 잡힘.
+        let step: Result<(), DuetError> = async {
+            let src_path = it.location.path.join(&it.name);
+            let dst_path = plan.dst.path.join(&it.name);
 
-        let src_path = it.location.path.join(&it.name);
-        let dst_path = plan.dst.path.join(&it.name);
-
-        // 충돌 시 backup 으로 mv (timestamp 충돌은 .<n> suffix 로 retry, 최대 5회)
-        if dst_fs.metadata(&dst_path).await.is_ok() {
-            let backup = pick_backup_path(dst_fs, &plan.dst.path, &it.name).await?;
-            dst_fs.rename(&dst_path, &backup).await?;
-            backups.push(BackupRestore {
-                backup_path: backup,
-                original_path: dst_path.clone(),
-            });
-        }
-
-        // copy 본체 — chunk 스트리밍(메모리 bounded, mid-file cancel). connection loss 면
-        // 1회 retry 하되 resume=true 로 중단된 .part 부터 이어받음(전송 재개).
-        match crate::fs::copy_relay_streaming(
-            src_fs,
-            &src_path,
-            dst_fs,
-            &dst_path,
-            false,
-            &cancel_token,
-            &on_bytes,
-        )
-        .await
-        {
-            Ok(()) => {}
-            Err(e) if crate::services::retry::is_retryable_error(&e) => {
-                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                if cancel_token.is_cancelled() {
-                    return Err(DuetError::Cancelled);
-                }
-                crate::fs::copy_relay_streaming(
-                    src_fs,
-                    &src_path,
-                    dst_fs,
-                    &dst_path,
-                    true, // 재개 — 이미 쓴 .part 이어받기
-                    &cancel_token,
-                    &on_bytes,
-                )
-                .await?;
+            // 충돌 시 backup 으로 mv (timestamp 충돌은 .<n> suffix 로 retry, 최대 5회)
+            if dst_fs.metadata(&dst_path).await.is_ok() {
+                let backup = pick_backup_path(dst_fs, &plan.dst.path, &it.name).await?;
+                dst_fs.rename(&dst_path, &backup).await?;
+                backups.push(BackupRestore {
+                    backup_path: backup,
+                    original_path: dst_path.clone(),
+                });
             }
-            Err(e) => return Err(e),
+
+            // copy 본체 — chunk 스트리밍(메모리 bounded, mid-file cancel). connection loss 면
+            // 1회 retry 하되 resume=true 로 중단된 .part 부터 이어받음(전송 재개).
+            match crate::fs::copy_relay_streaming(
+                src_fs,
+                &src_path,
+                dst_fs,
+                &dst_path,
+                false,
+                &cancel_token,
+                &on_bytes,
+            )
+            .await
+            {
+                Ok(()) => {}
+                Err(e) if crate::services::retry::is_retryable_error(&e) => {
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    if cancel_token.is_cancelled() {
+                        return Err(DuetError::Cancelled);
+                    }
+                    crate::fs::copy_relay_streaming(
+                        src_fs,
+                        &src_path,
+                        dst_fs,
+                        &dst_path,
+                        true, // 재개 — 이미 쓴 .part 이어받기
+                        &cancel_token,
+                        &on_bytes,
+                    )
+                    .await?;
+                }
+                Err(e) => return Err(e),
+            }
+            copied.push(dst_path);
+            Ok(())
         }
-        copied.push(dst_path);
+        .await;
+        if let Err(e) = step {
+            outcome = Err(e);
+            break;
+        }
     }
 
+    // §4: 부분 진행분(복사 완료 + 충돌 백업)이라도 journal 에 기록한 뒤 에러 전파.
+    if copied.is_empty() && backups.is_empty() {
+        outcome?;
+        return Err(DuetError::Io("copy affected nothing".into()));
+    }
+    let count = copied.len() as u32;
     let undo = UndoAction::UndoCopy {
         target_source: plan.dst.source.clone(),
         copied,
         backups_to_restore: backups,
     };
     let op = OpKind::Copy {
-        count: plan.items.len() as u32,
+        count,
         src: plan.items[0].location.clone(),
         dst: plan.dst.clone(),
     };
-    ctx.journal.push(op, undo).await
+    let entry = ctx.journal.push(op, undo).await?;
+    outcome?;
+    Ok(entry)
 }
 
 // === Move ===
@@ -386,50 +442,66 @@ pub async fn move_execute(
 
     let mut moved = Vec::new();
     let mut backups = Vec::new();
+    let mut outcome: Result<(), DuetError> = Ok(());
     for it in &plan.items {
         // 항목 경계 cancel check
         if cancel_token.is_cancelled() {
-            return Err(DuetError::Cancelled);
+            outcome = Err(DuetError::Cancelled);
+            break;
         }
+        // 한 항목 처리 — 내부 ?/return 은 이 async 블록만 빠져나와 아래 outcome 으로 잡힘.
+        let step: Result<(), DuetError> = async {
+            let src_path = it.location.path.join(&it.name);
+            let dst_path = plan.dst.path.join(&it.name);
 
-        let src_path = it.location.path.join(&it.name);
-        let dst_path = plan.dst.path.join(&it.name);
-
-        if dst_fs.metadata(&dst_path).await.is_ok() {
-            let backup = pick_backup_path(dst_fs, &plan.dst.path, &it.name).await?;
-            dst_fs.rename(&dst_path, &backup).await?;
-            backups.push(BackupRestore {
-                backup_path: backup,
-                original_path: dst_path.clone(),
-            });
-        }
-
-        if plan.is_same_fs {
-            // 같은 fs: 단순 rename — 빠르고 atomic
-            src_fs.rename(&src_path, &dst_path).await?;
-        } else {
-            // copy 본체 — connection loss 면 1회 retry
-            match crate::fs::copy_relay(src_fs, &src_path, dst_fs, &dst_path).await {
-                Ok(()) => {}
-                Err(e) if crate::services::retry::is_retryable_error(&e) => {
-                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                    if cancel_token.is_cancelled() {
-                        return Err(DuetError::Cancelled);
-                    }
-                    crate::fs::copy_relay(src_fs, &src_path, dst_fs, &dst_path).await?;
-                }
-                Err(e) => return Err(e),
+            if dst_fs.metadata(&dst_path).await.is_ok() {
+                let backup = pick_backup_path(dst_fs, &plan.dst.path, &it.name).await?;
+                dst_fs.rename(&dst_path, &backup).await?;
+                backups.push(BackupRestore {
+                    backup_path: backup,
+                    original_path: dst_path.clone(),
+                });
             }
-            // src 는 휴지통으로 (영구삭제 아님)
-            let batch_id = crate::services::trash::new_batch_id();
-            src_fs.trash(&src_path, &batch_id).await?;
+
+            if plan.is_same_fs {
+                // 같은 fs: 단순 rename — 빠르고 atomic
+                src_fs.rename(&src_path, &dst_path).await?;
+            } else {
+                // copy 본체 — connection loss 면 1회 retry
+                match crate::fs::copy_relay(src_fs, &src_path, dst_fs, &dst_path).await {
+                    Ok(()) => {}
+                    Err(e) if crate::services::retry::is_retryable_error(&e) => {
+                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                        if cancel_token.is_cancelled() {
+                            return Err(DuetError::Cancelled);
+                        }
+                        crate::fs::copy_relay(src_fs, &src_path, dst_fs, &dst_path).await?;
+                    }
+                    Err(e) => return Err(e),
+                }
+                // src 는 휴지통으로 (영구삭제 아님)
+                let batch_id = crate::services::trash::new_batch_id();
+                src_fs.trash(&src_path, &batch_id).await?;
+            }
+            moved.push(MoveItem {
+                src_original: src_path,
+                dst_now: dst_path,
+            });
+            Ok(())
         }
-        moved.push(MoveItem {
-            src_original: src_path,
-            dst_now: dst_path,
-        });
+        .await;
+        if let Err(e) = step {
+            outcome = Err(e);
+            break;
+        }
     }
 
+    // §4: 부분 진행분(이동 완료 + 충돌 백업)이라도 journal 에 기록한 뒤 에러 전파.
+    if moved.is_empty() && backups.is_empty() {
+        outcome?;
+        return Err(DuetError::Io("move affected nothing".into()));
+    }
+    let count = moved.len() as u32;
     let undo = UndoAction::UndoMove {
         src_source: plan.src_source.clone(),
         dst_source: plan.dst.source.clone(),
@@ -437,11 +509,13 @@ pub async fn move_execute(
         backups_to_restore: backups,
     };
     let op = OpKind::Move {
-        count: plan.items.len() as u32,
+        count,
         src: plan.items[0].location.clone(),
         dst: plan.dst.clone(),
     };
-    ctx.journal.push(op, undo).await
+    let entry = ctx.journal.push(op, undo).await?;
+    outcome?;
+    Ok(entry)
 }
 
 // === Sync (단방향 미러) ===
@@ -2654,124 +2728,153 @@ async fn copy_execute_same_host(
     let dst_fs = crate::fs::SshFs::new(dst_conn);
 
     let mut backups = Vec::new();
+    let mut copied = Vec::new();
+    let mut outcome: Result<(), DuetError> = Ok(());
     for it in &plan.items {
         // 항목 경계 cancel check (backup pre-loop)
         if cancel_token.is_cancelled() {
-            return Err(DuetError::Cancelled);
+            outcome = Err(DuetError::Cancelled);
+            break;
         }
-        let dst_path = plan.dst.path.join(&it.name);
-        if dst_fs.metadata(&dst_path).await.is_ok() {
-            let backup = pick_backup_path(&dst_fs, &plan.dst.path, &it.name).await?;
-            dst_fs.rename(&dst_path, &backup).await?;
-            backups.push(BackupRestore {
-                backup_path: backup,
-                original_path: dst_path,
-            });
+        let step: Result<(), DuetError> = async {
+            let dst_path = plan.dst.path.join(&it.name);
+            if dst_fs.metadata(&dst_path).await.is_ok() {
+                let backup = pick_backup_path(&dst_fs, &plan.dst.path, &it.name).await?;
+                dst_fs.rename(&dst_path, &backup).await?;
+                backups.push(BackupRestore {
+                    backup_path: backup,
+                    original_path: dst_path,
+                });
+            }
+            Ok(())
+        }
+        .await;
+        if let Err(e) = step {
+            outcome = Err(e);
+            break;
         }
     }
-
-    let mut copied = Vec::new();
 
     for it in &plan.items {
+        // backup 루프가 중간 실패했으면 copy 진행 안 함 (부분 backup 상태로 복사 금지).
+        if outcome.is_err() {
+            break;
+        }
         // 항목 경계 cancel check (copy main loop)
         if cancel_token.is_cancelled() {
-            return Err(DuetError::Cancelled);
+            outcome = Err(DuetError::Cancelled);
+            break;
         }
+        let step: Result<(), DuetError> = async {
+            let src_path = it.location.path.join(&it.name);
+            let dst_path = plan.dst.path.join(&it.name);
+            let src_arg = shell_escape_path(&src_path)?;
 
-        let src_path = it.location.path.join(&it.name);
-        let dst_path = plan.dst.path.join(&it.name);
-        let src_arg = shell_escape_path(&src_path)?;
+            let cmd = if use_rsync {
+                // rsync 는 SRC(trailing-slash 없음) 를 DEST *디렉토리* 안에 basename
+                // 으로 생성한다. 따라서 dst.path.join(name) (= 최종 경로) 을 주면
+                // dir 복사 시 한 단계 더 중첩됨 (dst/many/many/). 부모 디렉토리
+                // (plan.dst.path) 를 줘야 dst/<name> 으로 떨어진다 — file/dir 동일.
+                let dst_parent_arg = shell_escape_path(&plan.dst.path)?;
+                format!("rsync -a --info=progress2 -- {src_arg} {dst_parent_arg}")
+            } else {
+                // cp 는 DEST 를 새 이름으로 취급 → 최종 경로를 그대로 준다.
+                let dst_arg = shell_escape_path(&dst_path)?;
+                format!("cp -a -- {src_arg} {dst_arg}")
+            };
 
-        let cmd = if use_rsync {
-            // rsync 는 SRC(trailing-slash 없음) 를 DEST *디렉토리* 안에 basename
-            // 으로 생성한다. 따라서 dst.path.join(name) (= 최종 경로) 을 주면
-            // dir 복사 시 한 단계 더 중첩됨 (dst/many/many/). 부모 디렉토리
-            // (plan.dst.path) 를 줘야 dst/<name> 으로 떨어진다 — file/dir 동일.
-            let dst_parent_arg = shell_escape_path(&plan.dst.path)?;
-            format!("rsync -a --info=progress2 -- {src_arg} {dst_parent_arg}")
-        } else {
-            // cp 는 DEST 를 새 이름으로 취급 → 최종 경로를 그대로 준다.
-            let dst_arg = shell_escape_path(&dst_path)?;
-            format!("cp -a -- {src_arg} {dst_arg}")
-        };
+            // progress emit throttle: 1초
+            let mut last_emit = std::time::Instant::now()
+                .checked_sub(std::time::Duration::from_secs(2))
+                .unwrap_or_else(std::time::Instant::now);
+            let total_bytes = plan.total_size_bytes;
+            let progress_for_cb = progress.clone();
 
-        // progress emit throttle: 1초
-        let mut last_emit = std::time::Instant::now()
-            .checked_sub(std::time::Duration::from_secs(2))
-            .unwrap_or_else(std::time::Instant::now);
-        let total_bytes = plan.total_size_bytes;
-        let progress_for_cb = progress.clone();
-
-        // TODO(perf): session_mutex 가 rsync 전체 동안 잡혀 다른 SFTP op (list,
-        // metadata 등) 가 블락됨. 후속에서 exec_streaming 을 두 단계로 분리:
-        // (1) lock 잡고 channel_open_session 만 → (2) lock 풀고 channel 위에
-        // wait loop. MVP-3 v1 은 modal 안에서 사용자 대기라 acceptable.
-        let exec_result = {
-            let handle = session_mutex.lock().await;
-            exec_streaming(&handle, &cmd, |line| {
-                if let Some(p) = parse_rsync_progress2_line(line) {
-                    let now = std::time::Instant::now();
-                    let is_final = p.percent == 100;
-                    if is_final
-                        || now.duration_since(last_emit) >= std::time::Duration::from_secs(1)
-                    {
-                        last_emit = now;
-                        if let Some(emitter) = &progress_for_cb {
-                            emitter.emit(crate::services::task_events::ProgressInfo {
-                                bytes_done: p.bytes_done,
-                                bytes_total: if total_bytes > 0 {
-                                    Some(total_bytes)
-                                } else {
-                                    None
-                                },
-                                speed_bps: Some(p.speed_bps),
-                                eta_sec: Some(p.eta_sec),
-                                percent: Some(p.percent),
-                            });
+            // TODO(perf): session_mutex 가 rsync 전체 동안 잡혀 다른 SFTP op (list,
+            // metadata 등) 가 블락됨. 후속에서 exec_streaming 을 두 단계로 분리:
+            // (1) lock 잡고 channel_open_session 만 → (2) lock 풀고 channel 위에
+            // wait loop. MVP-3 v1 은 modal 안에서 사용자 대기라 acceptable.
+            let exec_result = {
+                let handle = session_mutex.lock().await;
+                exec_streaming(&handle, &cmd, |line| {
+                    if let Some(p) = parse_rsync_progress2_line(line) {
+                        let now = std::time::Instant::now();
+                        let is_final = p.percent == 100;
+                        if is_final
+                            || now.duration_since(last_emit) >= std::time::Duration::from_secs(1)
+                        {
+                            last_emit = now;
+                            if let Some(emitter) = &progress_for_cb {
+                                emitter.emit(crate::services::task_events::ProgressInfo {
+                                    bytes_done: p.bytes_done,
+                                    bytes_total: if total_bytes > 0 {
+                                        Some(total_bytes)
+                                    } else {
+                                        None
+                                    },
+                                    speed_bps: Some(p.speed_bps),
+                                    eta_sec: Some(p.eta_sec),
+                                    percent: Some(p.percent),
+                                });
+                            }
                         }
                     }
-                }
-            })
-            .await
-        };
+                })
+                .await
+            };
 
-        // exec/rsync 결과 — connection loss 면 1회 retry
-        let (exit, stderr) = match exec_result {
-            Ok(result) => result,
-            Err(e) if crate::services::retry::is_retryable_error(&e) => {
-                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                if cancel_token.is_cancelled() {
-                    return Err(DuetError::Cancelled);
+            // exec/rsync 결과 — connection loss 면 1회 retry
+            let (exit, stderr) = match exec_result {
+                Ok(result) => result,
+                Err(e) if crate::services::retry::is_retryable_error(&e) => {
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    if cancel_token.is_cancelled() {
+                        return Err(DuetError::Cancelled);
+                    }
+                    let handle = session_mutex.lock().await;
+                    exec_streaming(&handle, &cmd, |_| {}).await?
                 }
-                let handle = session_mutex.lock().await;
-                exec_streaming(&handle, &cmd, |_| {}).await?
+                Err(e) => return Err(e),
+            };
+
+            if exit != 0 {
+                return Err(DuetError::Ssh(format!(
+                    "{} failed (exit {}): {}",
+                    if use_rsync { "rsync" } else { "cp" },
+                    exit,
+                    String::from_utf8_lossy(&stderr).trim()
+                )));
             }
-            Err(e) => return Err(e),
-        };
-
-        if exit != 0 {
-            return Err(DuetError::Ssh(format!(
-                "{} failed (exit {}): {}",
-                if use_rsync { "rsync" } else { "cp" },
-                exit,
-                String::from_utf8_lossy(&stderr).trim()
-            )));
+            copied.push(dst_path);
+            Ok(())
         }
-        copied.push(dst_path);
+        .await;
+        if let Err(e) = step {
+            outcome = Err(e);
+            break;
+        }
     }
 
-    // Journal push (기존 schema 그대로)
+    // §4 (A4): 충돌 backup + 부분 복사분이라도 journal 에 기록한 뒤 에러 전파 —
+    // backup 후 copy 실패 시 .bak 고아 + undo 미기록(Ctrl+Z 복원 불가) 버그 수정.
+    if copied.is_empty() && backups.is_empty() {
+        outcome?;
+        return Err(DuetError::Io("copy affected nothing".into()));
+    }
+    let count = copied.len() as u32;
     let undo = UndoAction::UndoCopy {
         target_source: plan.dst.source.clone(),
         copied,
         backups_to_restore: backups,
     };
     let op = OpKind::Copy {
-        count: plan.items.len() as u32,
+        count,
         src: plan.items[0].location.clone(),
         dst: plan.dst.clone(),
     };
-    ctx.journal.push(op, undo).await
+    let entry = ctx.journal.push(op, undo).await?;
+    outcome?;
+    Ok(entry)
 }
 
 #[cfg(test)]
@@ -2852,9 +2955,264 @@ mod tests {
             .unwrap();
 
         let (ctx, _ctx_dir) = mk_ctx().await;
-        let result = delete_execute(&local, plan, &ctx).await;
+        let result = delete_execute(&local, plan, &ctx, "delete").await;
         assert!(matches!(result, Err(DuetError::NotPermitted)));
         assert!(dir.path().join("a").exists());
+    }
+
+    #[tokio::test]
+    async fn permanent_delete_requires_confirm_word() {
+        let dir = TempDir::new().unwrap();
+        tokio::fs::write(dir.path().join("a"), b"x").await.unwrap();
+        let local = LocalFs::new();
+        let parent = dir.path().to_path_buf();
+
+        let mk_plan = || async {
+            delete_plan(&local, vec![mk_target(&parent, "a")], DeleteMode::Permanent)
+                .await
+                .unwrap()
+        };
+
+        let (ctx, _d) = mk_ctx().await;
+        // 영구삭제 활성화 (단어 검증만 분리해 테스트).
+        ctx.settings
+            .apply(crate::services::settings::SettingsPatch {
+                permanent_delete_enabled: Some(true),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        // 틀린 단어 → 거부, 파일 보존.
+        let bad = delete_execute(&local, mk_plan().await, &ctx, "wrong").await;
+        assert!(matches!(bad, Err(DuetError::NotPermitted)));
+        assert!(dir.path().join("a").exists());
+
+        // 올바른 단어 → 삭제.
+        let ok = delete_execute(&local, mk_plan().await, &ctx, "delete").await;
+        assert!(ok.is_ok());
+        assert!(!dir.path().join("a").exists());
+    }
+
+    /// 2번째 trash 호출에서 실패하는 mock — 부분실패 저널 기록(§4, A1) 검증용.
+    #[derive(Default)]
+    struct FailingTrashFs {
+        trash_calls: std::sync::Mutex<u32>,
+    }
+
+    #[async_trait::async_trait]
+    impl FileSystem for FailingTrashFs {
+        fn source_id(&self) -> SourceId {
+            SourceId::Local
+        }
+        async fn list(&self, _: &std::path::Path) -> Result<Vec<crate::types::Entry>, DuetError> {
+            unimplemented!()
+        }
+        async fn metadata(
+            &self,
+            _: &std::path::Path,
+        ) -> Result<crate::types::EntryMeta, DuetError> {
+            unimplemented!()
+        }
+        async fn rename(&self, _: &std::path::Path, _: &std::path::Path) -> Result<(), DuetError> {
+            unimplemented!()
+        }
+        async fn mkdir(&self, _: &std::path::Path) -> Result<(), DuetError> {
+            unimplemented!()
+        }
+        async fn trash(&self, _p: &std::path::Path, _b: &str) -> Result<TrashLocation, DuetError> {
+            let mut n = self.trash_calls.lock().unwrap();
+            *n += 1;
+            if *n >= 2 {
+                Err(DuetError::Io("trash boom".into()))
+            } else {
+                Ok(TrashLocation::Local {
+                    trash_id: format!("t{n}"),
+                })
+            }
+        }
+        async fn remove(&self, _: &std::path::Path) -> Result<(), DuetError> {
+            unimplemented!()
+        }
+        async fn restore_from_trash(
+            &self,
+            _: &TrashLocation,
+            _: &std::path::Path,
+        ) -> Result<(), DuetError> {
+            unimplemented!()
+        }
+        async fn read_full(&self, _: &std::path::Path) -> Result<Vec<u8>, DuetError> {
+            unimplemented!()
+        }
+        async fn write_full(&self, _: &std::path::Path, _: &[u8]) -> Result<(), DuetError> {
+            unimplemented!()
+        }
+        async fn open_read(
+            &self,
+            _: &std::path::Path,
+            _: u64,
+        ) -> Result<std::pin::Pin<Box<dyn tokio::io::AsyncRead + Send>>, DuetError> {
+            unimplemented!()
+        }
+        async fn open_write(
+            &self,
+            _: &std::path::Path,
+            _: u64,
+        ) -> Result<std::pin::Pin<Box<dyn tokio::io::AsyncWrite + Send>>, DuetError> {
+            unimplemented!()
+        }
+    }
+
+    #[tokio::test]
+    async fn delete_partial_failure_journals_completed_items() {
+        let dir = TempDir::new().unwrap();
+        let parent = dir.path().to_path_buf();
+        let plan = DeletePlan {
+            mode: DeleteMode::Trash,
+            targets: vec![
+                mk_target(&parent, "a"),
+                mk_target(&parent, "b"),
+                mk_target(&parent, "c"),
+            ],
+            total_size_bytes: 0,
+            total_count: 3,
+            source: SourceId::Local,
+            source_location: Location {
+                source: SourceId::Local,
+                path: parent,
+            },
+        };
+        let (ctx, _d) = mk_ctx().await;
+        let fs = FailingTrashFs::default();
+        let result = delete_execute(&fs, plan, &ctx, "").await;
+        assert!(result.is_err(), "2번째 항목 실패로 에러여야 함");
+        let hist = ctx.journal.history(10).await;
+        assert_eq!(hist.len(), 1, "부분 진행분이 journal 에 1건 기록되어야 함");
+        match &hist[0].undo {
+            UndoAction::RestoreFromTrash { items, .. } => {
+                assert_eq!(items.len(), 1, "첫 항목만 휴지통으로 갔어야 함");
+            }
+            other => panic!("expected RestoreFromTrash, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn copy_partial_failure_journals_completed_items() {
+        use crate::core::copy_strategy::CopyStrategy;
+        let dir = TempDir::new().unwrap();
+        let src = dir.path().join("src");
+        let dst = dir.path().join("dst");
+        tokio::fs::create_dir_all(&src).await.unwrap();
+        tokio::fs::create_dir_all(&dst).await.unwrap();
+        tokio::fs::write(src.join("a"), b"hello").await.unwrap();
+        // "b" 는 일부러 안 만듦 → 2번째 복사가 실패.
+
+        let items = vec![
+            EntryRef {
+                location: Location {
+                    source: SourceId::Local,
+                    path: src.clone(),
+                },
+                name: "a".into(),
+            },
+            EntryRef {
+                location: Location {
+                    source: SourceId::Local,
+                    path: src.clone(),
+                },
+                name: "b".into(),
+            },
+        ];
+        let plan = CopyPlan {
+            src_source: SourceId::Local,
+            dst: Location {
+                source: SourceId::Local,
+                path: dst.clone(),
+            },
+            items,
+            conflicts: vec![],
+            total_size_bytes: 5,
+            strategy: CopyStrategy::LocalToLocal,
+        };
+        let (ctx, _d) = mk_ctx().await;
+        let local = LocalFs::new();
+        let result = copy_execute(
+            &local,
+            &local,
+            plan,
+            &ctx,
+            tokio_util::sync::CancellationToken::new(),
+            None,
+        )
+        .await;
+        assert!(result.is_err(), "두 번째(없는 파일) 복사가 실패해야 함");
+        assert!(dst.join("a").exists(), "첫 파일은 복사됐어야 함");
+        let hist = ctx.journal.history(10).await;
+        assert_eq!(hist.len(), 1, "부분 복사분이 journal 에 기록되어야 함");
+        match &hist[0].undo {
+            UndoAction::UndoCopy { copied, .. } => assert_eq!(copied.len(), 1),
+            other => panic!("expected UndoCopy, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn move_partial_failure_journals_completed_items() {
+        use crate::core::copy_strategy::CopyStrategy;
+        let dir = TempDir::new().unwrap();
+        let src = dir.path().join("src");
+        let dst = dir.path().join("dst");
+        tokio::fs::create_dir_all(&src).await.unwrap();
+        tokio::fs::create_dir_all(&dst).await.unwrap();
+        tokio::fs::write(src.join("a"), b"hello").await.unwrap();
+
+        let items = vec![
+            EntryRef {
+                location: Location {
+                    source: SourceId::Local,
+                    path: src.clone(),
+                },
+                name: "a".into(),
+            },
+            EntryRef {
+                location: Location {
+                    source: SourceId::Local,
+                    path: src.clone(),
+                },
+                name: "b".into(),
+            },
+        ];
+        let plan = MovePlan {
+            src_source: SourceId::Local,
+            dst: Location {
+                source: SourceId::Local,
+                path: dst.clone(),
+            },
+            items,
+            conflicts: vec![],
+            is_same_fs: true,
+            total_size_bytes: 5,
+            strategy: CopyStrategy::LocalToLocal,
+        };
+        let (ctx, _d) = mk_ctx().await;
+        let local = LocalFs::new();
+        let result = move_execute(
+            &local,
+            &local,
+            plan,
+            &ctx,
+            tokio_util::sync::CancellationToken::new(),
+            None,
+        )
+        .await;
+        assert!(result.is_err(), "두 번째(없는 파일) 이동이 실패해야 함");
+        assert!(dst.join("a").exists(), "첫 파일은 이동됐어야 함");
+        assert!(!src.join("a").exists(), "원본은 사라졌어야 함");
+        let hist = ctx.journal.history(10).await;
+        assert_eq!(hist.len(), 1, "부분 이동분이 journal 에 기록되어야 함");
+        match &hist[0].undo {
+            UndoAction::UndoMove { moved, .. } => assert_eq!(moved.len(), 1),
+            other => panic!("expected UndoMove, got {other:?}"),
+        }
     }
 
     #[tokio::test]

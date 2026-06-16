@@ -249,6 +249,8 @@ pub async fn connection_close(
     pool: tauri::State<'_, Arc<ConnectionPool>>,
     app: tauri::AppHandle,
 ) -> Result<(), DuetError> {
+    // in-flight 재연결이 있으면 즉시 취소 — 종료한 연결이 되살아나는(resurrection) 경합 차단.
+    pool.cancel_reconnect(&id).await;
     let snapshot = pool.get(&id).await.ok();
     // 종료 전, 이 연결로 만든 원격 아카이브 browse 임시 디렉토리를 host-side 에서
     // reap (세션이 살아있는 동안). best-effort — 이후 disconnect/remove 는 그대로 진행.

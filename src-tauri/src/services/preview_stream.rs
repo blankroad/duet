@@ -77,6 +77,16 @@ fn parse_range(h: &str) -> Option<(u64, Option<u64>)> {
     Some((start, end))
 }
 
+/// Range 응답의 inclusive content-range end. 빈 read(빈 파일/0바이트)면 `None`
+/// — `start + len - 1` u64 언더플로를 구조적으로 회피.
+fn content_range_end(start: u64, n: usize) -> Option<u64> {
+    if n == 0 {
+        None
+    } else {
+        Some(start + n as u64 - 1)
+    }
+}
+
 /// 확장자 → Content-Type (스트리밍 대상). 모르면 octet-stream.
 fn mime_for(path: &Path) -> &'static str {
     let ext = path
@@ -134,6 +144,19 @@ async fn try_handle<R: Runtime>(
     let total = meta.size.unwrap_or(0);
     let mime = mime_for(&path);
 
+    // 빈 파일: Range 의미 없음 → 200 빈 본문 (RFC 7233 허용). 아래 Range 산술의
+    // start+len-1 언더플로 원천 차단.
+    if total == 0 {
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, mime)
+            .header(header::ACCEPT_RANGES, "bytes")
+            .header(header::CONTENT_LENGTH, "0")
+            .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+            .body(Vec::new())
+            .ok();
+    }
+
     let range = request
         .headers()
         .get(header::RANGE)
@@ -152,7 +175,10 @@ async fn try_handle<R: Runtime>(
         let end = end_opt.unwrap_or(last).min(last);
         let want = (end.saturating_sub(start) + 1) as usize;
         let bytes = fs.read_range(&path, start, want).await.ok()?;
-        let actual_end = start + bytes.len() as u64 - 1;
+        let actual_end = match content_range_end(start, bytes.len()) {
+            Some(e) => e,
+            None => start, // 빈 read — 본문 빔(언더플로 회피)
+        };
         return Response::builder()
             .status(StatusCode::PARTIAL_CONTENT)
             .header(header::CONTENT_TYPE, mime)
@@ -222,5 +248,15 @@ mod tests {
         assert_eq!(mime_for(Path::new("a.MP4")), "video/mp4");
         assert_eq!(mime_for(Path::new("a.mp3")), "audio/mpeg");
         assert_eq!(mime_for(Path::new("a.unknown")), "application/octet-stream");
+    }
+
+    #[test]
+    fn content_range_end_handles_empty_read() {
+        // 빈 read(빈 파일/0바이트 응답) → None: start+len-1 언더플로 회피.
+        assert_eq!(content_range_end(0, 0), None);
+        assert_eq!(content_range_end(5, 0), None);
+        // 정상 범위는 inclusive end.
+        assert_eq!(content_range_end(0, 10), Some(9));
+        assert_eq!(content_range_end(100, 1), Some(100));
     }
 }

@@ -8,7 +8,8 @@ export interface DangerConfirmDialogProps {
   body: ReactNode;
   requiredWord: string;
   onCancel: () => void;
-  onConfirm: () => void;
+  /** 사용자가 실제로 타이핑한 확인 단어를 전달 — 백엔드 검증용(§3). */
+  onConfirm: (typedWord: string) => void;
 }
 
 export function DangerConfirmDialog({
@@ -45,7 +46,8 @@ export function DangerConfirmDialog({
           <div className="text-base">{body}</div>
           <div className="mt-3">
             <div className="mb-1 text-meta text-fg-muted">
-              Type <span className="font-mono text-fg">{requiredWord}</span> to confirm:
+              Type <span className="font-mono text-fg">{requiredWord}</span> to
+              confirm:
             </div>
             <input
               ref={inputRef}
@@ -53,7 +55,7 @@ export function DangerConfirmDialog({
               value={typed}
               onChange={(e) => setTyped(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && enabled) onConfirm();
+                if (e.key === "Enter" && enabled) onConfirm(typed);
                 else if (e.key === "Escape") onCancel();
               }}
               className="w-full rounded border border-border bg-subtle px-2 py-1 font-mono text-base focus:border-danger focus:outline-none"
@@ -69,7 +71,7 @@ export function DangerConfirmDialog({
             </button>
             <button
               type="button"
-              onClick={onConfirm}
+              onClick={() => onConfirm(typed)}
               disabled={!enabled}
               className="rounded bg-danger px-3 py-1 text-base text-white disabled:opacity-30"
             >

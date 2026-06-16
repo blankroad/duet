@@ -18,18 +18,36 @@ import {
   HardDrive,
   Clock,
   RefreshCw,
+  ArrowUpFromLine,
 } from "lucide-react";
 import { useEffect, Fragment, type ReactNode } from "react";
 import { useUI } from "@/stores/ui";
-import { useConnections, type Host, type ConnectionState } from "@/stores/connections";
-import { useSavedHosts, removeSavedHost, reorderSavedHosts } from "@/stores/savedHosts";
-import { useBookmarks, removeBookmark, reorderBookmarks } from "@/stores/bookmarks";
+import {
+  useConnections,
+  type Host,
+  type ConnectionState,
+} from "@/stores/connections";
+import {
+  useSavedHosts,
+  removeSavedHost,
+  reorderSavedHosts,
+} from "@/stores/savedHosts";
+import {
+  useBookmarks,
+  removeBookmark,
+  reorderBookmarks,
+} from "@/stores/bookmarks";
 import {
   useHostFavorites,
   removeHostFavorite,
   reorderHostFavorites,
 } from "@/stores/hostFavorites";
-import { usePlaces, refreshVolumes, refreshRemoteVolumes, sourceKey } from "@/stores/places";
+import {
+  usePlaces,
+  refreshVolumes,
+  refreshRemoteVolumes,
+  sourceKey,
+} from "@/stores/places";
 import { useRecents, type RecentEntry } from "@/stores/recents";
 import {
   useHostGroups,
@@ -102,13 +120,19 @@ export function Sidebar({
 
   return (
     <aside className="flex w-48 min-h-0 flex-col overflow-y-auto border-r border-border bg-subtle text-base">
-      <PlacesSection onOpenLocation={onOpenLocation} onTrashActivate={onTrashActivate} />
+      <PlacesSection
+        onOpenLocation={onOpenLocation}
+        onTrashActivate={onTrashActivate}
+      />
       <VolumesSection onOpenLocation={onOpenLocation} onEject={onEject} />
       <HostsSection onHostActivate={onHostActivate} onAdHocOpen={onAdHocOpen} />
       <SavedHostsSection onActivate={onSavedActivate} />
       <BookmarksSection onOpen={onOpenLocation} onAdd={onAddBookmark} />
       <HostFavoritesSection onOpen={onOpenHostPath} onAdd={onAddFavorite} />
-      <RecentSection onOpenLocation={onOpenLocation} onOpenHostPath={onOpenHostPath} />
+      <RecentSection
+        onOpenLocation={onOpenLocation}
+        onOpenHostPath={onOpenHostPath}
+      />
     </aside>
   );
 }
@@ -165,7 +189,8 @@ function DropLine() {
   return <div className="mx-2 my-0.5 h-0.5 rounded bg-accent" />;
 }
 
-const rowClass = "group flex cursor-default items-center gap-1 rounded px-2 py-0.5 hover:bg-border";
+const rowClass =
+  "group flex cursor-default items-center gap-1 rounded px-2 py-0.5 hover:bg-border";
 
 // ─────────────────────────── Places ───────────────────────────
 
@@ -195,11 +220,22 @@ function PlacesSection({
   onTrashActivate: (pane?: PaneId) => void;
 }) {
   const source = useActiveSource();
-  const places = usePlaces((s) => s.bySource[sourceKey(source)]?.places) ?? EMPTY_PLACES;
+  const places =
+    usePlaces((s) => s.bySource[sourceKey(source)]?.places) ?? EMPTY_PLACES;
   return (
-    <Section sectionKey="places" title="Places" icon={<Folder size={14} />} count={places.length}>
+    <Section
+      sectionKey="places"
+      title="Places"
+      icon={<Folder size={14} />}
+      count={places.length}
+    >
       {places.map((p) => (
-        <PlaceItem key={p.label} place={p} source={source} onOpenLocation={onOpenLocation} />
+        <PlaceItem
+          key={p.label}
+          place={p}
+          source={source}
+          onOpenLocation={onOpenLocation}
+        />
       ))}
       <TrashItem onTrashActivate={onTrashActivate} />
     </Section>
@@ -217,14 +253,29 @@ function PlaceItem({
 }) {
   const path = String(place.path);
   const menu: MenuEntry[] = [
-    { id: "open", label: "Open", onSelect: () => onOpenLocation(locationForSource(source, path), usePanes.getState().activePane) },
-    { id: "open-other", label: "Open in other pane", onSelect: () => onOpenLocation(locationForSource(source, path), otherPane()) },
+    {
+      id: "open",
+      label: "Open",
+      onSelect: () =>
+        onOpenLocation(
+          locationForSource(source, path),
+          usePanes.getState().activePane,
+        ),
+    },
+    {
+      id: "open-other",
+      label: "Open in other pane",
+      onSelect: () =>
+        onOpenLocation(locationForSource(source, path), otherPane()),
+    },
     { id: "copy-path", label: "Copy path", onSelect: () => copyText(path) },
   ];
   return (
     <button
       type="button"
-      onClick={(e) => onOpenLocation(locationForSource(source, path), targetPane(e))}
+      onClick={(e) =>
+        onOpenLocation(locationForSource(source, path), targetPane(e))
+      }
       onContextMenu={(e) => openMenu(e, menu)}
       title={path}
       className={clsx(rowClass, "w-full text-left")}
@@ -235,10 +286,22 @@ function PlaceItem({
   );
 }
 
-function TrashItem({ onTrashActivate }: { onTrashActivate: (pane?: PaneId) => void }) {
+function TrashItem({
+  onTrashActivate,
+}: {
+  onTrashActivate: (pane?: PaneId) => void;
+}) {
   const menu: MenuEntry[] = [
-    { id: "open", label: "Open", onSelect: () => onTrashActivate(usePanes.getState().activePane) },
-    { id: "open-other", label: "Open in other pane", onSelect: () => onTrashActivate(otherPane()) },
+    {
+      id: "open",
+      label: "Open",
+      onSelect: () => onTrashActivate(usePanes.getState().activePane),
+    },
+    {
+      id: "open-other",
+      label: "Open in other pane",
+      onSelect: () => onTrashActivate(otherPane()),
+    },
   ];
   return (
     <button
@@ -264,7 +327,8 @@ function VolumesSection({
   onEject: (volume: Volume) => void;
 }) {
   const source = useActiveSource();
-  const volumes = usePlaces((s) => s.bySource[sourceKey(source)]?.volumes) ?? EMPTY_VOLUMES;
+  const volumes =
+    usePlaces((s) => s.bySource[sourceKey(source)]?.volumes) ?? EMPTY_VOLUMES;
   const rescan = () => {
     if (source.kind === "local") void refreshVolumes();
     else void refreshRemoteVolumes(source.connection_id);
@@ -296,7 +360,13 @@ function VolumesSection({
         <Item label="(no mounted volumes)" muted />
       ) : (
         volumes.map((v) => (
-          <VolumeItem key={String(v.path)} volume={v} source={source} onOpenLocation={onOpenLocation} onEject={onEject} />
+          <VolumeItem
+            key={String(v.path)}
+            volume={v}
+            source={source}
+            onOpenLocation={onOpenLocation}
+            onEject={onEject}
+          />
         ))
       )}
     </Section>
@@ -316,25 +386,61 @@ function VolumeItem({
 }) {
   const path = String(volume.path);
   const menu: MenuEntry[] = [
-    { id: "open", label: "Open", onSelect: () => onOpenLocation(locationForSource(source, path), usePanes.getState().activePane) },
-    { id: "open-other", label: "Open in other pane", onSelect: () => onOpenLocation(locationForSource(source, path), otherPane()) },
+    {
+      id: "open",
+      label: "Open",
+      onSelect: () =>
+        onOpenLocation(
+          locationForSource(source, path),
+          usePanes.getState().activePane,
+        ),
+    },
+    {
+      id: "open-other",
+      label: "Open in other pane",
+      onSelect: () =>
+        onOpenLocation(locationForSource(source, path), otherPane()),
+    },
     { id: "copy-path", label: "Copy path", onSelect: () => copyText(path) },
-    // eject 는 로컬 OS 볼륨만 (원격 마운트는 언마운트 미지원).
-    ...(source.kind === "local"
-      ? ([{ kind: "separator" }, { id: "eject", label: "Eject", danger: true, onSelect: () => onEject(volume) }] as MenuEntry[])
+    // eject 는 ejectable 볼륨만 (부트/시스템 볼륨·원격 마운트 제외 — backend 가 판정).
+    ...(volume.ejectable
+      ? ([
+          { kind: "separator" },
+          {
+            id: "eject",
+            label: "Eject",
+            danger: true,
+            onSelect: () => onEject(volume),
+          },
+        ] as MenuEntry[])
       : []),
   ];
   return (
-    <button
-      type="button"
-      onClick={(e) => onOpenLocation(locationForSource(source, path), targetPane(e))}
+    <div
+      onClick={(e) =>
+        onOpenLocation(locationForSource(source, path), targetPane(e))
+      }
       onContextMenu={(e) => openMenu(e, menu)}
       title={path}
-      className={clsx(rowClass, "w-full text-left")}
+      className={rowClass}
     >
       <HardDrive size={11} className="shrink-0 text-fg-muted" />
       <span className="truncate">{volume.name}</span>
-    </button>
+      {volume.ejectable && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onEject(volume);
+          }}
+          className="ml-auto shrink-0 rounded p-0.5 text-fg-muted opacity-0 hover:bg-border hover:text-accent group-hover:opacity-100 focus:opacity-100"
+          aria-label={`Eject ${volume.name}`}
+          title="Eject"
+        >
+          <ArrowUpFromLine size={11} />
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -398,11 +504,24 @@ function RecentItem({
     if (entry.source === "ssh") onOpenHostPath(entry.alias, entry.path, pane);
     else onOpenLocation(localLocation(entry.path), pane);
   };
-  const title = entry.source === "ssh" ? `${entry.alias}:${entry.path}` : entry.path;
+  const title =
+    entry.source === "ssh" ? `${entry.alias}:${entry.path}` : entry.path;
   const menu: MenuEntry[] = [
-    { id: "open", label: "Open", onSelect: () => open(usePanes.getState().activePane) },
-    { id: "open-other", label: "Open in other pane", onSelect: () => open(otherPane()) },
-    { id: "copy-path", label: "Copy path", onSelect: () => copyText(entry.path) },
+    {
+      id: "open",
+      label: "Open",
+      onSelect: () => open(usePanes.getState().activePane),
+    },
+    {
+      id: "open-other",
+      label: "Open in other pane",
+      onSelect: () => open(otherPane()),
+    },
+    {
+      id: "copy-path",
+      label: "Copy path",
+      onSelect: () => copyText(entry.path),
+    },
   ];
   return (
     <button
@@ -419,7 +538,9 @@ function RecentItem({
       )}
       <span className="truncate">{entry.label}</span>
       {entry.source === "ssh" && (
-        <span className="ml-auto shrink-0 truncate text-meta opacity-50">{entry.alias}</span>
+        <span className="ml-auto shrink-0 truncate text-meta opacity-50">
+          {entry.alias}
+        </span>
       )}
     </button>
   );
@@ -427,13 +548,18 @@ function RecentItem({
 
 // ─────────────────────────── Saved hosts ───────────────────────────
 
-function SavedHostsSection({ onActivate }: { onActivate: (host: SavedHost) => void }) {
+function SavedHostsSection({
+  onActivate,
+}: {
+  onActivate: (host: SavedHost) => void;
+}) {
   const hosts = useSavedHosts((s) => s.hosts);
   const groups = useHostGroups((s) => s.groups);
   const byAlias = new Map(hosts.map((h) => [h.alias, h]));
   // 그룹에 배정된 alias 집합 (live 호스트만 — dangling 멤버 무시).
   const grouped = new Set<string>();
-  for (const g of groups) for (const m of g.members) if (byAlias.has(m)) grouped.add(m);
+  for (const g of groups)
+    for (const m of g.members) if (byAlias.has(m)) grouped.add(m);
   const ungrouped = hosts.filter((h) => !grouped.has(h.alias));
   // 재정렬 DnD 는 ungrouped 항목만 (그룹 내부는 메뉴로 관리).
   const { dragKey, insertBeforeKey, onItemMouseDown } = useReorderable({
@@ -442,7 +568,12 @@ function SavedHostsSection({ onActivate }: { onActivate: (host: SavedHost) => vo
     onCommit: (next) => void reorderSavedHosts(next),
   });
   return (
-    <Section sectionKey="saved" title="Saved hosts" icon={<Bookmark size={14} />} count={hosts.length}>
+    <Section
+      sectionKey="saved"
+      title="Saved hosts"
+      icon={<Bookmark size={14} />}
+      count={hosts.length}
+    >
       {hosts.length === 0 ? (
         <Item label="(none — Save host on connect)" muted />
       ) : (
@@ -451,7 +582,9 @@ function SavedHostsSection({ onActivate }: { onActivate: (host: SavedHost) => vo
             <HostGroupFolder
               key={g.id}
               group={g}
-              members={g.members.map((a) => byAlias.get(a)).filter((h): h is SavedHost => !!h)}
+              members={g.members
+                .map((a) => byAlias.get(a))
+                .filter((h): h is SavedHost => !!h)}
               groups={groups}
               onActivate={onActivate}
               isFirst={gi === 0}
@@ -466,7 +599,10 @@ function SavedHostsSection({ onActivate }: { onActivate: (host: SavedHost) => vo
                 currentGroupId={null}
                 groups={groups}
                 onActivate={onActivate}
-                reorder={{ dragging: dragKey === h.alias, onMouseDown: (e) => onItemMouseDown(e, h.alias) }}
+                reorder={{
+                  dragging: dragKey === h.alias,
+                  onMouseDown: (e) => onItemMouseDown(e, h.alias),
+                }}
               />
             </Fragment>
           ))}
@@ -497,7 +633,11 @@ function moveToGroupEntry(
   if (others.length > 0) {
     children.push({ kind: "separator" });
     for (const g of others) {
-      children.push({ id: `to-${g.id}`, label: g.name, onSelect: () => void assignToGroup(host.alias, g.id) });
+      children.push({
+        id: `to-${g.id}`,
+        label: g.name,
+        onSelect: () => void assignToGroup(host.alias, g.id),
+      });
     }
   }
   if (currentGroupId) {
@@ -537,10 +677,25 @@ function HostGroupFolder({
         if (n && n.trim()) void renameGroup(group.id, n.trim());
       },
     },
-    { id: "up", label: "Move up", disabled: isFirst, onSelect: () => void moveGroup(group.id, -1) },
-    { id: "down", label: "Move down", disabled: isLast, onSelect: () => void moveGroup(group.id, 1) },
+    {
+      id: "up",
+      label: "Move up",
+      disabled: isFirst,
+      onSelect: () => void moveGroup(group.id, -1),
+    },
+    {
+      id: "down",
+      label: "Move down",
+      disabled: isLast,
+      onSelect: () => void moveGroup(group.id, 1),
+    },
     { kind: "separator" },
-    { id: "delete", label: "Delete group", danger: true, onSelect: () => void deleteGroup(group.id) },
+    {
+      id: "delete",
+      label: "Delete group",
+      danger: true,
+      onSelect: () => void deleteGroup(group.id),
+    },
   ];
   return (
     <div>
@@ -559,7 +714,12 @@ function HostGroupFolder({
       {!collapsed &&
         members.map((h) => (
           <div key={h.alias} className="pl-2">
-            <SavedHostItem host={h} currentGroupId={group.id} groups={groups} onActivate={onActivate} />
+            <SavedHostItem
+              host={h}
+              currentGroupId={group.id}
+              groups={groups}
+              onActivate={onActivate}
+            />
           </div>
         ))}
     </div>
@@ -580,14 +740,25 @@ function SavedHostItem({
   reorder?: { dragging: boolean; onMouseDown: (e: React.MouseEvent) => void };
 }) {
   const menu: MenuEntry[] = [
-    { id: "connect", label: "Connect / Edit…", onSelect: () => onActivate(host) },
+    {
+      id: "connect",
+      label: "Connect / Edit…",
+      onSelect: () => onActivate(host),
+    },
     moveToGroupEntry(host, currentGroupId, groups),
     { kind: "separator" },
-    { id: "remove", label: "Remove", danger: true, onSelect: () => void removeSavedHost(host.alias) },
+    {
+      id: "remove",
+      label: "Remove",
+      danger: true,
+      onSelect: () => void removeSavedHost(host.alias),
+    },
   ];
   return (
     <div
-      {...(reorder ? { "data-reorder-key": host.alias, "data-reorder-group": "saved" } : {})}
+      {...(reorder
+        ? { "data-reorder-key": host.alias, "data-reorder-group": "saved" }
+        : {})}
       onMouseDown={reorder?.onMouseDown}
       onDoubleClick={() => onActivate(host)}
       onContextMenu={(e) => openMenu(e, menu)}
@@ -596,7 +767,10 @@ function SavedHostItem({
     >
       <Bookmark size={11} className="shrink-0 text-fg-muted" />
       <span className="truncate">{host.alias}</span>
-      <DeleteBtn label={`Remove saved host ${host.alias}`} onClick={() => void removeSavedHost(host.alias)} />
+      <DeleteBtn
+        label={`Remove saved host ${host.alias}`}
+        onClick={() => void removeSavedHost(host.alias)}
+      />
     </div>
   );
 }
@@ -657,11 +831,28 @@ function BookmarkItem({
 }) {
   const sshPrefix = bookmark.location.source.kind === "ssh" ? "ssh:" : "";
   const menu: MenuEntry[] = [
-    { id: "open", label: "Open", onSelect: () => onOpen(bookmark.location, usePanes.getState().activePane) },
-    { id: "open-other", label: "Open in other pane", onSelect: () => onOpen(bookmark.location, otherPane()) },
-    { id: "copy-path", label: "Copy path", onSelect: () => copyText(String(bookmark.location.path)) },
+    {
+      id: "open",
+      label: "Open",
+      onSelect: () => onOpen(bookmark.location, usePanes.getState().activePane),
+    },
+    {
+      id: "open-other",
+      label: "Open in other pane",
+      onSelect: () => onOpen(bookmark.location, otherPane()),
+    },
+    {
+      id: "copy-path",
+      label: "Copy path",
+      onSelect: () => copyText(String(bookmark.location.path)),
+    },
     { kind: "separator" },
-    { id: "remove", label: "Remove", danger: true, onSelect: () => void removeBookmark(bookmark.id) },
+    {
+      id: "remove",
+      label: "Remove",
+      danger: true,
+      onSelect: () => void removeBookmark(bookmark.id),
+    },
   ];
   return (
     <div
@@ -675,7 +866,10 @@ function BookmarkItem({
     >
       <Star size={11} className="shrink-0 text-fg-muted" />
       <span className="truncate">{bookmark.name}</span>
-      <DeleteBtn label="Remove bookmark" onClick={() => void removeBookmark(bookmark.id)} />
+      <DeleteBtn
+        label="Remove bookmark"
+        onClick={() => void removeBookmark(bookmark.id)}
+      />
     </div>
   );
 }
@@ -691,7 +885,9 @@ function HostFavoritesSection({
 }) {
   const items = useHostFavorites((s) => s.items);
   const activeRecord = useConnections((s) => s.active);
-  const activeAliases = new Set(Object.values(activeRecord).map((c) => c.alias));
+  const activeAliases = new Set(
+    Object.values(activeRecord).map((c) => c.alias),
+  );
   // 모든 즐겨찾기 표시(연결 안 돼도) — 클릭 시 자동 접속, 어디서나 관리/삭제 가능.
   const groups: Record<string, HostFavorite[]> = {};
   for (const f of items) (groups[f.host_alias] ??= []).push(f);
@@ -746,7 +942,11 @@ function FavoriteGroup({
         type="button"
         onClick={() => toggle(`fav:${alias}`)}
         className="flex w-full items-center gap-1 px-2 text-meta text-fg-muted hover:text-fg"
-        title={connected ? `${alias} (connected)` : `${alias} (click an item to connect)`}
+        title={
+          connected
+            ? `${alias} (connected)`
+            : `${alias} (click an item to connect)`
+        }
       >
         {collapsed ? <ChevronRight size={10} /> : <ChevronDown size={10} />}
         <span
@@ -788,11 +988,25 @@ function FavoriteItem({
 }) {
   const path = String(fav.path);
   const menu: MenuEntry[] = [
-    { id: "open", label: "Open (connect if needed)", onSelect: () => onOpen(fav.host_alias, path, usePanes.getState().activePane) },
-    { id: "open-other", label: "Open in other pane", onSelect: () => onOpen(fav.host_alias, path, otherPane()) },
+    {
+      id: "open",
+      label: "Open (connect if needed)",
+      onSelect: () =>
+        onOpen(fav.host_alias, path, usePanes.getState().activePane),
+    },
+    {
+      id: "open-other",
+      label: "Open in other pane",
+      onSelect: () => onOpen(fav.host_alias, path, otherPane()),
+    },
     { id: "copy-path", label: "Copy path", onSelect: () => copyText(path) },
     { kind: "separator" },
-    { id: "remove", label: "Remove", danger: true, onSelect: () => void removeHostFavorite(fav.id) },
+    {
+      id: "remove",
+      label: "Remove",
+      danger: true,
+      onSelect: () => void removeHostFavorite(fav.id),
+    },
   ];
   return (
     <div
@@ -806,7 +1020,10 @@ function FavoriteItem({
     >
       <Heart size={11} className="shrink-0 text-fg-muted" />
       <span className="truncate">{fav.name}</span>
-      <DeleteBtn label="Remove favorite" onClick={() => void removeHostFavorite(fav.id)} />
+      <DeleteBtn
+        label="Remove favorite"
+        onClick={() => void removeHostFavorite(fav.id)}
+      />
     </div>
   );
 }
@@ -856,7 +1073,9 @@ function HostItem({
   state: ConnectionState;
   onActivate: () => void;
 }) {
-  const menu: MenuEntry[] = [{ id: "connect", label: "Connect…", onSelect: onActivate }];
+  const menu: MenuEntry[] = [
+    { id: "connect", label: "Connect…", onSelect: onActivate },
+  ];
   return (
     <div
       onDoubleClick={onActivate}
@@ -867,7 +1086,11 @@ function HostItem({
       <StateDot state={state} />
       <span className="truncate">{host.alias}</span>
       {host.has_proxy_jump && (
-        <Network size={11} className="ml-auto shrink-0 text-fg-muted" aria-label="ProxyJump" />
+        <Network
+          size={11}
+          className="ml-auto shrink-0 text-fg-muted"
+          aria-label="ProxyJump"
+        />
       )}
     </div>
   );
@@ -881,7 +1104,12 @@ function StateDot({ state }: { state: ConnectionState }) {
     disconnected: "bg-fg-muted/30",
   }[state.kind];
   const label = state.kind === "error" ? state.message : state.kind;
-  return <span aria-label={label} className={clsx("h-1.5 w-1.5 shrink-0 rounded-full", cls)} />;
+  return (
+    <span
+      aria-label={label}
+      className={clsx("h-1.5 w-1.5 shrink-0 rounded-full", cls)}
+    />
+  );
 }
 
 // ─────────────────────────── Shared building blocks ───────────────────────────
@@ -962,7 +1190,12 @@ function AddBtn({ label, onClick }: { label: string; onClick: () => void }) {
 
 function Item({ label, muted }: { label: string; muted?: boolean }) {
   return (
-    <div className={clsx("rounded px-2 py-0.5 hover:bg-border", muted && "text-fg-muted")}>
+    <div
+      className={clsx(
+        "rounded px-2 py-0.5 hover:bg-border",
+        muted && "text-fg-muted",
+      )}
+    >
       {label}
     </div>
   );

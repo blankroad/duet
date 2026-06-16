@@ -15,6 +15,7 @@ import {
   ArrowDownUp,
   Eye,
   ExternalLink,
+  FilePen,
   FolderSearch,
   FileArchive,
   Package,
@@ -26,14 +27,30 @@ import { commands } from "@/types/bindings";
 import type { Entry, Location } from "@/types/bindings";
 import { formatErr } from "@/lib/error";
 import { isArchiveName } from "@/lib/archive";
-import { usePanes, type PaneId, type SortKey, type ViewMode } from "@/stores/panes";
+import {
+  usePanes,
+  type PaneId,
+  type SortKey,
+  type ViewMode,
+} from "@/stores/panes";
 import { useUIDialogs } from "@/stores/ui-dialogs";
 import { useToast } from "@/stores/toast";
 import { useConnections } from "@/stores/connections";
 import { bookmarkLocation } from "@/lib/bookmarkActions";
 import { addHostFavorite } from "@/stores/hostFavorites";
 import { childLocation } from "@/lib/entryDnd";
-import { triggerCopy, triggerMove, triggerRename, triggerBatchRename, triggerMkdir, triggerDelete, triggerExtract, triggerCompress, triggerSync, triggerCompare } from "@/lib/fileActions";
+import {
+  triggerCopy,
+  triggerMove,
+  triggerRename,
+  triggerBatchRename,
+  triggerMkdir,
+  triggerDelete,
+  triggerExtract,
+  triggerCompress,
+  triggerSync,
+  triggerCompare,
+} from "@/lib/fileActions";
 import type { MenuEntry } from "@/stores/contextMenu";
 
 /**
@@ -64,7 +81,9 @@ const sep = (): MenuEntry => ({ kind: "separator" });
 function sshAlias(location: Location): string | null {
   if (location.source.kind !== "ssh") return null;
   const connId = location.source.connection_id;
-  const conn = Object.values(useConnections.getState().active).find((c) => c.id === connId);
+  const conn = Object.values(useConnections.getState().active).find(
+    (c) => c.id === connId,
+  );
   return conn?.alias ?? null;
 }
 
@@ -80,11 +99,29 @@ async function copyText(text: string): Promise<void> {
 /** OS 파일 매니저에서 항목 위치 표시 (로컬 전용). */
 async function revealEntry(target: Location): Promise<void> {
   const r = await commands.revealPath(target);
-  if (r.status === "error") useToast.getState().show(`Reveal failed: ${formatErr(r.error)}`);
+  if (r.status === "error")
+    useToast.getState().show(`Reveal failed: ${formatErr(r.error)}`);
+}
+
+/** 원격 파일을 에디터로 열고 변경 시 자동 재업로드(편집 라운드트립). */
+async function editRemoteEntry(target: Location, name: string): Promise<void> {
+  const r = await commands.sshEditOpen(target);
+  const toast = useToast.getState().show;
+  if (r.status === "error") toast(`Edit failed: ${formatErr(r.error)}`);
+  else toast(`Editing ${name} — changes auto-upload`);
 }
 
 export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
-  const { paneId, entry, location, selectedCount, inTrash, onActivate, onOpenInOtherPane, onPutBack } = deps;
+  const {
+    paneId,
+    entry,
+    location,
+    selectedCount,
+    inTrash,
+    onActivate,
+    onOpenInOtherPane,
+    onPutBack,
+  } = deps;
   const open = useUIDialogs.getState().open;
   const showToast = useToast.getState().show;
   const isDir = entry.kind === "dir";
@@ -97,7 +134,12 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
   // 휴지통 탐색 중 — 원위치 복원 우선 노출.
   if (inTrash && onPutBack) {
     items.push(
-      { id: "put-back", label: "Put back", icon: <Undo2 size={ICON} />, onSelect: onPutBack },
+      {
+        id: "put-back",
+        label: "Put back",
+        icon: <Undo2 size={ICON} />,
+        onSelect: onPutBack,
+      },
       sep(),
     );
   }
@@ -105,36 +147,114 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
   if (!multi) {
     if (isDir) {
       items.push(
-        { id: "open", label: "Open", icon: <FolderOpen size={ICON} />, shortcut: "Enter", onSelect: () => onActivate(paneId, entry) },
-        { id: "open-other", label: "Open in other pane", icon: <PanelRight size={ICON} />, onSelect: () => onOpenInOtherPane(paneId, entry) },
+        {
+          id: "open",
+          label: "Open",
+          icon: <FolderOpen size={ICON} />,
+          shortcut: "Enter",
+          onSelect: () => onActivate(paneId, entry),
+        },
+        {
+          id: "open-other",
+          label: "Open in other pane",
+          icon: <PanelRight size={ICON} />,
+          onSelect: () => onOpenInOtherPane(paneId, entry),
+        },
       );
     } else {
-      items.push({ id: "open", label: "Open", icon: <ExternalLink size={ICON} />, shortcut: "Enter", onSelect: () => onActivate(paneId, entry) });
+      items.push({
+        id: "open",
+        label: "Open",
+        icon: <ExternalLink size={ICON} />,
+        shortcut: "Enter",
+        onSelect: () => onActivate(paneId, entry),
+      });
+      // 원격 파일: 편집 라운드트립(다운로드→에디터→저장 시 자동 재업로드).
+      if (location.source.kind === "ssh") {
+        items.push({
+          id: "edit-remote",
+          label: "Edit & watch",
+          icon: <FilePen size={ICON} />,
+          onSelect: () => void editRemoteEntry(child, entry.name),
+        });
+      }
     }
     if (location.source.kind === "local") {
-      items.push({ id: "reveal", label: "Show in file manager", icon: <FolderSearch size={ICON} />, onSelect: () => void revealEntry(child) });
+      items.push({
+        id: "reveal",
+        label: "Show in file manager",
+        icon: <FolderSearch size={ICON} />,
+        onSelect: () => void revealEntry(child),
+      });
     }
     items.push(sep());
   }
 
   if (!isDir && !multi && isArchiveName(entry.name)) {
     items.push(
-      { id: "extract", label: "Extract here", icon: <FileArchive size={ICON} />, onSelect: () => void triggerExtract(showToast) },
+      {
+        id: "extract",
+        label: "Extract here",
+        icon: <FileArchive size={ICON} />,
+        onSelect: () => void triggerExtract(showToast),
+      },
       sep(),
     );
   }
 
   items.push(
-    { id: "copy", label: "Copy to other pane", icon: <Copy size={ICON} />, shortcut: "F5", onSelect: () => void triggerCopy(open, showToast) },
-    { id: "move", label: "Move to other pane", icon: <FolderInput size={ICON} />, shortcut: "F6", onSelect: () => void triggerMove(open, showToast) },
-    { id: "compress", label: "Compress…", icon: <Package size={ICON} />, onSelect: () => triggerCompress(open, showToast) },
+    {
+      id: "copy",
+      label: "Copy to other pane",
+      icon: <Copy size={ICON} />,
+      shortcut: "F5",
+      onSelect: () => void triggerCopy(open, showToast),
+    },
+    {
+      id: "move",
+      label: "Move to other pane",
+      icon: <FolderInput size={ICON} />,
+      shortcut: "F6",
+      onSelect: () => void triggerMove(open, showToast),
+    },
+    {
+      id: "compress",
+      label: "Compress…",
+      icon: <Package size={ICON} />,
+      onSelect: () => triggerCompress(open, showToast),
+    },
     sep(),
-    { id: "rename", label: "Rename", icon: <Pencil size={ICON} />, shortcut: "F2", disabled: multi, onSelect: () => triggerRename(open, showToast) },
+    {
+      id: "rename",
+      label: "Rename",
+      icon: <Pencil size={ICON} />,
+      shortcut: "F2",
+      disabled: multi,
+      onSelect: () => triggerRename(open, showToast),
+    },
     ...(multi
-      ? [{ id: "batch-rename", label: "Batch rename…", icon: <Pencil size={ICON} />, onSelect: () => triggerBatchRename(open, showToast) } as MenuEntry]
+      ? [
+          {
+            id: "batch-rename",
+            label: "Batch rename…",
+            icon: <Pencil size={ICON} />,
+            onSelect: () => triggerBatchRename(open, showToast),
+          } as MenuEntry,
+        ]
       : []),
-    { id: "mkdir", label: "New folder", icon: <FolderPlus size={ICON} />, shortcut: "F7", onSelect: () => triggerMkdir(open) },
-    { id: "bookmark", label: "Add to bookmarks", icon: <Star size={ICON} />, onSelect: () => void bookmarkLocation(child, entry.name) },
+    {
+      id: "mkdir",
+      label: "New folder",
+      icon: <FolderPlus size={ICON} />,
+      shortcut: "F7",
+      onSelect: () => triggerMkdir(open),
+    },
+    {
+      id: "bookmark",
+      label: "Add to bookmarks",
+      icon: <Star size={ICON} />,
+      onSelect: () => void bookmarkLocation(child, entry.name),
+    },
   );
 
   if (alias) {
@@ -142,16 +262,40 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
       id: "host-fav",
       label: "Add to host favorites",
       icon: <Heart size={ICON} />,
-      onSelect: () => void addHostFavorite(alias, entry.name, String(child.path)),
+      onSelect: () =>
+        void addHostFavorite(alias, entry.name, String(child.path)),
     });
   }
 
   items.push(
-    { id: "copy-path", label: "Copy path", icon: <ClipboardCopy size={ICON} />, onSelect: () => void copyText(String(child.path)) },
-    { id: "copy-name", label: "Copy name", onSelect: () => void copyText(entry.name) },
+    {
+      id: "copy-path",
+      label: "Copy path",
+      icon: <ClipboardCopy size={ICON} />,
+      onSelect: () => void copyText(String(child.path)),
+    },
+    {
+      id: "copy-name",
+      label: "Copy name",
+      onSelect: () => void copyText(entry.name),
+    },
     sep(),
-    { id: "delete", label: "Delete", icon: <Trash2 size={ICON} />, shortcut: "Del", danger: true, onSelect: () => void triggerDelete("trash", open, showToast) },
-    { id: "delete-perm", label: "Delete permanently", icon: <Trash size={ICON} />, shortcut: "Shift+Del", danger: true, onSelect: () => void triggerDelete("permanent", open, showToast) },
+    {
+      id: "delete",
+      label: "Delete",
+      icon: <Trash2 size={ICON} />,
+      shortcut: "Del",
+      danger: true,
+      onSelect: () => void triggerDelete("trash", open, showToast),
+    },
+    {
+      id: "delete-perm",
+      label: "Delete permanently",
+      icon: <Trash size={ICON} />,
+      shortcut: "Shift+Del",
+      danger: true,
+      onSelect: () => void triggerDelete("permanent", open, showToast),
+    },
   );
 
   return items;
@@ -183,10 +327,32 @@ export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
   const alias = sshAlias(location);
 
   const items: MenuEntry[] = [
-    { id: "mkdir", label: "New folder", icon: <FolderPlus size={ICON} />, shortcut: "F7", onSelect: () => triggerMkdir(open) },
-    { id: "refresh", label: "Refresh", icon: <RotateCw size={ICON} />, shortcut: "Ctrl+R", onSelect: () => onRefresh(paneId) },
-    { id: "sync", label: "Sync to other pane", icon: <FolderSync size={ICON} />, onSelect: () => void triggerSync(open, useToast.getState().show) },
-    { id: "compare", label: "Compare folders", icon: <FolderGit2 size={ICON} />, onSelect: () => void triggerCompare(open, useToast.getState().show) },
+    {
+      id: "mkdir",
+      label: "New folder",
+      icon: <FolderPlus size={ICON} />,
+      shortcut: "F7",
+      onSelect: () => triggerMkdir(open),
+    },
+    {
+      id: "refresh",
+      label: "Refresh",
+      icon: <RotateCw size={ICON} />,
+      shortcut: "Ctrl+R",
+      onSelect: () => onRefresh(paneId),
+    },
+    {
+      id: "sync",
+      label: "Sync to other pane",
+      icon: <FolderSync size={ICON} />,
+      onSelect: () => void triggerSync(open, useToast.getState().show),
+    },
+    {
+      id: "compare",
+      label: "Compare folders",
+      icon: <FolderGit2 size={ICON} />,
+      onSelect: () => void triggerCompare(open, useToast.getState().show),
+    },
     sep(),
     {
       id: "view",
@@ -208,9 +374,20 @@ export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
         onSelect: () => p.toggleSortKey(paneId, s.key),
       })),
     },
-    { id: "hidden", label: "Toggle hidden files", icon: <Eye size={ICON} />, shortcut: "Ctrl+H", onSelect: () => p.toggleShowHidden(paneId) },
+    {
+      id: "hidden",
+      label: "Toggle hidden files",
+      icon: <Eye size={ICON} />,
+      shortcut: "Ctrl+H",
+      onSelect: () => p.toggleShowHidden(paneId),
+    },
     sep(),
-    { id: "bookmark", label: "Add this folder to bookmarks", icon: <Star size={ICON} />, onSelect: () => void bookmarkLocation(location, folderName(location)) },
+    {
+      id: "bookmark",
+      label: "Add this folder to bookmarks",
+      icon: <Star size={ICON} />,
+      onSelect: () => void bookmarkLocation(location, folderName(location)),
+    },
   ];
 
   if (alias) {
@@ -218,7 +395,12 @@ export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
       id: "host-fav",
       label: "Add this folder to host favorites",
       icon: <Heart size={ICON} />,
-      onSelect: () => void addHostFavorite(alias, folderName(location), String(location.path)),
+      onSelect: () =>
+        void addHostFavorite(
+          alias,
+          folderName(location),
+          String(location.path),
+        ),
     });
   }
 

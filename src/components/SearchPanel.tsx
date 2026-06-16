@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react";
-import { Loader, Search, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Loader, Search, X, RefreshCw } from "lucide-react";
 import { commands } from "@/types/bindings";
 import type { SearchHit } from "@/types/bindings";
 import { useSearch } from "@/stores/search";
@@ -20,14 +20,23 @@ export function SearchPanel({
   const isOpen = useSearch((s) => s.isOpen);
   const root = useSearch((s) => s.root);
   const query = useSearch((s) => s.query);
+  const content = useSearch((s) => s.content);
   const results = useSearch((s) => s.results);
   const status = useSearch((s) => s.status);
   const error = useSearch((s) => s.error);
   const setQueryNow = useSearch((s) => s.setQueryNow);
+  const setContent = useSearch((s) => s.setContent);
   const setResults = useSearch((s) => s.setResults);
   const setStatus = useSearch((s) => s.setStatus);
   const setError = useSearch((s) => s.setError);
   const close = useSearch((s) => s.close);
+
+  // 인덱스 재색인 후 재검색 트리거(파일명 모드).
+  const [reindexNonce, setReindexNonce] = useState(0);
+  const reindex = () => {
+    if (!root) return;
+    void commands.indexReindex(root).then(() => setReindexNonce((n) => n + 1));
+  };
 
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -45,19 +54,33 @@ export function SearchPanel({
       return;
     }
     setStatus("searching");
+    const opts = {
+      case_sensitive: false,
+      include_hidden: false,
+      max_results: 500,
+      content,
+    };
     const t = setTimeout(() => {
       void (async () => {
-        const r = await commands.searchGlobal(root, trimmed, {
-          case_sensitive: false,
-          include_hidden: false,
-          max_results: 500,
-        });
+        // 파일명 = 인덱스(즉시·오프라인), 내용 = grep/rg(원격 연결 필요).
+        const r = content
+          ? await commands.searchGlobal(root, trimmed, opts)
+          : await commands.indexSearch(root, trimmed, opts);
         if (r.status === "ok") setResults(r.data ?? []);
         else setError(r.error.kind);
       })();
     }, 200);
     return () => clearTimeout(t);
-  }, [isOpen, root, query, setResults, setStatus, setError]);
+  }, [
+    isOpen,
+    root,
+    query,
+    content,
+    reindexNonce,
+    setResults,
+    setStatus,
+    setError,
+  ]);
 
   if (!isOpen) return null;
 
@@ -79,9 +102,47 @@ export function SearchPanel({
               onPickHit(results[0]);
             }
           }}
-          placeholder="Search filenames…"
+          placeholder={content ? "Search file contents…" : "Search filenames…"}
           className="flex-1 bg-transparent font-mono focus:outline-none"
         />
+        {/* 파일명 ↔ 내용(grep) 모드 토글 */}
+        <div className="flex shrink-0 overflow-hidden rounded border border-border text-meta">
+          <button
+            type="button"
+            onClick={() => setContent(false)}
+            className={
+              !content
+                ? "bg-accent px-1.5 py-0.5 text-white"
+                : "px-1.5 py-0.5 text-fg-muted hover:bg-border"
+            }
+            title="Search by filename"
+          >
+            Name
+          </button>
+          <button
+            type="button"
+            onClick={() => setContent(true)}
+            className={
+              content
+                ? "bg-accent px-1.5 py-0.5 text-white"
+                : "px-1.5 py-0.5 text-fg-muted hover:bg-border"
+            }
+            title="Search file contents (grep)"
+          >
+            Text
+          </button>
+        </div>
+        {!content && (
+          <button
+            type="button"
+            onClick={reindex}
+            className="shrink-0 rounded p-0.5 text-fg-muted hover:bg-border"
+            title="Reindex (refresh file-name index)"
+            aria-label="Reindex"
+          >
+            <RefreshCw size={11} />
+          </button>
+        )}
         {status === "searching" && (
           <Loader size={12} className="shrink-0 animate-spin text-fg-muted" />
         )}

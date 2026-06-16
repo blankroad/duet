@@ -38,6 +38,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::system::home_directory,
             commands::system::ssh_home_directory,
             commands::system::open_path,
+            commands::system::ssh_edit_open,
             commands::system::reveal_path,
             commands::system::open_recycle_bin,
             commands::system::trash_location,
@@ -75,6 +76,8 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::secret_vault::vault_remove,
             commands::search::search_global,
             commands::search::search_cancel,
+            commands::search::index_search,
+            commands::search::index_reindex,
             commands::keymap::keymap_list,
             commands::keymap::keymap_set,
             commands::keymap::keymap_unset,
@@ -267,6 +270,8 @@ pub fn run() {
             let active_search = commands::search::ActiveSearch::new();
             app.manage(active_search);
             app.manage(commands::fs_ops::ActiveCompare::new());
+            // 파일명 인덱스(Everything 식 즉시·오프라인 검색) — 디스크 캐시 <config>/duet/index.
+            app.manage(services::file_index::FileIndex::load_default().expect("file index init"));
             Ok(())
         })
         .run(tauri::generate_context!())

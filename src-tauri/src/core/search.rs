@@ -1,10 +1,10 @@
 //! 파일명/내용 검색 backend.
 //!
-//! v1 (MVP-5): 파일명 substring 검색만.
-//! - LocalFilenameSearch: `ignore::WalkBuilder` (.gitignore 자동 존중)
-//! - SshFilenameSearch: russh exec 채널로 `find -iname` 실행 (Task 7)
+//! - 파일명: LocalFilenameSearch(`ignore::WalkBuilder`) / SshFilenameSearch(`find -iname`)
+//! - 내용(grep): LocalContentSearch(파일 읽어 substring) / SshContentSearch(`grep -rlIF`)
+//!   — v1 은 매칭 *파일* 단위(라인/미리보기는 후속). 새 의존성 없이 substring.
 //!
-//! v2 후속: GrepSearch (ripgrep), result streaming (event 기반).
+//! 후속: 정규식 모드(regex crate, §6 승인 필요), 라인-단위 결과 streaming.
 
 use crate::types::{DuetError, EntryKind, Location, SourceId};
 use async_trait::async_trait;
@@ -18,6 +18,9 @@ pub struct SearchOpts {
     pub case_sensitive: bool,
     pub include_hidden: bool,
     pub max_results: usize,
+    /// true 면 파일 *내용* 검색(grep), false 면 파일명 검색.
+    #[serde(default)]
+    pub content: bool,
 }
 
 impl Default for SearchOpts {
@@ -26,6 +29,7 @@ impl Default for SearchOpts {
             case_sensitive: false,
             include_hidden: false,
             max_results: 500,
+            content: false,
         }
     }
 }
@@ -139,6 +143,190 @@ fn matches_substring(name: &str, pattern: &str, case_sensitive: bool) -> bool {
         name.contains(pattern)
     } else {
         name.to_lowercase().contains(&pattern.to_lowercase())
+    }
+}
+
+/// 내용 검색에서 건너뛸 파일 크기 상한 (이보다 크면 skip — 메모리/시간 보호).
+const CONTENT_MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
+
+/// 로컬 파일 *내용*(substring) 검색 — 매칭 파일을 hit 으로(파일 단위; 라인정보는 후속).
+/// 바이너리(NUL 포함)·대용량 파일은 skip. `.gitignore` 존중은 파일명 검색과 동일.
+pub struct LocalContentSearch;
+
+#[async_trait]
+impl SearchBackend for LocalContentSearch {
+    async fn search(
+        &self,
+        root: &Path,
+        pattern: &str,
+        opts: &SearchOpts,
+        cancel: CancellationToken,
+    ) -> Result<Vec<SearchHit>, DuetError> {
+        use ignore::WalkBuilder;
+        let root = root.to_path_buf();
+        let pattern = pattern.to_string();
+        let opts = opts.clone();
+
+        tokio::task::spawn_blocking(move || -> Result<Vec<SearchHit>, DuetError> {
+            let walker = WalkBuilder::new(&root)
+                .hidden(!opts.include_hidden)
+                .git_ignore(true)
+                .git_exclude(true)
+                .build();
+            let mut hits = Vec::new();
+            for entry in walker {
+                if cancel.is_cancelled() {
+                    return Err(DuetError::Cancelled);
+                }
+                if hits.len() >= opts.max_results {
+                    break;
+                }
+                let entry = match entry {
+                    Ok(e) => e,
+                    Err(_) => continue,
+                };
+                // 파일만 (디렉토리/심볼릭 skip).
+                if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                    continue;
+                }
+                let path = entry.path();
+                let meta = match entry.metadata() {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+                if meta.len() > CONTENT_MAX_FILE_BYTES {
+                    continue;
+                }
+                let bytes = match std::fs::read(path) {
+                    Ok(b) => b,
+                    Err(_) => continue,
+                };
+                // 바이너리 휴리스틱 — NUL 바이트 있으면 skip.
+                if bytes.contains(&0) {
+                    continue;
+                }
+                let text = String::from_utf8_lossy(&bytes);
+                if !matches_substring(&text, &pattern, opts.case_sensitive) {
+                    continue;
+                }
+                let name = match path.file_name().and_then(|n| n.to_str()) {
+                    Some(n) => n.to_string(),
+                    None => continue,
+                };
+                let parent = match path.parent() {
+                    Some(p) => p.to_path_buf(),
+                    None => continue,
+                };
+                let modified_ms = meta
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_millis() as i64);
+                hits.push(SearchHit {
+                    location: Location {
+                        source: SourceId::Local,
+                        path: parent,
+                    },
+                    name,
+                    kind: EntryKind::File,
+                    size: meta.len(),
+                    modified_ms,
+                });
+            }
+            Ok(hits)
+        })
+        .await
+        .map_err(|e| DuetError::Io(format!("content search join: {e}")))?
+    }
+}
+
+/// pattern 을 POSIX single-quote 안에 안전하게 임베드하도록 escape (`'` → `'\''`).
+/// `-F`(고정문자열)라 백슬래시 등은 리터럴 — single-quote 만 처리하면 충분.
+fn sq_escape(pattern: &str) -> String {
+    pattern.replace('\'', "'\\''")
+}
+
+/// 원격 내용검색 명령 — 호스트에 `rg`(ripgrep)가 있으면 rg, 없으면 `grep` 으로 분기.
+/// (same-host copy 의 rsync→cp 감지와 같은 패턴.) rg 는 더 빠르고 `.gitignore` 를
+/// 기본 존중해 로컬 `LocalContentSearch`(ignore crate) 와 동작이 일치한다. grep 은
+/// POSIX 어디에나 있는 안전한 폴백. 둘 다 매칭 *파일 목록* 을 한 줄에 하나씩 출력.
+fn build_remote_content_cmd(
+    root_arg: &str,
+    pattern: &str,
+    case_sensitive: bool,
+    include_hidden: bool,
+    max_results: usize,
+) -> String {
+    let pat = sq_escape(pattern);
+    // rg: -F 고정문자열, -l 파일목록, -i 대소문자무시, --hidden 숨김포함(기본 제외).
+    let rg_case = if case_sensitive { "" } else { "-i " };
+    let rg_hidden = if include_hidden { "--hidden " } else { "" };
+    // grep: -rlIF, i=대소문자무시, --exclude-dir 로 숨김 디렉토리 제외(GNU).
+    let grep_case = if case_sensitive { "" } else { "i" };
+    let grep_excl = if include_hidden {
+        ""
+    } else {
+        "--exclude-dir='.*' "
+    };
+    format!(
+        "if command -v rg >/dev/null 2>&1; then \
+rg --files-with-matches --no-messages -F {rg_case}{rg_hidden}-e '{pat}' -- {root_arg} 2>/dev/null | head -n {max_results}; \
+else \
+grep -rlI{grep_case}F {grep_excl}-e '{pat}' -- {root_arg} 2>/dev/null | head -n {max_results}; \
+fi"
+    )
+}
+
+/// SSH 호스트의 내용 검색 — `rg`(있으면) 또는 `grep` 으로 매칭 파일 목록을 받는다.
+/// substring(고정문자열) 매칭, 바이너리 skip.
+pub struct SshContentSearch {
+    pub conn: std::sync::Arc<crate::services::connection_pool::ActiveConnection>,
+}
+
+#[async_trait]
+impl SearchBackend for SshContentSearch {
+    async fn search(
+        &self,
+        root: &Path,
+        pattern: &str,
+        opts: &SearchOpts,
+        cancel: CancellationToken,
+    ) -> Result<Vec<SearchHit>, DuetError> {
+        use crate::core::copy_strategy::shell_escape_path;
+        use crate::ssh::remote_exec::exec;
+
+        let root_arg = shell_escape_path(root)?;
+        let cmd = build_remote_content_cmd(
+            &root_arg,
+            pattern,
+            opts.case_sensitive,
+            opts.include_hidden,
+            opts.max_results,
+        );
+
+        let session_mutex = self
+            .conn
+            .session
+            .as_ref()
+            .ok_or_else(|| DuetError::ConnectionFailed("no live session".into()))?;
+        if cancel.is_cancelled() {
+            return Err(DuetError::Cancelled);
+        }
+        let result = {
+            let handle = session_mutex.lock().await;
+            exec(&handle, &cmd).await?
+        };
+        if cancel.is_cancelled() {
+            return Err(DuetError::Cancelled);
+        }
+        let stdout = String::from_utf8_lossy(&result.stdout);
+        let conn_id = self.conn.id.clone();
+        Ok(parse_find_output(
+            &stdout,
+            &conn_id,
+            self.conn.host_ip,
+            &self.conn.user,
+        ))
     }
 }
 
@@ -386,6 +574,107 @@ mod tests {
             .search(dir.path(), "alpha", &SearchOpts::default(), cancel)
             .await;
         assert!(matches!(res, Err(DuetError::Cancelled)));
+    }
+
+    #[tokio::test]
+    async fn local_content_matches_inside_files() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("a.txt"), b"hello needle world").unwrap();
+        fs::write(dir.path().join("b.txt"), b"nothing here").unwrap();
+        fs::write(dir.path().join("c.md"), b"another needle").unwrap();
+        let s = LocalContentSearch;
+        let hits = s
+            .search(
+                dir.path(),
+                "needle",
+                &SearchOpts {
+                    content: true,
+                    ..SearchOpts::default()
+                },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let mut names: Vec<&str> = hits.iter().map(|h| h.name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(names, vec!["a.txt", "c.md"]);
+    }
+
+    #[tokio::test]
+    async fn local_content_skips_binary_files() {
+        let dir = tempdir().unwrap();
+        // NUL 포함 = 바이너리 → 매칭돼도 skip.
+        fs::write(dir.path().join("bin.dat"), b"needle\0\0\0binary").unwrap();
+        fs::write(dir.path().join("text.txt"), b"needle text").unwrap();
+        let s = LocalContentSearch;
+        let hits = s
+            .search(
+                dir.path(),
+                "needle",
+                &SearchOpts {
+                    content: true,
+                    ..SearchOpts::default()
+                },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let names: Vec<&str> = hits.iter().map(|h| h.name.as_str()).collect();
+        assert_eq!(names, vec!["text.txt"]);
+    }
+
+    #[tokio::test]
+    async fn local_content_case_insensitive_default() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("a.txt"), b"HELLO NEEDLE").unwrap();
+        let s = LocalContentSearch;
+        let hits = s
+            .search(
+                dir.path(),
+                "needle",
+                &SearchOpts {
+                    content: true,
+                    ..SearchOpts::default()
+                },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+    }
+
+    #[test]
+    fn sq_escape_handles_single_quotes() {
+        assert_eq!(sq_escape("plain"), "plain");
+        // it's → it'\''s  (close-quote, escaped-quote, open-quote)
+        assert_eq!(sq_escape("it's"), "it'\\''s");
+    }
+
+    #[test]
+    fn remote_content_cmd_prefers_rg_with_grep_fallback() {
+        let cmd = build_remote_content_cmd("'/srv'", "needle", false, false, 500);
+        // rg 우선 + grep 폴백 둘 다 들어감.
+        assert!(cmd.contains("command -v rg"));
+        assert!(cmd.contains("rg --files-with-matches"));
+        assert!(cmd.contains("grep -rlIiF"));
+        // 대소문자 무시(기본): rg -i, grep i.
+        assert!(cmd.contains("-F -i "));
+        // 숨김 제외(기본): grep --exclude-dir, rg 는 --hidden 없음.
+        assert!(cmd.contains("--exclude-dir='.*'"));
+        assert!(!cmd.contains("--hidden"));
+        assert!(cmd.contains("'needle'"));
+        assert!(cmd.contains("head -n 500"));
+    }
+
+    #[test]
+    fn remote_content_cmd_case_sensitive_and_hidden() {
+        let cmd = build_remote_content_cmd("'/r'", "Foo", true, true, 10);
+        // 대소문자 구분: rg 에 -i 없음, grep 은 'grep -rlIF'(i 없음).
+        assert!(cmd.contains("-F --hidden")); // rg: -i 없이 바로 --hidden
+        assert!(cmd.contains("grep -rlIF"));
+        // include_hidden: grep exclude 없음, rg --hidden.
+        assert!(!cmd.contains("--exclude-dir"));
+        assert!(cmd.contains("--hidden"));
     }
 
     #[test]
