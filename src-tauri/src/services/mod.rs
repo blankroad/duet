@@ -6,6 +6,7 @@ pub mod compare_events;
 pub mod connection_events;
 pub mod connection_pool;
 pub mod connection_supervisor;
+pub mod edit_session;
 pub mod fs_events;
 pub mod fs_watcher;
 pub mod host_favorites;

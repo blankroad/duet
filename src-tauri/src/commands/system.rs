@@ -242,6 +242,53 @@ pub async fn open_path(
         .map_err(|e| DuetError::Io(format!("open failed: {e}")))
 }
 
+/// 원격 파일을 로컬 temp 로 받아 OS 기본 에디터로 열고, temp 변경을 감지해 원격으로
+/// 자동 재업로드(편집 라운드트립). 로컬 파일은 `open_path` 와 동일하게 그냥 열면 되므로
+/// 이 command 는 원격(SSH) 전용. 재업로드 watch 는 연결 종료 시 자동 종료된다.
+#[tauri::command]
+#[specta::specta]
+pub async fn ssh_edit_open(
+    location: Location,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+) -> Result<(), DuetError> {
+    let SourceId::Ssh { connection_id, .. } = &location.source else {
+        return Err(DuetError::NotSupported(
+            "edit roundtrip is only for remote files".into(),
+        ));
+    };
+    let fs = fs_for(&location.source, pool.inner()).await?;
+    let meta = fs.metadata(&location.path).await?;
+    if meta.kind != EntryKind::File {
+        return Err(DuetError::Io("can only edit regular files".into()));
+    }
+    let name = location
+        .path
+        .file_name()
+        .ok_or_else(|| DuetError::Io("remote path has no file name".into()))?;
+    let temp = crate::services::edit_session::edit_temp_path(connection_id, name);
+    if let Some(parent) = temp.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| DuetError::Io(format!("create edit temp dir: {e}")))?;
+    }
+    let bytes = fs.read_full(&location.path).await?;
+    tokio::fs::write(&temp, &bytes)
+        .await
+        .map_err(|e| DuetError::Io(format!("write edit temp: {e}")))?;
+    let to_open = temp.clone();
+    tokio::task::spawn_blocking(move || opener::open(&to_open))
+        .await
+        .map_err(|e| DuetError::Io(format!("open task join: {e}")))?
+        .map_err(|e| DuetError::Io(format!("open failed: {e}")))?;
+    crate::services::edit_session::spawn_edit_watch(
+        pool.inner().clone(),
+        connection_id.clone(),
+        location.path.clone(),
+        temp,
+    );
+    Ok(())
+}
+
 /// 파일/폴더를 OS 파일 매니저에서 보여준다 (선택 강조). 로컬 전용.
 #[tauri::command]
 #[specta::specta]
