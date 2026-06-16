@@ -17,6 +17,7 @@ import {
   launchApp,
 } from "@/stores/appLaunchers";
 import { useReorderable } from "@/hooks/useReorderable";
+import { useAppIcon } from "@/stores/appIcons";
 import { useContextMenu, type MenuEntry } from "@/stores/contextMenu";
 import { useUIDialogs } from "@/stores/ui-dialogs";
 
@@ -85,18 +86,16 @@ function mergeCls(merge: boolean, dragging: boolean): string {
 }
 
 /**
- * 앱 글리프 — 실제 OS 아이콘이 있으면 `<img>`, 없으면 이름 첫 글자 모노그램.
- * 아이콘 추출(backend)이 들어오면 `app.icon`(data URL) 만 채우면 자동 전환.
+ * 앱 글리프 — OS 네이티브 아이콘(backend 추출, path 별 캐시)이 있으면 `<img>`,
+ * 없으면(미로드/실패/non-Windows) 이름 첫 글자 모노그램으로 fallback.
  */
 function AppGlyph({ app, px }: { app: AppItem; px: number }) {
-  const icon = (app as AppItem & { icon?: string | null }).icon;
+  const icon = useAppIcon(app.path ?? null);
   if (icon) {
     return (
       <img
         src={icon}
         alt=""
-        width={px}
-        height={px}
         draggable={false}
         className="pointer-events-none shrink-0 object-contain"
         style={{ width: px, height: px }}

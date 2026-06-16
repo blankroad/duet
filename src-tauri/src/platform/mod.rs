@@ -10,6 +10,29 @@ use std::path::Path;
 #[cfg(target_os = "macos")]
 mod macos;
 
+/// 앱 실행파일(`.exe`)의 OS 네이티브 아이콘을 PNG 바이트로 추출.
+///
+/// Windows: `systemicons`(SHGetFileInfo+GDI). 절대경로 .exe 면 임베드 리소스
+/// 아이콘을 반환한다. 그 외 OS: `NotSupported` (프론트는 모노그램 fallback).
+/// `size` 는 px (16/32/64 권장).
+pub fn app_icon(path: &Path, size: i32) -> Result<Vec<u8>, DuetError> {
+    #[cfg(windows)]
+    {
+        let p = path
+            .to_str()
+            .ok_or_else(|| DuetError::Io("icon: non-utf8 path".into()))?;
+        systemicons::get_icon(p, size)
+            .map_err(|e| DuetError::Io(format!("icon extract failed: {e:?}")))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (path, size);
+        Err(DuetError::NotSupported(
+            "app icon extraction is only supported on Windows".into(),
+        ))
+    }
+}
+
 /// 마운트된 볼륨/드라이브를 eject (언마운트 + 디바이스 분리).
 ///
 /// macOS: `diskutil eject`. 그 외 OS: `NotSupported` (후속 — Linux `udisksctl`,

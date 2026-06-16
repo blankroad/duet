@@ -75,6 +75,15 @@ specta = { version = "=2.0.0-rc.22", features = ["derive", "chrono", "uuid"] }
 specta-typescript = "=0.0.9"
 tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
 
+# === OS 아이콘 추출 (Windows 전용) ===
+# 앱 런처 타일에 .exe 네이티브 아이콘 표시. systemicons = SHGetFileInfo+GDI 래퍼,
+# 절대경로 .exe → 임베드 아이콘 PNG 바이트. §6 승인(2026-06): recent 547 / total
+# 28.5k dl. 대안 windows-icons(Win전용·image 의존, 8.7k dl) 검토 — systemicons 가
+# PNG 직반환이라 image/base64 추가 의존 회피. macOS/Linux 는 미빌드 →
+# platform::app_icon 이 NotSupported → 프론트 모노그램 fallback.
+[target.'cfg(windows)'.dependencies]
+systemicons = "0.9"
+
 [features]
 # default = ["custom-protocol"]
 # custom-protocol = ["tauri/custom-protocol"]
