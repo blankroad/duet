@@ -240,8 +240,45 @@ impl SearchBackend for LocalContentSearch {
     }
 }
 
-/// SSH 호스트의 `grep -rlIF` 로 내용 검색 (매칭 파일 목록). `-F`=고정문자열(substring),
-/// `-l`=파일목록, `-I`=바이너리 skip. 패턴은 single-quote escape.
+/// pattern 을 POSIX single-quote 안에 안전하게 임베드하도록 escape (`'` → `'\''`).
+/// `-F`(고정문자열)라 백슬래시 등은 리터럴 — single-quote 만 처리하면 충분.
+fn sq_escape(pattern: &str) -> String {
+    pattern.replace('\'', "'\\''")
+}
+
+/// 원격 내용검색 명령 — 호스트에 `rg`(ripgrep)가 있으면 rg, 없으면 `grep` 으로 분기.
+/// (same-host copy 의 rsync→cp 감지와 같은 패턴.) rg 는 더 빠르고 `.gitignore` 를
+/// 기본 존중해 로컬 `LocalContentSearch`(ignore crate) 와 동작이 일치한다. grep 은
+/// POSIX 어디에나 있는 안전한 폴백. 둘 다 매칭 *파일 목록* 을 한 줄에 하나씩 출력.
+fn build_remote_content_cmd(
+    root_arg: &str,
+    pattern: &str,
+    case_sensitive: bool,
+    include_hidden: bool,
+    max_results: usize,
+) -> String {
+    let pat = sq_escape(pattern);
+    // rg: -F 고정문자열, -l 파일목록, -i 대소문자무시, --hidden 숨김포함(기본 제외).
+    let rg_case = if case_sensitive { "" } else { "-i " };
+    let rg_hidden = if include_hidden { "--hidden " } else { "" };
+    // grep: -rlIF, i=대소문자무시, --exclude-dir 로 숨김 디렉토리 제외(GNU).
+    let grep_case = if case_sensitive { "" } else { "i" };
+    let grep_excl = if include_hidden {
+        ""
+    } else {
+        "--exclude-dir='.*' "
+    };
+    format!(
+        "if command -v rg >/dev/null 2>&1; then \
+rg --files-with-matches --no-messages -F {rg_case}{rg_hidden}-e '{pat}' -- {root_arg} 2>/dev/null | head -n {max_results}; \
+else \
+grep -rlI{grep_case}F {grep_excl}-e '{pat}' -- {root_arg} 2>/dev/null | head -n {max_results}; \
+fi"
+    )
+}
+
+/// SSH 호스트의 내용 검색 — `rg`(있으면) 또는 `grep` 으로 매칭 파일 목록을 받는다.
+/// substring(고정문자열) 매칭, 바이너리 skip.
 pub struct SshContentSearch {
     pub conn: std::sync::Arc<crate::services::connection_pool::ActiveConnection>,
 }
@@ -259,17 +296,12 @@ impl SearchBackend for SshContentSearch {
         use crate::ssh::remote_exec::exec;
 
         let root_arg = shell_escape_path(root)?;
-        let pat_escaped = pattern.replace('\\', "\\\\").replace('\'', "\\'");
-        let case_flag = if opts.case_sensitive { "" } else { "i" };
-        // 숨김 디렉토리 제외(GNU grep). include_hidden 이면 생략.
-        let exclude = if opts.include_hidden {
-            String::new()
-        } else {
-            "--exclude-dir='.*' ".to_string()
-        };
-        let cmd = format!(
-            "grep -rlI{case_flag}F {exclude}-e '{pat_escaped}' -- {root_arg} 2>/dev/null | head -n {max}",
-            max = opts.max_results
+        let cmd = build_remote_content_cmd(
+            &root_arg,
+            pattern,
+            opts.case_sensitive,
+            opts.include_hidden,
+            opts.max_results,
         );
 
         let session_mutex = self
@@ -609,6 +641,40 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(hits.len(), 1);
+    }
+
+    #[test]
+    fn sq_escape_handles_single_quotes() {
+        assert_eq!(sq_escape("plain"), "plain");
+        // it's → it'\''s  (close-quote, escaped-quote, open-quote)
+        assert_eq!(sq_escape("it's"), "it'\\''s");
+    }
+
+    #[test]
+    fn remote_content_cmd_prefers_rg_with_grep_fallback() {
+        let cmd = build_remote_content_cmd("'/srv'", "needle", false, false, 500);
+        // rg 우선 + grep 폴백 둘 다 들어감.
+        assert!(cmd.contains("command -v rg"));
+        assert!(cmd.contains("rg --files-with-matches"));
+        assert!(cmd.contains("grep -rlIiF"));
+        // 대소문자 무시(기본): rg -i, grep i.
+        assert!(cmd.contains("-F -i "));
+        // 숨김 제외(기본): grep --exclude-dir, rg 는 --hidden 없음.
+        assert!(cmd.contains("--exclude-dir='.*'"));
+        assert!(!cmd.contains("--hidden"));
+        assert!(cmd.contains("'needle'"));
+        assert!(cmd.contains("head -n 500"));
+    }
+
+    #[test]
+    fn remote_content_cmd_case_sensitive_and_hidden() {
+        let cmd = build_remote_content_cmd("'/r'", "Foo", true, true, 10);
+        // 대소문자 구분: rg 에 -i 없음, grep 은 'grep -rlIF'(i 없음).
+        assert!(cmd.contains("-F --hidden")); // rg: -i 없이 바로 --hidden
+        assert!(cmd.contains("grep -rlIF"));
+        // include_hidden: grep exclude 없음, rg --hidden.
+        assert!(!cmd.contains("--exclude-dir"));
+        assert!(cmd.contains("--hidden"));
     }
 
     #[test]
