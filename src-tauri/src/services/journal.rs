@@ -267,21 +267,29 @@ impl Journal {
         Ok(entry)
     }
 
-    /// 가장 최근 undone == false entry 를 반환하고 undone = true 표시.
-    /// `None` 이면 undo 할 게 없음.
-    pub async fn pop_undoable(&self) -> Result<Option<JournalEntry>, DuetError> {
-        let mut lock = self.inner.lock().await;
-        let target_idx = lock.iter().rposition(|e| !e.undone);
-        let Some(idx) = target_idx else {
-            return Ok(None);
-        };
-        let mut entry = lock[idx].clone();
-        entry.undone = true;
-        lock[idx].undone = true;
-        drop(lock);
-        self.append(JsonlRecord::MarkUndone { id: entry.id })
-            .await?;
-        Ok(Some(entry))
+    /// 가장 최근 undone == false entry 를 **마킹 없이** 반환. `None` 이면 undo 할 게 없음.
+    ///
+    /// undo 실행 *전* 조회용. 실제 undone 확정은 실행 성공 후 [`commit_undone`] 으로.
+    /// (이전 `pop_undoable` 은 실행 전에 undone 을 박아, undo 실패 시 영구 손실됐음.)
+    pub async fn peek_undoable(&self) -> Result<Option<JournalEntry>, DuetError> {
+        let lock = self.inner.lock().await;
+        Ok(lock
+            .iter()
+            .rposition(|e| !e.undone)
+            .map(|i| lock[i].clone()))
+    }
+
+    /// undo 실행 성공(또는 비가역 종결) 후 호출 — 메모리 + 디스크에 undone 확정. 멱등.
+    /// 캐시에서 이미 밀려난 오래된 id 는 no-op (디스크 replay 가 이미 반영).
+    pub async fn commit_undone(&self, id: JournalId) -> Result<(), DuetError> {
+        {
+            let mut lock = self.inner.lock().await;
+            match lock.iter_mut().find(|e| e.id == id) {
+                Some(e) if !e.undone => e.undone = true,
+                _ => return Ok(()),
+            }
+        }
+        self.append(JsonlRecord::MarkUndone { id }).await
     }
 
     pub async fn history(&self, limit: usize) -> Vec<JournalEntry> {
@@ -368,21 +376,38 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn pop_undoable_walks_stack() {
+    async fn peek_commit_walks_stack() {
         let dir = tempdir().unwrap();
         let j = Journal::load_from(&dir.path().join("j.jsonl"))
             .await
             .unwrap();
         let a = j.push(mk_op(), mk_undo()).await.unwrap();
         let b = j.push(mk_op(), mk_undo()).await.unwrap();
-        // 가장 최근 = b
-        let popped = j.pop_undoable().await.unwrap().unwrap();
-        assert_eq!(popped.id, b.id);
+        // 가장 최근 = b, commit 해야 다음으로 넘어감
+        assert_eq!(j.peek_undoable().await.unwrap().unwrap().id, b.id);
+        j.commit_undone(b.id).await.unwrap();
         // 다음 = a
-        let popped2 = j.pop_undoable().await.unwrap().unwrap();
-        assert_eq!(popped2.id, a.id);
+        assert_eq!(j.peek_undoable().await.unwrap().unwrap().id, a.id);
+        j.commit_undone(a.id).await.unwrap();
         // 더 없음
-        assert!(j.pop_undoable().await.unwrap().is_none());
+        assert!(j.peek_undoable().await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn peek_does_not_mark_until_commit() {
+        let dir = tempdir().unwrap();
+        let j = Journal::load_from(&dir.path().join("j.jsonl"))
+            .await
+            .unwrap();
+        let a = j.push(mk_op(), mk_undo()).await.unwrap();
+        // peek 을 여러 번 해도 같은 엔트리 — 아직 소비 안 됨(undo 실패 시 재시도 가능).
+        assert_eq!(j.peek_undoable().await.unwrap().unwrap().id, a.id);
+        assert_eq!(j.peek_undoable().await.unwrap().unwrap().id, a.id);
+        // commit 후에만 소비됨.
+        j.commit_undone(a.id).await.unwrap();
+        assert!(j.peek_undoable().await.unwrap().is_none());
+        // commit 멱등 — 두 번 호출해도 안전.
+        j.commit_undone(a.id).await.unwrap();
     }
 
     #[tokio::test]
@@ -391,8 +416,8 @@ mod tests {
         let path = dir.path().join("j.jsonl");
         {
             let j = Journal::load_from(&path).await.unwrap();
-            j.push(mk_op(), mk_undo()).await.unwrap();
-            j.pop_undoable().await.unwrap();
+            let a = j.push(mk_op(), mk_undo()).await.unwrap();
+            j.commit_undone(a.id).await.unwrap();
         }
         // 새 인스턴스
         let j2 = Journal::load_from(&path).await.unwrap();
