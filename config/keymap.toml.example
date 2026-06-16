@@ -1,87 +1,40 @@
 # duet 키맵 설정 예시
-# ~/.duet/keymap.toml 로 복사해서 사용
+# <config_dir>/duet/keymap.toml 로 복사해서 사용.
 #
-# 모든 키바인딩은 여기서 재정의 가능.
-# OS별 자동 매핑: macOS는 Cmd, 다른 OS는 Ctrl
+# 형식: [bindings] 테이블에 "키" = "command_id".
+# 여기에 적은 키가 그 command 의 기본키를 덮어쓴다 (없는 키는 기본키 유지).
+# 더 쉬운 방법: 설정(Ctrl+,) → Keymap 에서 직접 Edit / Restore defaults.
 #
-# 키 표기:
-#   - 일반 키: "j", "k", "Enter", "Tab", "Esc", "Space"
-#   - 조합: "Ctrl+C", "Shift+Tab", "Alt+Up"
-#   - 함수키: "F1" .. "F12"
-#   - 시퀀스: ["g", "g"] (2 단계)
+# 키 표기 (lib/keyEvent.ts 기준, 수정자 순서 Ctrl→Alt→Shift):
+#   일반 키: "J", "Enter", "Tab", "Esc", "Delete", "F2"
+#   조합:    "Ctrl+C", "Ctrl+Shift+F", "Alt+Left"
+#   macOS Cmd 는 "Ctrl" 로 표기 (cross-platform 통일).
 #
-# 한 동작에 여러 키 매핑 가능. 첫 번째가 도움말에 표시됨.
+# command_id 전체 목록은 설정 → Keymap 에서 확인 (각 행의 command).
 
-[global]
-# Navigation
-move_down       = ["Down", "j"]
-move_up         = ["Up", "k"]
-go_back         = ["Alt+Left", "Backspace"]
-go_forward      = ["Alt+Right"]
-go_up           = ["Alt+Up"]
-enter_dir       = ["Enter"]
-switch_pane     = ["Tab"]
-focus_pane_left = ["Ctrl+1"]
-focus_pane_right = ["Ctrl+2"]
+[bindings]
+# 파일 작업 (TC 표준)
+"F5"           = "file.copy"
+"F6"           = "file.move"
+"F2"           = "file.rename"
+"F7"           = "file.newFolder"
+"Delete"       = "file.delete"
+"Shift+Delete" = "file.deletePerm"
+"Ctrl+Shift+C" = "file.copyPath"
+"Ctrl+Alt+C"   = "file.copyName"
+"Ctrl+Z"       = "edit.undo"
 
-# Selection
-toggle_select   = ["Space"]
-select_all      = ["Ctrl+A"]
-clear_selection = ["Esc"]
+# 네비게이션 / 뷰
+"Alt+Left"     = "nav.back"
+"Alt+Right"    = "nav.forward"
+"Ctrl+R"       = "view.refresh"
+"Ctrl+H"       = "view.toggleHidden"
+"Ctrl+B"       = "view.toggleSidebar"
 
-# File ops (TC 호환 + 모던 표준)
-view            = ["F3"]
-edit            = ["F4"]
-copy            = ["F5", "Ctrl+C"]
-paste           = ["Ctrl+V"]
-move            = ["F6", "Ctrl+X"]
-new_folder      = ["F7", "Ctrl+Shift+N"]
-new_file        = ["Ctrl+N"]
-delete_trash    = ["Delete", "F8"]
-delete_perm     = ["Shift+Delete", "Shift+F8"]
-rename          = ["F2", "Shift+F6"]
-
-# View
-refresh         = ["Ctrl+R"]
-toggle_hidden   = ["Ctrl+H"]
-toggle_preview  = ["F11"]
-toggle_sidebar  = ["Ctrl+B"]
-toggle_theme    = ["Ctrl+Shift+T"]
-sort_name       = ["Ctrl+1"]
-sort_size       = ["Ctrl+2"]
-sort_date       = ["Ctrl+3"]
-sort_type       = ["Ctrl+4"]
-
-# Search
-filter          = ["Ctrl+F"]
-search_global   = ["Ctrl+Shift+F"]
-
-# Tabs
-tab_new         = ["Ctrl+T"]
-tab_close       = ["Ctrl+W"]
-tab_next        = ["Ctrl+Tab"]
-tab_prev        = ["Ctrl+Shift+Tab"]
-
-# Connection
-connect         = ["Ctrl+K"]
-quick_connect   = ["Ctrl+Shift+K"]
-
-# Misc
-command_palette = ["Ctrl+P"]
-settings        = ["Ctrl+,"]
-undo            = ["Ctrl+Z"]
-edit_path       = ["Ctrl+L"]
-quit            = ["Ctrl+Q"]
-
-
-[in_dialog]
-# 다이얼로그 표시 중에 동작
-submit          = ["Enter"]
-cancel          = ["Esc"]
-confirm_yes     = ["y", "Y"]
-confirm_no      = ["n", "N"]
-confirm_all     = ["a", "A"]
-
-
-# 사용자 추가 매핑
-# my_action = ["F12"]
+# 탭 / 검색 / 설정
+"Ctrl+T"       = "tab.new"
+"Ctrl+W"       = "tab.close"
+"Ctrl+F"       = "filter.focus"
+"Ctrl+Shift+F" = "search.global"
+"Ctrl+P"       = "palette.open"
+"Ctrl+,"       = "settings.open"
