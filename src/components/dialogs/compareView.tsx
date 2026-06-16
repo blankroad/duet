@@ -65,21 +65,21 @@ export function strategyBadge(s: CopyStrategy): StrategyBadge {
   switch (s.kind) {
     case "ssh_same_host":
       return {
-        label: "⚡ 같은 호스트 직접",
+        label: "⚡ Same-host direct",
         tone: "border-accent bg-subtle text-accent",
-        title: "머지가 서버 내부에서 직접 실행됩니다 — 본인 PC 대역폭 0",
+        title: "Merge runs directly on the server — zero PC bandwidth",
       };
     case "relay":
       return {
-        label: "↔ 본인 PC 경유",
+        label: "↔ Via your PC",
         tone: "border-amber-500/40 bg-amber-500/10 text-amber-600",
-        title: "파일이 본인 PC 를 거쳐 복사됩니다 (cross-host)",
+        title: "Files are copied through your PC (cross-host)",
       };
     case "local_to_local":
       return {
-        label: "로컬",
+        label: "Local",
         tone: "border-border bg-subtle text-fg-muted",
-        title: "로컬 ↔ 로컬",
+        title: "Local ↔ Local",
       };
   }
 }
@@ -174,9 +174,9 @@ export function DirectionToggle({
   };
   return (
     <span className="flex items-center justify-end font-mono">
-      {opt("to_left", "←", "오른쪽 → 왼쪽")}
-      {opt("skip", "·", "건너뜀")}
-      {opt("to_right", "→", "왼쪽 → 오른쪽")}
+      {opt("to_left", "←", "Right → Left")}
+      {opt("skip", "·", "Skip")}
+      {opt("to_right", "→", "Left → Right")}
     </span>
   );
 }

@@ -70,10 +70,10 @@ export function CompareDiffPreview({
     </div>
   );
 
-  if (!entry) return <Shell>{note("행을 선택하면 미리보기가 표시됩니다.")}</Shell>;
-  if (!previewable) return <Shell>{note("미리보기 없음 (한쪽 전용/디렉토리).")}</Shell>;
-  if (loading) return <Shell>{note("불러오는 중…")}</Shell>;
-  if (error) return <Shell>{note(`미리보기 실패: ${error}`, true)}</Shell>;
+  if (!entry) return <Shell>{note("Select a row to preview.")}</Shell>;
+  if (!previewable) return <Shell>{note("No preview (one-side only / directory).")}</Shell>;
+  if (loading) return <Shell>{note("Loading…")}</Shell>;
+  if (error) return <Shell>{note(`Preview failed: ${error}`, true)}</Shell>;
   if (!data) return null;
 
   if (data.left.kind === "text" && data.right.kind === "text") {
@@ -102,7 +102,7 @@ export function CompareDiffPreview({
               {op.text}
             </div>
           ))}
-          {truncated && note("(일부만 표시 — 큰 파일)", false)}
+          {truncated && note("(truncated — large file)", false)}
         </div>
       </Shell>
     );
@@ -123,7 +123,7 @@ export function CompareDiffPreview({
     );
   }
 
-  return <Shell>{note(`미리보기: ${data.left.kind} ↔ ${data.right.kind} (텍스트/이미지 아님)`)}</Shell>;
+  return <Shell>{note(`Preview: ${data.left.kind} ↔ ${data.right.kind} (not text/image)`)}</Shell>;
 }
 
 function note(text: string, danger = false) {

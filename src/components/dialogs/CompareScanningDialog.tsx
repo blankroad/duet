@@ -30,10 +30,10 @@ export function CompareScanningDialog() {
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
         <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-xs -translate-x-1/2 -translate-y-1/2 rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none">
           <Dialog.Title className="flex items-center gap-2 text-title font-medium">
-            <Loader2 size={15} className="animate-spin text-accent" /> 폴더 비교 중…
+            <Loader2 size={15} className="animate-spin text-accent" /> Comparing folders…
           </Dialog.Title>
           <div className="mt-2 text-meta text-fg-muted">
-            <b className="text-fg">{scanned.toLocaleString()}</b> 항목 스캔됨
+            <b className="text-fg">{scanned.toLocaleString()}</b> items scanned
           </div>
           <div className="mt-4 flex justify-end">
             <button
@@ -41,7 +41,7 @@ export function CompareScanningDialog() {
               onClick={cancel}
               className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
             >
-              취소
+              Cancel
             </button>
           </div>
           <Dialog.Description className="sr-only">

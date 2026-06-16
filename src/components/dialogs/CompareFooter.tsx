@@ -24,9 +24,9 @@ export function CompareFooter({
   return (
     <div className="mt-3 flex items-center justify-between gap-2">
       <span className="text-meta text-fg-muted">
-        적용: 생성 <b className="text-fg">{create}</b> · 덮어쓰기{" "}
+        Apply: create <b className="text-fg">{create}</b> · overwrite{" "}
         <b className="text-fg">{overwrite}</b>
-        {overwrite > 0 && " (백업 후, undo 가능)"}
+        {overwrite > 0 && " (after backup, undoable)"}
       </span>
       <div className="flex gap-2">
         <button
@@ -43,8 +43,8 @@ export function CompareFooter({
           className="rounded border border-border px-3 py-1 text-base hover:bg-subtle disabled:opacity-50"
           title={
             truncated
-              ? "비교가 잘려 머지할 수 없습니다 — 범위를 좁히세요"
-              : "한쪽에만 있는 파일을 양방향으로 복사 (덮어쓰기/삭제 없음, undo 가능)"
+              ? "Comparison truncated — can't merge. Narrow the scope."
+              : "Copy one-side-only files both ways (no overwrite/delete, undoable)"
           }
         >
           Merge ↔
@@ -56,8 +56,8 @@ export function CompareFooter({
           className="rounded bg-accent px-3 py-1 text-base text-white disabled:opacity-50"
           title={
             truncated
-              ? "비교가 잘려 적용할 수 없습니다 — 범위를 좁히세요"
-              : "고른 방향대로 적용 (덮어쓰기는 .bak 백업, undo 가능)"
+              ? "Comparison truncated — can't apply. Narrow the scope."
+              : "Apply chosen directions (overwrites backed up to .bak, undoable)"
           }
         >
           Apply ({applyCount})
