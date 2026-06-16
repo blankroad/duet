@@ -587,6 +587,7 @@ async fn auth_orchestrated_on_handle(
     handle: &mut Handle<HostKeyVerifier>,
     host: &SshHostEntry,
 ) -> Result<(), DuetError> {
+    // 1. config 의 IdentityFile 들.
     for key_path in &host.identity_files {
         match auth_publickey_on_handle(handle, &host.user, key_path, None).await {
             Ok(()) => return Ok(()),
@@ -594,7 +595,34 @@ async fn auth_orchestrated_on_handle(
             Err(e) => return Err(e),
         }
     }
+    // 2. 기본 키 (~/.ssh/id_ed25519, id_ecdsa, id_rsa) — 표준 ssh 처럼 자동 시도.
+    //    IdentityFile 미설정 + Windows(agent 미지원)에서도 키 인증이 되게 한다.
+    //    (ssh-copy-id 로 설치한 키가 바로 먹는 핵심.) config 중복 경로는 skip.
+    for key_path in default_identity_files() {
+        if host.identity_files.contains(&key_path) || !key_path.exists() {
+            continue;
+        }
+        match auth_publickey_on_handle(handle, &host.user, &key_path, None).await {
+            Ok(()) => return Ok(()),
+            Err(DuetError::AuthFailed) => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    // 3. SSH agent (Unix 전용 — Windows 는 no-op AuthFailed).
     auth_agent_on_handle(handle, &host.user).await
+}
+
+/// 표준 OpenSSH 기본 개인키 경로 (`~/.ssh/id_ed25519`, `id_ecdsa`, `id_rsa`).
+/// ssh 가 IdentityFile 미설정 시 자동 시도하는 것과 동일 — passphrase 걸린 키는
+/// `load_secret_key(None)` 가 실패해 AuthFailed 로 skip (그럼 비번 fallback).
+fn default_identity_files() -> Vec<PathBuf> {
+    let Some(ssh) = dirs::home_dir().map(|h| h.join(".ssh")) else {
+        return Vec::new();
+    };
+    ["id_ed25519", "id_ecdsa", "id_rsa"]
+        .iter()
+        .map(|n| ssh.join(n))
+        .collect()
 }
 
 /// 임의의 AsyncRead+AsyncWrite 스트림 위에 SSH 핸드셰이크.
