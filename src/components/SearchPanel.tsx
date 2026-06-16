@@ -39,6 +39,9 @@ export function SearchPanel({
   };
 
   const inputRef = useRef<HTMLInputElement>(null);
+  // 요청 경합 가드 — 매 검색마다 증가. 응답 도착 시 최신 seq 아니면 버림
+  // (느린 첫-빌드 응답이 더 새 쿼리 결과를 덮어쓰는 버그 방지).
+  const seqRef = useRef(0);
 
   useEffect(() => {
     if (isOpen) inputRef.current?.focus();
@@ -47,6 +50,8 @@ export function SearchPanel({
   // debounce 200ms — query 또는 root 변경 시 IPC.
   useEffect(() => {
     if (!isOpen || !root) return;
+    // 이 effect 실행의 id. 변경마다 증가하므로 in-flight 이전 검색은 stale 처리됨.
+    const seq = ++seqRef.current;
     const trimmed = query.trim();
     if (trimmed.length < 2) {
       setResults([]);
@@ -66,6 +71,7 @@ export function SearchPanel({
         const r = content
           ? await commands.searchGlobal(root, trimmed, opts)
           : await commands.indexSearch(root, trimmed, opts);
+        if (seq !== seqRef.current) return; // 더 새 검색이 시작됨 → 이 응답은 버림
         if (r.status === "ok") setResults(r.data ?? []);
         else setError(r.error.kind);
       })();
@@ -98,8 +104,10 @@ export function SearchPanel({
               e.preventDefault();
               close();
             } else if (e.key === "Enter" && results[0]) {
+              // Enter = 이동 + 닫기(확정). 마우스 클릭은 패널 유지(여러 결과 탐색).
               e.preventDefault();
               onPickHit(results[0]);
+              close();
             }
           }}
           placeholder={content ? "Search file contents…" : "Search filenames…"}

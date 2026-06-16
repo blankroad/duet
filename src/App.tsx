@@ -391,7 +391,7 @@ function App() {
         const tab = activeTab(usePanes.getState(), rootPaneId);
         const idx = tab.entries.findIndex((e: Entry) => e.name === hit.name);
         if (idx >= 0) usePanes.getState().setCursor(rootPaneId, idx);
-        useSearch.getState().close();
+        // 검색창은 닫지 않음 — 여러 결과를 연속 클릭하며 탐색 가능(Enter/Esc 로 닫기).
       })();
     },
     [navigate],
