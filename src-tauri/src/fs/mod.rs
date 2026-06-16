@@ -228,16 +228,161 @@ async fn stream_copy_file(
         .shutdown()
         .await
         .map_err(|e| DuetError::Io(format!("copy close: {e}")))?;
-    // 완성 — .part 를 최종 이름으로. dst 가 이미 있으면(예: dir 재시도로 재복사된
-    // 완료 파일; 호출자가 사전 백업 보장) 우리 것이므로 제거 후 rename (SFTP rename 은
-    // 기존 파일에 실패할 수 있어 명시 제거).
-    if let Err(e) = dst_fs.rename(&part, dst).await {
+    // 완성 — .part 를 최종 이름으로 교체.
+    finalize_part(dst_fs, &part, dst).await
+}
+
+/// `.part` 임시본을 최종 `dst` 로 교체. rename 이 기존 dst 를 못 덮는 경우(SFTP rename
+/// 은 기존 파일에 실패 가능) dst 를 `.duet-old` 백업으로 비켜둔 뒤 교체하고 백업을 제거한다.
+/// 어느 순간에도 dst 또는 백업 중 하나가 항상 존재 — 기존의 `remove(dst)→rename` 사이
+/// 크래시로 인한 영구 데이터 손실 윈도우를 제거한다.
+async fn finalize_part(
+    dst_fs: &dyn FileSystem,
+    part: &std::path::Path,
+    dst: &std::path::Path,
+) -> Result<(), DuetError> {
+    if let Err(e) = dst_fs.rename(part, dst).await {
         if dst_fs.metadata(dst).await.is_ok() {
-            dst_fs.remove(dst).await?;
-            dst_fs.rename(&part, dst).await?;
+            let backup = {
+                let mut s = dst.as_os_str().to_os_string();
+                s.push(".duet-old");
+                std::path::PathBuf::from(s)
+            };
+            dst_fs.rename(dst, &backup).await?; // dst → 백업 (원본 보존)
+            dst_fs.rename(part, dst).await?; // part → dst
+            let _ = dst_fs.remove(&backup).await; // 백업 정리 (실패는 비치명)
         } else {
             return Err(e);
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{finalize_part, FileSystem};
+    use crate::types::{DuetError, Entry, EntryKind, EntryMeta, SourceId, TrashLocation};
+    use async_trait::async_trait;
+    use std::path::Path;
+    use std::pin::Pin;
+    use std::sync::Mutex;
+
+    /// 호출 순서를 기록하는 mock — finalize_part 의 rename/remove 시퀀스 검증용.
+    #[derive(Default)]
+    struct RecordingFs {
+        calls: Mutex<Vec<String>>,
+        rename_count: Mutex<u32>,
+        /// 첫 rename(part→dst) 을 실패시켜 SFTP "교체 불가" 를 흉내.
+        fail_first_rename: bool,
+    }
+
+    #[async_trait]
+    impl FileSystem for RecordingFs {
+        fn source_id(&self) -> SourceId {
+            SourceId::Local
+        }
+        async fn list(&self, _p: &Path) -> Result<Vec<Entry>, DuetError> {
+            unimplemented!()
+        }
+        async fn metadata(&self, p: &Path) -> Result<EntryMeta, DuetError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("metadata({})", p.display()));
+            Ok(EntryMeta {
+                kind: EntryKind::File,
+                size: Some(1),
+                modified_ms: None,
+                permissions: None,
+            })
+        }
+        async fn rename(&self, from: &Path, to: &Path) -> Result<(), DuetError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("rename({},{})", from.display(), to.display()));
+            let mut n = self.rename_count.lock().unwrap();
+            *n += 1;
+            if *n == 1 && self.fail_first_rename {
+                Err(DuetError::Ssh("sftp: failure (cannot replace)".into()))
+            } else {
+                Ok(())
+            }
+        }
+        async fn mkdir(&self, _p: &Path) -> Result<(), DuetError> {
+            unimplemented!()
+        }
+        async fn trash(&self, _p: &Path, _b: &str) -> Result<TrashLocation, DuetError> {
+            unimplemented!()
+        }
+        async fn remove(&self, p: &Path) -> Result<(), DuetError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("remove({})", p.display()));
+            Ok(())
+        }
+        async fn restore_from_trash(&self, _l: &TrashLocation, _o: &Path) -> Result<(), DuetError> {
+            unimplemented!()
+        }
+        async fn read_full(&self, _p: &Path) -> Result<Vec<u8>, DuetError> {
+            unimplemented!()
+        }
+        async fn write_full(&self, _p: &Path, _b: &[u8]) -> Result<(), DuetError> {
+            unimplemented!()
+        }
+        async fn open_read(
+            &self,
+            _p: &Path,
+            _o: u64,
+        ) -> Result<Pin<Box<dyn tokio::io::AsyncRead + Send>>, DuetError> {
+            unimplemented!()
+        }
+        async fn open_write(
+            &self,
+            _p: &Path,
+            _o: u64,
+        ) -> Result<Pin<Box<dyn tokio::io::AsyncWrite + Send>>, DuetError> {
+            unimplemented!()
+        }
+    }
+
+    #[tokio::test]
+    async fn finalize_uses_backup_swap_not_destructive_remove() {
+        let fs = RecordingFs {
+            fail_first_rename: true,
+            ..Default::default()
+        };
+        finalize_part(&fs, Path::new("/d/f.duet-part"), Path::new("/d/f"))
+            .await
+            .unwrap();
+        let calls = fs.calls.lock().unwrap().clone();
+        assert_eq!(
+            calls,
+            vec![
+                "rename(/d/f.duet-part,/d/f)".to_string(), // 첫 시도 실패
+                "metadata(/d/f)".to_string(),              // dst 존재 확인
+                "rename(/d/f,/d/f.duet-old)".to_string(),  // dst → 백업
+                "rename(/d/f.duet-part,/d/f)".to_string(), // part → dst
+                "remove(/d/f.duet-old)".to_string(),       // 백업 정리
+            ]
+        );
+        // 핵심: dst 자체가 백업 없이 remove 되지 않음 (데이터 손실 윈도우 없음).
+        assert!(!calls.iter().any(|c| c == "remove(/d/f)"));
+    }
+
+    #[tokio::test]
+    async fn finalize_happy_path_single_rename() {
+        let fs = RecordingFs::default(); // 첫 rename 성공
+        finalize_part(&fs, Path::new("/d/f.duet-part"), Path::new("/d/f"))
+            .await
+            .unwrap();
+        assert_eq!(*fs.rename_count.lock().unwrap(), 1);
+        assert!(!fs
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|c| c.starts_with("remove")));
+    }
 }
