@@ -20,10 +20,12 @@ export function SearchPanel({
   const isOpen = useSearch((s) => s.isOpen);
   const root = useSearch((s) => s.root);
   const query = useSearch((s) => s.query);
+  const content = useSearch((s) => s.content);
   const results = useSearch((s) => s.results);
   const status = useSearch((s) => s.status);
   const error = useSearch((s) => s.error);
   const setQueryNow = useSearch((s) => s.setQueryNow);
+  const setContent = useSearch((s) => s.setContent);
   const setResults = useSearch((s) => s.setResults);
   const setStatus = useSearch((s) => s.setStatus);
   const setError = useSearch((s) => s.setError);
@@ -51,13 +53,14 @@ export function SearchPanel({
           case_sensitive: false,
           include_hidden: false,
           max_results: 500,
+          content,
         });
         if (r.status === "ok") setResults(r.data ?? []);
         else setError(r.error.kind);
       })();
     }, 200);
     return () => clearTimeout(t);
-  }, [isOpen, root, query, setResults, setStatus, setError]);
+  }, [isOpen, root, query, content, setResults, setStatus, setError]);
 
   if (!isOpen) return null;
 
@@ -79,9 +82,36 @@ export function SearchPanel({
               onPickHit(results[0]);
             }
           }}
-          placeholder="Search filenames…"
+          placeholder={content ? "Search file contents…" : "Search filenames…"}
           className="flex-1 bg-transparent font-mono focus:outline-none"
         />
+        {/* 파일명 ↔ 내용(grep) 모드 토글 */}
+        <div className="flex shrink-0 overflow-hidden rounded border border-border text-meta">
+          <button
+            type="button"
+            onClick={() => setContent(false)}
+            className={
+              !content
+                ? "bg-accent px-1.5 py-0.5 text-white"
+                : "px-1.5 py-0.5 text-fg-muted hover:bg-border"
+            }
+            title="Search by filename"
+          >
+            Name
+          </button>
+          <button
+            type="button"
+            onClick={() => setContent(true)}
+            className={
+              content
+                ? "bg-accent px-1.5 py-0.5 text-white"
+                : "px-1.5 py-0.5 text-fg-muted hover:bg-border"
+            }
+            title="Search file contents (grep)"
+          >
+            Text
+          </button>
+        </div>
         {status === "searching" && (
           <Loader size={12} className="shrink-0 animate-spin text-fg-muted" />
         )}

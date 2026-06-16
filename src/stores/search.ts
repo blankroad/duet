@@ -2,13 +2,20 @@ import { create } from "zustand";
 import type { Location, SearchHit } from "@/types/bindings";
 import type { PaneId } from "./panes";
 
-export type SearchStatus = "idle" | "searching" | "done" | "error" | "cancelled";
+export type SearchStatus =
+  | "idle"
+  | "searching"
+  | "done"
+  | "error"
+  | "cancelled";
 
 interface SearchState {
   isOpen: boolean;
   rootPaneId: PaneId | null;
   root: Location | null;
   query: string;
+  /** true 면 파일 내용(grep) 검색, false 면 파일명 검색. */
+  content: boolean;
   results: SearchHit[];
   status: SearchStatus;
   error: string | null;
@@ -17,6 +24,7 @@ interface SearchState {
   close: () => void;
   /** input 의 onChange 직접 호출 — 실제 IPC 발사는 SearchPanel 컴포넌트가 debounce. */
   setQueryNow: (q: string) => void;
+  setContent: (c: boolean) => void;
   setResults: (hits: SearchHit[]) => void;
   setStatus: (s: SearchStatus) => void;
   setError: (msg: string) => void;
@@ -27,15 +35,33 @@ export const useSearch = create<SearchState>((set) => ({
   rootPaneId: null,
   root: null,
   query: "",
+  content: false,
   results: [],
   status: "idle",
   error: null,
 
   open: (paneId, root) =>
-    set({ isOpen: true, rootPaneId: paneId, root, query: "", results: [], status: "idle", error: null }),
+    set({
+      isOpen: true,
+      rootPaneId: paneId,
+      root,
+      query: "",
+      results: [],
+      status: "idle",
+      error: null,
+    }),
   close: () =>
-    set({ isOpen: false, rootPaneId: null, root: null, query: "", results: [], status: "idle", error: null }),
+    set({
+      isOpen: false,
+      rootPaneId: null,
+      root: null,
+      query: "",
+      results: [],
+      status: "idle",
+      error: null,
+    }),
   setQueryNow: (q) => set({ query: q }),
+  setContent: (c) => set({ content: c, results: [], status: "idle" }),
   setResults: (hits) => set({ results: hits, status: "done", error: null }),
   setStatus: (s) => set({ status: s }),
   setError: (msg) => set({ error: msg, status: "error" }),

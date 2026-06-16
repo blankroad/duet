@@ -6,7 +6,8 @@
 use std::sync::Arc;
 
 use crate::core::search::{
-    LocalFilenameSearch, SearchBackend, SearchHit, SearchOpts, SshFilenameSearch,
+    LocalContentSearch, LocalFilenameSearch, SearchBackend, SearchHit, SearchOpts,
+    SshContentSearch, SshFilenameSearch,
 };
 use crate::services::connection_pool::ConnectionPool;
 use crate::types::{DuetError, Location, SourceId};
@@ -58,13 +59,28 @@ pub async fn search_global(
     let cancel = active.inner().rotate().await;
     match &root.source {
         SourceId::Local => {
-            let backend = LocalFilenameSearch;
-            backend.search(&root.path, &pattern, &opts, cancel).await
+            // opts.content 에 따라 내용(grep) / 파일명 backend 선택.
+            if opts.content {
+                LocalContentSearch
+                    .search(&root.path, &pattern, &opts, cancel)
+                    .await
+            } else {
+                LocalFilenameSearch
+                    .search(&root.path, &pattern, &opts, cancel)
+                    .await
+            }
         }
         SourceId::Ssh { connection_id, .. } => {
             let conn = pool.inner().get(connection_id).await?;
-            let backend = SshFilenameSearch { conn };
-            backend.search(&root.path, &pattern, &opts, cancel).await
+            if opts.content {
+                SshContentSearch { conn }
+                    .search(&root.path, &pattern, &opts, cancel)
+                    .await
+            } else {
+                SshFilenameSearch { conn }
+                    .search(&root.path, &pattern, &opts, cancel)
+                    .await
+            }
         }
     }
 }

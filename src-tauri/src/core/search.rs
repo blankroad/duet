@@ -1,10 +1,10 @@
 //! 파일명/내용 검색 backend.
 //!
-//! v1 (MVP-5): 파일명 substring 검색만.
-//! - LocalFilenameSearch: `ignore::WalkBuilder` (.gitignore 자동 존중)
-//! - SshFilenameSearch: russh exec 채널로 `find -iname` 실행 (Task 7)
+//! - 파일명: LocalFilenameSearch(`ignore::WalkBuilder`) / SshFilenameSearch(`find -iname`)
+//! - 내용(grep): LocalContentSearch(파일 읽어 substring) / SshContentSearch(`grep -rlIF`)
+//!   — v1 은 매칭 *파일* 단위(라인/미리보기는 후속). 새 의존성 없이 substring.
 //!
-//! v2 후속: GrepSearch (ripgrep), result streaming (event 기반).
+//! 후속: 정규식 모드(regex crate, §6 승인 필요), 라인-단위 결과 streaming.
 
 use crate::types::{DuetError, EntryKind, Location, SourceId};
 use async_trait::async_trait;
@@ -18,6 +18,9 @@ pub struct SearchOpts {
     pub case_sensitive: bool,
     pub include_hidden: bool,
     pub max_results: usize,
+    /// true 면 파일 *내용* 검색(grep), false 면 파일명 검색.
+    #[serde(default)]
+    pub content: bool,
 }
 
 impl Default for SearchOpts {
@@ -26,6 +29,7 @@ impl Default for SearchOpts {
             case_sensitive: false,
             include_hidden: false,
             max_results: 500,
+            content: false,
         }
     }
 }
@@ -139,6 +143,158 @@ fn matches_substring(name: &str, pattern: &str, case_sensitive: bool) -> bool {
         name.contains(pattern)
     } else {
         name.to_lowercase().contains(&pattern.to_lowercase())
+    }
+}
+
+/// 내용 검색에서 건너뛸 파일 크기 상한 (이보다 크면 skip — 메모리/시간 보호).
+const CONTENT_MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
+
+/// 로컬 파일 *내용*(substring) 검색 — 매칭 파일을 hit 으로(파일 단위; 라인정보는 후속).
+/// 바이너리(NUL 포함)·대용량 파일은 skip. `.gitignore` 존중은 파일명 검색과 동일.
+pub struct LocalContentSearch;
+
+#[async_trait]
+impl SearchBackend for LocalContentSearch {
+    async fn search(
+        &self,
+        root: &Path,
+        pattern: &str,
+        opts: &SearchOpts,
+        cancel: CancellationToken,
+    ) -> Result<Vec<SearchHit>, DuetError> {
+        use ignore::WalkBuilder;
+        let root = root.to_path_buf();
+        let pattern = pattern.to_string();
+        let opts = opts.clone();
+
+        tokio::task::spawn_blocking(move || -> Result<Vec<SearchHit>, DuetError> {
+            let walker = WalkBuilder::new(&root)
+                .hidden(!opts.include_hidden)
+                .git_ignore(true)
+                .git_exclude(true)
+                .build();
+            let mut hits = Vec::new();
+            for entry in walker {
+                if cancel.is_cancelled() {
+                    return Err(DuetError::Cancelled);
+                }
+                if hits.len() >= opts.max_results {
+                    break;
+                }
+                let entry = match entry {
+                    Ok(e) => e,
+                    Err(_) => continue,
+                };
+                // 파일만 (디렉토리/심볼릭 skip).
+                if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                    continue;
+                }
+                let path = entry.path();
+                let meta = match entry.metadata() {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+                if meta.len() > CONTENT_MAX_FILE_BYTES {
+                    continue;
+                }
+                let bytes = match std::fs::read(path) {
+                    Ok(b) => b,
+                    Err(_) => continue,
+                };
+                // 바이너리 휴리스틱 — NUL 바이트 있으면 skip.
+                if bytes.contains(&0) {
+                    continue;
+                }
+                let text = String::from_utf8_lossy(&bytes);
+                if !matches_substring(&text, &pattern, opts.case_sensitive) {
+                    continue;
+                }
+                let name = match path.file_name().and_then(|n| n.to_str()) {
+                    Some(n) => n.to_string(),
+                    None => continue,
+                };
+                let parent = match path.parent() {
+                    Some(p) => p.to_path_buf(),
+                    None => continue,
+                };
+                let modified_ms = meta
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_millis() as i64);
+                hits.push(SearchHit {
+                    location: Location {
+                        source: SourceId::Local,
+                        path: parent,
+                    },
+                    name,
+                    kind: EntryKind::File,
+                    size: meta.len(),
+                    modified_ms,
+                });
+            }
+            Ok(hits)
+        })
+        .await
+        .map_err(|e| DuetError::Io(format!("content search join: {e}")))?
+    }
+}
+
+/// SSH 호스트의 `grep -rlIF` 로 내용 검색 (매칭 파일 목록). `-F`=고정문자열(substring),
+/// `-l`=파일목록, `-I`=바이너리 skip. 패턴은 single-quote escape.
+pub struct SshContentSearch {
+    pub conn: std::sync::Arc<crate::services::connection_pool::ActiveConnection>,
+}
+
+#[async_trait]
+impl SearchBackend for SshContentSearch {
+    async fn search(
+        &self,
+        root: &Path,
+        pattern: &str,
+        opts: &SearchOpts,
+        cancel: CancellationToken,
+    ) -> Result<Vec<SearchHit>, DuetError> {
+        use crate::core::copy_strategy::shell_escape_path;
+        use crate::ssh::remote_exec::exec;
+
+        let root_arg = shell_escape_path(root)?;
+        let pat_escaped = pattern.replace('\\', "\\\\").replace('\'', "\\'");
+        let case_flag = if opts.case_sensitive { "" } else { "i" };
+        // 숨김 디렉토리 제외(GNU grep). include_hidden 이면 생략.
+        let exclude = if opts.include_hidden {
+            String::new()
+        } else {
+            "--exclude-dir='.*' ".to_string()
+        };
+        let cmd = format!(
+            "grep -rlI{case_flag}F {exclude}-e '{pat_escaped}' -- {root_arg} 2>/dev/null | head -n {max}",
+            max = opts.max_results
+        );
+
+        let session_mutex = self
+            .conn
+            .session
+            .as_ref()
+            .ok_or_else(|| DuetError::ConnectionFailed("no live session".into()))?;
+        if cancel.is_cancelled() {
+            return Err(DuetError::Cancelled);
+        }
+        let result = {
+            let handle = session_mutex.lock().await;
+            exec(&handle, &cmd).await?
+        };
+        if cancel.is_cancelled() {
+            return Err(DuetError::Cancelled);
+        }
+        let stdout = String::from_utf8_lossy(&result.stdout);
+        let conn_id = self.conn.id.clone();
+        Ok(parse_find_output(
+            &stdout,
+            &conn_id,
+            self.conn.host_ip,
+            &self.conn.user,
+        ))
     }
 }
 
@@ -386,6 +542,73 @@ mod tests {
             .search(dir.path(), "alpha", &SearchOpts::default(), cancel)
             .await;
         assert!(matches!(res, Err(DuetError::Cancelled)));
+    }
+
+    #[tokio::test]
+    async fn local_content_matches_inside_files() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("a.txt"), b"hello needle world").unwrap();
+        fs::write(dir.path().join("b.txt"), b"nothing here").unwrap();
+        fs::write(dir.path().join("c.md"), b"another needle").unwrap();
+        let s = LocalContentSearch;
+        let hits = s
+            .search(
+                dir.path(),
+                "needle",
+                &SearchOpts {
+                    content: true,
+                    ..SearchOpts::default()
+                },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let mut names: Vec<&str> = hits.iter().map(|h| h.name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(names, vec!["a.txt", "c.md"]);
+    }
+
+    #[tokio::test]
+    async fn local_content_skips_binary_files() {
+        let dir = tempdir().unwrap();
+        // NUL 포함 = 바이너리 → 매칭돼도 skip.
+        fs::write(dir.path().join("bin.dat"), b"needle\0\0\0binary").unwrap();
+        fs::write(dir.path().join("text.txt"), b"needle text").unwrap();
+        let s = LocalContentSearch;
+        let hits = s
+            .search(
+                dir.path(),
+                "needle",
+                &SearchOpts {
+                    content: true,
+                    ..SearchOpts::default()
+                },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let names: Vec<&str> = hits.iter().map(|h| h.name.as_str()).collect();
+        assert_eq!(names, vec!["text.txt"]);
+    }
+
+    #[tokio::test]
+    async fn local_content_case_insensitive_default() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("a.txt"), b"HELLO NEEDLE").unwrap();
+        let s = LocalContentSearch;
+        let hits = s
+            .search(
+                dir.path(),
+                "needle",
+                &SearchOpts {
+                    content: true,
+                    ..SearchOpts::default()
+                },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(hits.len(), 1);
     }
 
     #[test]
