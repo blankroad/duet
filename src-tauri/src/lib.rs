@@ -78,6 +78,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::search::search_cancel,
             commands::search::index_search,
             commands::search::index_reindex,
+            commands::search::index_ensure,
             commands::keymap::keymap_list,
             commands::keymap::keymap_set,
             commands::keymap::keymap_unset,

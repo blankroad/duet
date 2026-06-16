@@ -182,3 +182,20 @@ pub async fn index_reindex(
 ) -> Result<(), DuetError> {
     build_index_for(&root, pool.inner(), index.inner()).await
 }
+
+/// 인덱스가 신선하지 않으면(미빌드 또는 TTL 초과) 빌드. 검색 패널 오픈 시 미리 호출해
+/// 첫 쿼리가 즉시 뜨고 결과가 stale 하지 않도록. 이미 신선하면 즉시 반환.
+#[tauri::command]
+#[specta::specta]
+pub async fn index_ensure(
+    root: Location,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+    index: tauri::State<'_, Arc<FileIndex>>,
+) -> Result<(), DuetError> {
+    // 60초 이내 빌드면 재빌드 생략(과도한 재워크 방지). 그보다 오래됐거나 미빌드면 빌드.
+    const TTL_MS: i64 = 60_000;
+    if index.is_fresh(&root.source, &root.path, TTL_MS).await {
+        return Ok(());
+    }
+    build_index_for(&root, pool.inner(), index.inner()).await
+}

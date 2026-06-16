@@ -103,6 +103,25 @@ impl FileIndex {
         self.cache_path(key).exists()
     }
 
+    /// 인덱스가 신선한지 — 빌드돼 있고 마지막 빌드가 `ttl_ms` 이내. 메모리에 없으면
+    /// 디스크에서 로드(캐싱)해 빌드 시각 확인. 미빌드면 false(빌드 필요).
+    pub async fn is_fresh(&self, source: &SourceId, root: &Path, ttl_ms: i64) -> bool {
+        let key = index_key(source, root);
+        let built = self.inner.read().await.get(&key).map(|i| i.built_at_ms);
+        let built = match built {
+            Some(b) => b,
+            None => match self.load_from_disk(&key).await {
+                Some(idx) => {
+                    let b = idx.built_at_ms;
+                    self.inner.write().await.insert(key, idx);
+                    b
+                }
+                None => return false,
+            },
+        };
+        now_ms() - built < ttl_ms
+    }
+
     /// 로컬 디렉토리 트리를 인덱싱(`ignore` 워크, .gitignore 존중). blocking I/O 라
     /// spawn_blocking 에서 호출됨을 가정하지 않고 내부에서 처리.
     pub async fn build_local(self: &Arc<Self>, root: &Path) -> Result<usize, DuetError> {
