@@ -321,40 +321,51 @@ fn local_public_key() -> Result<String, DuetError> {
     ))
 }
 
-/// `ssh-copy-id` 와 동일한 한 줄 셸 — umask 077, `~/.ssh` 생성, dedup append, 권한 보정.
-/// 공개키는 single-quote escape (base64 라 quote 없음, 방어적).
-fn build_install_pubkey_cmd(pubkey: &str) -> String {
-    let escaped = pubkey.replace('\'', "'\\''");
+/// `ssh-copy-id` 와 동일 — umask 077, `<home>/.ssh` 생성, dedup append, 권한 보정,
+/// **마지막에 재확인 grep** 으로 exit status 가 "키가 실제로 들어있는지"를 반영한다
+/// (false success 차단). **절대 home 경로**를 받아 `~` 셸 확장에 의존하지 않는다.
+/// 인자(home/pubkey)는 single-quote escape.
+fn build_install_pubkey_cmd(home: &str, pubkey: &str) -> String {
+    let k = pubkey.replace('\'', "'\\''");
+    let h = home.replace('\'', "'\\''");
     format!(
-        "umask 077; mkdir -p ~/.ssh && {{ grep -qxF '{escaped}' ~/.ssh/authorized_keys 2>/dev/null \
-         || echo '{escaped}' >> ~/.ssh/authorized_keys; }} && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys"
+        "umask 077; mkdir -p '{h}/.ssh' && touch '{h}/.ssh/authorized_keys' && \
+         {{ grep -qxF '{k}' '{h}/.ssh/authorized_keys' || printf '%s\\n' '{k}' >> '{h}/.ssh/authorized_keys'; }} && \
+         chmod 700 '{h}/.ssh' && chmod 600 '{h}/.ssh/authorized_keys' && \
+         grep -qxF '{k}' '{h}/.ssh/authorized_keys'"
     )
 }
 
-/// 로컬 공개키를 원격 `~/.ssh/authorized_keys` 에 설치 (ssh-copy-id).
+/// 로컬 공개키를 원격 `<home>/.ssh/authorized_keys` 에 설치 (ssh-copy-id).
 ///
 /// 비밀번호로 접속한 뒤 이걸 호출하면, 이후 `connect`(키→agent→비번 폴백)가 키로
 /// 자동 인증 → 비밀번호 불필요. 키 생성은 하지 않는다 (로컬 키 없으면 안내 에러).
-/// 원격 변경은 russh exec (§9 — 시스템 ssh 아님). 공개키만 다룸 (§5 무관).
+/// home 은 SFTP `canonicalize(".")` 로 받은 절대경로 — `~` 미사용. 원격 변경은
+/// russh exec (§9). 공개키만 다룸 (§5 무관). 성공 시 설치된 절대경로 반환(검증용).
 #[tauri::command]
 #[specta::specta]
 pub async fn ssh_setup_key_auth(
     connection_id: ConnectionId,
     pool: tauri::State<'_, Arc<ConnectionPool>>,
-) -> Result<(), DuetError> {
+) -> Result<String, DuetError> {
     let pubkey = local_public_key()?;
     let conn = pool.inner().get(&connection_id).await?;
+    // 절대 home 경로 (SFTP canonicalize) — `~` 셸 확장에 의존 안 함.
+    let home = crate::fs::SshFs::new(Arc::clone(&conn)).home().await?;
+    let home_str = home
+        .to_str()
+        .ok_or_else(|| DuetError::Io("non-UTF8 remote home".into()))?;
     let session_mutex = conn
         .session
         .as_ref()
         .ok_or_else(|| DuetError::ConnectionFailed("no live session".into()))?;
-    let cmd = build_install_pubkey_cmd(&pubkey);
+    let cmd = build_install_pubkey_cmd(home_str, &pubkey);
     let out = {
         let handle = session_mutex.lock().await;
         crate::ssh::remote_exec::exec(&handle, &cmd).await?
     };
     if out.exit_status == 0 {
-        Ok(())
+        Ok(format!("{home_str}/.ssh/authorized_keys"))
     } else {
         Err(DuetError::Ssh(format!(
             "key install failed (exit {}): {}",
@@ -372,19 +383,26 @@ mod tests {
 
     #[test]
     fn install_pubkey_cmd_is_ssh_copy_id_shaped() {
-        let cmd = build_install_pubkey_cmd("ssh-ed25519 AAAAC3Nz user@host");
-        assert!(cmd.contains("mkdir -p ~/.ssh"));
-        assert!(cmd.contains("grep -qxF 'ssh-ed25519 AAAAC3Nz user@host'")); // dedup
-        assert!(cmd.contains(">> ~/.ssh/authorized_keys")); // append
-        assert!(cmd.contains("chmod 700 ~/.ssh"));
-        assert!(cmd.contains("chmod 600 ~/.ssh/authorized_keys"));
+        let cmd = build_install_pubkey_cmd("/home/u", "ssh-ed25519 AAAAC3Nz user@host");
+        // 절대경로 사용 (~ 미사용).
+        assert!(cmd.contains("mkdir -p '/home/u/.ssh'"));
+        assert!(!cmd.contains("~/.ssh"));
+        assert!(cmd
+            .contains("grep -qxF 'ssh-ed25519 AAAAC3Nz user@host' '/home/u/.ssh/authorized_keys'"));
+        assert!(cmd.contains(">> '/home/u/.ssh/authorized_keys'")); // append
+        assert!(cmd.contains("chmod 700 '/home/u/.ssh'"));
+        assert!(cmd.contains("chmod 600 '/home/u/.ssh/authorized_keys'"));
         assert!(cmd.contains("umask 077"));
+        // 마지막 재확인 grep — exit status 가 키 존재 여부를 반영.
+        assert!(cmd.trim_end().ends_with(
+            "grep -qxF 'ssh-ed25519 AAAAC3Nz user@host' '/home/u/.ssh/authorized_keys'"
+        ));
     }
 
     #[test]
     fn install_pubkey_cmd_escapes_single_quote() {
-        // 키에 ' 가 있어도(이례적) 셸 인젝션 안 되게 escape.
-        let cmd = build_install_pubkey_cmd("ab'cd");
+        // 키/home 에 ' 가 있어도(이례적) 셸 인젝션 안 되게 escape.
+        let cmd = build_install_pubkey_cmd("/home/u", "ab'cd");
         assert!(cmd.contains("ab'\\''cd"));
     }
 

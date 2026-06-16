@@ -478,7 +478,7 @@ function App() {
           const r = await commands.sshSetupKeyAuth(src.connection_id);
           showToast(
             r.status === "ok"
-              ? "Passwordless login set up — your key is installed"
+              ? `Passwordless login set up — installed at ${r.data}`
               : `Setup failed: ${formatErr(r.error)}`,
           );
         })();
