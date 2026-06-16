@@ -69,8 +69,8 @@ export function ArgsDialog({ name, initial, onClose, onSubmit }: ArgsDialogProps
             <Plus size={12} /> Add argument
           </button>
           <p className="mt-3 text-meta text-fg-muted">
-            argv 배열로 그대로 전달 (셸 미경유). macOS GUI 앱 대부분은 인자를 무시하며 새
-            인스턴스로 실행됩니다.
+            Passed as an argv array (no shell). Most macOS GUI apps ignore args and launch
+            a new instance.
           </p>
           <div className="mt-4 flex justify-end gap-2">
             <button

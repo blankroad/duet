@@ -109,7 +109,7 @@ export function ConnectionDialog({ alias, onClose, onConnected }: ConnectionDial
 
           <div className="mt-3">
             <label htmlFor="conn-pw" className="block text-meta text-fg-muted">
-              Password (optional — 키/agent 실패 시 fallback)
+              Password (optional — fallback if key/agent fails)
             </label>
             <input
               id="conn-pw"
@@ -216,7 +216,7 @@ function ErrorBox({ error }: { error: DuetError }) {
       <div className="text-fg-muted">{message}</div>
       {isAuth && (
         <div className="mt-1 text-fg-muted">
-          키/agent + (입력했으면) password 모두 실패. password 확인 후 다시 시도.
+          Key/agent + (if entered) password all failed. Check the password and retry.
         </div>
       )}
     </div>

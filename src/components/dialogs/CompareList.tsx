@@ -82,8 +82,8 @@ export function CompareList({
       {rows.length === 0 ? (
         <div className="px-2 py-3 text-center text-meta text-fg-muted">
           {entriesEmpty
-            ? "차이 없음 — 두 폴더가 동일합니다."
-            : "표시할 항목 없음 (필터/검색 조건)."}
+            ? "No differences — the two folders are identical."
+            : "No items to show (filter/search)."}
         </div>
       ) : (
         <table className="w-full text-meta">

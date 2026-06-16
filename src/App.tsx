@@ -933,7 +933,7 @@ function App() {
             void (async () => {
               const r = await commands.fsApplyThreeWay(base, left, right);
               if (r.status === "ok") {
-                openDialog({ kind: "progress", title: "3-way 적용…", taskId: r.data });
+                openDialog({ kind: "progress", title: "Applying 3-way…", taskId: r.data });
               } else {
                 closeDialog();
                 showToast(`3-way apply failed: ${formatErr(r.error)}`);

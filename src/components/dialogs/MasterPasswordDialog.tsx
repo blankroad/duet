@@ -89,8 +89,8 @@ export function MasterPasswordDialog({
 
           <p className="mb-3 text-meta text-fg-muted">
             {mode === "create"
-              ? "비밀번호 vault 가 아직 없어요. 마스터 비밀번호를 정하면 saved hosts 의 password 가 암호화되어 저장됩니다 (age, scrypt+ChaCha20). 마스터를 잊으면 복구 불가."
-              : "저장된 password 를 사용하려면 마스터 비밀번호를 입력하세요. 세션 동안 메모리에만 캐시됨."}
+              ? "No password vault yet. Set a master password to encrypt saved hosts' passwords (age, scrypt+ChaCha20). If you forget the master, it can't be recovered."
+              : "Enter the master password to use saved passwords. Cached in memory only for the session."}
           </p>
 
           <input

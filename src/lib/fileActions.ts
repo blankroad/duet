@@ -135,7 +135,7 @@ export async function triggerThreeWay(open: OpenFn, showToast: ToastFn): Promise
   const state = usePanes.getState();
   const left = activeTab(state, active).location;
   const right = activeTab(state, opposite).location;
-  const input = window.prompt("base(공통 조상) 디렉토리 경로 — left 소스 기준:", String(left.path));
+  const input = window.prompt("Base (common ancestor) directory path — relative to the left source:", String(left.path));
   if (input == null || input.trim() === "") return;
   const baseLoc: Location = { source: left.source, path: input.trim() };
   const r = await commands.fsCompareThreeWay(baseLoc, left, right);

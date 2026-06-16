@@ -34,7 +34,7 @@ export function CompareFilterBar({
               "flex items-center gap-1 rounded border px-1.5 py-0.5 text-meta",
               on ? "border-border bg-subtle" : "border-transparent text-fg-muted opacity-60",
             )}
-            title={`${LABEL[s]} 토글`}
+            title={`Toggle ${LABEL[s]}`}
           >
             <Icon size={11} className={TONE[s]} />
             <span>{LABEL[s]}</span>

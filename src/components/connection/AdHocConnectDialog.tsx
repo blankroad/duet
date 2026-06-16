@@ -277,7 +277,7 @@ export function AdHocConnectDialog({
               autoComplete="off"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="(optional — 키/agent 실패 시 fallback)"
+              placeholder="(optional — fallback if key/agent fails)"
               className="rounded border border-border bg-subtle px-2 py-1 font-mono focus:border-accent focus:outline-none"
             />
           </div>
@@ -360,7 +360,7 @@ export function AdHocConnectDialog({
               <div className="text-fg-muted">{formatErr(phase.error)}</div>
               {phase.error.kind === "AuthFailed" && (
                 <div className="mt-1 text-fg-muted">
-                  키/agent 실패. password 입력 후 다시 시도하거나 키파일 경로 확인.
+                  Key/agent failed. Enter a password and retry, or check the key file path.
                 </div>
               )}
             </div>

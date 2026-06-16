@@ -169,9 +169,9 @@ function FolderDirSet({ onSet }: { onSet: (dir: ApplyDirection) => void }) {
   );
   return (
     <span className="flex w-14 shrink-0 items-center justify-end font-mono">
-      {btn("to_left", "←", "이 폴더 전체: 오른쪽 → 왼쪽")}
-      {btn("skip", "·", "이 폴더 전체: 건너뜀")}
-      {btn("to_right", "→", "이 폴더 전체: 왼쪽 → 오른쪽")}
+      {btn("to_left", "←", "Whole folder: Right → Left")}
+      {btn("skip", "·", "Whole folder: Skip")}
+      {btn("to_right", "→", "Whole folder: Left → Right")}
     </span>
   );
 }

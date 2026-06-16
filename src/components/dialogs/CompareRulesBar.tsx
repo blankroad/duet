@@ -72,7 +72,7 @@ export function CompareRulesBar({
         className="flex items-center gap-1 rounded border border-border px-2 py-0.5 hover:bg-subtle disabled:opacity-50"
       >
         <RefreshCw size={11} className={busy ? "animate-spin" : ""} />
-        {busy ? "비교 중…" : "Re-compare"}
+        {busy ? "Comparing…" : "Re-compare"}
       </button>
     </div>
   );
