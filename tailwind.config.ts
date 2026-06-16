@@ -29,6 +29,8 @@ const config: Config = {
       fontFamily: {
         sans: ["ui-sans-serif", "system-ui", "-apple-system", "sans-serif"],
         mono: ["ui-monospace", "Cascadia Code", "SF Mono", "monospace"],
+        // 워드마크/로고 전용 (번들된 woff2 — globals.css @font-face).
+        brand: ['"Space Grotesk"', "ui-sans-serif", "system-ui", "sans-serif"],
       },
       // Fluent 절제형 토큰 — globals.css CSS 변수 매핑 (네임드로 두어 기존 rounded/shadow 무영향)
       borderRadius: {

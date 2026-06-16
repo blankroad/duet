@@ -2,6 +2,23 @@
 @tailwind components;
 @tailwind utilities;
 
+/* 워드마크/로고 전용 폰트 — 번들된 woff2 (오프라인 안전, 런타임 의존성 없음).
+   latin subset, 600/700 만. UI 본문은 system sans 유지. */
+@font-face {
+  font-family: "Space Grotesk";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/space-grotesk-600.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Space Grotesk";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/space-grotesk-700.woff2") format("woff2");
+}
+
 /*
  * CSS variables — light/dark 테마 자동 전환
  * Tailwind config 가 이 변수들을 색상으로 매핑함

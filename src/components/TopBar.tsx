@@ -32,7 +32,7 @@ export function TopBar() {
           <rect x="1.5" y="3" width="5.4" height="10" rx="1.6" className="fill-accent" opacity="0.5" />
           <rect x="9.1" y="3" width="5.4" height="10" rx="1.6" className="fill-accent" />
         </svg>
-        <span className="text-title font-semibold tracking-tight text-fg">duet</span>
+        <span className="font-brand text-title font-semibold tracking-tight text-fg">duet</span>
       </span>
       <Divider />
       <IconBtn label="Toggle sidebar (Ctrl+B)" active={sidebarOpen} onClick={toggleSidebar}>
