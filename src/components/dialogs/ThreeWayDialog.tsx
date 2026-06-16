@@ -6,15 +6,15 @@ import type { ThreeWayPlan, ThreeWayStatus } from "@/types/bindings";
 
 const LABEL: Record<ThreeWayStatus, string> = {
   unchanged: "",
-  left_changed: "← 변경",
-  right_changed: "변경 →",
-  both_changed: "양쪽 변경",
-  left_added: "← 추가",
-  right_added: "추가 →",
-  add_conflict: "추가 충돌",
-  left_deleted: "← 삭제",
-  right_deleted: "삭제 →",
-  delete_conflict: "삭제 충돌",
+  left_changed: "← Changed",
+  right_changed: "Changed →",
+  both_changed: "Both changed",
+  left_added: "← Added",
+  right_added: "Added →",
+  add_conflict: "Add conflict",
+  left_deleted: "← Deleted",
+  right_deleted: "Deleted →",
+  delete_conflict: "Delete conflict",
 };
 
 const TONE: Record<ThreeWayStatus, string> = {
@@ -57,7 +57,7 @@ export function ThreeWayDialog({
         <Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex max-h-[80vh] w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 flex-col rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none">
           <div className="mb-2 flex items-start justify-between">
             <Dialog.Title className="flex items-center gap-1.5 text-title font-medium">
-              <GitMerge size={15} /> 3-way 비교
+              <GitMerge size={15} /> 3-way compare
             </Dialog.Title>
             <Dialog.Close className="rounded p-1 text-fg-muted hover:bg-border" aria-label="Close">
               <X size={14} />
@@ -78,10 +78,10 @@ export function ThreeWayDialog({
 
           <div className="mb-2 flex items-center gap-3 text-meta">
             <span className="text-fg-muted">
-              자동 해결 <b className="text-fg">{plan.auto}</b>
+              Auto-resolved <b className="text-fg">{plan.auto}</b>
             </span>
             <span className={clsx(plan.conflicts > 0 ? "text-danger" : "text-fg-muted")}>
-              충돌 <b>{plan.conflicts}</b>
+              Conflicts <b>{plan.conflicts}</b>
             </span>
             {plan.conflicts > 0 && (
               <label className="ml-auto flex items-center gap-1 text-fg-muted">
@@ -90,14 +90,14 @@ export function ThreeWayDialog({
                   checked={onlyConflicts}
                   onChange={(e) => setOnlyConflicts(e.target.checked)}
                 />
-                충돌만
+                Conflicts only
               </label>
             )}
           </div>
 
           {plan.truncated && (
             <div className="mb-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-meta text-amber-600">
-              항목이 많아 일부만 표시했습니다 (상한 도달).
+              Too many items — only some are shown (limit reached).
             </div>
           )}
 
@@ -105,8 +105,8 @@ export function ThreeWayDialog({
             {rows.length === 0 ? (
               <div className="px-2 py-3 text-center text-meta text-fg-muted">
                 {plan.entries.length === 0
-                  ? "차이 없음 — base 기준으로 left/right 가 동일합니다."
-                  : "표시할 항목 없음."}
+                  ? "No differences — left/right match base."
+                  : "No items to show."}
               </div>
             ) : (
               <table className="w-full text-meta">
@@ -131,8 +131,8 @@ export function ThreeWayDialog({
 
           <div className="mt-3 flex items-center justify-between gap-2">
             <span className="text-meta text-fg-muted">
-              자동 해결분만 적용(충돌 {plan.conflicts}개는 건너뜀). 덮어쓰기는 .bak, 삭제는
-              휴지통 — undo 가능.
+              Apply auto-resolved only (skips {plan.conflicts} conflicts). Overwrites → .bak,
+              deletes → trash — undoable.
             </span>
             <div className="flex gap-2">
               <button
@@ -149,11 +149,11 @@ export function ThreeWayDialog({
                 className="rounded bg-accent px-3 py-1 text-base text-white disabled:opacity-50"
                 title={
                   plan.truncated
-                    ? "비교가 잘려 적용할 수 없습니다 — 범위를 좁히세요"
-                    : "자동 해결 가능한 항목을 반대편에 반영 (충돌 제외, undo 가능)"
+                    ? "Comparison truncated — can't apply. Narrow the scope."
+                    : "Apply auto-resolvable items to the other side (excludes conflicts, undoable)"
                 }
               >
-                자동 해결 적용 ({plan.auto})
+                Apply auto-resolved ({plan.auto})
               </button>
             </div>
           </div>

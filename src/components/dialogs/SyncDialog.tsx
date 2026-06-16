@@ -76,28 +76,28 @@ export function SyncDialog({ srcLabel, dstLabel, src, dst, onClose, onConfirm }:
           <div className="mt-3 min-h-0 flex-1">
             {error ? (
               <div className="rounded border border-danger/40 bg-danger/10 px-2 py-1 text-meta text-danger">
-                미리보기 실패: {error}
+                Preview failed: {error}
               </div>
             ) : preview == null ? (
               <div className="flex items-center gap-2 text-meta text-fg-muted">
-                <Loader2 size={13} className="animate-spin" /> 변경 계산 중…
+                <Loader2 size={13} className="animate-spin" /> Computing changes…
               </div>
             ) : (
               <div className="space-y-2 text-meta">
                 <Section
                   icon={<FilePlus2 size={12} className="text-accent" />}
-                  label="복사(새/변경)"
+                  label="Copy (new/changed)"
                   items={preview.copy}
                   tone="text-fg"
                 />
                 <Section
                   icon={<Trash2 size={12} className={prune ? "text-danger" : "text-fg-muted"} />}
-                  label={prune ? "삭제(휴지통)" : "대상 전용 (미삭제)"}
+                  label={prune ? "Delete (trash)" : "Target-only (not deleted)"}
                   items={preview.prune}
                   tone={prune ? "text-danger" : "text-fg-muted"}
                 />
                 {preview.truncated && (
-                  <div className="text-amber-600">목록이 많아 일부만 표시했습니다.</div>
+                  <div className="text-amber-600">Too many items — only some are shown.</div>
                 )}
               </div>
             )}
@@ -111,18 +111,18 @@ export function SyncDialog({ srcLabel, dstLabel, src, dst, onClose, onConfirm }:
               className="mt-0.5"
             />
             <span>
-              source 에 없는 파일도 삭제 (mirror)
+              Also delete files missing from source (mirror)
               <span className="block text-meta text-fg-muted">
-                대상에만 있는 파일{preview ? ` ${preview.prune.length}개` : ""}를 휴지통으로 보냅니다.
+                Sends files that exist only in the target{preview ? ` (${preview.prune.length})` : ""} to trash.
               </span>
             </span>
           </label>
 
           {trash && (
             <div className="mt-2 text-meta text-fg-muted">
-              원격 휴지통(<span className="font-mono">~/.duet-trash</span>) 누적:{" "}
+              Remote trash (<span className="font-mono">~/.duet-trash</span>) accumulated:{" "}
               <b className={trash.bytes > 0 ? "text-fg" : ""}>{formatSize(trash.bytes)}</b>
-              {trash.bytes > 0 && " — prune/덮어쓰기 백업이 이 호스트에 쌓입니다."}
+              {trash.bytes > 0 && " — prune/overwrite backups pile up on this host."}
             </div>
           )}
 
@@ -130,8 +130,8 @@ export function SyncDialog({ srcLabel, dstLabel, src, dst, onClose, onConfirm }:
             <div className="mt-2 flex items-start gap-1.5 rounded border border-amber-500/40 bg-amber-500/10 p-2 text-meta text-amber-600">
               <AlertTriangle size={13} className="mt-0.5 shrink-0" />
               <span>
-                대상 폴더에만 있는 파일이 휴지통으로 이동합니다. Undo 로 되돌릴 수 있으나
-                (macOS 로컬은 Finder 에서 수동 복원).
+                Files only in the target folder move to trash. Undoable
+                (macOS local: restore manually in Finder).
               </span>
             </div>
           )}
