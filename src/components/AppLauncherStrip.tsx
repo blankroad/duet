@@ -70,16 +70,16 @@ export function AppLauncherStrip() {
         onClick={() => void registerApp()}
         title="Add application"
         aria-label="Add application"
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-fg-muted hover:bg-subtle hover:text-fg"
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-muted hover:bg-subtle hover:text-fg"
       >
-        <Plus size={13} />
+        <Plus size={15} />
       </button>
     </div>
   );
 }
 
 const tileBase =
-  "flex h-7 w-7 shrink-0 items-center justify-center rounded bg-subtle text-fg hover:bg-border";
+  "flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-subtle text-fg hover:bg-border";
 
 function mergeCls(merge: boolean, dragging: boolean): string {
   return clsx(dragging && "opacity-50", merge && "scale-110 ring-2 ring-accent");
@@ -174,7 +174,7 @@ function AppButton({
       title={`${app.name}${args.length ? ` ${args.join(" ")}` : ""}\n${app.path}`}
       className={clsx(tileBase, mergeCls(!!merge, !!dragging))}
     >
-      <AppGlyph app={app} px={16} />
+      <AppGlyph app={app} px={20} />
     </button>
   );
 }
@@ -225,9 +225,9 @@ function FolderTile({
           {children.slice(0, 4).map((c) => (
             <span
               key={c.id}
-              className="flex h-2.5 w-2.5 items-center justify-center overflow-hidden rounded-[2px] bg-base"
+              className="flex h-3 w-3 items-center justify-center overflow-hidden rounded-[2px] bg-base"
             >
-              <AppGlyph app={c} px={8} />
+              <AppGlyph app={c} px={10} />
             </span>
           ))}
         </span>
@@ -258,7 +258,17 @@ function FolderFlyout({
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(folder.name);
   const children = folder.children ?? [];
+
+  // 헤더 이름 더블클릭 → 인라인 편집. 빈/동일이면 무시, 다르면 rename(label만).
+  const commitName = () => {
+    const n = draft.trim();
+    setEditing(false);
+    if (n && n !== folder.name) void renameAppLauncher(folder.id, n);
+    else setDraft(folder.name);
+  };
 
   // 마운트 후 카드 크기 측정 → 앵커 아래, 뷰포트 안으로 클램프
   useLayoutEffect(() => {
@@ -291,7 +301,36 @@ function FolderFlyout({
           visibility: pos ? "visible" : "hidden",
         }}
       >
-        <div className="mb-2 px-1 text-meta font-medium text-fg-muted">{folder.name}</div>
+        {editing ? (
+          <input
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commitName}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                commitName();
+              } else if (e.key === "Escape") {
+                e.stopPropagation(); // 편집 취소만 — 플라이아웃은 유지
+                setDraft(folder.name);
+                setEditing(false);
+              }
+            }}
+            className="mb-2 w-full rounded border border-accent bg-subtle px-1 py-0.5 text-meta font-medium text-fg focus:outline-none"
+          />
+        ) : (
+          <div
+            className="mb-2 cursor-text select-none px-1 text-meta font-medium text-fg-muted"
+            onDoubleClick={() => {
+              setDraft(folder.name);
+              setEditing(true);
+            }}
+            title="Double-click to rename"
+          >
+            {folder.name}
+          </div>
+        )}
         <div className="grid max-w-[18rem] grid-cols-4 gap-1">
           {children.map((c) => (
             <FolderChild key={c.id} app={c} folderId={folder.id} onLaunched={onClose} />
@@ -337,7 +376,7 @@ function FolderChild({
 }
 
 function DropLine() {
-  return <div className="mx-0.5 h-5 w-0.5 shrink-0 rounded bg-accent" />;
+  return <div className="mx-0.5 h-6 w-0.5 shrink-0 rounded bg-accent" />;
 }
 
 /** 파일피커로 앱 선택 → 등록. mac `.app` 은 package 라 file 로 잡힘(directory:false). */

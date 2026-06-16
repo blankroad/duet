@@ -33,7 +33,7 @@ export function TopBar() {
   return (
     <header
       data-tauri-drag-region
-      className="flex h-9 shrink-0 items-center gap-0.5 border-b border-border px-2"
+      className="flex h-10 shrink-0 items-center gap-0.5 border-b border-border px-2"
     >
       {/* 로고/워드마크 — 자식은 pointer-events-none 으로 span 이 드래그 타깃이 되게 */}
       <span
@@ -57,16 +57,16 @@ export function TopBar() {
       </span>
       <Divider />
       <IconBtn label="Toggle sidebar (Ctrl+B)" active={sidebarOpen} onClick={toggleSidebar}>
-        <PanelLeft size={14} />
+        <PanelLeft size={15} />
       </IconBtn>
       <IconBtn label="Toggle preview (F11)" active={previewOpen} onClick={togglePreview}>
-        <PanelRight size={14} />
+        <PanelRight size={15} />
       </IconBtn>
       <IconBtn
         label="Compare folders (left ↔ right)"
         onClick={() => void triggerCompare(useUIDialogs.getState().open, useToast.getState().show)}
       >
-        <FolderGit2 size={14} />
+        <FolderGit2 size={15} />
       </IconBtn>
 
       <div
@@ -77,16 +77,16 @@ export function TopBar() {
       </div>
 
       <IconBtn label="Search (Ctrl+Shift+F)" onClick={openSearch}>
-        <Search size={14} />
+        <Search size={15} />
       </IconBtn>
       <IconBtn label="Command palette (Ctrl+P)" onClick={() => usePalette.getState().open()}>
-        <Command size={14} />
+        <Command size={15} />
       </IconBtn>
       <IconBtn
         label="Settings (Ctrl+,)"
         onClick={() => useUIDialogs.getState().open({ kind: "settings" })}
       >
-        <Settings size={14} />
+        <Settings size={15} />
       </IconBtn>
 
       <Divider />
@@ -127,7 +127,7 @@ function WindowControls() {
 
   return (
     // -mr-2 로 헤더 우측 패딩을 상쇄해 화면 가장자리까지 flush
-    <div className="-mr-2 flex h-9 items-center">
+    <div className="-mr-2 flex h-10 items-center">
       <WinBtn label="Minimize" onClick={() => run((w) => w.minimize())}>
         <svg width="11" height="11" viewBox="0 0 11 11" stroke="currentColor" strokeWidth="1.1" aria-hidden="true">
           <line x1="1.5" y1="5.5" x2="9.5" y2="5.5" />
@@ -176,7 +176,7 @@ function WinBtn({
       title={label}
       aria-label={label}
       className={clsx(
-        "flex h-9 w-11 items-center justify-center text-fg-muted transition-colors",
+        "flex h-10 w-11 items-center justify-center text-fg-muted transition-colors",
         danger ? "hover:bg-danger hover:text-white" : "hover:bg-subtle hover:text-fg",
       )}
     >
@@ -203,7 +203,7 @@ function IconBtn({
       title={label}
       aria-label={label}
       className={clsx(
-        "flex h-7 w-7 shrink-0 items-center justify-center rounded hover:bg-subtle",
+        "flex h-8 w-8 shrink-0 items-center justify-center rounded hover:bg-subtle",
         active ? "text-accent" : "text-fg-muted hover:text-fg",
       )}
     >
@@ -213,5 +213,5 @@ function IconBtn({
 }
 
 function Divider() {
-  return <div className="mx-1 h-4 w-px shrink-0 bg-border" />;
+  return <div className="mx-1 h-5 w-px shrink-0 bg-border" />;
 }
