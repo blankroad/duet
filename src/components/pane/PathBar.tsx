@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, ArrowUp, RotateCw, Star, FileArchive, Pencil, Monitor, Server } from "lucide-react";
+import { ArrowLeft, ArrowRight, ArrowUp, RotateCw, Star, FileArchive, Pencil, Monitor, Server, BookMarked, Folder } from "lucide-react";
 import { platform } from "@tauri-apps/plugin-os";
 import type { Location } from "@/types/bindings";
 
@@ -38,6 +38,8 @@ import {
 } from "@/stores/bookmarks";
 import { folderName } from "@/lib/entryMenu";
 import { bookmarkLocation } from "@/lib/bookmarkActions";
+import { useHostFavorites } from "@/stores/hostFavorites";
+import { useContextMenu, type MenuEntry } from "@/stores/contextMenu";
 
 interface PathBarProps {
   location: Location;
@@ -116,6 +118,46 @@ export function PathBar({ location, archive, canBack, canForward, onBack, onForw
     }
     if (bookmarkId) void removeBookmark(bookmarkId);
     else void addBookmark(folderName(location), location);
+  };
+
+  // TC 식 즐겨찾기 드롭다운 — 현재 소스(local) 또는 현재 host(ssh)의 즐겨찾기를
+  // 나열, 클릭 시 이동. 기존 ContextMenu 인프라 재사용(위치보정/키보드/바깥클릭).
+  const openFavorites = (e: React.MouseEvent) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const src = location.source;
+    const favs =
+      src.kind === "local"
+        ? useBookmarks
+            .getState()
+            .items.filter((b) => b.location.source.kind === "local")
+            .map((b) => ({ id: b.id, name: b.name, path: String(b.location.path) }))
+        : useHostFavorites
+            .getState()
+            .items.filter((f) => f.host_alias === (src.connection_id.split(":")[0] ?? ""))
+            .map((f) => ({ id: f.id, name: f.name, path: String(f.path) }));
+
+    const list: MenuEntry[] =
+      favs.length === 0
+        ? [{ id: "empty", label: "No favorites yet", disabled: true }]
+        : favs.map((f) => ({
+            id: f.id,
+            label: f.name,
+            shortcut: f.path,
+            icon: <Folder size={13} />,
+            onSelect: () => onSegmentClick?.(f.path),
+          }));
+
+    const entries: MenuEntry[] = [
+      {
+        id: "add",
+        label: bookmarked ? "Remove this folder" : "Add this folder",
+        icon: <Star size={13} />,
+        onSelect: toggleBookmark,
+      },
+      { kind: "separator" },
+      ...list,
+    ];
+    useContextMenu.getState().openAt(rect.left, rect.bottom + 4, entries);
   };
 
   return (
@@ -231,6 +273,17 @@ export function PathBar({ location, archive, canBack, canForward, onBack, onForw
             title="Edit path / go to location (Ctrl+L)"
           >
             <Pencil size={13} className="text-fg-muted" />
+          </button>
+        )}
+        {/* 즐겨찾기 바로가기 드롭다운 (TC 식) — 이 host/소스의 저장 폴더로 이동 */}
+        {!archive && (
+          <button
+            onClick={openFavorites}
+            className="rounded p-1 hover:bg-border"
+            aria-label="Favorites"
+            title="Favorites — go to a saved folder"
+          >
+            <BookMarked size={14} className="text-fg-muted" />
           </button>
         )}
         {/* 아카이브 임시경로는 북마크하면 dangling 되므로 숨김 */}
