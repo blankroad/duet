@@ -63,7 +63,12 @@ interface PanesState {
   closeTab: (id: PaneId, index: number) => void;
   selectTab: (id: PaneId, index: number) => void;
   // existing — 활성 탭에 dispatch
-  setEntries: (id: PaneId, location: Location, entries: Entry[], opts?: { pushHistory?: boolean }) => void;
+  setEntries: (
+    id: PaneId,
+    location: Location,
+    entries: Entry[],
+    opts?: { pushHistory?: boolean },
+  ) => void;
   setActivePane: (id: PaneId) => void;
   moveCursor: (id: PaneId, delta: number) => void;
   setCursor: (id: PaneId, index: number) => void;
@@ -90,6 +95,26 @@ interface PanesState {
   swapPanes: () => void;
   /** 활성 패널의 현재 탭을 반대 패널로 이동(포커스도 따라감). */
   moveActiveTabToOther: () => void;
+  /** 세션 복원 — 저장된 탭 레이아웃(로컬 탭)을 통째로 설정. 부팅 시 1회. */
+  restoreLayout: (layout: RestoredLayout) => void;
+}
+
+/** 세션 영속용 슬림 레이아웃 — 로컬 탭만 (SSH 는 재시작 시 연결 소실). */
+export interface RestoredLayout {
+  activePane: PaneId;
+  panes: Record<
+    PaneId,
+    {
+      activeTabIndex: number;
+      tabs: Array<{
+        path: string;
+        sortKey: SortKey;
+        sortOrder: SortOrder;
+        showHidden: boolean;
+        viewMode: ViewMode;
+      }>;
+    }
+  >;
 }
 
 const home = (): Location => ({
@@ -104,11 +129,12 @@ function newTabId(): string {
 }
 
 /** 새 탭 기본값 — 설정(Settings)에서 부팅 시 주입(applyTabDefaults). 죽은 토글 방지 배선. */
-let tabDefaults: { sortKey: SortKey; viewMode: ViewMode; showHidden: boolean } = {
-  sortKey: "name",
-  viewMode: "details",
-  showHidden: false,
-};
+let tabDefaults: { sortKey: SortKey; viewMode: ViewMode; showHidden: boolean } =
+  {
+    sortKey: "name",
+    viewMode: "details",
+    showHidden: false,
+  };
 
 const initialTab = (location: Location = home()): TabState => ({
   id: newTabId(),
@@ -198,14 +224,19 @@ export const usePanes = create<PanesState>((set, get) => ({
       if (navigated && pushHistory) {
         const stack = history.stack.slice(0, history.index + 1);
         stack.push(location);
-        const trimmed = stack.length > 100 ? stack.slice(stack.length - 100) : stack;
+        const trimmed =
+          stack.length > 100 ? stack.slice(stack.length - 100) : stack;
         history = { stack: trimmed, index: trimmed.length - 1 };
       }
       // 아카이브/휴지통 루트 밖으로 이동하면 컨텍스트 해제 (내부 하위폴더면 유지).
       const archive =
-        cur.archive && location.path.startsWith(cur.archive.root) ? cur.archive : undefined;
+        cur.archive && location.path.startsWith(cur.archive.root)
+          ? cur.archive
+          : undefined;
       const trashRoot =
-        cur.trashRoot && location.path.startsWith(cur.trashRoot) ? cur.trashRoot : undefined;
+        cur.trashRoot && location.path.startsWith(cur.trashRoot)
+          ? cur.trashRoot
+          : undefined;
       const nextTab: TabState = {
         ...cur,
         location,
@@ -222,18 +253,54 @@ export const usePanes = create<PanesState>((set, get) => ({
       return { panes: { ...s.panes, [id]: withActiveTab(p, () => nextTab) } };
     }),
   setActivePane: (id) => set({ activePane: id }),
+  restoreLayout: (layout) =>
+    set(() => {
+      const buildPane = (slim: RestoredLayout["panes"][PaneId]): PaneState => {
+        const tabs: TabState[] = slim.tabs.map((t) => ({
+          ...initialTab({ source: { kind: "local" }, path: t.path }),
+          sortKey: t.sortKey,
+          sortOrder: t.sortOrder,
+          showHidden: t.showHidden,
+          viewMode: t.viewMode,
+        }));
+        if (tabs.length === 0) return initialPane();
+        const activeTabIndex = Math.min(
+          Math.max(0, slim.activeTabIndex),
+          tabs.length - 1,
+        );
+        return { tabs, activeTabIndex };
+      };
+      return {
+        panes: {
+          left: buildPane(layout.panes.left),
+          right: buildPane(layout.panes.right),
+        },
+        activePane: layout.activePane,
+      };
+    }),
   moveCursor: (id, delta) =>
     set((s) => {
       const p = s.panes[id];
       const cur = p.tabs[p.activeTabIndex];
       if (!cur) return s;
       const visible = computeDisplayed(cur);
-      const next = Math.max(0, Math.min(visible.length - 1, cur.cursorIndex + delta));
-      return { panes: { ...s.panes, [id]: withActiveTab(p, (t) => ({ ...t, cursorIndex: next })) } };
+      const next = Math.max(
+        0,
+        Math.min(visible.length - 1, cur.cursorIndex + delta),
+      );
+      return {
+        panes: {
+          ...s.panes,
+          [id]: withActiveTab(p, (t) => ({ ...t, cursorIndex: next })),
+        },
+      };
     }),
   setCursor: (id, index) =>
     set((s) => ({
-      panes: { ...s.panes, [id]: withActiveTab(s.panes[id], (t) => ({ ...t, cursorIndex: index })) },
+      panes: {
+        ...s.panes,
+        [id]: withActiveTab(s.panes[id], (t) => ({ ...t, cursorIndex: index })),
+      },
     })),
   toggleSelected: (id, name) =>
     set((s) => ({
@@ -251,18 +318,32 @@ export const usePanes = create<PanesState>((set, get) => ({
     set((s) => ({
       panes: {
         ...s.panes,
-        [id]: withActiveTab(s.panes[id], (t) => ({ ...t, selected: new Set(names) })),
+        [id]: withActiveTab(s.panes[id], (t) => ({
+          ...t,
+          selected: new Set(names),
+        })),
       },
     })),
   clearSelection: (id) =>
     set((s) => ({
-      panes: { ...s.panes, [id]: withActiveTab(s.panes[id], (t) => ({ ...t, selected: new Set() })) },
+      panes: {
+        ...s.panes,
+        [id]: withActiveTab(s.panes[id], (t) => ({
+          ...t,
+          selected: new Set(),
+        })),
+      },
     })),
   setSort: (id, key, order) =>
     set((s) => ({
       panes: {
         ...s.panes,
-        [id]: withActiveTab(s.panes[id], (t) => ({ ...t, sortKey: key, sortOrder: order, cursorIndex: 0 })),
+        [id]: withActiveTab(s.panes[id], (t) => ({
+          ...t,
+          sortKey: key,
+          sortOrder: order,
+          cursorIndex: 0,
+        })),
       },
     })),
   toggleSortKey: (id, key) =>
@@ -281,14 +362,20 @@ export const usePanes = create<PanesState>((set, get) => ({
     set((s) => ({
       panes: {
         ...s.panes,
-        [id]: withActiveTab(s.panes[id], (t) => ({ ...t, showHidden: !t.showHidden, cursorIndex: 0 })),
+        [id]: withActiveTab(s.panes[id], (t) => ({
+          ...t,
+          showHidden: !t.showHidden,
+          cursorIndex: 0,
+        })),
       },
     })),
   setViewMode: (id, mode) =>
     set((s) => ({
       panes: {
         ...s.panes,
-        [id]: withActiveTab(s.panes[id], (t) => (t.viewMode === mode ? t : { ...t, viewMode: mode })),
+        [id]: withActiveTab(s.panes[id], (t) =>
+          t.viewMode === mode ? t : { ...t, viewMode: mode },
+        ),
       },
     })),
   cycleViewMode: (id) =>
@@ -308,30 +395,51 @@ export const usePanes = create<PanesState>((set, get) => ({
       return {
         panes: {
           ...s.panes,
-          [id]: withActiveTab(s.panes[id], (t) => (t.gridCols === c ? t : { ...t, gridCols: c })),
+          [id]: withActiveTab(s.panes[id], (t) =>
+            t.gridCols === c ? t : { ...t, gridCols: c },
+          ),
         },
       };
     }),
   setFilter: (id, filter) =>
     set((s) => ({
-      panes: { ...s.panes, [id]: withActiveTab(s.panes[id], (t) => ({ ...t, filter, cursorIndex: 0 })) },
+      panes: {
+        ...s.panes,
+        [id]: withActiveTab(s.panes[id], (t) => ({
+          ...t,
+          filter,
+          cursorIndex: 0,
+        })),
+      },
     })),
   setFilterFocused: (id, focused) =>
     set((s) => ({
-      panes: { ...s.panes, [id]: withActiveTab(s.panes[id], (t) => ({ ...t, filterFocused: focused })) },
+      panes: {
+        ...s.panes,
+        [id]: withActiveTab(s.panes[id], (t) => ({
+          ...t,
+          filterFocused: focused,
+        })),
+      },
     })),
   setArchiveContext: (id, ctx) =>
     set((s) => ({
       panes: {
         ...s.panes,
-        [id]: withActiveTab(s.panes[id], (t) => ({ ...t, archive: ctx ?? undefined })),
+        [id]: withActiveTab(s.panes[id], (t) => ({
+          ...t,
+          archive: ctx ?? undefined,
+        })),
       },
     })),
   setTrashRoot: (id, root) =>
     set((s) => ({
       panes: {
         ...s.panes,
-        [id]: withActiveTab(s.panes[id], (t) => ({ ...t, trashRoot: root ?? undefined })),
+        [id]: withActiveTab(s.panes[id], (t) => ({
+          ...t,
+          trashRoot: root ?? undefined,
+        })),
       },
     })),
   back: (id) => {
@@ -437,13 +545,21 @@ export function computeDisplayed(t: TabState): Entry[] {
   const sorted = sortEntries(arr, t.sortKey, t.sortOrder);
   // 루트가 아니고 필터가 없을 때만 최상단에 ".." (부모/아카이브 나가기) 행.
   // 정렬과 무관하게 항상 맨 위 고정. 빈 폴더에서도 돌아갈 수 있게 표시.
-  if (t.location.path !== "/" && t.location.path.length > 0 && t.filter.length === 0) {
+  if (
+    t.location.path !== "/" &&
+    t.location.path.length > 0 &&
+    t.filter.length === 0
+  ) {
     return [PARENT_ENTRY, ...sorted];
   }
   return sorted;
 }
 
-function sortEntries(entries: Entry[], key: SortKey, order: SortOrder): Entry[] {
+function sortEntries(
+  entries: Entry[],
+  key: SortKey,
+  order: SortOrder,
+): Entry[] {
   const dirsFirst = (a: Entry, b: Entry) => {
     if (a.kind !== b.kind) {
       if (a.kind === "dir") return -1;
@@ -503,6 +619,8 @@ export function applyTabDefaults(d: {
         cursorIndex: 0,
       })),
     });
-    return { panes: { left: mapPane(s.panes.left), right: mapPane(s.panes.right) } };
+    return {
+      panes: { left: mapPane(s.panes.left), right: mapPane(s.panes.right) },
+    };
   });
 }

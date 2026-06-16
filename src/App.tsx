@@ -78,6 +78,7 @@ import { bootstrapUserAliases } from "@/stores/userAliases";
 import { bootstrapAppLaunchers, setAppArgs } from "@/stores/appLaunchers";
 import { bootstrapPlaces, refreshVolumes } from "@/stores/places";
 import { recordRecent } from "@/stores/recents";
+import { loadSession, initSessionPersist } from "@/stores/session";
 import { bootstrapHostGroups } from "@/stores/sidebarGroups";
 import { useDynamicCommands } from "@/lib/dynamicCommands";
 import { useConnections } from "@/stores/connections";
@@ -156,11 +157,9 @@ function App() {
     ) => {
       try {
         const entries = await listDirectory(location);
-        usePanes
-          .getState()
-          .setEntries(id, location, entries, {
-            pushHistory: opts.pushHistory ?? true,
-          });
+        usePanes.getState().setEntries(id, location, entries, {
+          pushHistory: opts.pushHistory ?? true,
+        });
         void commands.paneWatchSet(id, location);
         if (opts.pushHistory !== false) recordRecent(location);
       } catch (e) {
@@ -941,8 +940,27 @@ function App() {
     (async () => {
       const result = await commands.homeDirectory();
       const home = result.status === "ok" ? result.data : "/";
-      await navigate("left", home);
-      await navigate("right", home);
+      // 세션 복원: 저장된 탭 레이아웃(로컬 탭)이 있으면 그걸로, 없으면 양쪽 home.
+      const saved = loadSession();
+      if (saved) {
+        usePanes.getState().restoreLayout(saved);
+        // 복원된 탭들은 entries 캐시가 비어 있으므로 각 탭을 navigate 해 적재. 끝나면 원래 active 로.
+        for (const pane of ["left", "right"] as PaneId[]) {
+          const tabPaths = usePanes
+            .getState()
+            .panes[pane].tabs.map((t) => String(t.location.path));
+          const savedActive = usePanes.getState().panes[pane].activeTabIndex;
+          for (let i = 0; i < tabPaths.length; i++) {
+            usePanes.getState().selectTab(pane, i);
+            await navigate(pane, tabPaths[i]!, { pushHistory: false });
+          }
+          usePanes.getState().selectTab(pane, savedActive);
+        }
+        usePanes.getState().setActivePane(saved.activePane);
+      } else {
+        await navigate("left", home);
+        await navigate("right", home);
+      }
       // 탐색기 "Open in duet" 로 폴더 경로가 argv 로 들어왔으면 왼쪽 패널을 그 폴더로.
       const startup = await commands.startupOpenPath();
       if (startup.status === "ok" && startup.data) {
@@ -969,6 +987,8 @@ function App() {
             .setSingleClickOpen(r.data.single_click_open ?? false);
         }
       });
+      // 탭 레이아웃 영속 구독 시작 — 복원 navigate 가 끝난 뒤라야 churn 없음.
+      initSessionPersist();
     })();
     // navigate가 deps에 들어가면 무한 루프 — 마운트 1회만
     // eslint-disable-next-line react-hooks/exhaustive-deps
