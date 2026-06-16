@@ -27,7 +27,13 @@ export function TopBar() {
 
   return (
     <header className="flex h-9 shrink-0 items-center gap-0.5 border-b border-border px-2">
-      <span className="px-1 text-title font-medium">duet</span>
+      <span className="flex select-none items-center gap-1.5 px-1" title="duet">
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" className="shrink-0">
+          <rect x="1.5" y="3" width="5.4" height="10" rx="1.6" className="fill-accent" opacity="0.5" />
+          <rect x="9.1" y="3" width="5.4" height="10" rx="1.6" className="fill-accent" />
+        </svg>
+        <span className="text-title font-semibold tracking-tight text-fg">duet</span>
+      </span>
       <Divider />
       <IconBtn label="Toggle sidebar (Ctrl+B)" active={sidebarOpen} onClick={toggleSidebar}>
         <PanelLeft size={14} />
