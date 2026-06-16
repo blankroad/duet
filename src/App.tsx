@@ -77,6 +77,7 @@ import { useTaskEvents } from "@/hooks/useTaskEvents";
 import { formatErr } from "@/lib/error";
 import { formatSize } from "@/lib/format";
 import { platform } from "@tauri-apps/plugin-os";
+import { confirm as tauriConfirm } from "@tauri-apps/plugin-dialog";
 import { commands } from "@/types/bindings";
 import type { CompressFormat, ConnectionDto, CopyStrategy, DuetError, Entry, EntryRef, HostFavorite, Location, SearchHit, UserAlias, Volume } from "@/types/bindings";
 
@@ -467,14 +468,20 @@ function App() {
           showToast("Active panel is not a remote host");
           return;
         }
-        if (!confirm("Install your SSH public key on this host for passwordless login next time?")) return;
-        void commands.sshSetupKeyAuth(src.connection_id).then((r) => {
+        void (async () => {
+          // window.confirm 은 Tauri 웹뷰에서 동작 안 함 → plugin-dialog 의 native confirm.
+          const ok = await tauriConfirm(
+            "Install your SSH public key on this host for passwordless login next time?",
+            { title: "Passwordless login" },
+          );
+          if (!ok) return;
+          const r = await commands.sshSetupKeyAuth(src.connection_id);
           showToast(
             r.status === "ok"
               ? "Passwordless login set up — your key is installed"
               : `Setup failed: ${formatErr(r.error)}`,
           );
-        });
+        })();
       },
     });
     setBuiltins(builtins);

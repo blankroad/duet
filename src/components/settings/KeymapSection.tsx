@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAllCommands } from "@/stores/commands";
 import { useKeymap, setKeymap, unsetKeymap, resetKeymap } from "@/stores/keymap";
 import { formatKeyEvent } from "@/lib/keyEvent";
+import { confirm as tauriConfirm } from "@tauri-apps/plugin-dialog";
 import { AlertTriangle, Search, RotateCcw } from "lucide-react";
 
 export function KeymapSection() {
@@ -47,7 +48,11 @@ export function KeymapSection() {
         <button
           type="button"
           onClick={() => {
-            if (confirm("Reset all keybindings to defaults?")) void resetKeymap();
+            void tauriConfirm("Reset all keybindings to defaults?", {
+              title: "Restore defaults",
+            }).then((ok) => {
+              if (ok) void resetKeymap();
+            });
           }}
           className="flex items-center gap-1 rounded border border-border px-2 py-1 text-meta text-fg-muted hover:bg-border hover:text-fg"
           title="Restore all default keybindings"
