@@ -42,10 +42,25 @@ export function SearchPanel({
   // 요청 경합 가드 — 매 검색마다 증가. 응답 도착 시 최신 seq 아니면 버림
   // (느린 첫-빌드 응답이 더 새 쿼리 결과를 덮어쓰는 버그 방지).
   const seqRef = useRef(0);
+  const [indexing, setIndexing] = useState(false);
 
   useEffect(() => {
     if (isOpen) inputRef.current?.focus();
   }, [isOpen]);
+
+  // 검색 열릴 때(파일명 모드) 인덱스를 미리 빌드/신선화 — 첫 쿼리가 즉시 뜨고
+  // 결과가 stale 하지 않도록. TTL 내면 backend 가 즉시 반환.
+  useEffect(() => {
+    if (!isOpen || !root || content) return;
+    let cancelled = false;
+    setIndexing(true);
+    void commands.indexEnsure(root).finally(() => {
+      if (!cancelled) setIndexing(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, root, content]);
 
   // debounce 200ms — query 또는 root 변경 시 IPC.
   useEffect(() => {
@@ -155,7 +170,11 @@ export function SearchPanel({
           <Loader size={12} className="shrink-0 animate-spin text-fg-muted" />
         )}
         <span className="shrink-0 text-meta text-fg-muted">
-          {query.trim().length < 2 ? "min 2 chars" : `${results.length} hits`}
+          {indexing
+            ? "indexing…"
+            : query.trim().length < 2
+              ? "min 2 chars"
+              : `${results.length} hits`}
         </span>
         <button
           type="button"
