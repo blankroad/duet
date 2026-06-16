@@ -93,9 +93,10 @@ async fn smoke_mkdir_then_undo_removes_dir() {
     assert!(env.dir().join("newdir").is_dir());
 
     // pop_undoable 으로 가장 최근 entry 회수 → execute_undo
-    let popped = env.journal.pop_undoable().await.unwrap().unwrap();
+    let popped = env.journal.peek_undoable().await.unwrap().unwrap();
     assert_eq!(popped.id, entry.id);
     let outcome = execute_undo(&popped, &env.pool).await;
+    env.journal.commit_undone(popped.id).await.unwrap();
     assert!(matches!(outcome.kind, UndoKind::Ok));
     assert!(!env.dir().join("newdir").exists());
 }
@@ -116,8 +117,9 @@ async fn smoke_rename_then_undo_restores_name() {
     assert!(!env.dir().join("a.txt").exists());
     assert!(env.dir().join("b.txt").exists());
 
-    let popped = env.journal.pop_undoable().await.unwrap().unwrap();
+    let popped = env.journal.peek_undoable().await.unwrap().unwrap();
     let outcome = execute_undo(&popped, &env.pool).await;
+    env.journal.commit_undone(popped.id).await.unwrap();
     assert!(matches!(outcome.kind, UndoKind::Ok));
     assert!(env.dir().join("a.txt").exists());
     assert!(!env.dir().join("b.txt").exists());
@@ -164,8 +166,9 @@ async fn smoke_copy_with_conflict_creates_backup_and_undo_restores() {
     assert_eq!(backups.len(), 1, "should have one .bak.* file");
 
     // undo → dst/a.txt 다시 OLD, backup 사라짐
-    let popped = env.journal.pop_undoable().await.unwrap().unwrap();
+    let popped = env.journal.peek_undoable().await.unwrap().unwrap();
     let outcome = execute_undo(&popped, &env.pool).await;
+    env.journal.commit_undone(popped.id).await.unwrap();
     assert!(
         matches!(outcome.kind, UndoKind::Ok),
         "undo failed: {:?}",
@@ -205,8 +208,9 @@ async fn smoke_move_same_fs_then_undo_restores() {
     assert!(!env.dir().join("src/a").exists());
     assert!(env.dir().join("dst/a").exists());
 
-    let popped = env.journal.pop_undoable().await.unwrap().unwrap();
+    let popped = env.journal.peek_undoable().await.unwrap().unwrap();
     let outcome = execute_undo(&popped, &env.pool).await;
+    env.journal.commit_undone(popped.id).await.unwrap();
     assert!(matches!(outcome.kind, UndoKind::Ok));
     assert!(env.dir().join("src/a").exists());
     assert!(!env.dir().join("dst/a").exists());
@@ -224,8 +228,8 @@ async fn smoke_permanent_delete_blocked_then_allowed() {
         .await
         .unwrap();
 
-    // settings off → NotPermitted
-    let result = ops::delete_execute(&local, plan.clone(), &env.ctx()).await;
+    // settings off → NotPermitted (확인 단어가 맞아도 settings 게이트에서 먼저 차단)
+    let result = ops::delete_execute(&local, plan.clone(), &env.ctx(), "delete").await;
     assert!(matches!(result, Err(DuetError::NotPermitted)));
     assert!(env.dir().join("a").exists(), "file should still exist");
 
@@ -237,13 +241,16 @@ async fn smoke_permanent_delete_blocked_then_allowed() {
         })
         .await
         .unwrap();
-    let entry = ops::delete_execute(&local, plan, &env.ctx()).await.unwrap();
+    let entry = ops::delete_execute(&local, plan, &env.ctx(), "delete")
+        .await
+        .unwrap();
     assert!(!env.dir().join("a").exists());
 
     // undo → Irreversible
-    let popped = env.journal.pop_undoable().await.unwrap().unwrap();
+    let popped = env.journal.peek_undoable().await.unwrap().unwrap();
     assert_eq!(popped.id, entry.id);
     let outcome = execute_undo(&popped, &env.pool).await;
+    env.journal.commit_undone(popped.id).await.unwrap();
     assert!(matches!(outcome.kind, UndoKind::Irreversible));
 }
 
@@ -264,11 +271,15 @@ async fn smoke_trash_then_undo_restores_on_linux_windows() {
     )
     .await
     .unwrap();
-    ops::delete_execute(&local, plan, &env.ctx()).await.unwrap();
+    // Trash 모드 — confirm 단어는 무시됨.
+    ops::delete_execute(&local, plan, &env.ctx(), "")
+        .await
+        .unwrap();
     assert!(!target_path.exists(), "file should be in trash");
 
-    let popped = env.journal.pop_undoable().await.unwrap().unwrap();
+    let popped = env.journal.peek_undoable().await.unwrap().unwrap();
     let outcome = execute_undo(&popped, &env.pool).await;
+    env.journal.commit_undone(popped.id).await.unwrap();
     assert!(
         matches!(outcome.kind, UndoKind::Ok),
         "undo from trash failed: {:?}",
