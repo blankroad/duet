@@ -151,9 +151,16 @@ impl AppLaunchersStore {
     }
 
     pub async fn add(&self, name: String, path: PathBuf) -> Result<Vec<AppItem>, DuetError> {
-        if name.trim().is_empty() {
-            return Err(DuetError::Io("app name required".into()));
-        }
+        // 표시 이름이 비면 실행파일명(stem)으로 — 경로 파싱은 backend 담당(§7).
+        // OS별 구분자/번들(.app)/확장자(.exe/.desktop) 를 Path 가 정확히 처리.
+        let name = if name.trim().is_empty() {
+            path.file_stem()
+                .and_then(|s| s.to_str())
+                .map(str::to_owned)
+                .unwrap_or_else(|| "app".to_owned())
+        } else {
+            name
+        };
         let mut v = self.inner.write().await;
         v.push(AppItem::new_app(name, path));
         let snap = v.clone();

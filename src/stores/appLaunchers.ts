@@ -29,8 +29,9 @@ export async function bootstrapAppLaunchers(): Promise<void> {
   if (r.status === "ok") useAppLaunchers.getState().setAll(r.data);
 }
 
-export async function addAppLauncher(name: string, path: string): Promise<void> {
-  apply(await commands.appsAdd(name, path));
+/** 앱 등록 — 표시 이름은 backend 가 실행파일명(stem)에서 도출(§7, 빈 name 전달). */
+export async function addAppLauncher(path: string): Promise<void> {
+  apply(await commands.appsAdd("", path));
 }
 export async function renameAppLauncher(id: string, name: string): Promise<void> {
   apply(await commands.appsRename(id, name));

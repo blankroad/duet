@@ -126,9 +126,10 @@ function appMenu(app: AppItem, folderId?: string): MenuEntry[] {
     { id: "args", label: "Edit arguments…", onSelect: () => openArgsDialog(app) },
     {
       id: "rename",
-      label: "Rename…",
+      label: "Rename label…",
       onSelect: () => {
-        const n = window.prompt("App name", app.name);
+        // 여기 표시되는 이름(label)만 변경 — 실행 경로(app.path)는 그대로.
+        const n = window.prompt("Display name (label shown here)", app.name);
         if (n) void renameAppLauncher(app.id, n);
       },
     },
@@ -348,7 +349,6 @@ async function registerApp(): Promise<void> {
     defaultPath: "/Applications",
   });
   if (!selected || Array.isArray(selected)) return;
-  const base = selected.split("/").pop() ?? selected;
-  const name = base.replace(/\.(app|exe|desktop)$/i, "");
-  await addAppLauncher(name, selected);
+  // 경로 파싱(basename/확장자 제거)은 backend 가 담당 — §7(프론트는 경로 조작 금지).
+  await addAppLauncher(selected);
 }
