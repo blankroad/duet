@@ -54,6 +54,10 @@ pub fn shell_escape_path(p: &Path) -> Result<String, DuetError> {
     if s.contains('\0') {
         return Err(DuetError::Io("path contains NUL byte".into()));
     }
+    // §7: 원격 exec 경로는 항상 POSIX. Windows 클라이언트의 PathBuf 는 `\` 구분자를
+    // 쓰므로 `/` 로 정규화한다. 안 하면 원격 리눅스가 `\` 를 디렉토리 구분자가 아닌
+    // 파일명 문자로 취급해 경로가 깨진다 (목적지 폴더가 파일명 prefix 로 붙는 사고).
+    let s = s.replace('\\', "/");
     let escaped = s.replace('\'', "'\\''");
     Ok(format!("'{escaped}'"))
 }
@@ -149,5 +153,15 @@ mod tests {
     fn escape_path_with_null_byte_rejected() {
         let p = std::path::PathBuf::from("/tmp/\0bad");
         assert!(shell_escape_path(&p).is_err());
+    }
+
+    #[test]
+    fn escape_normalizes_windows_separator() {
+        // §7 회귀: Windows 클라이언트의 PathBuf 가 끼워넣은 `\` 를 원격 POSIX `/` 로.
+        // (수정 전엔 `'/home/u/projects\app.zip'` 가 나와 원격에서 경로가 깨졌음.)
+        assert_eq!(
+            shell_escape_path(Path::new("/home/u/projects\\app.zip")).unwrap(),
+            "'/home/u/projects/app.zip'"
+        );
     }
 }

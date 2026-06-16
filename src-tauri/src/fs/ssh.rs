@@ -70,9 +70,8 @@ impl FileSystem for SshFs {
 
     async fn metadata(&self, path: &Path) -> Result<crate::types::EntryMeta, DuetError> {
         let sftp = self.open_sftp().await?;
-        let path_str = path
-            .to_str()
-            .ok_or_else(|| DuetError::Io("non-UTF8 path".into()))?;
+        let owned = remote_path_str(path)?;
+        let path_str = owned.as_str();
         let meta = sftp
             .metadata(path_str.to_string())
             .await
@@ -96,12 +95,10 @@ impl FileSystem for SshFs {
 
     async fn rename(&self, from: &Path, to: &Path) -> Result<(), DuetError> {
         let sftp = self.open_sftp().await?;
-        let from_s = from
-            .to_str()
-            .ok_or_else(|| DuetError::Io("non-UTF8 from".into()))?;
-        let to_s = to
-            .to_str()
-            .ok_or_else(|| DuetError::Io("non-UTF8 to".into()))?;
+        let from_owned = remote_path_str(from)?;
+        let from_s = from_owned.as_str();
+        let to_owned = remote_path_str(to)?;
+        let to_s = to_owned.as_str();
         sftp.rename(from_s.to_string(), to_s.to_string())
             .await
             .map_err(|e| map_sftp_error(e, from_s))
@@ -109,9 +106,8 @@ impl FileSystem for SshFs {
 
     async fn mkdir(&self, path: &Path) -> Result<(), DuetError> {
         let sftp = self.open_sftp().await?;
-        let path_str = path
-            .to_str()
-            .ok_or_else(|| DuetError::Io("non-UTF8 path".into()))?;
+        let owned = remote_path_str(path)?;
+        let path_str = owned.as_str();
         sftp.create_dir(path_str.to_string())
             .await
             .map_err(|e| map_sftp_error(e, path_str))
@@ -139,12 +135,10 @@ impl FileSystem for SshFs {
         if let Some(parent) = target.parent() {
             sftp_mkdir_all(&sftp, parent).await?;
         }
-        let abs_str = abs_path
-            .to_str()
-            .ok_or_else(|| DuetError::Io("non-UTF8 path".into()))?;
-        let target_str = target
-            .to_str()
-            .ok_or_else(|| DuetError::Io("non-UTF8 trash path".into()))?;
+        let abs_owned = remote_path_str(&abs_path)?;
+        let abs_str = abs_owned.as_str();
+        let target_owned = remote_path_str(&target)?;
+        let target_str = target_owned.as_str();
         sftp.rename(abs_str.to_string(), target_str.to_string())
             .await
             .map_err(|e| map_sftp_error(e, abs_str))?;
@@ -168,9 +162,8 @@ impl FileSystem for SshFs {
             ));
         };
         let sftp = self.open_sftp().await?;
-        let original_str = original_path
-            .to_str()
-            .ok_or_else(|| DuetError::Io("non-UTF8 original path".into()))?;
+        let original_owned = remote_path_str(original_path)?;
+        let original_str = original_owned.as_str();
         // 복원 대상 자리에 이미 있으면 명시 에러
         if sftp.metadata(original_str.to_string()).await.is_ok() {
             return Err(DuetError::Io(format!(
@@ -181,9 +174,8 @@ impl FileSystem for SshFs {
         if let Some(parent) = original_path.parent() {
             sftp_mkdir_all(&sftp, parent).await?;
         }
-        let trash_str = trash_path
-            .to_str()
-            .ok_or_else(|| DuetError::Io("non-UTF8 trash path".into()))?;
+        let trash_owned = remote_path_str(trash_path)?;
+        let trash_str = trash_owned.as_str();
         sftp.rename(trash_str.to_string(), original_str.to_string())
             .await
             .map_err(|e| map_sftp_error(e, trash_str))
@@ -192,9 +184,8 @@ impl FileSystem for SshFs {
     async fn read_full(&self, path: &Path) -> Result<Vec<u8>, DuetError> {
         use tokio::io::AsyncReadExt;
         let sftp = self.open_sftp().await?;
-        let path_str = path
-            .to_str()
-            .ok_or_else(|| DuetError::Io("non-UTF8 path".into()))?;
+        let owned = remote_path_str(path)?;
+        let path_str = owned.as_str();
         let mut file = sftp
             .open(path_str.to_string())
             .await
@@ -208,9 +199,8 @@ impl FileSystem for SshFs {
 
     async fn read_head(&self, path: &Path, max: usize) -> Result<(Vec<u8>, bool), DuetError> {
         let sftp = self.open_sftp().await?;
-        let path_str = path
-            .to_str()
-            .ok_or_else(|| DuetError::Io("non-UTF8 path".into()))?;
+        let owned = remote_path_str(path)?;
+        let path_str = owned.as_str();
         let mut file = sftp
             .open(path_str.to_string())
             .await
@@ -227,9 +217,8 @@ impl FileSystem for SshFs {
     async fn read_range(&self, path: &Path, offset: u64, len: usize) -> Result<Vec<u8>, DuetError> {
         use tokio::io::AsyncSeekExt;
         let sftp = self.open_sftp().await?;
-        let path_str = path
-            .to_str()
-            .ok_or_else(|| DuetError::Io("non-UTF8 path".into()))?;
+        let owned = remote_path_str(path)?;
+        let path_str = owned.as_str();
         let mut file = sftp
             .open(path_str.to_string())
             .await
@@ -249,9 +238,8 @@ impl FileSystem for SshFs {
     async fn write_full(&self, path: &Path, bytes: &[u8]) -> Result<(), DuetError> {
         use tokio::io::AsyncWriteExt;
         let sftp = self.open_sftp().await?;
-        let path_str = path
-            .to_str()
-            .ok_or_else(|| DuetError::Io("non-UTF8 path".into()))?;
+        let owned = remote_path_str(path)?;
+        let path_str = owned.as_str();
         let mut file = sftp
             .create(path_str.to_string())
             .await
@@ -272,9 +260,8 @@ impl FileSystem for SshFs {
     ) -> Result<std::pin::Pin<Box<dyn tokio::io::AsyncRead + Send>>, DuetError> {
         use tokio::io::AsyncSeekExt;
         let sftp = self.open_sftp().await?;
-        let path_str = path
-            .to_str()
-            .ok_or_else(|| DuetError::Io("non-UTF8 path".into()))?;
+        let owned = remote_path_str(path)?;
+        let path_str = owned.as_str();
         // File 은 Arc<RawSftpSession> 를 자체 보유 — sftp 로컬 var 가 drop 돼도 채널 유지.
         let mut file = sftp
             .open(path_str.to_string())
@@ -296,9 +283,8 @@ impl FileSystem for SshFs {
         use russh_sftp::protocol::OpenFlags;
         use tokio::io::AsyncSeekExt;
         let sftp = self.open_sftp().await?;
-        let path_str = path
-            .to_str()
-            .ok_or_else(|| DuetError::Io("non-UTF8 path".into()))?;
+        let owned = remote_path_str(path)?;
+        let path_str = owned.as_str();
         // offset==0: WRITE|CREATE|TRUNCATE (create 와 동일). offset>0: 이어쓰기 위해
         // TRUNCATE 없이 열고 seek.
         let flags = if offset == 0 {
@@ -320,9 +306,8 @@ impl FileSystem for SshFs {
 
     async fn list(&self, path: &Path) -> Result<Vec<Entry>, DuetError> {
         let sftp = self.open_sftp().await?;
-        let path_str = path
-            .to_str()
-            .ok_or_else(|| DuetError::Io("non-UTF8 path".into()))?;
+        let owned = remote_path_str(path)?;
+        let path_str = owned.as_str();
         let read_dir = sftp
             .read_dir(path_str)
             .await
@@ -359,6 +344,19 @@ impl FileSystem for SshFs {
     }
 }
 
+/// 로컬 `Path` → 원격(POSIX) 경로 문자열.
+///
+/// CLAUDE.md §7: 원격 경로는 항상 POSIX. Windows 클라이언트의 `PathBuf` 는 `\`
+/// 구분자를 쓰므로 `/` 로 정규화한다. 안 하면 원격 리눅스가 `\` 를 디렉토리
+/// 구분자가 아닌 파일명 문자로 취급해, 복사/삭제 대상 경로가 엉뚱한 곳(home 등)
+/// 에서 깨진다. `to_str` 가 None 이면 비-UTF8 로컬 경로 — SFTP wire format(String) 거부.
+fn remote_path_str(path: &Path) -> Result<String, DuetError> {
+    let s = path
+        .to_str()
+        .ok_or_else(|| DuetError::Io("non-UTF8 path".into()))?;
+    Ok(s.replace('\\', "/"))
+}
+
 /// 원격 사용자의 home 디렉토리 절대경로. SFTP `canonicalize(".")` 결과.
 async fn remote_home(sftp: &russh_sftp::client::SftpSession) -> Result<PathBuf, DuetError> {
     let home = sftp
@@ -378,9 +376,8 @@ async fn sftp_mkdir_all(
             Box::pin(sftp_mkdir_all(sftp, parent)).await?;
         }
     }
-    let path_str = path
-        .to_str()
-        .ok_or_else(|| DuetError::Io("non-UTF8 path".into()))?;
+    let owned = remote_path_str(path)?;
+    let path_str = owned.as_str();
     // 이미 있으면 idempotent.
     if sftp.metadata(path_str.to_string()).await.is_ok() {
         return Ok(());
@@ -395,9 +392,8 @@ async fn remove_recursive(
     sftp: &russh_sftp::client::SftpSession,
     path: &Path,
 ) -> Result<(), DuetError> {
-    let path_str = path
-        .to_str()
-        .ok_or_else(|| DuetError::Io("non-UTF8 path".into()))?;
+    let owned = remote_path_str(path)?;
+    let path_str = owned.as_str();
     let meta = sftp
         .metadata(path_str.to_string())
         .await
@@ -453,6 +449,28 @@ mod tests {
     #[test]
     fn ssh_fs_constructor_compiles() {
         let _ = SshFs::new;
+    }
+
+    #[test]
+    fn remote_path_str_normalizes_backslashes() {
+        use std::path::Path;
+        // §7 회귀: Windows 클라이언트의 PathBuf 가 끼워넣은 `\` → 원격 POSIX `/`.
+        // 수정 전엔 `/home/u/projects\app.zip` 가 그대로 SFTP 로 나가, 리눅스가
+        // home 에 `projects\app.zip` 라는 이름의 파일을 만들었음.
+        assert_eq!(
+            super::remote_path_str(Path::new("/home/u/projects\\app.zip")).unwrap(),
+            "/home/u/projects/app.zip"
+        );
+        // 휴지통 base 도 동일 — `/home/u\.duet-trash` → `/home/u/.duet-trash`.
+        assert_eq!(
+            super::remote_path_str(Path::new("/home/u\\.duet-trash\\b\\home\\u\\f.txt")).unwrap(),
+            "/home/u/.duet-trash/b/home/u/f.txt"
+        );
+        // 정상 POSIX 경로는 변형 없음.
+        assert_eq!(
+            super::remote_path_str(Path::new("/home/u/a/b")).unwrap(),
+            "/home/u/a/b"
+        );
     }
 
     #[test]
