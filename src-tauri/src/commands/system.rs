@@ -418,6 +418,80 @@ pub async fn volumes() -> Result<Vec<Volume>, DuetError> {
         .map_err(|e| DuetError::Io(format!("volumes task join: {e}")))
 }
 
+/// 원격 호스트의 표준 Places — home + 존재하는 표준 폴더 (순수 SFTP stat).
+///
+/// `places()`(로컬)의 원격판. 헤드리스 서버엔 표준 폴더가 없는 경우가 많아
+/// `metadata` 로 실제 존재하는 dir 만 포함한다. exec 없이 SFTP 만 사용(§9 무관).
+#[tauri::command]
+#[specta::specta]
+pub async fn ssh_places(
+    connection_id: ConnectionId,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+) -> Result<Vec<Place>, DuetError> {
+    let conn = pool.inner().get(&connection_id).await?;
+    let fs = SshFs::new(conn);
+    let home = fs.home().await?;
+    let mut out = vec![Place {
+        label: "Home".into(),
+        path: home.clone(),
+    }];
+    for label in ["Desktop", "Documents", "Downloads", "Pictures", "Movies"] {
+        let p = home.join(label);
+        if let Ok(meta) = fs.metadata(&p).await {
+            if meta.kind == EntryKind::Dir {
+                out.push(Place {
+                    label: label.into(),
+                    path: p,
+                });
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// 원격 호스트의 마운트 볼륨 — `/Volumes`(mac)·`/mnt`·`/media`·`/media/<user>`
+/// 의 디렉토리 엔트리 (순수 SFTP list). 없는 root 는 skip → OS 판별 불필요.
+#[tauri::command]
+#[specta::specta]
+pub async fn ssh_volumes(
+    connection_id: ConnectionId,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+) -> Result<Vec<Volume>, DuetError> {
+    let conn = pool.inner().get(&connection_id).await?;
+    let fs = SshFs::new(conn);
+    let user = match fs.source_id() {
+        SourceId::Ssh { user, .. } => user,
+        SourceId::Local => String::new(),
+    };
+    let mut roots = vec![
+        PathBuf::from("/Volumes"),
+        PathBuf::from("/mnt"),
+        PathBuf::from("/media"),
+    ];
+    if !user.is_empty() {
+        roots.push(Path::new("/media").join(&user));
+    }
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for root in roots {
+        // 없는 root(다른 OS 등)는 SFTP 에러 → 조용히 skip.
+        let Ok(entries) = fs.list(&root).await else {
+            continue;
+        };
+        for e in entries {
+            // mount point 는 dir, /Volumes 의 부팅 디스크 등은 symlink 일 수 있어 둘 다 허용.
+            if e.kind != EntryKind::Dir && e.kind != EntryKind::Symlink {
+                continue;
+            }
+            let path = root.join(&e.name);
+            if seen.insert(path.clone()) {
+                out.push(Volume { name: e.name, path });
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// 마운트된 볼륨을 eject (언마운트). macOS 만 지원, 그 외 `NotSupported`.
 ///
 /// 실제 프로세스 spawn 은 `platform/` 레이어. 비가역 시스템 op 이므로

@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { events } from "@/types/bindings";
 import { useConnections } from "@/stores/connections";
+import { loadRemotePlaces, evictRemotePlaces } from "@/stores/places";
 
 /**
  * 백엔드의 `connection-state-event` 를 구독하여 connections store 를 자동
@@ -27,9 +28,12 @@ export function useConnectionEvents() {
             user: payload.user,
             state: { kind: "connected" },
           });
+          // 원격 호스트 Places/Volumes 로드 (활성 패널이 이 소스면 사이드바에 표시).
+          void loadRemotePlaces(payload.id);
           break;
         case "disconnected":
           removeActive(payload.id);
+          evictRemotePlaces(payload.id);
           break;
         case "error":
           setState(payload.id, { kind: "error", message: payload.state.message });

@@ -29,7 +29,7 @@ import {
   removeHostFavorite,
   reorderHostFavorites,
 } from "@/stores/hostFavorites";
-import { usePlaces, refreshVolumes } from "@/stores/places";
+import { usePlaces, refreshVolumes, refreshRemoteVolumes, sourceKey } from "@/stores/places";
 import { useRecents, type RecentEntry } from "@/stores/recents";
 import {
   useHostGroups,
@@ -39,7 +39,7 @@ import {
   assignToGroup,
   moveGroup,
 } from "@/stores/sidebarGroups";
-import { usePanes, type PaneId } from "@/stores/panes";
+import { usePanes, activeTab, type PaneId } from "@/stores/panes";
 import { useContextMenu, type MenuEntry } from "@/stores/contextMenu";
 import { useToast } from "@/stores/toast";
 import { useReorderable } from "@/hooks/useReorderable";
@@ -50,6 +50,7 @@ import type {
   HostGroup,
   Location,
   Place,
+  SourceId,
   Volume,
 } from "@/types/bindings";
 import clsx from "clsx";
@@ -131,6 +132,19 @@ function localLocation(path: string): Location {
   return { source: { kind: "local" }, path };
 }
 
+/** 임의 source 의 path → Location (Places/Volumes 가 활성 패널 소스로 이동). */
+function locationForSource(source: SourceId, path: string): Location {
+  return { source, path };
+}
+
+/** 활성 패널(탭)의 source — Places/Volumes 가 이걸로 맞춰진다. */
+function useActiveSource(): SourceId {
+  return usePanes((s) => activeTab(s, s.activePane).location.source);
+}
+
+const EMPTY_PLACES: Place[] = [];
+const EMPTY_VOLUMES: Volume[] = [];
+
 /** 컨텍스트 메뉴 오픈 헬퍼. */
 function openMenu(e: React.MouseEvent, items: MenuEntry[]): void {
   e.preventDefault();
@@ -180,11 +194,12 @@ function PlacesSection({
   onOpenLocation: (location: Location, pane: PaneId) => void;
   onTrashActivate: (pane?: PaneId) => void;
 }) {
-  const places = usePlaces((s) => s.places);
+  const source = useActiveSource();
+  const places = usePlaces((s) => s.bySource[sourceKey(source)]?.places) ?? EMPTY_PLACES;
   return (
     <Section sectionKey="places" title="Places" icon={<Folder size={14} />} count={places.length}>
       {places.map((p) => (
-        <PlaceItem key={p.label} place={p} onOpenLocation={onOpenLocation} />
+        <PlaceItem key={p.label} place={p} source={source} onOpenLocation={onOpenLocation} />
       ))}
       <TrashItem onTrashActivate={onTrashActivate} />
     </Section>
@@ -193,21 +208,23 @@ function PlacesSection({
 
 function PlaceItem({
   place,
+  source,
   onOpenLocation,
 }: {
   place: Place;
+  source: SourceId;
   onOpenLocation: (location: Location, pane: PaneId) => void;
 }) {
   const path = String(place.path);
   const menu: MenuEntry[] = [
-    { id: "open", label: "Open", onSelect: () => onOpenLocation(localLocation(path), usePanes.getState().activePane) },
-    { id: "open-other", label: "Open in other pane", onSelect: () => onOpenLocation(localLocation(path), otherPane()) },
+    { id: "open", label: "Open", onSelect: () => onOpenLocation(locationForSource(source, path), usePanes.getState().activePane) },
+    { id: "open-other", label: "Open in other pane", onSelect: () => onOpenLocation(locationForSource(source, path), otherPane()) },
     { id: "copy-path", label: "Copy path", onSelect: () => copyText(path) },
   ];
   return (
     <button
       type="button"
-      onClick={(e) => onOpenLocation(localLocation(path), targetPane(e))}
+      onClick={(e) => onOpenLocation(locationForSource(source, path), targetPane(e))}
       onContextMenu={(e) => openMenu(e, menu)}
       title={path}
       className={clsx(rowClass, "w-full text-left")}
@@ -246,8 +263,14 @@ function VolumesSection({
   onOpenLocation: (location: Location, pane: PaneId) => void;
   onEject: (volume: Volume) => void;
 }) {
-  const volumes = usePlaces((s) => s.volumes);
-  // 사이드바가 열릴 때마다 재스캔 — 마운트/언마운트 반영.
+  const source = useActiveSource();
+  const volumes = usePlaces((s) => s.bySource[sourceKey(source)]?.volumes) ?? EMPTY_VOLUMES;
+  const rescan = () => {
+    if (source.kind === "local") void refreshVolumes();
+    else void refreshRemoteVolumes(source.connection_id);
+  };
+  // 로컬은 사이드바가 열릴 때 재스캔. 원격은 연결 시 로드되며 포커스 전환 시 재조회 안 함
+  // (수동 새로고침 버튼으로 갱신).
   useEffect(() => {
     void refreshVolumes();
   }, []);
@@ -260,7 +283,7 @@ function VolumesSection({
       action={
         <button
           type="button"
-          onClick={() => void refreshVolumes()}
+          onClick={rescan}
           className="rounded p-0.5 text-fg-muted hover:bg-border hover:text-fg"
           title="Rescan volumes"
           aria-label="Rescan volumes"
@@ -273,7 +296,7 @@ function VolumesSection({
         <Item label="(no mounted volumes)" muted />
       ) : (
         volumes.map((v) => (
-          <VolumeItem key={String(v.path)} volume={v} onOpenLocation={onOpenLocation} onEject={onEject} />
+          <VolumeItem key={String(v.path)} volume={v} source={source} onOpenLocation={onOpenLocation} onEject={onEject} />
         ))
       )}
     </Section>
@@ -282,25 +305,29 @@ function VolumesSection({
 
 function VolumeItem({
   volume,
+  source,
   onOpenLocation,
   onEject,
 }: {
   volume: Volume;
+  source: SourceId;
   onOpenLocation: (location: Location, pane: PaneId) => void;
   onEject: (volume: Volume) => void;
 }) {
   const path = String(volume.path);
   const menu: MenuEntry[] = [
-    { id: "open", label: "Open", onSelect: () => onOpenLocation(localLocation(path), usePanes.getState().activePane) },
-    { id: "open-other", label: "Open in other pane", onSelect: () => onOpenLocation(localLocation(path), otherPane()) },
+    { id: "open", label: "Open", onSelect: () => onOpenLocation(locationForSource(source, path), usePanes.getState().activePane) },
+    { id: "open-other", label: "Open in other pane", onSelect: () => onOpenLocation(locationForSource(source, path), otherPane()) },
     { id: "copy-path", label: "Copy path", onSelect: () => copyText(path) },
-    { kind: "separator" },
-    { id: "eject", label: "Eject", danger: true, onSelect: () => onEject(volume) },
+    // eject 는 로컬 OS 볼륨만 (원격 마운트는 언마운트 미지원).
+    ...(source.kind === "local"
+      ? ([{ kind: "separator" }, { id: "eject", label: "Eject", danger: true, onSelect: () => onEject(volume) }] as MenuEntry[])
+      : []),
   ];
   return (
     <button
       type="button"
-      onClick={(e) => onOpenLocation(localLocation(path), targetPane(e))}
+      onClick={(e) => onOpenLocation(locationForSource(source, path), targetPane(e))}
       onContextMenu={(e) => openMenu(e, menu)}
       title={path}
       className={clsx(rowClass, "w-full text-left")}

@@ -44,6 +44,8 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::system::trash_restore,
             commands::system::places,
             commands::system::volumes,
+            commands::system::ssh_places,
+            commands::system::ssh_volumes,
             commands::system::eject_volume,
             commands::system::local_abs_paths,
             commands::connection::ssh_config_hosts,
