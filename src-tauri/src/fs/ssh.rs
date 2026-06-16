@@ -60,6 +60,54 @@ impl SshFs {
             .await
             .map_err(|e| DuetError::Ssh(format!("sftp init: {e}")))
     }
+
+    /// 원격 호스트 내 이동 — atomic `rename` 우선, 실패(EXDEV: src 와 dst 가 다른
+    /// 파일시스템) 시 서버측 `cp -a` 복사 후 원본 SFTP 제거.
+    ///
+    /// trash(mv)/restore 가 cross-mount 에서도 동작하게 하는 폴백. §3 준수: 원본
+    /// 제거는 SFTP recursive remove (시스템 `rm` exec 아님). 복사 성공(exit 0)
+    /// 확인 후에만 원본 제거 — 데이터 손실 방지.
+    async fn move_within_host(
+        &self,
+        sftp: &russh_sftp::client::SftpSession,
+        from: &Path,
+        to: &Path,
+    ) -> Result<(), DuetError> {
+        let from_s = remote_path_str(from)?;
+        let to_s = remote_path_str(to)?;
+        if sftp.rename(from_s, to_s).await.is_ok() {
+            return Ok(());
+        }
+        // rename 실패 — 보통 EXDEV(다른 마운트). mv 처럼 cp -a 후 원본 제거.
+        self.exec_cp(from, to).await?;
+        Box::pin(remove_recursive(sftp, from)).await
+    }
+
+    /// 서버측 `cp -a from to` (russh exec — 같은 호스트라 네트워크 왕복 없음, §9).
+    async fn exec_cp(&self, from: &Path, to: &Path) -> Result<(), DuetError> {
+        let session =
+            self.conn.session.as_ref().ok_or_else(|| {
+                DuetError::ConnectionFailed("connection has no live session".into())
+            })?;
+        let cmd = format!(
+            "cp -a -- {} {}",
+            posix_shell_quote(&remote_path_str(from)?)?,
+            posix_shell_quote(&remote_path_str(to)?)?
+        );
+        let out = {
+            let handle = session.lock().await;
+            crate::ssh::remote_exec::exec(&handle, &cmd).await?
+        };
+        if out.exit_status == 0 {
+            Ok(())
+        } else {
+            Err(DuetError::Ssh(format!(
+                "trash cp failed (exit {}): {}",
+                out.exit_status,
+                String::from_utf8_lossy(&out.stderr).trim()
+            )))
+        }
+    }
 }
 
 #[async_trait]
@@ -135,13 +183,8 @@ impl FileSystem for SshFs {
         if let Some(parent) = target.parent() {
             sftp_mkdir_all(&sftp, parent).await?;
         }
-        let abs_owned = remote_path_str(&abs_path)?;
-        let abs_str = abs_owned.as_str();
-        let target_owned = remote_path_str(&target)?;
-        let target_str = target_owned.as_str();
-        sftp.rename(abs_str.to_string(), target_str.to_string())
-            .await
-            .map_err(|e| map_sftp_error(e, abs_str))?;
+        // atomic rename 우선, src 와 trash 가 다른 파일시스템(EXDEV)이면 cp+remove 폴백.
+        self.move_within_host(&sftp, &abs_path, &target).await?;
 
         Ok(crate::types::TrashLocation::Remote { trash_path: target })
     }
@@ -174,11 +217,8 @@ impl FileSystem for SshFs {
         if let Some(parent) = original_path.parent() {
             sftp_mkdir_all(&sftp, parent).await?;
         }
-        let trash_owned = remote_path_str(trash_path)?;
-        let trash_str = trash_owned.as_str();
-        sftp.rename(trash_str.to_string(), original_str.to_string())
+        self.move_within_host(&sftp, trash_path, original_path)
             .await
-            .map_err(|e| map_sftp_error(e, trash_str))
     }
 
     async fn read_full(&self, path: &Path) -> Result<Vec<u8>, DuetError> {
@@ -357,6 +397,17 @@ fn remote_path_str(path: &Path) -> Result<String, DuetError> {
     Ok(s.replace('\\', "/"))
 }
 
+/// POSIX shell single-quote escape (exec 인자 안전화). NUL 은 거부.
+///
+/// `core::copy_strategy::shell_escape_path` 와 동일 로직 — §2(fs→core 역방향
+/// import 금지) 회피 위해 fs 레이어에 인라인.
+fn posix_shell_quote(s: &str) -> Result<String, DuetError> {
+    if s.contains('\0') {
+        return Err(DuetError::Io("path contains NUL byte".into()));
+    }
+    Ok(format!("'{}'", s.replace('\'', "'\\''")))
+}
+
 /// 원격 사용자의 home 디렉토리 절대경로. SFTP `canonicalize(".")` 결과.
 async fn remote_home(sftp: &russh_sftp::client::SftpSession) -> Result<PathBuf, DuetError> {
     let home = sftp
@@ -471,6 +522,22 @@ mod tests {
             super::remote_path_str(Path::new("/home/u/a/b")).unwrap(),
             "/home/u/a/b"
         );
+    }
+
+    #[test]
+    fn posix_shell_quote_escapes_and_normalizes() {
+        use std::path::Path;
+        assert_eq!(super::posix_shell_quote("/a/b").unwrap(), "'/a/b'");
+        // 작은따옴표는 '\'' 로.
+        assert_eq!(
+            super::posix_shell_quote("/a/it's").unwrap(),
+            "'/a/it'\\''s'"
+        );
+        // NUL 거부.
+        assert!(super::posix_shell_quote("/a/\0b").is_err());
+        // remote_path_str + quote 조합 — Windows `\` 는 `/` 로 정규화되어 안전.
+        let p = super::remote_path_str(Path::new("/mnt/d\\f")).unwrap();
+        assert_eq!(super::posix_shell_quote(&p).unwrap(), "'/mnt/d/f'");
     }
 
     #[test]
