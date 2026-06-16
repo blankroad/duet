@@ -9,7 +9,17 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
+fn default_theme() -> String {
+    "system".into()
+}
+fn default_sort() -> String {
+    "name".into()
+}
+fn default_view() -> String {
+    "details".into()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct Settings {
     /// 영구 삭제 (Shift+Delete) 메뉴 활성화. CLAUDE.md §3 — 디폴트 false.
     #[serde(default)]
@@ -20,6 +30,32 @@ pub struct Settings {
     /// 비교창 기본 mtime 허용오차(ms).
     #[serde(default)]
     pub compare_mtime_tolerance_ms: i64,
+    /// UI 테마: "system" | "light" | "dark". 프론트가 `data-theme` 로 적용.
+    #[serde(default = "default_theme")]
+    pub theme: String,
+    /// 새 탭 기본 정렬: "name" | "size" | "mtime" | "kind" | "ext".
+    #[serde(default = "default_sort")]
+    pub default_sort: String,
+    /// 새 탭 기본 뷰: "details" | "grid" | "tiles".
+    #[serde(default = "default_view")]
+    pub default_view: String,
+    /// 새 탭에서 숨김 파일 기본 표시 여부.
+    #[serde(default)]
+    pub show_hidden_default: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            permanent_delete_enabled: false,
+            compare_ignore_globs: Vec::new(),
+            compare_mtime_tolerance_ms: 0,
+            theme: default_theme(),
+            default_sort: default_sort(),
+            default_view: default_view(),
+            show_hidden_default: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Type, Default)]
@@ -27,6 +63,10 @@ pub struct SettingsPatch {
     pub permanent_delete_enabled: Option<bool>,
     pub compare_ignore_globs: Option<Vec<String>>,
     pub compare_mtime_tolerance_ms: Option<i64>,
+    pub theme: Option<String>,
+    pub default_sort: Option<String>,
+    pub default_view: Option<String>,
+    pub show_hidden_default: Option<bool>,
 }
 
 /// In-memory cache + on-disk TOML. 동시 접근은 RwLock.
@@ -72,6 +112,18 @@ impl SettingsStore {
         }
         if let Some(v) = patch.compare_mtime_tolerance_ms {
             s.compare_mtime_tolerance_ms = v;
+        }
+        if let Some(v) = patch.theme {
+            s.theme = v;
+        }
+        if let Some(v) = patch.default_sort {
+            s.default_sort = v;
+        }
+        if let Some(v) = patch.default_view {
+            s.default_view = v;
+        }
+        if let Some(v) = patch.show_hidden_default {
+            s.show_hidden_default = v;
         }
         let snapshot = s.clone();
         // 디스크 동기화 — write lock 잡은 채로 (race 방지)

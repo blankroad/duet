@@ -38,6 +38,10 @@ export function CompareRulesBar({
       permanent_delete_enabled: null,
       compare_ignore_globs: globs,
       compare_mtime_tolerance_ms: tol,
+      theme: null,
+      default_sort: null,
+      default_view: null,
+      show_hidden_default: null,
     });
   };
 

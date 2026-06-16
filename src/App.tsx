@@ -48,7 +48,8 @@ import { useCommands } from "@/stores/commands";
 import { usePalette } from "@/stores/palette";
 import { buildBuiltins } from "@/lib/commands";
 import { useUI } from "@/stores/ui";
-import { usePanes, activeTab, computeDisplayed, type PaneId } from "@/stores/panes";
+import { usePanes, activeTab, computeDisplayed, applyTabDefaults, type PaneId, type SortKey, type ViewMode } from "@/stores/panes";
+import { applyTheme } from "@/lib/theme";
 import { useSearch } from "@/stores/search";
 import { useUIDialogs } from "@/stores/ui-dialogs";
 import { useToast } from "@/stores/toast";
@@ -795,6 +796,17 @@ function App() {
       void bootstrapAppLaunchers();
       void bootstrapPlaces();
       void bootstrapHostGroups();
+      // 설정 적용 — 테마 + 새 탭 기본값(정렬/뷰/숨김), 기존 탭에도 즉시 반영.
+      void commands.settingsGet().then((r) => {
+        if (r.status === "ok") {
+          applyTheme(r.data.theme ?? "system");
+          applyTabDefaults({
+            sortKey: (r.data.default_sort ?? "name") as SortKey,
+            viewMode: (r.data.default_view ?? "details") as ViewMode,
+            showHidden: r.data.show_hidden_default ?? false,
+          });
+        }
+      });
     })();
     // navigate가 deps에 들어가면 무한 루프 — 마운트 1회만
     // eslint-disable-next-line react-hooks/exhaustive-deps

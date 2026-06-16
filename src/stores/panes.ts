@@ -103,6 +103,13 @@ function newTabId(): string {
   return `t${_idSeq}`;
 }
 
+/** 새 탭 기본값 — 설정(Settings)에서 부팅 시 주입(applyTabDefaults). 죽은 토글 방지 배선. */
+let tabDefaults: { sortKey: SortKey; viewMode: ViewMode; showHidden: boolean } = {
+  sortKey: "name",
+  viewMode: "details",
+  showHidden: false,
+};
+
 const initialTab = (location: Location = home()): TabState => ({
   id: newTabId(),
   location,
@@ -110,10 +117,10 @@ const initialTab = (location: Location = home()): TabState => ({
   cursorIndex: -1,
   selected: new Set(),
   loadedAt: 0,
-  sortKey: "name",
+  sortKey: tabDefaults.sortKey,
   sortOrder: "asc",
-  showHidden: false,
-  viewMode: "details",
+  showHidden: tabDefaults.showHidden,
+  viewMode: tabDefaults.viewMode,
   gridCols: 1,
   filter: "",
   filterFocused: false,
@@ -473,4 +480,29 @@ function sortEntries(entries: Entry[], key: SortKey, order: SortOrder): Entry[] 
     return order === "asc" ? c : -c;
   });
   return sorted;
+}
+
+/**
+ * 설정에서 새 탭 기본값을 주입 + 현재 열린 모든 탭에도 적용 (부팅 시 1회 / 설정 변경 시).
+ * 새 탭은 tabDefaults 를 통해, 기존 탭은 즉시 갱신 — "default view" 등이 바로 반영되게.
+ */
+export function applyTabDefaults(d: {
+  sortKey: SortKey;
+  viewMode: ViewMode;
+  showHidden: boolean;
+}): void {
+  tabDefaults = { ...d };
+  usePanes.setState((s) => {
+    const mapPane = (p: PaneState): PaneState => ({
+      ...p,
+      tabs: p.tabs.map((t) => ({
+        ...t,
+        sortKey: d.sortKey,
+        viewMode: d.viewMode,
+        showHidden: d.showHidden,
+        cursorIndex: 0,
+      })),
+    });
+    return { panes: { left: mapPane(s.panes.left), right: mapPane(s.panes.right) } };
+  });
 }
