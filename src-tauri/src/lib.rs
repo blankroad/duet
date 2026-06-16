@@ -53,6 +53,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::connection::connection_open_adhoc,
             commands::connection::connection_close,
             commands::connection::connection_list,
+            commands::connection::ssh_setup_key_auth,
             commands::host_favorites::host_favorites_list,
             commands::host_favorites::host_favorites_add,
             commands::host_favorites::host_favorites_remove,

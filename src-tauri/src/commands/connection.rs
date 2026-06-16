@@ -300,11 +300,93 @@ pub async fn connection_list(
         .collect())
 }
 
+/// 로컬 SSH 공개키 한 개 찾기 — `~/.ssh/id_ed25519.pub` > `id_ecdsa.pub` > `id_rsa.pub`.
+/// 공개키만 읽는다 (비밀키/비번 안 건드림 — §5 무관).
+fn local_public_key() -> Result<String, DuetError> {
+    let ssh_dir = dirs::home_dir()
+        .ok_or_else(|| DuetError::Io("home directory not found".into()))?
+        .join(".ssh");
+    for name in ["id_ed25519.pub", "id_ecdsa.pub", "id_rsa.pub"] {
+        if let Ok(text) = std::fs::read_to_string(ssh_dir.join(name)) {
+            let line = text.trim();
+            if !line.is_empty() {
+                return Ok(line.to_string());
+            }
+        }
+    }
+    Err(DuetError::Io(
+        "no local SSH public key found (~/.ssh/id_ed25519.pub 등). \
+         `ssh-keygen -t ed25519` 로 생성 후 다시 시도."
+            .into(),
+    ))
+}
+
+/// `ssh-copy-id` 와 동일한 한 줄 셸 — umask 077, `~/.ssh` 생성, dedup append, 권한 보정.
+/// 공개키는 single-quote escape (base64 라 quote 없음, 방어적).
+fn build_install_pubkey_cmd(pubkey: &str) -> String {
+    let escaped = pubkey.replace('\'', "'\\''");
+    format!(
+        "umask 077; mkdir -p ~/.ssh && {{ grep -qxF '{escaped}' ~/.ssh/authorized_keys 2>/dev/null \
+         || echo '{escaped}' >> ~/.ssh/authorized_keys; }} && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys"
+    )
+}
+
+/// 로컬 공개키를 원격 `~/.ssh/authorized_keys` 에 설치 (ssh-copy-id).
+///
+/// 비밀번호로 접속한 뒤 이걸 호출하면, 이후 `connect`(키→agent→비번 폴백)가 키로
+/// 자동 인증 → 비밀번호 불필요. 키 생성은 하지 않는다 (로컬 키 없으면 안내 에러).
+/// 원격 변경은 russh exec (§9 — 시스템 ssh 아님). 공개키만 다룸 (§5 무관).
+#[tauri::command]
+#[specta::specta]
+pub async fn ssh_setup_key_auth(
+    connection_id: ConnectionId,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+) -> Result<(), DuetError> {
+    let pubkey = local_public_key()?;
+    let conn = pool.inner().get(&connection_id).await?;
+    let session_mutex = conn
+        .session
+        .as_ref()
+        .ok_or_else(|| DuetError::ConnectionFailed("no live session".into()))?;
+    let cmd = build_install_pubkey_cmd(&pubkey);
+    let out = {
+        let handle = session_mutex.lock().await;
+        crate::ssh::remote_exec::exec(&handle, &cmd).await?
+    };
+    if out.exit_status == 0 {
+        Ok(())
+    } else {
+        Err(DuetError::Ssh(format!(
+            "key install failed (exit {}): {}",
+            out.exit_status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        )))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ssh::config::SshHostEntry;
     use std::path::PathBuf;
+
+    #[test]
+    fn install_pubkey_cmd_is_ssh_copy_id_shaped() {
+        let cmd = build_install_pubkey_cmd("ssh-ed25519 AAAAC3Nz user@host");
+        assert!(cmd.contains("mkdir -p ~/.ssh"));
+        assert!(cmd.contains("grep -qxF 'ssh-ed25519 AAAAC3Nz user@host'")); // dedup
+        assert!(cmd.contains(">> ~/.ssh/authorized_keys")); // append
+        assert!(cmd.contains("chmod 700 ~/.ssh"));
+        assert!(cmd.contains("chmod 600 ~/.ssh/authorized_keys"));
+        assert!(cmd.contains("umask 077"));
+    }
+
+    #[test]
+    fn install_pubkey_cmd_escapes_single_quote() {
+        // 키에 ' 가 있어도(이례적) 셸 인젝션 안 되게 escape.
+        let cmd = build_install_pubkey_cmd("ab'cd");
+        assert!(cmd.contains("ab'\\''cd"));
+    }
 
     fn mk_entry(alias: &str, with_jump: bool) -> SshHostEntry {
         SshHostEntry {

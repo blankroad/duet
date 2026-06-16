@@ -461,6 +461,21 @@ function App() {
       copyPath: () => void copySelectionPaths(showToast),
       copyName: () => void copySelectionNames(showToast),
       undo: () => void triggerUndo(showToast),
+      setupKeyAuth: () => {
+        const src = activeTab(usePanes.getState(), usePanes.getState().activePane).location.source;
+        if (src.kind !== "ssh") {
+          showToast("Active panel is not a remote host");
+          return;
+        }
+        if (!confirm("Install your SSH public key on this host for passwordless login next time?")) return;
+        void commands.sshSetupKeyAuth(src.connection_id).then((r) => {
+          showToast(
+            r.status === "ok"
+              ? "Passwordless login set up — your key is installed"
+              : `Setup failed: ${formatErr(r.error)}`,
+          );
+        });
+      },
     });
     setBuiltins(builtins);
   }, [setBuiltins, openPalette, toggleSidebar, togglePreview, onBack, onForward, onRefresh, openDialog, showToast]);

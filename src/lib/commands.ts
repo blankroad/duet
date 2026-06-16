@@ -71,6 +71,8 @@ export interface BuiltinDeps {
   copyPath: () => void;
   copyName: () => void;
   undo: () => void;
+  // ssh
+  setupKeyAuth: () => void;
 }
 
 export function buildBuiltins(deps: BuiltinDeps): Command[] {
@@ -115,5 +117,6 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
     { id: "file.copyPath", label: "Copy path", category: "File", defaultKey: "Ctrl+Shift+C", action: deps.copyPath },
     { id: "file.copyName", label: "Copy name", category: "File", defaultKey: "Ctrl+Alt+C", action: deps.copyName },
     { id: "edit.undo", label: "Undo last operation", category: "File", defaultKey: "Ctrl+Z", action: deps.undo },
+    { id: "ssh.setupKeyAuth", label: "Set up passwordless login (this host)", category: "Settings", action: deps.setupKeyAuth },
   ];
 }
