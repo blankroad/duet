@@ -30,7 +30,20 @@ import { useContextMenu } from "@/stores/contextMenu";
 import { buildEntryMenu, buildEmptyMenu, folderName } from "@/lib/entryMenu";
 import { childLocation } from "@/lib/entryDnd";
 import { isArchiveName } from "@/lib/archive";
-import { resolveActiveTargets, triggerCompare, triggerSync, triggerThreeWay } from "@/lib/fileActions";
+import {
+  resolveActiveTargets,
+  triggerCompare,
+  triggerSync,
+  triggerThreeWay,
+  triggerCopy,
+  triggerMove,
+  triggerDelete,
+  triggerMkdir,
+  triggerRenameSmart,
+  triggerUndo,
+  copySelectionPaths,
+  copySelectionNames,
+} from "@/lib/fileActions";
 import { useCommands } from "@/stores/commands";
 import { usePalette } from "@/stores/palette";
 import { buildBuiltins } from "@/lib/commands";
@@ -56,7 +69,6 @@ import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
 import { useSshHosts } from "@/hooks/useSshHosts";
 import { useConnectionEvents } from "@/hooks/useConnectionEvents";
 import { useFsChangedEvents } from "@/hooks/useFsChangedEvents";
-import { useDestructiveKeys } from "@/hooks/useDestructiveKeys";
 import { useOsFileDrop } from "@/hooks/useOsFileDrop";
 import { useJournalEvents } from "@/hooks/useJournalEvents";
 import { useKeymapEvents } from "@/hooks/useKeymapEvents";
@@ -336,7 +348,6 @@ function App() {
   useSshHosts();
   useConnectionEvents();
   useFsChangedEvents(onRefresh);
-  useDestructiveKeys();
   useOsFileDrop();
   useJournalEvents();
   useKeymapEvents();
@@ -440,6 +451,15 @@ function App() {
           });
         }
       },
+      copy: () => void triggerCopy(openDialog, showToast),
+      move: () => void triggerMove(openDialog, showToast),
+      rename: () => triggerRenameSmart(openDialog, showToast),
+      newFolder: () => triggerMkdir(openDialog),
+      delete: () => void triggerDelete("trash", openDialog, showToast),
+      deletePerm: () => void triggerDelete("permanent", openDialog, showToast),
+      copyPath: () => void copySelectionPaths(showToast),
+      copyName: () => void copySelectionNames(showToast),
+      undo: () => void triggerUndo(showToast),
     });
     setBuiltins(builtins);
   }, [setBuiltins, openPalette, toggleSidebar, togglePreview, onBack, onForward, onRefresh, openDialog, showToast]);

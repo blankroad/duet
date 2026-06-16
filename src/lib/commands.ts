@@ -61,6 +61,16 @@ export interface BuiltinDeps {
   openPalette: () => void;
   // close (Ctrl+Q on non-mac)
   quit: () => void;
+  // file ops (재바인딩 가능한 1급 명령으로 통합 — 이전 useDestructiveKeys 하드코딩 대체)
+  copy: () => void;
+  move: () => void;
+  rename: () => void;
+  newFolder: () => void;
+  delete: () => void;
+  deletePerm: () => void;
+  copyPath: () => void;
+  copyName: () => void;
+  undo: () => void;
 }
 
 export function buildBuiltins(deps: BuiltinDeps): Command[] {
@@ -73,7 +83,6 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
     { id: "nav.back", label: "Go back", category: "Navigation", defaultKey: "Alt+Left", action: deps.back },
     { id: "nav.forward", label: "Go forward", category: "Navigation", defaultKey: "Alt+Right", action: deps.forward },
     { id: "view.refresh", label: "Refresh", category: "View", defaultKey: "Ctrl+R", action: deps.refresh },
-    { id: "view.refreshF5", label: "Refresh (F5)", category: "View", defaultKey: "F5", action: deps.refresh },
     { id: "view.toggleHidden", label: "Toggle hidden files", category: "View", defaultKey: "Ctrl+H", action: deps.toggleHidden },
     { id: "view.toggleSidebar", label: "Toggle sidebar", category: "View", defaultKey: "Ctrl+B", action: deps.toggleSidebar },
     { id: "view.togglePreview", label: "Toggle preview", category: "View", defaultKey: "F11", action: deps.togglePreview },
@@ -96,5 +105,15 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
     { id: "settings.open", label: "Open settings", category: "Settings", defaultKey: "Ctrl+,", action: deps.openSettings },
     { id: "palette.open", label: "Command palette", category: "Settings", defaultKey: "Ctrl+P", action: deps.openPalette },
     { id: "app.quit", label: "Quit", category: "Settings", defaultKey: "Ctrl+Q", action: deps.quit },
+    // 파일 작업 — 재바인딩 가능 (KeymapSection + 팔레트 노출). F5=copy 는 TC 표준.
+    { id: "file.copy", label: "Copy to other panel", category: "File", defaultKey: "F5", action: deps.copy },
+    { id: "file.move", label: "Move to other panel", category: "File", defaultKey: "F6", action: deps.move },
+    { id: "file.rename", label: "Rename", category: "File", defaultKey: "F2", action: deps.rename },
+    { id: "file.newFolder", label: "New folder", category: "File", defaultKey: "F7", action: deps.newFolder },
+    { id: "file.delete", label: "Delete (to trash)", category: "File", defaultKey: "Delete", action: deps.delete },
+    { id: "file.deletePerm", label: "Delete permanently", category: "File", defaultKey: "Shift+Delete", action: deps.deletePerm },
+    { id: "file.copyPath", label: "Copy path", category: "File", defaultKey: "Ctrl+Shift+C", action: deps.copyPath },
+    { id: "file.copyName", label: "Copy name", category: "File", defaultKey: "Ctrl+Alt+C", action: deps.copyName },
+    { id: "edit.undo", label: "Undo last operation", category: "File", defaultKey: "Ctrl+Z", action: deps.undo },
   ];
 }

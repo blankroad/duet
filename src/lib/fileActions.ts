@@ -2,6 +2,7 @@ import { commands } from "@/types/bindings";
 import type { DeleteMode, EntryRef, Location } from "@/types/bindings";
 import { usePanes, activeTab, computeDisplayed, isParentEntry, PARENT_NAME, type PaneId } from "@/stores/panes";
 import type { DialogState } from "@/stores/ui-dialogs";
+import { childLocation } from "@/lib/entryDnd";
 import { formatErr } from "@/lib/error";
 
 type OpenFn = (d: DialogState) => void;
@@ -58,6 +59,47 @@ export function triggerBatchRename(open: OpenFn, showToast: ToastFn): void {
     return;
   }
   open({ kind: "batch-rename", targets });
+}
+
+/** F2 — 단일이면 rename, 다중이면 batch rename (단축키 한 개로 통합). */
+export function triggerRenameSmart(open: OpenFn, showToast: ToastFn): void {
+  const { targets } = resolveActiveTargets();
+  if (targets.length > 1) triggerBatchRename(open, showToast);
+  else triggerRename(open, showToast);
+}
+
+/** Ctrl+Z — 마지막 파괴적 작업 되돌리기 (다이얼로그 없이 toast). */
+export async function triggerUndo(showToast: ToastFn): Promise<void> {
+  const r = await commands.undoLast();
+  if (r.status === "ok") showToast(r.data.message ?? `Undone (${r.data.kind})`);
+  else showToast(`Undo failed: ${formatErr(r.error)}`);
+}
+
+async function copyToClipboard(text: string, showToast: ToastFn, label: string): Promise<void> {
+  if (!text) {
+    showToast(`${label}: nothing selected`);
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast(`Copied ${label.toLowerCase()}`);
+  } catch {
+    showToast("Clipboard unavailable");
+  }
+}
+
+/** 선택 항목의 전체 경로를 클립보드로 (여러 개는 줄바꿈). 경로 결합은 childLocation(§7). */
+export async function copySelectionPaths(showToast: ToastFn): Promise<void> {
+  const { targets } = resolveActiveTargets();
+  const text = targets.map((t) => String(childLocation(t.location, t.name).path)).join("\n");
+  await copyToClipboard(text, showToast, "Path");
+}
+
+/** 선택 항목의 이름을 클립보드로. */
+export async function copySelectionNames(showToast: ToastFn): Promise<void> {
+  const { targets } = resolveActiveTargets();
+  const text = targets.map((t) => t.name).join("\n");
+  await copyToClipboard(text, showToast, "Name");
 }
 
 /** 두 패널 폴더 비교 — 활성=left, 반대=right. 결과를 비교 다이얼로그로. */
