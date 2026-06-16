@@ -351,19 +351,29 @@ pub async fn places() -> Result<Vec<Place>, DuetError> {
 pub struct Volume {
     pub name: String,
     pub path: PathBuf,
+    /// 이 볼륨을 eject(언마운트)할 수 있는지. 부트/시스템 볼륨은 false.
+    /// 현재 eject 는 macOS 만 지원하므로 그 외 플랫폼은 항상 false.
+    pub ejectable: bool,
 }
 
 #[cfg(target_os = "macos")]
 fn list_volumes() -> Vec<Volume> {
-    // `/Volumes` 의 각 엔트리 = 마운트 (외장 디스크/이미지/네트워크 마운트 포함).
+    use std::os::unix::fs::MetadataExt;
+    // 부트(루트) 볼륨의 device id — `/Volumes` 의 boot 볼륨(Macintosh HD)을 eject
+    // 대상에서 제외하기 위해 비교. 외장/디스크이미지/네트워크 마운트는 device 가 달라
+    // ejectable=true 가 된다.
+    let root_dev = std::fs::metadata("/").ok().map(|m| m.dev());
     let mut out = Vec::new();
     if let Ok(rd) = std::fs::read_dir("/Volumes") {
         for e in rd.flatten() {
             let path = e.path();
             if path.is_dir() {
+                let dev = std::fs::metadata(&path).ok().map(|m| m.dev());
+                let ejectable = matches!((dev, root_dev), (Some(d), Some(r)) if d != r);
                 out.push(Volume {
                     name: e.file_name().to_string_lossy().into_owned(),
                     path,
+                    ejectable,
                 });
             }
         }
@@ -381,9 +391,12 @@ fn list_volumes() -> Vec<Volume> {
                 if let Ok(inner) = std::fs::read_dir(user.path()) {
                     for e in inner.flatten() {
                         if e.path().is_dir() {
+                            // /media, /run/media 는 udisks 가 이동식 미디어를 자동
+                            // 마운트하는 위치 → ejectable.
                             out.push(Volume {
                                 name: e.file_name().to_string_lossy().into_owned(),
                                 path: e.path(),
+                                ejectable: true,
                             });
                         }
                     }
@@ -394,9 +407,11 @@ fn list_volumes() -> Vec<Volume> {
     if let Ok(rd) = std::fs::read_dir("/mnt") {
         for e in rd.flatten() {
             if e.path().is_dir() {
+                // /mnt 는 보통 수동/fstab 고정 마운트 → eject 대상 아님.
                 out.push(Volume {
                     name: e.file_name().to_string_lossy().into_owned(),
                     path: e.path(),
+                    ejectable: false,
                 });
             }
         }
@@ -409,14 +424,21 @@ fn list_volumes() -> Vec<Volume> {
     // 드라이브 문자 A:..Z: 중 실제 마운트된 것 (탐색기처럼). Win32 API/unsafe 없이
     // 존재 확인만 — 새 의존성 회피. 미디어 없는 광학 드라이브·미연결 네트워크
     // 드라이브는 metadata 실패로 자연스레 skip.
+    // Windows 가 설치된 시스템 드라이브(보통 C:)는 eject 대상에서 제외.
+    let system_drive = std::env::var("SystemDrive")
+        .unwrap_or_else(|_| "C:".to_string())
+        .to_ascii_uppercase();
     let mut out = Vec::new();
     for letter in b'A'..=b'Z' {
         let root = format!("{}:\\", letter as char);
         let path = PathBuf::from(&root);
         if std::fs::metadata(&path).is_ok() {
+            let name = format!("{}:", letter as char);
+            let ejectable = name.to_ascii_uppercase() != system_drive;
             out.push(Volume {
-                name: format!("{}:", letter as char),
+                name,
                 path,
+                ejectable,
             });
         }
     }
@@ -499,17 +521,23 @@ pub async fn ssh_volumes(
             }
             let path = root.join(&e.name);
             if seen.insert(path.clone()) {
-                out.push(Volume { name: e.name, path });
+                // 원격 마운트는 우리 eject(로컬 macOS diskutil) 대상이 아님.
+                out.push(Volume {
+                    name: e.name,
+                    path,
+                    ejectable: false,
+                });
             }
         }
     }
     Ok(out)
 }
 
-/// 마운트된 볼륨을 eject (언마운트). macOS 만 지원, 그 외 `NotSupported`.
+/// 마운트된 볼륨을 eject (언마운트 + 디바이스 분리). macOS/Windows/Linux 지원.
 ///
-/// 실제 프로세스 spawn 은 `platform/` 레이어. 비가역 시스템 op 이므로
-/// `open_path`/`reveal_path` 처럼 journal 안 씀 — 안전장치는 frontend 확인.
+/// 실제 프로세스 spawn(diskutil / PowerShell / udisksctl)은 `platform/` 레이어.
+/// 비가역 시스템 op 이므로 `open_path`/`reveal_path` 처럼 journal 안 씀 — 안전장치는
+/// frontend 확인 다이얼로그(`ejectable` 볼륨에만 노출).
 #[tauri::command]
 #[specta::specta]
 pub async fn eject_volume(path: PathBuf) -> Result<(), DuetError> {
