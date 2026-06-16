@@ -1,4 +1,5 @@
-import { ArrowLeft, ArrowRight, ArrowUp, RotateCw, Star, FileArchive } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowLeft, ArrowRight, ArrowUp, RotateCw, Star, FileArchive, Pencil } from "lucide-react";
 import type { Location } from "@/types/bindings";
 import type { ArchiveBrowse } from "@/stores/panes";
 import {
@@ -23,6 +24,9 @@ interface PathBarProps {
   onSegmentClick?: (path: string) => void;
   /** 아카이브 browse 중 "Update archive" — 편집을 원본 아카이브로 repack. */
   onUpdateArchive?: (() => void) | undefined;
+  /** Ctrl+L 신호 — nonce 증가 시 editActive 인 PathBar 가 경로 입력 모드로. */
+  editNonce?: number;
+  editActive?: boolean;
 }
 
 /**
@@ -31,9 +35,32 @@ interface PathBarProps {
  *
  * MVP-0: breadcrumb 표시 + 새로고침. 직접 입력 모드(Ctrl+L)는 추후.
  */
-export function PathBar({ location, archive, canBack, canForward, onBack, onForward, onUp, onRefresh, onSegmentClick, onUpdateArchive }: PathBarProps) {
+export function PathBar({ location, archive, canBack, canForward, onBack, onForward, onUp, onRefresh, onSegmentClick, onUpdateArchive, editNonce, editActive }: PathBarProps) {
   const sourceLabel = location.source.kind === "local" ? "Local" : `${location.source.user}@${location.source.host_ip}`;
   const segments = location.path.split("/").filter(Boolean);
+
+  // 경로 직접 입력 모드 (탐색기 주소창 / Ctrl+L). 아카이브 임시경로에선 비활성.
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const startEdit = () => {
+    setDraft(String(location.path));
+    setEditing(true);
+  };
+  // Ctrl+L 신호 — 이 패널이 대상(editActive)이면 편집 진입.
+  useEffect(() => {
+    if (editActive && !archive) startEdit();
+    // editNonce 증가만 트리거 (location 변경으로 재실행 안 함).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editNonce]);
+  useEffect(() => {
+    if (editing) inputRef.current?.select();
+  }, [editing]);
+  const submitPath = () => {
+    const p = draft.trim();
+    setEditing(false);
+    if (p) onSegmentClick?.(p);
+  };
 
   // 아카이브 내부: 임시경로 대신 archive.zip/sub 상대 breadcrumb.
   const archiveSegments =
@@ -113,6 +140,26 @@ export function PathBar({ location, archive, canBack, canForward, onBack, onForw
             <span className="ml-1 shrink-0 rounded bg-subtle px-1 text-meta text-fg-muted">read-only</span>
           )}
         </div>
+      ) : editing ? (
+        <input
+          ref={inputRef}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              submitPath();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              setEditing(false);
+            }
+          }}
+          onBlur={() => setEditing(false)}
+          spellCheck={false}
+          placeholder="Type a path and press Enter…"
+          aria-label="Go to path"
+          className="ml-2 min-w-0 flex-1 rounded border border-accent bg-subtle px-2 py-0.5 font-mono text-base focus:outline-none"
+        />
       ) : (
         <>
           <span className="ml-2 font-mono truncate text-fg-muted">{sourceLabel}</span>
@@ -139,6 +186,16 @@ export function PathBar({ location, archive, canBack, canForward, onBack, onForw
         </>
       )}
       <div className="ml-auto flex items-center">
+        {!archive && !editing && (
+          <button
+            onClick={startEdit}
+            className="rounded p-1 hover:bg-border"
+            aria-label="Edit path"
+            title="Edit path / go to location (Ctrl+L)"
+          >
+            <Pencil size={13} className="text-fg-muted" />
+          </button>
+        )}
         {/* 아카이브 임시경로는 북마크하면 dangling 되므로 숨김 */}
         {!archive && (
           <button

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { PaneId } from "@/stores/panes";
 
 /**
  * UI 상태 (모달 표시, 사이드바 토글 등).
@@ -38,6 +39,11 @@ interface UIState {
   /** 사이드바 섹션/그룹 접힘 상태 (key → collapsed). 영속. */
   collapsed: Record<string, boolean>;
   toggleSection: (key: string) => void;
+  /** "경로 직접 입력" 요청 — Ctrl+L 등에서 활성 패널 PathBar 를 편집 모드로.
+   *  nonce 가 증가하면 editPathPane 패널의 PathBar 가 편집 진입. */
+  editPathPane: PaneId | null;
+  editPathNonce: number;
+  requestEditPath: (pane: PaneId) => void;
 }
 
 export const useUI = create<UIState>((set) => ({
@@ -55,4 +61,8 @@ export const useUI = create<UIState>((set) => ({
       saveCollapsed(collapsed);
       return { collapsed };
     }),
+  editPathPane: null,
+  editPathNonce: 0,
+  requestEditPath: (pane) =>
+    set((s) => ({ editPathPane: pane, editPathNonce: s.editPathNonce + 1 })),
 }));

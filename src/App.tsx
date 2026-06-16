@@ -408,6 +408,7 @@ function App() {
       },
       back: () => onBack(usePanes.getState().activePane),
       forward: () => onForward(usePanes.getState().activePane),
+      editPath: () => useUI.getState().requestEditPath(usePanes.getState().activePane),
       refresh: () => onRefresh(usePanes.getState().activePane),
       toggleHidden: () => usePanes.getState().toggleShowHidden(usePanes.getState().activePane),
       toggleSidebar: () => toggleSidebar(),

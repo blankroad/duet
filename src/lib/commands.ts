@@ -30,6 +30,7 @@ export interface BuiltinDeps {
   // navigation
   back: () => void;
   forward: () => void;
+  editPath: () => void;
   // view
   refresh: () => void;
   toggleHidden: () => void;
@@ -84,6 +85,7 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
     { id: "tab.moveToOther", label: "Move tab to other panel", category: "Tab", action: deps.moveTabToOther },
     { id: "nav.back", label: "Go back", category: "Navigation", defaultKey: "Alt+Left", action: deps.back },
     { id: "nav.forward", label: "Go forward", category: "Navigation", defaultKey: "Alt+Right", action: deps.forward },
+    { id: "pane.editPath", label: "Edit path (type a location)", category: "Navigation", defaultKey: "Ctrl+L", action: deps.editPath },
     { id: "view.refresh", label: "Refresh", category: "View", defaultKey: "Ctrl+R", action: deps.refresh },
     { id: "view.toggleHidden", label: "Toggle hidden files", category: "View", defaultKey: "Ctrl+H", action: deps.toggleHidden },
     { id: "view.toggleSidebar", label: "Toggle sidebar", category: "View", defaultKey: "Ctrl+B", action: deps.toggleSidebar },

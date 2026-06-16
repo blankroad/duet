@@ -6,6 +6,7 @@ import { PaneToolbar } from "./PaneToolbar";
 import { EntryList } from "./EntryList";
 import { EntryGrid } from "./EntryGrid";
 import { usePanes, activeTab, computeDisplayed, isParentEntry, type PaneId } from "@/stores/panes";
+import { useUI } from "@/stores/ui";
 import type { Entry } from "@/types/bindings";
 import clsx from "clsx";
 
@@ -39,6 +40,8 @@ export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward,
   const toggleSortKey = usePanes((s) => s.toggleSortKey);
   const setGridCols = usePanes((s) => s.setGridCols);
   const tab = usePanes((s) => activeTab(s, id));
+  const editPathNonce = useUI((s) => s.editPathNonce);
+  const editPathPane = useUI((s) => s.editPathPane);
   // selector 가 매번 새 배열을 반환하면 zustand v5 무한 re-render → useMemo 로
   // tab(안정 ref) 변경 시에만 재정렬. (activeTab 은 기존 tab ref 반환.)
   const displayed = useMemo(() => computeDisplayed(tab), [tab]);
@@ -88,6 +91,8 @@ export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward,
         onSegmentClick={(p) => onNavigate(id, p)}
         onRefresh={() => onRefresh(id)}
         onUpdateArchive={tab.archive ? () => onUpdateArchive(id) : undefined}
+        editNonce={editPathNonce}
+        editActive={editPathPane === id}
       />
       <PaneToolbar
         id={id}
