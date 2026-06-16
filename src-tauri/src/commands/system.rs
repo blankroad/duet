@@ -406,7 +406,21 @@ fn list_volumes() -> Vec<Volume> {
 
 #[cfg(target_os = "windows")]
 fn list_volumes() -> Vec<Volume> {
-    Vec::new() // 후속: GetLogicalDrives (platform/ 에서)
+    // 드라이브 문자 A:..Z: 중 실제 마운트된 것 (탐색기처럼). Win32 API/unsafe 없이
+    // 존재 확인만 — 새 의존성 회피. 미디어 없는 광학 드라이브·미연결 네트워크
+    // 드라이브는 metadata 실패로 자연스레 skip.
+    let mut out = Vec::new();
+    for letter in b'A'..=b'Z' {
+        let root = format!("{}:\\", letter as char);
+        let path = PathBuf::from(&root);
+        if std::fs::metadata(&path).is_ok() {
+            out.push(Volume {
+                name: format!("{}:", letter as char),
+                path,
+            });
+        }
+    }
+    out
 }
 
 /// 마운트된 볼륨 목록 (읽기 전용). eject 는 `eject_volume`.
