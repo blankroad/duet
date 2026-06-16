@@ -1,13 +1,14 @@
-//! 파일명 인덱스 — "Everything" 식 즉시·오프라인 검색.
+//! 파일명 인덱스 — "Everything" 식 즉시 검색.
 //!
-//! source+root 별로 파일 경로 목록을 **인메모리**에 들고(=Everything 의 쿼리 방식:
-//! RAM 리스트 + 빠른 선형 매칭), 디스크에 캐시한다. 쿼리는 라이브 연결 없이
-//! 캐시 인덱스만으로 즉시 처리 — 원격 서버가 꺼져 있어도 검색된다.
+//! Everything 의 쿼리 방식(메모리에 목록 + 빠른 substring 스캔)을 따른다. 단,
+//! 수백만 파일(전체 드라이브) 규모에서 `Vec<{String,String,String}>` 은 메모리가
+//! 폭발하므로 **콤팩트 버퍼**로 저장한다:
+//! - `paths`  : 모든 전체경로를 이어붙인 단일 String + `path_off` (각 경로 시작 offset)
+//! - `names_lower` : 소문자 파일명들을 이어붙인 단일 String + `name_off` (빠른 대소문자무시 매칭)
+//! - `kinds/sizes/mtimes` : 경로별 메타 (병렬 Vec, String 할당 없음)
 //!
-//! 빌드/갱신은 Everything 과 다르다(MFT/USN 은 NTFS·로컬 전용): 로컬은 `ignore`
-//! 워크, 원격은 `find` 1회. 증분 갱신은 후속(현재는 온디맨드 빌드 + 수동 재색인).
-//!
-//! 자료구조: 사전 소문자화(`name_lower`)로 대소문자 무시 매칭을 빠르게. 새 의존성 없음.
+//! 이로써 String 수백만 개 할당을 피하고, 쿼리는 `names_lower` 슬라이스를 선형
+//! `contains` 스캔 — Everything 과 동일한 in-memory 빠른 매칭. 새 의존성 없음.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -20,31 +21,96 @@ use crate::core::search::{SearchHit, SearchOpts};
 use crate::services::settings::duet_config_dir;
 use crate::types::{DuetError, EntryKind, Location, SourceId};
 
-/// 인덱스 엔트리 — SearchHit 재구성에 필요한 최소 정보 + 매칭용 소문자 이름.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct IndexEntry {
-    /// 전체 경로 (parent + name 은 여기서 파생).
-    path: PathBuf,
-    /// 파일명 (표시/대소문자 구분 매칭).
-    name: String,
-    /// 소문자 파일명 (대소문자 무시 매칭 — 매 쿼리 lowercasing 회피).
-    name_lower: String,
-    kind: EntryKind,
-    size: u64,
-    modified_ms: Option<i64>,
+fn kind_to_u8(k: EntryKind) -> u8 {
+    match k {
+        EntryKind::File => 0,
+        EntryKind::Dir => 1,
+        EntryKind::Symlink => 2,
+        EntryKind::Other => 3,
+    }
+}
+fn u8_to_kind(b: u8) -> EntryKind {
+    match b {
+        1 => EntryKind::Dir,
+        2 => EntryKind::Symlink,
+        3 => EntryKind::Other,
+        _ => EntryKind::File,
+    }
 }
 
-/// 한 source+root 의 인덱스.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct SourceIndex {
-    root: PathBuf,
-    entries: Vec<IndexEntry>,
+/// 콤팩트 인덱스 — 한 source(+root)의 전체 파일 경로를 버퍼로 압축 저장.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct CompactIndex {
     built_at_ms: i64,
+    /// 전체경로 이어붙임. `[path_off[i]..path_off[i+1]]` = i번째 경로.
+    paths: String,
+    path_off: Vec<u32>,
+    /// 소문자 파일명 이어붙임 (대소문자무시 매칭용).
+    names_lower: String,
+    name_off: Vec<u32>,
+    kinds: Vec<u8>,
+    sizes: Vec<u64>,
+    /// `i64::MIN` = None.
+    mtimes: Vec<i64>,
+}
+
+impl CompactIndex {
+    fn count(&self) -> usize {
+        self.kinds.len()
+    }
+}
+
+/// 콤팩트 인덱스 빌더 — 워크/find 가 항목을 push, 끝나면 finish.
+#[derive(Default)]
+struct CompactBuilder {
+    paths: String,
+    path_off: Vec<u32>,
+    names_lower: String,
+    name_off: Vec<u32>,
+    kinds: Vec<u8>,
+    sizes: Vec<u64>,
+    mtimes: Vec<i64>,
+}
+
+impl CompactBuilder {
+    fn new() -> Self {
+        let mut b = Self::default();
+        b.path_off.push(0);
+        b.name_off.push(0);
+        b
+    }
+    fn push(&mut self, p: &IndexedPath) {
+        let path_str = p.path.to_string_lossy();
+        self.paths.push_str(&path_str);
+        self.path_off.push(self.paths.len() as u32);
+        let name_lower = p
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        self.names_lower.push_str(&name_lower);
+        self.name_off.push(self.names_lower.len() as u32);
+        self.kinds.push(kind_to_u8(p.kind));
+        self.sizes.push(p.size);
+        self.mtimes.push(p.modified_ms.unwrap_or(i64::MIN));
+    }
+    fn finish(self, built_at_ms: i64) -> CompactIndex {
+        CompactIndex {
+            built_at_ms,
+            paths: self.paths,
+            path_off: self.path_off,
+            names_lower: self.names_lower,
+            name_off: self.name_off,
+            kinds: self.kinds,
+            sizes: self.sizes,
+            mtimes: self.mtimes,
+        }
+    }
 }
 
 /// source(+root)별 인덱스 보관소. Tauri State 로 등록.
 pub struct FileIndex {
-    inner: RwLock<HashMap<String, SourceIndex>>,
+    inner: RwLock<HashMap<String, CompactIndex>>,
     /// 디스크 캐시 디렉토리 (`<config>/duet/index` 또는 테스트용 임시 dir).
     cache_dir: PathBuf,
 }
@@ -90,12 +156,12 @@ impl FileIndex {
         self.cache_dir.join(key_to_filename(key))
     }
 
-    async fn load_from_disk(&self, key: &str) -> Option<SourceIndex> {
+    async fn load_from_disk(&self, key: &str) -> Option<CompactIndex> {
         let bytes = tokio::fs::read(self.cache_path(key)).await.ok()?;
         serde_json::from_slice(&bytes).ok()
     }
 
-    /// 인덱스가 이미(메모리/디스크에) 있으면 true. 빌드 필요 판단용.
+    /// 인덱스가 이미(메모리/디스크에) 있으면 true.
     pub async fn has(&self, key: &str) -> bool {
         if self.inner.read().await.contains_key(key) {
             return true;
@@ -122,32 +188,39 @@ impl FileIndex {
         now_ms() - built < ttl_ms
     }
 
-    /// 로컬 디렉토리 트리를 인덱싱(`ignore` 워크, .gitignore 존중). blocking I/O 라
-    /// spawn_blocking 에서 호출됨을 가정하지 않고 내부에서 처리.
+    /// 로컬 디렉토리 트리를 인덱싱(`ignore` 워크, .gitignore 존중). blocking 워크는
+    /// spawn_blocking 으로 격리.
     pub async fn build_local(self: &Arc<Self>, root: &Path) -> Result<usize, DuetError> {
         let root = root.to_path_buf();
-        let entries = tokio::task::spawn_blocking(move || walk_local(&root))
-            .await
-            .map_err(|e| DuetError::Io(format!("index build join: {e}")))??;
-        let key = index_key(&SourceId::Local, &entries.0);
-        self.store(key, entries.0, entries.1).await
+        let (root2, builder) = tokio::task::spawn_blocking(move || -> Result<_, DuetError> {
+            let b = walk_local(&root)?;
+            Ok((root, b))
+        })
+        .await
+        .map_err(|e| DuetError::Io(format!("index build join: {e}")))??;
+        let key = index_key(&SourceId::Local, &root2);
+        self.store_compact(key, builder.finish(now_ms())).await
     }
 
-    /// 이미 수집된 (root, 경로목록)을 인덱스에 저장 + 디스크 캐시. 원격 빌드(커맨드에서
-    /// `find` 출력 파싱 후)도 이 경로로 들어온다.
+    /// 이미 수집된 경로 목록(원격 `find` 등)을 인덱스에 저장 + 디스크 캐시.
     pub async fn store(
         self: &Arc<Self>,
         key: String,
-        root: PathBuf,
         entries: Vec<IndexedPath>,
     ) -> Result<usize, DuetError> {
-        let entries: Vec<IndexEntry> = entries.into_iter().map(IndexEntry::from).collect();
-        let count = entries.len();
-        let idx = SourceIndex {
-            root,
-            entries,
-            built_at_ms: now_ms(),
-        };
+        let mut b = CompactBuilder::new();
+        for e in &entries {
+            b.push(e);
+        }
+        self.store_compact(key, b.finish(now_ms())).await
+    }
+
+    async fn store_compact(
+        self: &Arc<Self>,
+        key: String,
+        idx: CompactIndex,
+    ) -> Result<usize, DuetError> {
+        let count = idx.count();
         // 디스크 캐시(best-effort — 실패해도 메모리 인덱스는 유효).
         let path = self.cache_path(&key);
         if let Some(parent) = path.parent() {
@@ -170,7 +243,6 @@ impl FileIndex {
         opts: &SearchOpts,
     ) -> Option<Vec<SearchHit>> {
         let key = index_key(source, root);
-        // 메모리 → 없으면 디스크 로드.
         {
             let guard = self.inner.read().await;
             if let Some(idx) = guard.get(&key) {
@@ -184,37 +256,48 @@ impl FileIndex {
     }
 }
 
-/// 인메모리 인덱스에서 substring 매칭 → SearchHit (Everything 식 빠른 선형 스캔).
+/// 콤팩트 인덱스에서 파일명 substring 매칭 → SearchHit (Everything 식 빠른 선형 스캔).
 fn run_query(
-    idx: &SourceIndex,
+    idx: &CompactIndex,
     source: &SourceId,
     pattern: &str,
     opts: &SearchOpts,
 ) -> Vec<SearchHit> {
     let pat_lower = pattern.to_lowercase();
     let mut hits = Vec::new();
-    for e in &idx.entries {
+    let n = idx.count();
+    for i in 0..n {
+        let path = &idx.paths[idx.path_off[i] as usize..idx.path_off[i + 1] as usize];
         let matched = if opts.case_sensitive {
-            e.name.contains(pattern)
+            // 대소문자 구분: 원본 파일명(경로 마지막 컴포넌트)으로 매칭.
+            let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
+            name.contains(pattern)
         } else {
-            e.name_lower.contains(&pat_lower)
+            let nl = &idx.names_lower[idx.name_off[i] as usize..idx.name_off[i + 1] as usize];
+            nl.contains(&pat_lower)
         };
         if !matched {
             continue;
         }
-        let parent = match e.path.parent() {
-            Some(p) => p.to_path_buf(),
+        let p = Path::new(path);
+        let name = match p.file_name().and_then(|x| x.to_str()) {
+            Some(x) => x.to_string(),
             None => continue,
         };
+        let parent = match p.parent() {
+            Some(x) => x.to_path_buf(),
+            None => continue,
+        };
+        let mtime = idx.mtimes[i];
         hits.push(SearchHit {
             location: Location {
                 source: source.clone(),
                 path: parent,
             },
-            name: e.name.clone(),
-            kind: e.kind,
-            size: e.size,
-            modified_ms: e.modified_ms,
+            name,
+            kind: u8_to_kind(idx.kinds[i]),
+            size: idx.sizes[i],
+            modified_ms: if mtime == i64::MIN { None } else { Some(mtime) },
         });
         if hits.len() >= opts.max_results {
             break;
@@ -223,7 +306,7 @@ fn run_query(
     hits
 }
 
-/// 인덱스에 넣을 한 경로의 메타 — 빌드 단계가 채워서 `store` 로 넘김.
+/// 인덱스에 넣을 한 경로의 메타 — 빌드 단계가 채워서 넘김.
 pub struct IndexedPath {
     pub path: PathBuf,
     pub kind: EntryKind,
@@ -231,34 +314,15 @@ pub struct IndexedPath {
     pub modified_ms: Option<i64>,
 }
 
-impl From<IndexedPath> for IndexEntry {
-    fn from(p: IndexedPath) -> Self {
-        let name = p
-            .path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let name_lower = name.to_lowercase();
-        IndexEntry {
-            path: p.path,
-            name,
-            name_lower,
-            kind: p.kind,
-            size: p.size,
-            modified_ms: p.modified_ms,
-        }
-    }
-}
-
-/// 로컬 트리 워크 → (root, 경로목록). `.gitignore` 존중. blocking.
-fn walk_local(root: &Path) -> Result<(PathBuf, Vec<IndexedPath>), DuetError> {
+/// 로컬 트리 워크 → CompactBuilder. `.gitignore` 존중. blocking.
+fn walk_local(root: &Path) -> Result<CompactBuilder, DuetError> {
     use ignore::WalkBuilder;
     let walker = WalkBuilder::new(root)
-        .hidden(false) // 인덱스는 숨김 포함해 담고, 쿼리 시점 필터링은 후속(현재 미사용)
+        .hidden(false)
         .git_ignore(true)
         .git_exclude(true)
         .build();
-    let mut out = Vec::new();
+    let mut b = CompactBuilder::new();
     for entry in walker.flatten() {
         let path = entry.path();
         if path == root {
@@ -276,14 +340,14 @@ fn walk_local(root: &Path) -> Result<(PathBuf, Vec<IndexedPath>), DuetError> {
             .and_then(|m| m.modified().ok())
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_millis() as i64);
-        out.push(IndexedPath {
+        b.push(&IndexedPath {
             path: path.to_path_buf(),
             kind,
             size,
             modified_ms,
         });
     }
-    Ok((root.to_path_buf(), out))
+    Ok(b)
 }
 
 #[cfg(test)]
@@ -305,7 +369,6 @@ mod tests {
         let root = Path::new("/srv/data");
         let local = index_key(&SourceId::Local, root);
         assert!(local.starts_with("local|"));
-        // 같은 host_ip+user+root 면 connection_id 가 달라도 키 동일(오프라인 재사용).
         let a = index_key(&ssh_source(), root);
         let b = index_key(
             &SourceId::Ssh {
@@ -344,9 +407,9 @@ mod tests {
         let mut names: Vec<&str> = hits.iter().map(|h| h.name.as_str()).collect();
         names.sort_unstable();
         assert_eq!(names, vec!["alpha.txt", "alpha2.rs"]);
-        // 클릭 navigate 대상은 부모 디렉토리.
         let a = hits.iter().find(|h| h.name == "alpha2.rs").unwrap();
         assert_eq!(a.location.path, dir.path().join("sub"));
+        assert_eq!(a.kind, EntryKind::File);
     }
 
     #[tokio::test]
@@ -371,7 +434,6 @@ mod tests {
         let cache = tempdir().unwrap();
         let idx = FileIndex::new(cache.path().to_path_buf());
         idx.build_local(dir.path()).await.unwrap();
-        // 기본(무시) → 매칭
         let ci = idx
             .query(
                 &SourceId::Local,
@@ -382,7 +444,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(ci.len(), 1);
-        // 구분 → 불일치
         let cs = idx
             .query(
                 &SourceId::Local,
@@ -396,5 +457,41 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(cs.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn store_from_paths_and_query() {
+        let cache = tempdir().unwrap();
+        let idx = FileIndex::new(cache.path().to_path_buf());
+        let key = index_key(&ssh_source(), Path::new("/home/u"));
+        idx.store(
+            key,
+            vec![
+                IndexedPath {
+                    path: PathBuf::from("/home/u/notes.txt"),
+                    kind: EntryKind::File,
+                    size: 0,
+                    modified_ms: None,
+                },
+                IndexedPath {
+                    path: PathBuf::from("/home/u/sub/notes2.md"),
+                    kind: EntryKind::File,
+                    size: 0,
+                    modified_ms: None,
+                },
+            ],
+        )
+        .await
+        .unwrap();
+        let hits = idx
+            .query(
+                &ssh_source(),
+                Path::new("/home/u"),
+                "notes",
+                &SearchOpts::default(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(hits.len(), 2);
     }
 }

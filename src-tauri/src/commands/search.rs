@@ -141,7 +141,7 @@ async fn build_index_for(
             let conn = pool.get(connection_id).await?;
             let paths = build_remote_index(&conn, &root.path).await?;
             let key = index_key(&root.source, &root.path);
-            index.store(key, root.path.clone(), paths).await?;
+            index.store(key, paths).await?;
         }
     }
     Ok(())
