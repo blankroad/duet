@@ -400,35 +400,35 @@ pub async fn connect_with_agent(
     port: u16,
     user: &str,
 ) -> Result<SshSession, DuetError> {
-    let tcp = TcpStream::connect((hostname, port))
-        .await
-        .map_err(|e| DuetError::ConnectionFailed(format!("{hostname}:{port} — {e}")))?;
-    let host_ip = tcp
-        .peer_addr()
-        .map_err(|e| DuetError::ConnectionFailed(format!("getpeername: {e}")))?
-        .ip();
-
-    let report = Arc::new(Mutex::new(None));
-    let verifier = HostKeyVerifier::new(hostname, port, false, false, report.clone());
-    let mut handle = russh::client::connect_stream(make_config(), tcp, verifier)
-        .await
-        .map_err(|e| {
-            host_key_or(
-                &report,
-                DuetError::ConnectionFailed(format!("ssh handshake: {e}")),
-            )
-        })?;
-
-    // SSH_AUTH_SOCK 가 없거나 agent 가 응답 안 하면 AuthFailed.
-    // connect_env() 는 Unix 전용 — Windows 빌드는 cfg(unix) 로 분리.
+    // SSH agent (russh `connect_env`) 는 Unix 전용 — Windows 는 agent 인증 미지원.
+    // TCP/host_ip/handle 바인딩도 cfg(unix) 안에 둬서 Windows 빌드 unused 경고 회피.
     #[cfg(not(unix))]
     {
-        let _ = handle;
-        return Err(DuetError::AuthFailed);
+        let _ = (hostname, port, user);
+        Err(DuetError::AuthFailed)
     }
 
     #[cfg(unix)]
     {
+        let tcp = TcpStream::connect((hostname, port))
+            .await
+            .map_err(|e| DuetError::ConnectionFailed(format!("{hostname}:{port} — {e}")))?;
+        let host_ip = tcp
+            .peer_addr()
+            .map_err(|e| DuetError::ConnectionFailed(format!("getpeername: {e}")))?
+            .ip();
+
+        let report = Arc::new(Mutex::new(None));
+        let verifier = HostKeyVerifier::new(hostname, port, false, false, report.clone());
+        let mut handle = russh::client::connect_stream(make_config(), tcp, verifier)
+            .await
+            .map_err(|e| {
+                host_key_or(
+                    &report,
+                    DuetError::ConnectionFailed(format!("ssh handshake: {e}")),
+                )
+            })?;
+
         let mut agent = russh::keys::agent::client::AgentClient::connect_env()
             .await
             .map_err(|_| DuetError::AuthFailed)?;
