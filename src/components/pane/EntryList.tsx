@@ -18,7 +18,7 @@ interface EntryListProps {
   selected: Set<string>;
   sortKey: SortKey;
   sortOrder: SortOrder;
-  onCursorMove: (index: number) => void;
+  onCursorMove: (index: number, e?: React.MouseEvent) => void;
   onActivate: (entry: Entry, index: number) => void;
   onToggleSelect: (name: string) => void;
   onSortClick: (key: SortKey) => void;
@@ -128,7 +128,7 @@ export function EntryList({
                   entry={entry}
                   isCursor={cursorIndex === vi.index}
                   isSelected={selected.has(entry.name)}
-                  onClick={() => onCursorMove(vi.index)}
+                  onClick={(e) => onCursorMove(vi.index, e)}
                   onDoubleClick={() => onActivate(entry, vi.index)}
                 />
               </div>

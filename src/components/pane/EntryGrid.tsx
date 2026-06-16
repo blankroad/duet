@@ -18,7 +18,7 @@ interface EntryGridProps {
   mode: "grid" | "tiles";
   cursorIndex: number;
   selected: Set<string>;
-  onCursorMove: (index: number) => void;
+  onCursorMove: (index: number, e?: React.MouseEvent) => void;
   onActivate: (entry: Entry, index: number) => void;
   /** grid 컬럼 수를 store 에 보고 (키보드 ↑↓ 이동폭 공유). tiles 는 1. */
   onColumns: (cols: number) => void;
@@ -149,7 +149,7 @@ export function EntryGrid({
                   onMouseEnter: () => setHoverEntry(id, entry),
                   onMouseDown: (e) => onEntryMouseDown(e, entry),
                   onContextMenu: (e) => onEntryContextMenu(e, entry, index),
-                  onClick: () => onCursorMove(index),
+                  onClick: (e: React.MouseEvent) => onCursorMove(index, e),
                   onDoubleClick: () => onActivate(entry, index),
                 };
                 return mode === "grid" ? (
@@ -183,7 +183,7 @@ interface CellProps {
   onMouseEnter: () => void;
   onMouseDown: (e: React.MouseEvent) => void;
   onContextMenu: (e: React.MouseEvent) => void;
-  onClick: () => void;
+  onClick: (e: React.MouseEvent) => void;
   onDoubleClick: () => void;
 }
 

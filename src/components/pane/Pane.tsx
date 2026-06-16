@@ -5,7 +5,7 @@ import { PaneFilterBar } from "./PaneFilterBar";
 import { PaneToolbar } from "./PaneToolbar";
 import { EntryList } from "./EntryList";
 import { EntryGrid } from "./EntryGrid";
-import { usePanes, activeTab, computeDisplayed, type PaneId } from "@/stores/panes";
+import { usePanes, activeTab, computeDisplayed, isParentEntry, type PaneId } from "@/stores/panes";
 import type { Entry } from "@/types/bindings";
 import clsx from "clsx";
 
@@ -34,6 +34,8 @@ export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward,
   const setActivePane = usePanes((s) => s.setActivePane);
   const setCursor = usePanes((s) => s.setCursor);
   const toggleSelected = usePanes((s) => s.toggleSelected);
+  const setSelected = usePanes((s) => s.setSelected);
+  const clearSelection = usePanes((s) => s.clearSelection);
   const toggleSortKey = usePanes((s) => s.toggleSortKey);
   const setGridCols = usePanes((s) => s.setGridCols);
   const tab = usePanes((s) => activeTab(s, id));
@@ -42,6 +44,29 @@ export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward,
   const displayed = useMemo(() => computeDisplayed(tab), [tab]);
 
   const goUp = () => onUp(id);
+
+  // 행 클릭 — 일반: 단일 선택, Ctrl/Cmd: 토글, Shift: 커서에서 범위 선택.
+  const handleEntryClick = (index: number, e?: React.MouseEvent) => {
+    const entry = displayed[index];
+    const selectable = entry && !isParentEntry(entry);
+    if (e?.shiftKey && selectable) {
+      const anchor = tab.cursorIndex >= 0 ? tab.cursorIndex : index;
+      const lo = Math.min(anchor, index);
+      const hi = Math.max(anchor, index);
+      const names = displayed
+        .slice(lo, hi + 1)
+        .filter((x) => !isParentEntry(x))
+        .map((x) => x.name);
+      setSelected(id, names);
+      setCursor(id, index);
+    } else if (e && (e.ctrlKey || e.metaKey) && selectable) {
+      toggleSelected(id, entry.name);
+      setCursor(id, index);
+    } else {
+      clearSelection(id);
+      setCursor(id, index);
+    }
+  };
 
   return (
     <div
@@ -82,7 +107,7 @@ export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward,
           selected={tab.selected}
           sortKey={tab.sortKey}
           sortOrder={tab.sortOrder}
-          onCursorMove={(i) => setCursor(id, i)}
+          onCursorMove={handleEntryClick}
           onActivate={(entry) => onActivate(id, entry)}
           onToggleSelect={(name) => toggleSelected(id, name)}
           onSortClick={(k) => toggleSortKey(id, k)}
@@ -96,7 +121,7 @@ export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward,
           mode={tab.viewMode}
           cursorIndex={tab.cursorIndex}
           selected={tab.selected}
-          onCursorMove={(i) => setCursor(id, i)}
+          onCursorMove={handleEntryClick}
           onActivate={(entry) => onActivate(id, entry)}
           onColumns={(c) => setGridCols(id, c)}
           onEntryContextMenu={(e, entry, index) => onEntryContextMenu(id, entry, index, e)}

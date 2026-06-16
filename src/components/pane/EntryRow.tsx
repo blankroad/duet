@@ -9,7 +9,7 @@ interface EntryRowProps {
   entry: Entry;
   isCursor: boolean;
   isSelected: boolean;
-  onClick: () => void;
+  onClick: (e: React.MouseEvent) => void;
   onDoubleClick: () => void;
 }
 
