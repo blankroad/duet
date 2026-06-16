@@ -260,6 +260,32 @@ pub async fn reveal_path(location: Location) -> Result<(), DuetError> {
     }
 }
 
+/// Windows 시스템 휴지통(재활용 통)을 탐색기로 연다.
+///
+/// Windows Recycle Bin 은 셸 가상폴더(`$I`/`$R` 쌍)라 패널로 직접 탐색·복원이
+/// 불가하다(`trash_location` 이 `NotSupported`). 대신 탐색기로 띄워 사용자가
+/// 시스템 휴지통을 바로 보고 복원할 수 있게 한다. 삭제 자체는 이미 OS 휴지통으로
+/// 이동하며, 최근 삭제는 duet 의 Ctrl+Z(undo)로도 복원된다.
+#[tauri::command]
+#[specta::specta]
+pub async fn open_recycle_bin() -> Result<(), DuetError> {
+    #[cfg(target_os = "windows")]
+    {
+        // `shell:RecycleBinFolder` = Recycle Bin 셸 네임스페이스. opener 가
+        // `start ""` 로 띄운다 (CLAUDE.md §9 는 SSH 클라이언트만 제한 — 로컬 런처는 허용).
+        tokio::task::spawn_blocking(|| opener::open("shell:RecycleBinFolder"))
+            .await
+            .map_err(|e| DuetError::Io(format!("open task join: {e}")))?
+            .map_err(|e| DuetError::Io(format!("open recycle bin failed: {e}")))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err(DuetError::NotSupported(
+            "recycle bin opener is Windows-only".into(),
+        ))
+    }
+}
+
 /// 원격 파일을 임시 디렉토리(`<temp>/duet-opened/`)로 다운로드 후 그 경로 반환.
 async fn download_to_temp(
     location: &Location,

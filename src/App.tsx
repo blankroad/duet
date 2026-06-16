@@ -63,6 +63,7 @@ import { useKeymapEvents } from "@/hooks/useKeymapEvents";
 import { useTaskEvents } from "@/hooks/useTaskEvents";
 import { formatErr } from "@/lib/error";
 import { formatSize } from "@/lib/format";
+import { platform } from "@tauri-apps/plugin-os";
 import { commands } from "@/types/bindings";
 import type { CompressFormat, ConnectionDto, CopyStrategy, DuetError, Entry, EntryRef, HostFavorite, Location, SearchHit, UserAlias, Volume } from "@/types/bindings";
 
@@ -131,6 +132,13 @@ function App() {
     const id = pane ?? usePanes.getState().activePane;
     const src = activeTab(usePanes.getState(), id).location.source;
     void (async () => {
+      // Windows 로컬 휴지통은 셸 가상폴더($I/$R)라 패널 탐색이 불가 →
+      // 시스템 휴지통(재활용 통)을 탐색기로 연다.
+      if (src.kind === "local" && platform() === "windows") {
+        const r = await commands.openRecycleBin();
+        if (r.status === "error") showToast(`Recycle Bin — ${formatErr(r.error)}`);
+        return;
+      }
       const r = await commands.trashLocation(src);
       if (r.status === "error") {
         showToast(`Trash unavailable — ${formatErr(r.error)}`);
