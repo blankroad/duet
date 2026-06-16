@@ -1,9 +1,4 @@
 import {
-  ArrowLeft,
-  ArrowRight,
-  ArrowUp,
-  RefreshCw,
-  SquarePlus,
   FolderPlus,
   Copy,
   Scissors,
@@ -18,65 +13,29 @@ import clsx from "clsx";
 import { usePanes, activeTab, type PaneId, type ViewMode } from "@/stores/panes";
 import { useUIDialogs } from "@/stores/ui-dialogs";
 import { useToast } from "@/stores/toast";
-import {
-  triggerCopy,
-  triggerDelete,
-  triggerMove,
-  triggerMkdir,
-} from "@/lib/fileActions";
+import { triggerCopy, triggerDelete, triggerMove, triggerMkdir } from "@/lib/fileActions";
 
 interface PaneToolbarProps {
   id: PaneId;
-  canBack: boolean;
-  canForward: boolean;
-  onBack: () => void;
-  onForward: () => void;
-  onUp: () => void;
-  onRefresh: () => void;
 }
 
 /**
- * 패널 상단 커맨드 바 — 마우스 사용자용. 모든 액션은 키보드와 동일 경로
- * (파괴적 액션은 lib/fileActions, 뷰/hidden 은 panes store, preview 는 ui store).
- * 절제형: 아이콘 버튼, 강조색 남용 금지 (활성 뷰만 accent).
+ * 패널 액션 바 — 마우스 사용자용 파일 작업 + 뷰 모드.
+ *
+ * 네비게이션(뒤로/앞으로/위/새로고침)과 새 탭은 PathBar / TabBar 에 있으므로
+ * 여기엔 중복 배치하지 않는다 (역할 분리: PathBar=어디+이동, 이 바=무엇을+보기).
+ * 모든 액션은 키보드와 동일 경로(파괴적 액션 lib/fileActions, 뷰/hidden panes store).
  */
-export function PaneToolbar({
-  id,
-  canBack,
-  canForward,
-  onBack,
-  onForward,
-  onUp,
-  onRefresh,
-}: PaneToolbarProps) {
+export function PaneToolbar({ id }: PaneToolbarProps) {
   const viewMode = usePanes((s) => activeTab(s, id).viewMode);
   const showHidden = usePanes((s) => activeTab(s, id).showHidden);
   const setViewMode = usePanes((s) => s.setViewMode);
   const toggleShowHidden = usePanes((s) => s.toggleShowHidden);
-  const openTab = usePanes((s) => s.openTab);
   const open = useUIDialogs((s) => s.open);
   const showToast = useToast((s) => s.show);
 
   return (
     <div className="flex h-8 shrink-0 items-center gap-0.5 border-b border-border px-1.5">
-      <ToolButton label="Back" disabled={!canBack} onClick={onBack}>
-        <ArrowLeft size={15} />
-      </ToolButton>
-      <ToolButton label="Forward" disabled={!canForward} onClick={onForward}>
-        <ArrowRight size={15} />
-      </ToolButton>
-      <ToolButton label="Up" onClick={onUp}>
-        <ArrowUp size={15} />
-      </ToolButton>
-      <ToolButton label="Refresh" onClick={onRefresh}>
-        <RefreshCw size={14} />
-      </ToolButton>
-      <ToolButton label="New tab (Ctrl+T)" onClick={() => openTab(id)}>
-        <SquarePlus size={15} />
-      </ToolButton>
-
-      <Divider />
-
       <ToolButton label="New folder (F7)" onClick={() => triggerMkdir(open)}>
         <FolderPlus size={15} />
       </ToolButton>

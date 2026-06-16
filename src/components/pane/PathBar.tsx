@@ -95,7 +95,7 @@ export function PathBar({ location, archive, canBack, canForward, onBack, onForw
         aria-label="Back"
         title="Back (Alt+←)"
       >
-        <ArrowLeft size={12} />
+        <ArrowLeft size={14} />
       </button>
       <button
         type="button"
@@ -105,7 +105,7 @@ export function PathBar({ location, archive, canBack, canForward, onBack, onForw
         aria-label="Forward"
         title="Forward (Alt+→)"
       >
-        <ArrowRight size={12} />
+        <ArrowRight size={14} />
       </button>
       <button onClick={onUp} className="rounded p-1 hover:bg-border" disabled={!onUp} aria-label="Up">
         <ArrowUp size={14} />

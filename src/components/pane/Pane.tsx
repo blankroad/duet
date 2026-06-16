@@ -94,15 +94,7 @@ export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward,
         editNonce={editPathNonce}
         editActive={editPathPane === id}
       />
-      <PaneToolbar
-        id={id}
-        canBack={tab.history.index > 0}
-        canForward={tab.history.index < tab.history.stack.length - 1}
-        onBack={() => onBack(id)}
-        onForward={() => onForward(id)}
-        onUp={goUp}
-        onRefresh={() => onRefresh(id)}
-      />
+      <PaneToolbar id={id} />
       <PaneFilterBar id={id} />
       {tab.viewMode === "details" ? (
         <EntryList
