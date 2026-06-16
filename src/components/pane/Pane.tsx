@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { TabBar } from "./TabBar";
 import { PathBar } from "./PathBar";
 import { PaneFilterBar } from "./PaneFilterBar";
@@ -7,6 +7,7 @@ import { EntryList } from "./EntryList";
 import { EntryGrid } from "./EntryGrid";
 import { usePanes, activeTab, computeDisplayed, isParentEntry, type PaneId } from "@/stores/panes";
 import { useUI } from "@/stores/ui";
+import { useAppSettings } from "@/stores/settings";
 import type { Entry } from "@/types/bindings";
 import clsx from "clsx";
 
@@ -40,6 +41,7 @@ export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward,
   const toggleSortKey = usePanes((s) => s.toggleSortKey);
   const setGridCols = usePanes((s) => s.setGridCols);
   const tab = usePanes((s) => activeTab(s, id));
+  const singleClickOpen = useAppSettings((s) => s.singleClickOpen);
   const editPathNonce = useUI((s) => s.editPathNonce);
   const editPathPane = useUI((s) => s.editPathPane);
   // selector 가 매번 새 배열을 반환하면 zustand v5 무한 re-render → useMemo 로
@@ -48,7 +50,17 @@ export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward,
 
   const goUp = () => onUp(id);
 
-  // 행 클릭 — 일반: 단일 선택, Ctrl/Cmd: 토글, Shift: 커서에서 범위 선택.
+  // 단일클릭-오픈 + 더블클릭이 같은 항목을 두 번 열지 않도록 가드(짧은 디바운스).
+  const lastActivate = useRef(0);
+  const activate = (entry: Entry) => {
+    const now = Date.now();
+    if (now - lastActivate.current < 350) return;
+    lastActivate.current = now;
+    onActivate(id, entry);
+  };
+
+  // 행 클릭 — 일반: 단일 선택(+single-click-open 시 열기), Ctrl/Cmd: 토글,
+  // Shift: 커서에서 범위 선택. 수식키가 있으면 열지 않음(선택 전용).
   const handleEntryClick = (index: number, e?: React.MouseEvent) => {
     const entry = displayed[index];
     const selectable = entry && !isParentEntry(entry);
@@ -68,6 +80,8 @@ export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward,
     } else {
       clearSelection(id);
       setCursor(id, index);
+      // single-click-open: 수식키 없는 일반 클릭은 폴더/파일을 바로 연다(부모 ".." 포함).
+      if (singleClickOpen && entry) activate(entry);
     }
   };
 
@@ -105,7 +119,7 @@ export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward,
           sortKey={tab.sortKey}
           sortOrder={tab.sortOrder}
           onCursorMove={handleEntryClick}
-          onActivate={(entry) => onActivate(id, entry)}
+          onActivate={(entry) => activate(entry)}
           onToggleSelect={(name) => toggleSelected(id, name)}
           onSortClick={(k) => toggleSortKey(id, k)}
           onEntryContextMenu={(e, entry, index) => onEntryContextMenu(id, entry, index, e)}
@@ -119,7 +133,7 @@ export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward,
           cursorIndex={tab.cursorIndex}
           selected={tab.selected}
           onCursorMove={handleEntryClick}
-          onActivate={(entry) => onActivate(id, entry)}
+          onActivate={(entry) => activate(entry)}
           onColumns={(c) => setGridCols(id, c)}
           onEntryContextMenu={(e, entry, index) => onEntryContextMenu(id, entry, index, e)}
           onEmptyContextMenu={(e) => onEmptyContextMenu(id, e)}

@@ -3,6 +3,7 @@ import { AlertTriangle } from "lucide-react";
 import { commands } from "@/types/bindings";
 import type { Settings, SettingsPatch } from "@/types/bindings";
 import { applyTabDefaults, type SortKey, type ViewMode } from "@/stores/panes";
+import { useAppSettings } from "@/stores/settings";
 import { applyTheme } from "@/lib/theme";
 
 /** null 로 채운 전체 patch + override (특정 필드만 변경). */
@@ -15,6 +16,7 @@ function buildPatch(over: Partial<SettingsPatch>): SettingsPatch {
     default_sort: null,
     default_view: null,
     show_hidden_default: null,
+    single_click_open: null,
     ...over,
   };
 }
@@ -49,6 +51,7 @@ export function GeneralSection() {
       viewMode: (r.data.default_view ?? "details") as ViewMode,
       showHidden: r.data.show_hidden_default ?? false,
     });
+    useAppSettings.getState().setSingleClickOpen(r.data.single_click_open ?? false);
   };
 
   if (loading || !settings) return <div className="text-base text-fg-muted">Loading…</div>;
@@ -111,6 +114,22 @@ export function GeneralSection() {
         <div className="flex-1">
           <div className="text-base">Show hidden files by default</div>
           <div className="text-meta text-fg-muted">Show dotfiles from the start.</div>
+        </div>
+      </label>
+
+      <label className="flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={settings.single_click_open}
+          onChange={(e) => void save({ single_click_open: e.target.checked })}
+          className="mt-0.5"
+        />
+        <div className="flex-1">
+          <div className="text-base">Open items with a single click</div>
+          <div className="text-meta text-fg-muted">
+            Single-click opens folders and files. Off = double-click (default). Hold Ctrl/Shift to
+            select without opening.
+          </div>
         </div>
       </label>
 

@@ -48,6 +48,7 @@ import { useCommands } from "@/stores/commands";
 import { usePalette } from "@/stores/palette";
 import { buildBuiltins } from "@/lib/commands";
 import { useUI } from "@/stores/ui";
+import { useAppSettings } from "@/stores/settings";
 import { usePanes, activeTab, computeDisplayed, applyTabDefaults, type PaneId, type SortKey, type ViewMode } from "@/stores/panes";
 import { applyTheme } from "@/lib/theme";
 import { useSearch } from "@/stores/search";
@@ -828,6 +829,7 @@ function App() {
             viewMode: (r.data.default_view ?? "details") as ViewMode,
             showHidden: r.data.show_hidden_default ?? false,
           });
+          useAppSettings.getState().setSingleClickOpen(r.data.single_click_open ?? false);
         }
       });
     })();
