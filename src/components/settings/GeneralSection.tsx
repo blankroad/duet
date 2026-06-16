@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle } from "lucide-react";
+import { platform } from "@tauri-apps/plugin-os";
 import { commands } from "@/types/bindings";
 import type { Settings, SettingsPatch } from "@/types/bindings";
 import { applyTabDefaults, type SortKey, type ViewMode } from "@/stores/panes";
 import { useAppSettings } from "@/stores/settings";
 import { applyTheme } from "@/lib/theme";
+
+const isWindows = platform() === "windows";
 
 /** null 로 채운 전체 patch + override (특정 필드만 변경). */
 function buildPatch(over: Partial<SettingsPatch>): SettingsPatch {
@@ -27,6 +30,9 @@ const selectClass =
 export function GeneralSection() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
+  // 탐색기 "Open in duet" 우클릭 등록 상태 (Windows 전용, 레지스트리가 SoT).
+  const [openInDuet, setOpenInDuet] = useState(false);
+  const [openInDuetBusy, setOpenInDuetBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -35,10 +41,22 @@ export function GeneralSection() {
       if (r.status === "ok") setSettings(r.data);
       setLoading(false);
     });
+    if (isWindows) {
+      commands.openInDuetGet().then((r) => {
+        if (!cancelled && r.status === "ok") setOpenInDuet(r.data);
+      });
+    }
     return () => {
       cancelled = true;
     };
   }, []);
+
+  const toggleOpenInDuet = async (enabled: boolean) => {
+    setOpenInDuetBusy(true);
+    const r = await commands.openInDuetSet(enabled);
+    setOpenInDuetBusy(false);
+    if (r.status === "ok") setOpenInDuet(r.data);
+  };
 
   // 저장 후 즉시 적용 (테마 + 새 탭 기본값) — 죽은 토글 방지.
   const save = async (over: Partial<SettingsPatch>) => {
@@ -153,6 +171,27 @@ export function GeneralSection() {
           )}
         </div>
       </label>
+
+      {/* Windows 탐색기 통합 (Windows 전용) */}
+      {isWindows && (
+        <label className="flex items-start gap-2 border-t border-border pt-3">
+          <input
+            type="checkbox"
+            checked={openInDuet}
+            disabled={openInDuetBusy}
+            onChange={(e) => void toggleOpenInDuet(e.target.checked)}
+            className="mt-0.5"
+          />
+          <div className="flex-1">
+            <div className="text-base">Add &ldquo;Open in duet&rdquo; to the folder right-click menu</div>
+            <div className="text-meta text-fg-muted">
+              Windows only. Adds a per-user registry entry (no admin) so right-clicking a
+              folder or drive can open it in duet. Fully reversible — turning this off removes
+              the entry. Tip: turn it off before uninstalling.
+            </div>
+          </div>
+        </label>
+      )}
     </div>
   );
 }

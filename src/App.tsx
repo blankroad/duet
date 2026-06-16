@@ -813,6 +813,11 @@ function App() {
       const home = result.status === "ok" ? result.data : "/";
       await navigate("left", home);
       await navigate("right", home);
+      // 탐색기 "Open in duet" 로 폴더 경로가 argv 로 들어왔으면 왼쪽 패널을 그 폴더로.
+      const startup = await commands.startupOpenPath();
+      if (startup.status === "ok" && startup.data) {
+        await navigate("left", startup.data);
+      }
       void bootstrapSavedHosts();
       // 즐겨찾기 먼저 로드 → 북마크 마이그레이션이 중복을 정확히 걸러냄.
       void bootstrapHostFavorites().then(() => bootstrapBookmarks());

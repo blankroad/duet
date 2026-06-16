@@ -83,6 +83,11 @@ tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
 # platform::app_icon 이 NotSupported → 프론트 모노그램 fallback.
 [target.'cfg(windows)'.dependencies]
 systemicons = "0.9"
+# 탐색기 폴더/드라이브 우클릭 "Open in duet" 등록 (HKCU, 사용자 범위·관리자 불필요).
+# §6 승인(2026-06): winreg = MS Registry API 안전 래퍼, de-facto 표준(recent 32M /
+# total 178M dl). 대안 windows-registry(MS 공식, 24M)·registry(29k) 검토 — winreg
+# API 가 가장 단순. 토글 off = 우리가 만든 3개 키만 재귀 삭제(완전 가역).
+winreg = "0.55"
 
 [features]
 # default = ["custom-protocol"]

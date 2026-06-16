@@ -521,6 +521,52 @@ pub async fn eject_volume(path: PathBuf) -> Result<(), DuetError> {
         .map_err(|e| DuetError::Io(format!("eject task join: {e}")))?
 }
 
+/// 탐색기 폴더/드라이브 우클릭 "Open in duet" 등록 여부 (Windows; 그 외 false).
+#[tauri::command]
+#[specta::specta]
+pub async fn open_in_duet_get() -> Result<bool, DuetError> {
+    tokio::task::spawn_blocking(crate::platform::open_in_duet_status)
+        .await
+        .map_err(|e| DuetError::Io(format!("registry task join: {e}")))?
+}
+
+/// "Open in duet" 우클릭 등록/해제. current_exe() 경로로 등록(HKCU, 가역). 새 상태 반환.
+#[tauri::command]
+#[specta::specta]
+pub async fn open_in_duet_set(enabled: bool) -> Result<bool, DuetError> {
+    tokio::task::spawn_blocking(move || {
+        if enabled {
+            let exe =
+                std::env::current_exe().map_err(|e| DuetError::Io(format!("current_exe: {e}")))?;
+            crate::platform::open_in_duet_register(&exe)?;
+        } else {
+            crate::platform::open_in_duet_unregister()?;
+        }
+        crate::platform::open_in_duet_status()
+    })
+    .await
+    .map_err(|e| DuetError::Io(format!("registry task join: {e}")))?
+}
+
+/// 실행 인자(argv[1])로 받은 폴더 경로 — 탐색기 "Open in duet" → 시작 시 그 폴더 열기.
+/// 디렉토리면 그 경로, 파일이면 부모, 아니면 None. (어느 OS 든 무해)
+#[tauri::command]
+#[specta::specta]
+pub async fn startup_open_path() -> Result<Option<String>, DuetError> {
+    let Some(arg) = std::env::args().nth(1) else {
+        return Ok(None);
+    };
+    let p = PathBuf::from(&arg);
+    let Ok(meta) = std::fs::metadata(&p) else {
+        return Ok(None);
+    };
+    if meta.is_dir() {
+        Ok(Some(arg))
+    } else {
+        Ok(p.parent().and_then(|x| x.to_str()).map(str::to_owned))
+    }
+}
+
 /// 로컬 항목들의 절대경로 — OS 드래그-아웃(파일 export)용. 경로 결합은 `Path`(§7).
 /// SSH 항목은 로컬 경로가 없어 `NotSupported` (원격 드래그-아웃은 후속 — 임시 다운로드 필요).
 #[tauri::command]

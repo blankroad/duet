@@ -1182,6 +1182,7 @@ dependencies = [
  "unicode-normalization",
  "unicode-width",
  "uuid",
+ "winreg",
  "zip",
 ]
 

@@ -51,3 +51,84 @@ pub fn eject_volume(path: &Path) -> Result<(), DuetError> {
         ))
     }
 }
+
+// === Windows 탐색기 통합: 폴더/드라이브 우클릭 "Open in duet" ===
+//
+// HKCU\Software\Classes 아래 사용자 범위로만 기록(관리자 불필요). 우리가 만든
+// 3개 키(Directory / Directory\Background / Drive 의 shell\duet)만 다루고,
+// 해제는 그 키만 재귀 삭제 — 완전 가역. 레지스트리 경로는 파일시스템 경로가
+// 아니라 항상 `\` 구분자(§7 무관).
+
+/// "Open in duet" 우클릭 항목이 등록돼 있는지. 비-Windows 는 항상 false.
+pub fn open_in_duet_status() -> Result<bool, DuetError> {
+    #[cfg(windows)]
+    {
+        use winreg::enums::HKEY_CURRENT_USER;
+        use winreg::RegKey;
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        Ok(hkcu
+            .open_subkey(r"Software\Classes\Directory\shell\duet\command")
+            .is_ok())
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(false)
+    }
+}
+
+/// "Open in duet" 우클릭 항목 등록(멱등). `exe` = 현재 실행파일 — 클릭한 폴더를
+/// `%1`(Drive/Directory) / `%V`(Background) 로 전달받는다.
+pub fn open_in_duet_register(exe: &Path) -> Result<(), DuetError> {
+    #[cfg(windows)]
+    {
+        use winreg::enums::HKEY_CURRENT_USER;
+        use winreg::RegKey;
+        let exe_str = exe
+            .to_str()
+            .ok_or_else(|| DuetError::Io("exe path non-utf8".into()))?;
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        // (base 키, command 가 폴더를 받는 토큰)
+        let targets = [
+            (r"Software\Classes\Directory\shell\duet", "%1"),
+            (r"Software\Classes\Directory\Background\shell\duet", "%V"),
+            (r"Software\Classes\Drive\shell\duet", "%1"),
+        ];
+        for (base, arg) in targets {
+            let (key, _) = hkcu.create_subkey(base)?;
+            key.set_value("", &"Open in duet")?; // 메뉴 라벨
+            key.set_value("Icon", &exe_str)?; // 메뉴 아이콘 = duet exe
+            let (cmd, _) = hkcu.create_subkey(format!(r"{base}\command"))?;
+            cmd.set_value("", &format!("\"{exe_str}\" \"{arg}\""))?;
+        }
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = exe;
+        Err(DuetError::NotSupported(
+            "shell integration is only supported on Windows".into(),
+        ))
+    }
+}
+
+/// "Open in duet" 우클릭 항목 해제 — 우리가 만든 3개 키만 재귀 삭제(없으면 무시).
+pub fn open_in_duet_unregister() -> Result<(), DuetError> {
+    #[cfg(windows)]
+    {
+        use winreg::enums::HKEY_CURRENT_USER;
+        use winreg::RegKey;
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        for base in [
+            r"Software\Classes\Directory\shell\duet",
+            r"Software\Classes\Directory\Background\shell\duet",
+            r"Software\Classes\Drive\shell\duet",
+        ] {
+            let _ = hkcu.delete_subkey_all(base); // 없으면 Err — 무시(가역·멱등)
+        }
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(())
+    }
+}
