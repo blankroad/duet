@@ -47,7 +47,7 @@ export function CompareFilterBar({
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="경로 검색"
+          placeholder="Search path"
           className="w-32 bg-transparent py-0.5 text-meta focus:outline-none"
         />
       </div>

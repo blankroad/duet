@@ -1,7 +1,7 @@
 import {
   FolderPlus,
   Copy,
-  Scissors,
+  MoveRight,
   Trash2,
   List,
   LayoutGrid,
@@ -43,7 +43,7 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
         <Copy size={15} />
       </ToolButton>
       <ToolButton label="Move → other pane (F6)" onClick={() => void triggerMove(open, showToast)}>
-        <Scissors size={15} />
+        <MoveRight size={15} />
       </ToolButton>
       <ToolButton
         label="Delete to trash (Del)"

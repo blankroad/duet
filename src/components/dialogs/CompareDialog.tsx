@@ -75,11 +75,11 @@ export function CompareDialog({
         }));
       }
       setVerifyNote(
-        `검증 ${sameRels.length}개 — 실제로 다름 ${differ.size}` +
-          (unver > 0 ? `, 검증불가 ${unver}` : ""),
+        `Verified ${sameRels.length} — actually differ ${differ.size}` +
+          (unver > 0 ? `, unverifiable ${unver}` : ""),
       );
     } else {
-      setVerifyNote(`검증 실패: ${r.error.kind}`);
+      setVerifyNote(`Verify failed: ${r.error.kind}`);
     }
     setVerifying(false);
   };
@@ -96,7 +96,7 @@ export function CompareDialog({
     if (!dest) return;
     const format = dest.toLowerCase().endsWith(".json") ? "json" : "csv";
     const r = await commands.fsExportCompare(plan, dest, format);
-    setVerifyNote(r.status === "ok" ? `내보냄: ${dest}` : `내보내기 실패: ${r.error.kind}`);
+    setVerifyNote(r.status === "ok" ? `Exported: ${dest}` : `Export failed: ${r.error.kind}`);
   };
 
   // 기본 필터: 차이만(same 숨김). unreadable 은 경고라 기본 표시.
@@ -233,9 +233,9 @@ export function CompareDialog({
               onClick={() => void onVerify()}
               disabled={counts.same === 0 || verifying}
               className="rounded border border-border px-2 py-0.5 hover:bg-subtle disabled:opacity-50"
-              title="Same 로 분류된 항목의 내용을 해시/바이트로 재검증 (틀린 Same 잡기). same-host 는 host-side sha256(PC 다운로드 0)."
+              title="Re-verify 'Same' items by hash/bytes (catch false Same). Same-host uses host-side sha256 (no PC download)."
             >
-              {verifying ? "검증 중…" : `내용 검증 (Same ${counts.same})`}
+              {verifying ? "Verifying…" : `Verify content (Same ${counts.same})`}
             </button>
             <button
               type="button"
@@ -245,55 +245,55 @@ export function CompareDialog({
                 "rounded border px-2 py-0.5 hover:bg-subtle",
                 showPreview ? "border-border bg-subtle text-fg" : "border-border",
               )}
-              title="선택 행의 좌/우 내용을 인라인으로 비교(텍스트 diff / 이미지)"
+              title="Compare the selected row's left/right content inline (text diff / image)"
             >
-              미리보기
+              Preview
             </button>
             <button
               type="button"
               onClick={() => setView((v) => (v === "list" ? "tree" : "list"))}
               className="rounded border border-border px-2 py-0.5 hover:bg-subtle"
-              title="평면 목록(키보드 ↑↓←→) ↔ 디렉토리 트리(접기/롤업) 전환"
+              title="Toggle flat list (keyboard ↑↓←→) ↔ directory tree (collapse / rollup)"
             >
-              {view === "list" ? "트리 보기" : "목록 보기"}
+              {view === "list" ? "Tree view" : "List view"}
             </button>
             <label
               className="flex items-center gap-1 text-fg-muted"
-              title="이동/이름변경(내용 동일, 경로만 다름)을 한 쌍으로 인식 — 머지의 중복복제 차단. local·same-host. Re-compare 로 적용."
+              title="Detect move/rename (same content, different path) as a pair — prevents duplicate copies on merge. local · same-host. Apply via Re-compare."
             >
               <input
                 type="checkbox"
                 checked={detectRenames}
                 onChange={(e) => setDetectRenames(e.target.checked)}
               />
-              이동 감지
+              Detect moves
             </label>
             <button
               type="button"
               onClick={() => void onExport()}
               className="rounded border border-border px-2 py-0.5 hover:bg-subtle"
-              title="비교 결과를 CSV/JSON 파일로 내보내기"
+              title="Export comparison results to a CSV/JSON file"
             >
-              내보내기
+              Export
             </button>
             {verifyNote && <span className="truncate">{verifyNote}</span>}
           </div>
 
           {counts.unreadable > 0 && (
             <div className="mb-2 rounded border border-danger/40 bg-danger/10 px-2 py-1 text-meta text-danger">
-              {counts.unreadable}개 디렉토리를 읽지 못했습니다 — 머지/동기화에서 제외됩니다.
+              Could not read {counts.unreadable} director{counts.unreadable === 1 ? "y" : "ies"} — excluded from merge/sync.
             </div>
           )}
           {plan.truncated && (
             <div className="mb-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-meta text-amber-600">
-              비교 항목이 많아 일부만 표시했습니다 (상한 도달) — 머지/적용은 비활성화됩니다.
+              Too many items — only some are shown (limit reached). Merge/apply is disabled.
             </div>
           )}
 
           {moves.length > 0 && (
             <div className="mb-2 max-h-20 overflow-auto rounded border border-border bg-subtle/40 px-2 py-1 text-meta">
               <div className="text-fg-muted">
-                ↔ 이동/이름변경 <b className="text-fg">{moves.length}</b> — 복사하지 않음(중복 방지)
+                ↔ Move/rename <b className="text-fg">{moves.length}</b> — not copied (avoids duplicates)
               </div>
               {moves.map((m) => (
                 <div

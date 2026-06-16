@@ -75,7 +75,7 @@ export function CompareList({
       className="min-h-0 flex-1 overflow-y-auto rounded border border-border focus:outline-none focus:ring-1 focus:ring-accent"
       tabIndex={0}
       role="listbox"
-      aria-label="비교 결과"
+      aria-label="Comparison results"
       aria-activedescendant={rows.length === 0 ? undefined : `cmp-opt-${selClamped}`}
       onKeyDown={onKeyDown}
     >

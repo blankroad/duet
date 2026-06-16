@@ -45,7 +45,7 @@ export function StatusBar() {
           type="button"
           onMouseDown={onDragOut}
           className="flex cursor-grab items-center gap-1 rounded px-1.5 hover:bg-subtle hover:text-fg active:cursor-grabbing"
-          title="끌어서 Finder/외부 앱으로 내보내기 (복사)"
+          title="Drag out to Finder / other apps (copy)"
         >
           <Upload size={11} />
           <span>drag out ({selectedCount})</span>

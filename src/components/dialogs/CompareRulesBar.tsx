@@ -52,16 +52,16 @@ export function CompareRulesBar({
         value={ignore}
         onChange={(e) => setIgnore(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && run()}
-        placeholder="무시 패턴 (node_modules .git *.log)"
+        placeholder="Ignore patterns (node_modules .git *.log)"
         className="min-w-0 flex-1 rounded border border-border bg-subtle px-2 py-0.5 focus:border-accent focus:outline-none"
       />
       <select
         value={tol}
         onChange={(e) => setTol(Number(e.target.value))}
         className="rounded border border-border bg-subtle px-1 py-0.5 focus:outline-none"
-        title="mtime 허용오차 — 크기 같고 시각 차가 이 이내면 동일 취급 (SSH↔로컬 오탐 흡수)"
+        title="mtime tolerance — same size + time diff within this = treated equal (absorbs SSH↔local false diffs)"
       >
-        <option value={0}>mtime 정확</option>
+        <option value={0}>mtime exact</option>
         <option value={2000}>±2s</option>
         <option value={60000}>±1m</option>
       </select>

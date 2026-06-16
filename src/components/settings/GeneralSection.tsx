@@ -59,7 +59,7 @@ export function GeneralSection() {
       <div className="flex items-center justify-between gap-2">
         <div>
           <div className="text-base">Theme</div>
-          <div className="text-meta text-fg-muted">System 은 OS 설정을 따름.</div>
+          <div className="text-meta text-fg-muted">System follows your OS setting.</div>
         </div>
         <select
           className={selectClass}
@@ -110,7 +110,7 @@ export function GeneralSection() {
         />
         <div className="flex-1">
           <div className="text-base">Show hidden files by default</div>
-          <div className="text-meta text-fg-muted">dotfiles 등을 시작부터 표시.</div>
+          <div className="text-meta text-fg-muted">Show dotfiles from the start.</div>
         </div>
       </label>
 
@@ -123,13 +123,13 @@ export function GeneralSection() {
           className="mt-0.5"
         />
         <div className="flex-1">
-          <div className="text-base">Permanent delete (Shift+Delete) 활성화</div>
+          <div className="text-base">Enable permanent delete (Shift+Delete)</div>
           <div className="text-meta text-fg-muted">
-            CLAUDE.md §3 — 디폴트 OFF. 활성화해도 단어 타이핑 추가 확인 필요.
+            Off by default. Even when on, deleting requires typing a word to confirm.
           </div>
           {settings.permanent_delete_enabled && (
             <div className="mt-1 flex items-center gap-1 text-meta text-danger">
-              <AlertTriangle size={11} /> 영구 삭제 위험.
+              <AlertTriangle size={11} /> Permanent delete is risky.
             </div>
           )}
         </div>

@@ -47,7 +47,7 @@ export function CompareTree({ rows, dirOf, setDir, onSelect }: CompareTreeProps)
   return (
     <div className="min-h-0 flex-1 overflow-auto rounded border border-border text-meta">
       {tree.length === 0 ? (
-        <div className="px-2 py-3 text-center text-fg-muted">표시할 항목 없음</div>
+        <div className="px-2 py-3 text-center text-fg-muted">No items to show</div>
       ) : (
         tree.map((n) => (
           <TreeRow
