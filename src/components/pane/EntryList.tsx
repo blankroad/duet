@@ -112,7 +112,13 @@ export function EntryList({
                 data-entry={entry.name}
                 data-drop-folder={isDropFolder ? entry.name : undefined}
                 onMouseEnter={() => setHoverEntry(id, entry)}
-                onMouseDown={(e) => onEntryMouseDown(e, entry)}
+                onMouseDown={(e) => {
+                  // 아이콘/이름(드래그 핸들) 위에서만 항목 드래그 시작. 그 외
+                  // (Size/Modified 컬럼 등 여백)은 컨테이너 마키 선택으로 흘려보냄.
+                  if ((e.target as HTMLElement).closest("[data-drag-handle]")) {
+                    onEntryMouseDown(e, entry);
+                  }
+                }}
                 onContextMenu={(e) => onEntryContextMenu(e, entry, vi.index)}
                 className={clsx(dragActive && overFolder === entry.name && "ring-2 ring-inset ring-accent")}
                 style={{

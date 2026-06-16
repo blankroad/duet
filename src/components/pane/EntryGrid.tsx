@@ -147,7 +147,12 @@ export function EntryGrid({
                   isSelected,
                   highlight: dragActive && overFolder === entry.name,
                   onMouseEnter: () => setHoverEntry(id, entry),
-                  onMouseDown: (e) => onEntryMouseDown(e, entry),
+                  onMouseDown: (e) => {
+                    // 아이콘/이름(핸들) 위에서만 드래그 시작 — 그 외 여백은 마키로.
+                    if ((e.target as HTMLElement).closest("[data-drag-handle]")) {
+                      onEntryMouseDown(e, entry);
+                    }
+                  },
                   onContextMenu: (e) => onEntryContextMenu(e, entry, index),
                   onClick: (e: React.MouseEvent) => onCursorMove(index, e),
                   onDoubleClick: () => onActivate(entry, index),
@@ -224,14 +229,17 @@ function GridCell({ entry, isCursor, isSelected, highlight, onMouseEnter, onMous
       onClick={onClick}
       onDoubleClick={onDoubleClick}
     >
-      <EntryIcon entry={entry} size={32} />
-      <span
-        className={clsx(
-          "font-mono text-meta text-center line-clamp-2 break-all",
-          entry.hidden && "text-fg-muted",
-        )}
-      >
-        {entry.name}
+      {/* 드래그 핸들 = 아이콘+이름. 셀 여백/간격은 마키 시작 영역. */}
+      <span data-drag-handle className="flex flex-col items-center gap-1">
+        <EntryIcon entry={entry} size={32} />
+        <span
+          className={clsx(
+            "font-mono text-meta text-center line-clamp-2 break-all",
+            entry.hidden && "text-fg-muted",
+          )}
+        >
+          {entry.name}
+        </span>
       </span>
     </div>
   );
@@ -274,15 +282,18 @@ function TileRow({ entry, isCursor, isSelected, highlight, onMouseEnter, onMouse
       onClick={onClick}
       onDoubleClick={onDoubleClick}
     >
-      <EntryIcon entry={entry} size={24} />
-      <div className="flex min-w-0 flex-col">
-        <span className={clsx("font-mono truncate", entry.hidden && "text-fg-muted")}>
-          {entry.name}
-        </span>
-        <span className="text-meta text-fg-muted">
-          {formatSize(entry.size)} · {formatTime(entry.modified_ms)}
-        </span>
-      </div>
+      {/* 드래그 핸들 = 아이콘+이름/메타. 행 우측 여백은 마키 시작 영역. */}
+      <span data-drag-handle className="flex min-w-0 items-center gap-3">
+        <EntryIcon entry={entry} size={24} />
+        <div className="flex min-w-0 flex-col">
+          <span className={clsx("font-mono truncate", entry.hidden && "text-fg-muted")}>
+            {entry.name}
+          </span>
+          <span className="text-meta text-fg-muted">
+            {formatSize(entry.size)} · {formatTime(entry.modified_ms)}
+          </span>
+        </div>
+      </span>
     </div>
   );
 }

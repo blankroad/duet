@@ -51,9 +51,12 @@ export function EntryRow({ entry, isCursor, isSelected, onClick, onDoubleClick }
       onClick={onClick}
       onDoubleClick={onDoubleClick}
     >
-      <EntryIcon entry={entry} size={14} />
-      <span className={clsx("font-mono flex-1 truncate", entry.hidden && "text-fg-muted")}>
-        {entry.name}
+      {/* 드래그 핸들 = 아이콘+이름 (항목 이동). 우측 메타 컬럼은 마키 시작 영역. */}
+      <span data-drag-handle className="flex min-w-0 flex-1 items-center gap-2">
+        <EntryIcon entry={entry} size={14} />
+        <span className={clsx("font-mono truncate", entry.hidden && "text-fg-muted")}>
+          {entry.name}
+        </span>
       </span>
       <span className="font-mono w-20 text-right text-meta text-fg-muted">{formatSize(entry.size)}</span>
       <span className="font-mono w-20 text-right text-meta text-fg-muted">{formatTime(entry.modified_ms)}</span>
