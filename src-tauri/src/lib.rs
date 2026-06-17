@@ -79,6 +79,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::search::index_search,
             commands::search::index_reindex,
             commands::search::index_ensure,
+            commands::search::index_build_global,
             commands::keymap::keymap_list,
             commands::keymap::keymap_set,
             commands::keymap::keymap_unset,
@@ -144,6 +145,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             services::journal_events::JournalChangedEvent,
             services::keymap_events::KeymapChangedEvent,
             services::task_events::TaskEvent,
+            services::index_events::IndexProgressEvent,
         ])
 }
 

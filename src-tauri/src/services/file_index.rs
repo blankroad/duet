@@ -138,6 +138,24 @@ fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
+/// 전체 드라이브(로컬) 인덱스의 고정 키 — 어느 위치에서 검색하든 이 전역 인덱스를 쓴다.
+pub const GLOBAL_LOCAL_KEY: &str = "local-global";
+
+/// 인덱싱할 로컬 드라이브 루트들. Windows=존재하는 드라이브문자 루트, 그 외=`/`.
+fn local_drive_roots() -> Vec<PathBuf> {
+    #[cfg(windows)]
+    {
+        (b'A'..=b'Z')
+            .map(|c| PathBuf::from(format!("{}:\\", c as char)))
+            .filter(|p| p.exists())
+            .collect()
+    }
+    #[cfg(not(windows))]
+    {
+        vec![PathBuf::from("/")]
+    }
+}
+
 impl FileIndex {
     /// 명시적 캐시 디렉토리로 생성 (테스트는 임시 dir 주입).
     pub fn new(cache_dir: PathBuf) -> Arc<Self> {
@@ -213,6 +231,44 @@ impl FileIndex {
             b.push(e);
         }
         self.store_compact(key, b.finish(now_ms())).await
+    }
+
+    /// 모든 로컬 드라이브를 walk 해 **전역 인덱스**를 빌드(=Everything). 메모리에만 보관
+    /// (수백 MB JSON 회피 — 바이너리 영속화는 후속). `on_progress(n)` 는 진행 파일 수를
+    /// 주기적으로 받는다(UI 표시용).
+    pub async fn build_global_local<F: Fn(u32) + Send + 'static>(
+        self: &Arc<Self>,
+        on_progress: F,
+    ) -> Result<usize, DuetError> {
+        let roots = local_drive_roots();
+        let idx = tokio::task::spawn_blocking(move || {
+            let mut b = CompactBuilder::new();
+            let mut count = 0u32;
+            for root in &roots {
+                walk_into(&mut b, root, &mut count, &on_progress);
+            }
+            b.finish(now_ms())
+        })
+        .await
+        .map_err(|e| DuetError::Io(format!("global index join: {e}")))?;
+        let count = idx.count();
+        // 전역 인덱스는 디스크 영속 생략(크기 큼) — 메모리에만.
+        self.inner
+            .write()
+            .await
+            .insert(GLOBAL_LOCAL_KEY.to_string(), idx);
+        Ok(count)
+    }
+
+    /// 전역(전체 드라이브) 인덱스가 빌드돼 있으면 쿼리, 아니면 `None`.
+    pub async fn query_global_local(
+        &self,
+        pattern: &str,
+        opts: &SearchOpts,
+    ) -> Option<Vec<SearchHit>> {
+        let g = self.inner.read().await;
+        g.get(GLOBAL_LOCAL_KEY)
+            .map(|idx| run_query(idx, &SourceId::Local, pattern, opts))
     }
 
     async fn store_compact(
@@ -314,15 +370,14 @@ pub struct IndexedPath {
     pub modified_ms: Option<i64>,
 }
 
-/// 로컬 트리 워크 → CompactBuilder. `.gitignore` 존중. blocking.
-fn walk_local(root: &Path) -> Result<CompactBuilder, DuetError> {
+/// 한 root 트리를 walk 해 builder 에 push. `.gitignore` 존중. 5000개마다 진행률 콜백.
+fn walk_into<F: Fn(u32)>(b: &mut CompactBuilder, root: &Path, count: &mut u32, on_progress: &F) {
     use ignore::WalkBuilder;
     let walker = WalkBuilder::new(root)
         .hidden(false)
         .git_ignore(true)
         .git_exclude(true)
         .build();
-    let mut b = CompactBuilder::new();
     for entry in walker.flatten() {
         let path = entry.path();
         if path == root {
@@ -346,7 +401,18 @@ fn walk_local(root: &Path) -> Result<CompactBuilder, DuetError> {
             size,
             modified_ms,
         });
+        *count += 1;
+        if count.is_multiple_of(5000) {
+            on_progress(*count);
+        }
     }
+}
+
+/// 로컬 트리 워크 → CompactBuilder (단일 root, 진행률 없음). blocking.
+fn walk_local(root: &Path) -> Result<CompactBuilder, DuetError> {
+    let mut b = CompactBuilder::new();
+    let mut count = 0u32;
+    walk_into(&mut b, root, &mut count, &|_| {});
     Ok(b)
 }
 
