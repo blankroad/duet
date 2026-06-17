@@ -1,21 +1,30 @@
 import { useCallback } from "react";
-import { usePanes, activeTab, isParentEntry, type PaneId } from "@/stores/panes";
-import type { Entry } from "@/types/bindings";
+import {
+  usePanes,
+  activeTab,
+  isParentEntry,
+  type PaneId,
+} from "@/stores/panes";
+import type { Entry, EntryRef } from "@/types/bindings";
 import { exceedsThreshold } from "@/lib/marquee";
 import { useDragState } from "@/stores/dragState";
 import { childLocation, sameLocation } from "@/lib/entryDnd";
 import { resolveDropAt } from "@/lib/dropTarget";
 import { planTransferTo } from "@/lib/fileActions";
+import { resolveDragPaths, startDragWithPaths } from "@/lib/dragOut";
 import { useUIDialogs } from "@/stores/ui-dialogs";
 import { useToast } from "@/stores/toast";
 
 /**
- * 항목 행/셀의 포인터 기반 드래그 — 임계값을 넘으면 드래그 시작, mouseup 위치의
- * 패널/폴더로 드롭. 복사 기본 / Ctrl=이동, 항상 확인 다이얼로그 경유.
- * (드래그로 원본이 사라지는 사고 방지 — 이동은 Ctrl 명시적으로만.)
+ * 항목 행/셀의 포인터 기반 드래그.
  *
- * HTML5 DnD 대신 포인터 이벤트만 사용 — Tauri dragDropEnabled(OS 드롭)와 충돌 없음,
- * SSH 소스 항목도 동일하게 동작. 드래그가 발생하면 뒤따르는 click(커서 이동) 은 억제.
+ * - **로컬 소스**: 임계값을 넘으면 **OS 네이티브 드래그**(`startDrag`)로 시작 → 탐색기/
+ *   다른 앱/다른 패널 어디로든 드롭 가능(창 밖으로 나갈 수 있음). 항상 copy. 절대경로는
+ *   mousedown 시점에 미리 해석해 두고 임계 도달 시 **동기 발사**(제스처 유지).
+ * - **원격(SSH) 소스**: 로컬 경로가 없어 OS 드래그-아웃 불가 → 기존 인앱 DOM 드래그
+ *   (고스트 + 패널 드롭). 복사 기본 / Ctrl=이동, 항상 확인 다이얼로그 경유.
+ *
+ * 드래그가 발생하면 뒤따르는 click(커서 이동)은 1회 억제.
  */
 export function useEntryDrag(id: PaneId) {
   const open = useUIDialogs((s) => s.open);
@@ -28,55 +37,112 @@ export function useEntryDrag(id: PaneId) {
       const sx = e.clientX;
       const sy = e.clientY;
       const tab = activeTab(usePanes.getState(), id);
+      const isLocal = tab.location.source.kind === "local";
       // 드래그 대상: 누른 항목이 기존 선택에 속하면 선택 전체, 아니면 그 항목만.
-      const dragWholeSelection = tab.selected.size > 0 && tab.selected.has(entry.name);
-      const names = dragWholeSelection ? Array.from(tab.selected) : [entry.name];
+      const dragWholeSelection =
+        tab.selected.size > 0 && tab.selected.has(entry.name);
+      const names = dragWholeSelection
+        ? Array.from(tab.selected)
+        : [entry.name];
+      const targets: EntryRef[] = names.map((name) => ({
+        location: tab.location,
+        name,
+      }));
+
+      // 로컬: OS 드래그-아웃용 절대경로를 미리 해석(임계 도달 시 await 없이 발사하기 위함).
+      let osPaths: string[] = [];
+      if (isLocal) {
+        void resolveDragPaths(targets).then((p) => {
+          osPaths = p;
+        });
+      }
+
       let started = false;
+      let handedToOs = false; // 로컬: OS 가 드래그를 인계받음(이후 onUp 무시)
+
+      // 드래그 직후의 합성 click 1회 억제 (커서가 튀지 않도록).
+      const suppressNextClick = () => {
+        const suppress = (c: MouseEvent) => {
+          c.stopPropagation();
+          c.preventDefault();
+        };
+        window.addEventListener("click", suppress, {
+          capture: true,
+          once: true,
+        });
+        setTimeout(
+          () => window.removeEventListener("click", suppress, true),
+          0,
+        );
+      };
 
       const onMove = (ev: MouseEvent) => {
         if (!started) {
           if (!exceedsThreshold(ev.clientX - sx, ev.clientY - sy)) return;
           started = true;
-          // 선택에 없던 항목을 드래그하면 그 항목만 선택으로 교체 — 기존 선택이
-          // 그대로 남아 드래그 대상과 불일치하던 문제 수정 (marquee 와 동일 의미).
+          // 선택에 없던 항목을 드래그하면 그 항목만 선택으로 교체 (marquee 와 동일 의미).
           if (!dragWholeSelection) {
             usePanes.getState().setSelected(id, [entry.name]);
           }
+          if (isLocal) {
+            // 로컬 → OS 네이티브 드래그로 인계. 인앱 리스너는 정리(이후 OS 가 마우스 캡처).
+            handedToOs = true;
+            window.removeEventListener("mousemove", onMove);
+            window.removeEventListener("mouseup", onUp, true);
+            if (osPaths.length > 0) {
+              startDragWithPaths(osPaths);
+            } else {
+              // 경로 해석이 아직이면(선택 직후 즉시 드래그) 해석 후 발사 — 폴백.
+              void resolveDragPaths(targets).then(startDragWithPaths);
+            }
+            suppressNextClick();
+            return;
+          }
+          // 원격(SSH): 인앱 DOM 드래그(고스트).
           useDragState.getState().start({
             source: tab.location,
-            targets: names.map((name) => ({ location: tab.location, name })),
-            label: names.length === 1 ? (names[0] ?? "") : `${names.length} items`,
+            targets,
+            label:
+              names.length === 1 ? (names[0] ?? "") : `${names.length} items`,
             x: ev.clientX,
             y: ev.clientY,
           });
           document.body.style.cursor = "grabbing";
         }
         const d = resolveDropAt(ev.clientX, ev.clientY);
-        useDragState.getState().move(ev.clientX, ev.clientY, d?.pane ?? null, d?.folder ?? null);
+        useDragState
+          .getState()
+          .move(ev.clientX, ev.clientY, d?.pane ?? null, d?.folder ?? null);
       };
 
       const onUp = (ev: MouseEvent) => {
         window.removeEventListener("mousemove", onMove);
         window.removeEventListener("mouseup", onUp, true);
+        if (handedToOs) return; // OS 가 드롭 처리 — 인앱 후처리 없음
         if (!started) return; // 단순 클릭 — 행의 onClick 이 처리
         document.body.style.cursor = "";
-        const { source, targets } = useDragState.getState();
+        const { source, targets: dragTargets } = useDragState.getState();
         const d = resolveDropAt(ev.clientX, ev.clientY);
         useDragState.getState().end();
-        // 드래그 직후의 합성 click 1회 억제 (커서가 튀지 않도록)
-        const suppress = (c: MouseEvent) => {
-          c.stopPropagation();
-          c.preventDefault();
-        };
-        window.addEventListener("click", suppress, { capture: true, once: true });
-        setTimeout(() => window.removeEventListener("click", suppress, true), 0);
+        suppressNextClick();
 
         if (!d || !source) return;
         const dstLoc = activeTab(usePanes.getState(), d.pane).location;
         const dst = d.folder ? childLocation(dstLoc, d.folder) : dstLoc;
         if (sameLocation(source, dst)) return;
-        if (targets.some((t) => sameLocation(childLocation(t.location, t.name), dst))) return;
-        void planTransferTo(targets, dst, ev.ctrlKey ? "move" : "copy", open, showToast);
+        if (
+          dragTargets.some((t) =>
+            sameLocation(childLocation(t.location, t.name), dst),
+          )
+        )
+          return;
+        void planTransferTo(
+          dragTargets,
+          dst,
+          ev.ctrlKey ? "move" : "copy",
+          open,
+          showToast,
+        );
       };
 
       window.addEventListener("mousemove", onMove);
