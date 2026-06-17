@@ -1,11 +1,78 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { usePanes, activeTab, selectDisplayedEntries } from "./panes";
+import {
+  usePanes,
+  activeTab,
+  selectDisplayedEntries,
+  computeDisplayed,
+  isRootPath,
+  type TabState,
+} from "./panes";
 import type { Entry } from "@/types/bindings";
 
-const mk = (name: string, kind: "dir" | "file" = "file", size = 100, mtime = 0, hidden = false): Entry =>
-  ({ name, kind, size, modified_ms: mtime, permissions: null, hidden }) as Entry;
+const mk = (
+  name: string,
+  kind: "dir" | "file" = "file",
+  size = 100,
+  mtime = 0,
+  hidden = false,
+): Entry =>
+  ({
+    name,
+    kind,
+    size,
+    modified_ms: mtime,
+    permissions: null,
+    hidden,
+  }) as Entry;
 
 const homeLocation = { source: { kind: "local" as const }, path: "/" };
+
+const mkTab = (path: string, entries: Entry[] = []): TabState => ({
+  id: "t",
+  location: { source: { kind: "local" }, path },
+  entries,
+  cursorIndex: -1,
+  selected: new Set<string>(),
+  loadedAt: 0,
+  sortKey: "name",
+  sortOrder: "asc",
+  showHidden: false,
+  viewMode: "details",
+  gridCols: 1,
+  filter: "",
+  filterFocused: false,
+  history: { stack: [], index: 0 },
+});
+
+describe("root parent entry (..)", () => {
+  it("isRootPath: unix + windows 드라이브 루트", () => {
+    expect(isRootPath("/")).toBe(true);
+    expect(isRootPath("")).toBe(true);
+    expect(isRootPath("C:\\")).toBe(true);
+    expect(isRootPath("C:/")).toBe(true);
+    expect(isRootPath("C:")).toBe(true);
+    expect(isRootPath("/home/u")).toBe(false);
+    expect(isRootPath("C:\\Users")).toBe(false);
+    expect(isRootPath("C:\\Users\\")).toBe(false);
+  });
+
+  it("드라이브 루트엔 '..' 없음, 하위폴더엔 있음", () => {
+    expect(
+      computeDisplayed(mkTab("C:\\", [mk("a.txt")])).some(
+        (e) => e.name === "..",
+      ),
+    ).toBe(false);
+    expect(
+      computeDisplayed(mkTab("/", [mk("a.txt")])).some((e) => e.name === ".."),
+    ).toBe(false);
+    expect(computeDisplayed(mkTab("C:\\Users", [mk("a.txt")]))[0]?.name).toBe(
+      "..",
+    );
+    expect(computeDisplayed(mkTab("/home/u", [mk("a.txt")]))[0]?.name).toBe(
+      "..",
+    );
+  });
+});
 
 const reset = () => {
   usePanes.setState((s) => {
@@ -40,7 +107,9 @@ describe("panes — tab management", () => {
   beforeEach(reset);
 
   it("openTab clones current location", () => {
-    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/foo" }, []);
+    usePanes
+      .getState()
+      .setEntries("left", { source: { kind: "local" }, path: "/foo" }, []);
     usePanes.getState().openTab("left");
     const p = usePanes.getState().panes.left;
     expect(p.tabs.length).toBe(2);
@@ -49,7 +118,9 @@ describe("panes — tab management", () => {
   });
 
   it("openTab with explicit location", () => {
-    usePanes.getState().openTab("left", { source: { kind: "local" }, path: "/bar" });
+    usePanes
+      .getState()
+      .openTab("left", { source: { kind: "local" }, path: "/bar" });
     const p = usePanes.getState().panes.left;
     expect(p.tabs[1]!.location.path).toBe("/bar");
     expect(p.activeTabIndex).toBe(1);
@@ -61,8 +132,12 @@ describe("panes — tab management", () => {
   });
 
   it("closeTab non-active shifts active down", () => {
-    usePanes.getState().openTab("left", { source: { kind: "local" }, path: "/a" });
-    usePanes.getState().openTab("left", { source: { kind: "local" }, path: "/b" });
+    usePanes
+      .getState()
+      .openTab("left", { source: { kind: "local" }, path: "/a" });
+    usePanes
+      .getState()
+      .openTab("left", { source: { kind: "local" }, path: "/b" });
     usePanes.getState().closeTab("left", 0);
     const p = usePanes.getState().panes.left;
     expect(p.tabs.length).toBe(2);
@@ -70,8 +145,12 @@ describe("panes — tab management", () => {
   });
 
   it("closeTab active selects left", () => {
-    usePanes.getState().openTab("left", { source: { kind: "local" }, path: "/a" });
-    usePanes.getState().openTab("left", { source: { kind: "local" }, path: "/b" });
+    usePanes
+      .getState()
+      .openTab("left", { source: { kind: "local" }, path: "/a" });
+    usePanes
+      .getState()
+      .openTab("left", { source: { kind: "local" }, path: "/b" });
     usePanes.getState().closeTab("left", 2);
     const p = usePanes.getState().panes.left;
     expect(p.tabs.length).toBe(2);
@@ -80,7 +159,9 @@ describe("panes — tab management", () => {
   });
 
   it("selectTab changes activeTabIndex", () => {
-    usePanes.getState().openTab("left", { source: { kind: "local" }, path: "/a" });
+    usePanes
+      .getState()
+      .openTab("left", { source: { kind: "local" }, path: "/a" });
     usePanes.getState().selectTab("left", 0);
     expect(usePanes.getState().panes.left.activeTabIndex).toBe(0);
   });
@@ -90,22 +171,26 @@ describe("panes — sort/hidden via active tab", () => {
   beforeEach(reset);
 
   it("sort by name asc — dirs first", () => {
-    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/" }, [
-      mk("zeta", "file"),
-      mk("alpha", "dir"),
-      mk("beta", "file"),
-      mk("gamma", "dir"),
-    ]);
+    usePanes
+      .getState()
+      .setEntries("left", { source: { kind: "local" }, path: "/" }, [
+        mk("zeta", "file"),
+        mk("alpha", "dir"),
+        mk("beta", "file"),
+        mk("gamma", "dir"),
+      ]);
     const out = selectDisplayedEntries("left", usePanes.getState());
     expect(out.map((e) => e.name)).toEqual(["alpha", "gamma", "beta", "zeta"]);
   });
 
   it("sort by size desc", () => {
-    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/" }, [
-      mk("a", "file", 100),
-      mk("b", "file", 300),
-      mk("c", "file", 200),
-    ]);
+    usePanes
+      .getState()
+      .setEntries("left", { source: { kind: "local" }, path: "/" }, [
+        mk("a", "file", 100),
+        mk("b", "file", 300),
+        mk("c", "file", 200),
+      ]);
     usePanes.getState().setSort("left", "size", "desc");
     const out = selectDisplayedEntries("left", usePanes.getState());
     expect(out.map((e) => e.name)).toEqual(["b", "c", "a"]);
@@ -118,15 +203,16 @@ describe("panes — sort/hidden via active tab", () => {
   });
 
   it("toggleShowHidden shows dotfiles", () => {
-    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/" }, [
-      mk(".bashrc", "file", 100, 0, true),
-      mk("README.md", "file"),
-    ]);
+    usePanes
+      .getState()
+      .setEntries("left", { source: { kind: "local" }, path: "/" }, [
+        mk(".bashrc", "file", 100, 0, true),
+        mk("README.md", "file"),
+      ]);
     usePanes.getState().toggleShowHidden("left");
-    expect(selectDisplayedEntries("left", usePanes.getState()).map((e) => e.name)).toEqual([
-      ".bashrc",
-      "README.md",
-    ]);
+    expect(
+      selectDisplayedEntries("left", usePanes.getState()).map((e) => e.name),
+    ).toEqual([".bashrc", "README.md"]);
   });
 });
 
@@ -134,31 +220,54 @@ describe("panes — '..' parent row", () => {
   beforeEach(reset);
 
   it("prepends '..' at non-root, not at root", () => {
-    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/foo" }, [mk("a"), mk("b")]);
+    usePanes
+      .getState()
+      .setEntries("left", { source: { kind: "local" }, path: "/foo" }, [
+        mk("a"),
+        mk("b"),
+      ]);
     const out = selectDisplayedEntries("left", usePanes.getState());
     expect(out.map((e) => e.name)).toEqual(["..", "a", "b"]);
 
-    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/" }, [mk("a")]);
-    expect(selectDisplayedEntries("left", usePanes.getState()).map((e) => e.name)).toEqual(["a"]);
+    usePanes
+      .getState()
+      .setEntries("left", { source: { kind: "local" }, path: "/" }, [mk("a")]);
+    expect(
+      selectDisplayedEntries("left", usePanes.getState()).map((e) => e.name),
+    ).toEqual(["a"]);
   });
 
   it("'..' stays first even when sorted desc", () => {
-    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/foo" }, [mk("a"), mk("z")]);
+    usePanes
+      .getState()
+      .setEntries("left", { source: { kind: "local" }, path: "/foo" }, [
+        mk("a"),
+        mk("z"),
+      ]);
     usePanes.getState().setSort("left", "name", "desc");
     const out = selectDisplayedEntries("left", usePanes.getState());
     expect(out.map((e) => e.name)).toEqual(["..", "z", "a"]);
   });
 
   it("no '..' while filtering", () => {
-    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/foo" }, [mk("apple"), mk("banana")]);
+    usePanes
+      .getState()
+      .setEntries("left", { source: { kind: "local" }, path: "/foo" }, [
+        mk("apple"),
+        mk("banana"),
+      ]);
     usePanes.getState().setFilter("left", "an");
     const out = selectDisplayedEntries("left", usePanes.getState());
     expect(out.map((e) => e.name)).toEqual(["banana"]);
   });
 
   it("shows '..' in an empty non-root folder", () => {
-    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/foo" }, []);
-    expect(selectDisplayedEntries("left", usePanes.getState()).map((e) => e.name)).toEqual([".."]);
+    usePanes
+      .getState()
+      .setEntries("left", { source: { kind: "local" }, path: "/foo" }, []);
+    expect(
+      selectDisplayedEntries("left", usePanes.getState()).map((e) => e.name),
+    ).toEqual([".."]);
   });
 });
 
@@ -166,12 +275,22 @@ describe("panes — cursor & selection (legacy)", () => {
   beforeEach(reset);
 
   it("setEntries resets cursor", () => {
-    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/" }, [mk("a"), mk("b")]);
+    usePanes
+      .getState()
+      .setEntries("left", { source: { kind: "local" }, path: "/" }, [
+        mk("a"),
+        mk("b"),
+      ]);
     expect(activeTab(usePanes.getState(), "left").cursorIndex).toBe(0);
   });
 
   it("moveCursor clamps", () => {
-    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/" }, [mk("a"), mk("b")]);
+    usePanes
+      .getState()
+      .setEntries("left", { source: { kind: "local" }, path: "/" }, [
+        mk("a"),
+        mk("b"),
+      ]);
     usePanes.getState().moveCursor("left", 5);
     expect(activeTab(usePanes.getState(), "left").cursorIndex).toBe(1);
     usePanes.getState().moveCursor("left", -10);
@@ -179,11 +298,15 @@ describe("panes — cursor & selection (legacy)", () => {
   });
 
   it("toggleSelected adds and removes", () => {
-    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/" }, [mk("x")]);
+    usePanes
+      .getState()
+      .setEntries("left", { source: { kind: "local" }, path: "/" }, [mk("x")]);
     usePanes.getState().toggleSelected("left", "x");
     expect(activeTab(usePanes.getState(), "left").selected.has("x")).toBe(true);
     usePanes.getState().toggleSelected("left", "x");
-    expect(activeTab(usePanes.getState(), "left").selected.has("x")).toBe(false);
+    expect(activeTab(usePanes.getState(), "left").selected.has("x")).toBe(
+      false,
+    );
   });
 });
 
@@ -191,30 +314,48 @@ describe("panes — history", () => {
   beforeEach(reset);
 
   it("setEntries pushes history on path change", () => {
-    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/a" }, []);
-    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/b" }, []);
+    usePanes
+      .getState()
+      .setEntries("left", { source: { kind: "local" }, path: "/a" }, []);
+    usePanes
+      .getState()
+      .setEntries("left", { source: { kind: "local" }, path: "/b" }, []);
     const t = activeTab(usePanes.getState(), "left");
     expect(t.history.stack.map((l) => l.path)).toEqual(["/", "/a", "/b"]);
     expect(t.history.index).toBe(2);
   });
 
   it("setEntries same path does not push", () => {
-    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/a" }, []);
-    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/a" }, []);
+    usePanes
+      .getState()
+      .setEntries("left", { source: { kind: "local" }, path: "/a" }, []);
+    usePanes
+      .getState()
+      .setEntries("left", { source: { kind: "local" }, path: "/a" }, []);
     const t = activeTab(usePanes.getState(), "left");
     expect(t.history.stack.length).toBe(2);
   });
 
   it("setEntries pushHistory=false skips", () => {
-    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/a" }, []);
-    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/b" }, [], { pushHistory: false });
+    usePanes
+      .getState()
+      .setEntries("left", { source: { kind: "local" }, path: "/a" }, []);
+    usePanes
+      .getState()
+      .setEntries("left", { source: { kind: "local" }, path: "/b" }, [], {
+        pushHistory: false,
+      });
     const t = activeTab(usePanes.getState(), "left");
     expect(t.history.stack.map((l) => l.path)).toEqual(["/", "/a"]);
   });
 
   it("back returns previous location", () => {
-    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/a" }, []);
-    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/b" }, []);
+    usePanes
+      .getState()
+      .setEntries("left", { source: { kind: "local" }, path: "/a" }, []);
+    usePanes
+      .getState()
+      .setEntries("left", { source: { kind: "local" }, path: "/b" }, []);
     const prev = usePanes.getState().back("left");
     expect(prev?.path).toBe("/a");
     expect(activeTab(usePanes.getState(), "left").history.index).toBe(1);
@@ -225,18 +366,28 @@ describe("panes — history", () => {
   });
 
   it("forward after back", () => {
-    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/a" }, []);
-    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/b" }, []);
+    usePanes
+      .getState()
+      .setEntries("left", { source: { kind: "local" }, path: "/a" }, []);
+    usePanes
+      .getState()
+      .setEntries("left", { source: { kind: "local" }, path: "/b" }, []);
     usePanes.getState().back("left");
     const next = usePanes.getState().forward("left");
     expect(next?.path).toBe("/b");
   });
 
   it("navigate after back truncates forward stack", () => {
-    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/a" }, []);
-    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/b" }, []);
+    usePanes
+      .getState()
+      .setEntries("left", { source: { kind: "local" }, path: "/a" }, []);
+    usePanes
+      .getState()
+      .setEntries("left", { source: { kind: "local" }, path: "/b" }, []);
     usePanes.getState().back("left");
-    usePanes.getState().setEntries("left", { source: { kind: "local" }, path: "/c" }, []);
+    usePanes
+      .getState()
+      .setEntries("left", { source: { kind: "local" }, path: "/c" }, []);
     const t = activeTab(usePanes.getState(), "left");
     expect(t.history.stack.map((l) => l.path)).toEqual(["/", "/a", "/c"]);
     expect(t.history.index).toBe(2);
@@ -278,9 +429,13 @@ describe("panes — setSelected", () => {
 
   it("replaces the selection set", () => {
     usePanes.getState().setSelected("left", ["a", "b", "c"]);
-    expect(activeTab(usePanes.getState(), "left").selected).toEqual(new Set(["a", "b", "c"]));
+    expect(activeTab(usePanes.getState(), "left").selected).toEqual(
+      new Set(["a", "b", "c"]),
+    );
     usePanes.getState().setSelected("left", ["x"]);
-    expect(activeTab(usePanes.getState(), "left").selected).toEqual(new Set(["x"]));
+    expect(activeTab(usePanes.getState(), "left").selected).toEqual(
+      new Set(["x"]),
+    );
   });
 
   it("empty array clears selection", () => {
