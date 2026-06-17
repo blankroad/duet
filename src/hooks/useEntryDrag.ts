@@ -16,13 +16,15 @@ import { useUIDialogs } from "@/stores/ui-dialogs";
 import { useToast } from "@/stores/toast";
 
 /**
- * 항목 행/셀의 포인터 기반 드래그.
+ * 항목 행/셀의 포인터 기반 드래그. 시작 시점의 Ctrl + 소스 종류로 메커니즘 결정:
  *
- * - **로컬 소스**: 임계값을 넘으면 **OS 네이티브 드래그**(`startDrag`)로 시작 → 탐색기/
- *   다른 앱/다른 패널 어디로든 드롭 가능(창 밖으로 나갈 수 있음). 항상 copy. 절대경로는
- *   mousedown 시점에 미리 해석해 두고 임계 도달 시 **동기 발사**(제스처 유지).
- * - **원격(SSH) 소스**: 로컬 경로가 없어 OS 드래그-아웃 불가 → 기존 인앱 DOM 드래그
- *   (고스트 + 패널 드롭). 복사 기본 / Ctrl=이동, 항상 확인 다이얼로그 경유.
+ * - **로컬 + Ctrl 없음**: **OS 네이티브 드래그**(`startDrag`) → 탐색기/다른 앱/다른 패널
+ *   어디로든 드롭(창 밖 가능), 항상 copy. 절대경로는 mousedown 에 미리 해석해 두고 임계
+ *   도달 시 **동기 발사**(제스처 유지).
+ * - **로컬 + Ctrl**: 인앱 DOM 드래그 → 패널↔패널 **이동**(onUp 에서 planTransferTo move).
+ *   (OS 드래그는 시작 후 못 바꾸므로 이동/내보내기는 *시작 시점* Ctrl 로 결정.)
+ * - **원격(SSH)**: 로컬 경로가 없어 OS 드래그-아웃 불가 → 인앱 DOM 드래그(복사 기본 /
+ *   Ctrl=이동). 항상 확인 다이얼로그 경유.
  *
  * 드래그가 발생하면 뒤따르는 click(커서 이동)은 1회 억제.
  */
@@ -84,8 +86,10 @@ export function useEntryDrag(id: PaneId) {
           if (!dragWholeSelection) {
             usePanes.getState().setSelected(id, [entry.name]);
           }
-          if (isLocal) {
-            // 로컬 → OS 네이티브 드래그로 인계. 인앱 리스너는 정리(이후 OS 가 마우스 캡처).
+          if (isLocal && !ev.ctrlKey) {
+            // 로컬 + Ctrl 안 누름 → OS 네이티브 드래그로 인계(탐색기/다른 앱/다른 패널 copy).
+            // Ctrl 누르고 시작하면 아래 인앱 드래그로 가서 패널↔패널 '이동'(onUp)이 된다.
+            // (OS 드래그는 시작 후 못 바꾸므로 이동/내보내기는 시작 시점 Ctrl 로 결정.)
             handedToOs = true;
             window.removeEventListener("mousemove", onMove);
             window.removeEventListener("mouseup", onUp, true);
