@@ -270,11 +270,44 @@ fn trash_delete_capture_id(path: &Path) -> Result<String, DuetError> {
         .collect();
     trash::delete(path).map_err(|e| DuetError::Io(format!("trash delete: {e}")))?;
     let after = os_limited::list().map_err(|e| DuetError::Io(format!("trash list after: {e}")))?;
-    let new = after
+    // delete 후 새로 생긴 항목들 중 방금 보낸 것을 고른다. 원본경로 정확 비교만으로는
+    // Windows 에서 표기 차이(드라이브문자 대소문자/구분자/verbatim 접두) 때문에 매칭이
+    // 빗나가 "삭제됐는데 실패로 보고"되는 문제가 있었다 → pick_trashed_id 로 견고화.
+    let candidates = after
         .into_iter()
-        .find(|i| !items_before.contains(&i.id) && i.original_path() == path)
-        .ok_or_else(|| DuetError::Io("trash item not found after delete".into()))?;
-    Ok(new.id.to_string_lossy().into_owned())
+        .filter(|i| !items_before.contains(&i.id))
+        .map(|i| (i.id.to_string_lossy().into_owned(), i.original_path()));
+    pick_trashed_id(candidates, path)
+        .ok_or_else(|| DuetError::Io("trash item not found after delete".into()))
+}
+
+/// 두 경로가 "같은 대상"인지 — 정확히 같으면 즉시 true, 아니면 표기 차이(구분자/대소문자)
+/// 를 흡수해 비교. 휴지통 매칭 보강용(엄격 동등은 Windows 에서 자주 빗나감).
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+fn paths_eq(a: &Path, b: &Path) -> bool {
+    if a == b {
+        return true;
+    }
+    let norm = |p: &Path| p.to_string_lossy().replace('\\', "/").to_lowercase();
+    norm(a) == norm(b)
+}
+
+/// `delete` 직후 새로 생긴 (휴지통id, 원본경로) 후보들 중 방금 삭제한 `path` 의 id 를 고른다.
+/// ① 원본경로 일치(표기차 흡수) 우선, ② 없으면 새 후보가 정확히 하나일 때 그것(레이스/표기차
+/// 견고화). 둘 다 아니면 `None`(호출자가 not-found 처리).
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+fn pick_trashed_id<I>(candidates: I, path: &Path) -> Option<String>
+where
+    I: IntoIterator<Item = (String, std::path::PathBuf)>,
+{
+    let cands: Vec<(String, std::path::PathBuf)> = candidates.into_iter().collect();
+    if let Some((id, _)) = cands.iter().find(|(_, op)| paths_eq(op, path)) {
+        return Some(id.clone());
+    }
+    if cands.len() == 1 {
+        return Some(cands[0].0.clone());
+    }
+    None
 }
 
 #[cfg(target_os = "macos")]
@@ -317,8 +350,57 @@ fn trash_restore(_trash_id: &str, _original: &Path) -> Result<(), DuetError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
     use tempfile::TempDir;
     use tokio::fs;
+
+    #[test]
+    fn paths_eq_absorbs_separator_and_case() {
+        assert!(paths_eq(Path::new("/a/b.txt"), Path::new("/a/b.txt")));
+        // Windows 표기 차이(구분자/드라이브문자 대소문자).
+        assert!(paths_eq(
+            Path::new(r"C:\Users\a\b.txt"),
+            Path::new("c:/Users/a/b.txt")
+        ));
+        assert!(!paths_eq(Path::new("/a/b.txt"), Path::new("/a/c.txt")));
+    }
+
+    #[test]
+    fn pick_trashed_id_prefers_path_match() {
+        let cands = vec![
+            ("id-other".to_string(), PathBuf::from("/a/other.txt")),
+            ("id-want".to_string(), PathBuf::from("/a/want.txt")),
+        ];
+        let got = pick_trashed_id(cands, Path::new("/a/want.txt"));
+        assert_eq!(got.as_deref(), Some("id-want"));
+    }
+
+    #[test]
+    fn pick_trashed_id_path_match_tolerates_windows_notation() {
+        let cands = vec![("id-win".to_string(), PathBuf::from(r"C:\Users\a\file.txt"))];
+        // backend 가 넘긴 path 표기가 약간 달라도(슬래시/대소문자) 매칭돼야 함.
+        let got = pick_trashed_id(cands, Path::new("c:/Users/a/file.txt"));
+        assert_eq!(got.as_deref(), Some("id-win"));
+    }
+
+    #[test]
+    fn pick_trashed_id_falls_back_to_sole_new_item() {
+        // 경로 매칭 실패(표기 크게 다름)해도 새 항목이 하나뿐이면 그것을 채택 —
+        // "삭제됐는데 못 찾아 실패 보고" 회귀 방지.
+        let cands = vec![("id-only".to_string(), PathBuf::from("/weird/repr.txt"))];
+        let got = pick_trashed_id(cands, Path::new("/totally/different.txt"));
+        assert_eq!(got.as_deref(), Some("id-only"));
+    }
+
+    #[test]
+    fn pick_trashed_id_ambiguous_without_match_is_none() {
+        // 새 항목이 여럿인데 경로도 안 맞으면 임의 선택 금지(None).
+        let cands = vec![
+            ("a".to_string(), PathBuf::from("/x/1.txt")),
+            ("b".to_string(), PathBuf::from("/x/2.txt")),
+        ];
+        assert_eq!(pick_trashed_id(cands, Path::new("/x/3.txt")), None);
+    }
 
     #[tokio::test]
     async fn list_empty_directory_returns_empty() {
