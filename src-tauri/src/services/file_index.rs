@@ -61,7 +61,7 @@ impl CompactIndex {
 }
 
 /// 콤팩트 인덱스 빌더 — 워크/find 가 항목을 push, 끝나면 finish.
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct CompactBuilder {
     paths: String,
     path_off: Vec<u32>,
@@ -93,6 +93,20 @@ impl CompactBuilder {
         self.kinds.push(kind_to_u8(p.kind));
         self.sizes.push(p.size);
         self.mtimes.push(p.modified_ms.unwrap_or(i64::MIN));
+    }
+    /// 지금까지 push 된 항목으로 콤팩트 인덱스 스냅샷(빌더는 그대로 유지).
+    /// 전체 드라이브 워크 도중 "부분 공개"용 — 검색이 빌드 완료를 안 기다려도 됨.
+    fn snapshot(&self, built_at_ms: i64) -> CompactIndex {
+        CompactIndex {
+            built_at_ms,
+            paths: self.paths.clone(),
+            path_off: self.path_off.clone(),
+            names_lower: self.names_lower.clone(),
+            name_off: self.name_off.clone(),
+            kinds: self.kinds.clone(),
+            sizes: self.sizes.clone(),
+            mtimes: self.mtimes.clone(),
+        }
     }
     fn finish(self, built_at_ms: i64) -> CompactIndex {
         CompactIndex {
@@ -140,6 +154,11 @@ fn now_ms() -> i64 {
 
 /// 전체 드라이브(로컬) 인덱스의 고정 키 — 어느 위치에서 검색하든 이 전역 인덱스를 쓴다.
 pub const GLOBAL_LOCAL_KEY: &str = "local-global";
+
+/// 전역 인덱스를 처음 "부분 공개"하는 파일 수 임계치. 이후 공개마다 2배로 늘린다
+/// (누적 스냅샷 복사비용 ≈ O(n)). 큰 단일 드라이브(C:)에서도 이 임계치마다
+/// 검색이 전체-PC 범위로 즉시 전환된다.
+const FIRST_PUBLISH_AT: u32 = 20_000;
 
 /// 인덱싱할 로컬 드라이브 루트들. Windows=존재하는 드라이브문자 루트, 그 외=`/`.
 fn local_drive_roots() -> Vec<PathBuf> {
@@ -236,28 +255,60 @@ impl FileIndex {
     /// 모든 로컬 드라이브를 walk 해 **전역 인덱스**를 빌드(=Everything). 메모리에만 보관
     /// (수백 MB JSON 회피 — 바이너리 영속화는 후속). `on_progress(n)` 는 진행 파일 수를
     /// 주기적으로 받는다(UI 표시용).
+    ///
+    /// 핵심: 빌드 도중 **부분 공개**한다 — 첫 임계치(또는 첫 드라이브 완료) 직후부터
+    /// `query_global_local` 이 전체-PC(인덱싱된 만큼) 결과를 돌려준다. 그래서 검색이
+    /// "지금 연 폴더"로 폴백되지 않고 곧바로 호스트 전체 범위가 된다.
     pub async fn build_global_local<F: Fn(u32) + Send + 'static>(
         self: &Arc<Self>,
         on_progress: F,
     ) -> Result<usize, DuetError> {
-        let roots = local_drive_roots();
-        let idx = tokio::task::spawn_blocking(move || {
+        self.build_global_from_roots(local_drive_roots(), on_progress)
+            .await
+    }
+
+    /// `build_global_local` 의 본체 — root 목록을 주입받는다(테스트는 임시 dir 주입).
+    async fn build_global_from_roots<F: Fn(u32) + Send + 'static>(
+        self: &Arc<Self>,
+        roots: Vec<PathBuf>,
+        on_progress: F,
+    ) -> Result<usize, DuetError> {
+        let this = self.clone();
+        let count = tokio::task::spawn_blocking(move || {
             let mut b = CompactBuilder::new();
             let mut count = 0u32;
-            for root in &roots {
-                walk_into(&mut b, root, &mut count, &on_progress);
+            let mut next_publish: u32 = FIRST_PUBLISH_AT;
+            {
+                // 큰 드라이브 도중 임계치마다 부분 공개(임계치는 2배씩 증가).
+                let mut tick = |builder: &CompactBuilder, c: u32| {
+                    on_progress(c);
+                    if c >= next_publish {
+                        this.publish_global(builder.snapshot(now_ms()));
+                        next_publish = next_publish.saturating_mul(2);
+                    }
+                };
+                for root in &roots {
+                    walk_into(&mut b, root, &mut count, &mut tick);
+                    // 드라이브 1개 끝날 때마다 무조건 공개 — 작은/여러 드라이브도 즉시 전체-PC.
+                    this.publish_global(b.snapshot(now_ms()));
+                }
             }
-            b.finish(now_ms())
+            let final_idx = b.finish(now_ms());
+            let c = final_idx.count();
+            this.publish_global(final_idx);
+            c
         })
         .await
         .map_err(|e| DuetError::Io(format!("global index join: {e}")))?;
-        let count = idx.count();
-        // 전역 인덱스는 디스크 영속 생략(크기 큼) — 메모리에만.
-        self.inner
-            .write()
-            .await
-            .insert(GLOBAL_LOCAL_KEY.to_string(), idx);
         Ok(count)
+    }
+
+    /// 전역(전체 드라이브) 인덱스를 갱신 — 부분/최종 모두 같은 키로 덮어쓴다.
+    /// blocking 컨텍스트(spawn_blocking 내부)에서 호출 가능하도록 `blocking_write` 사용.
+    fn publish_global(&self, idx: CompactIndex) {
+        self.inner
+            .blocking_write()
+            .insert(GLOBAL_LOCAL_KEY.to_string(), idx);
     }
 
     /// 전역(전체 드라이브) 인덱스가 빌드돼 있으면 쿼리, 아니면 `None`.
@@ -370,8 +421,14 @@ pub struct IndexedPath {
     pub modified_ms: Option<i64>,
 }
 
-/// 한 root 트리를 walk 해 builder 에 push. `.gitignore` 존중. 5000개마다 진행률 콜백.
-fn walk_into<F: Fn(u32)>(b: &mut CompactBuilder, root: &Path, count: &mut u32, on_progress: &F) {
+/// 한 root 트리를 walk 해 builder 에 push. `.gitignore` 존중. 5000개마다 `tick(&builder,
+/// count)` 호출 — 진행률 표시 + (전역 빌드 시) 부분 공개 스냅샷에 쓰인다.
+fn walk_into<F: FnMut(&CompactBuilder, u32)>(
+    b: &mut CompactBuilder,
+    root: &Path,
+    count: &mut u32,
+    tick: &mut F,
+) {
     use ignore::WalkBuilder;
     let walker = WalkBuilder::new(root)
         .hidden(false)
@@ -403,16 +460,16 @@ fn walk_into<F: Fn(u32)>(b: &mut CompactBuilder, root: &Path, count: &mut u32, o
         });
         *count += 1;
         if count.is_multiple_of(5000) {
-            on_progress(*count);
+            tick(b, *count);
         }
     }
 }
 
-/// 로컬 트리 워크 → CompactBuilder (단일 root, 진행률 없음). blocking.
+/// 로컬 트리 워크 → CompactBuilder (단일 root, 부분 공개 없음). blocking.
 fn walk_local(root: &Path) -> Result<CompactBuilder, DuetError> {
     let mut b = CompactBuilder::new();
     let mut count = 0u32;
-    walk_into(&mut b, root, &mut count, &|_| {});
+    walk_into(&mut b, root, &mut count, &mut |_, _| {});
     Ok(b)
 }
 
@@ -523,6 +580,65 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(cs.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn global_index_covers_all_roots_regardless_of_query_location() {
+        // 두 개의 "드라이브"(임시 dir)를 전역 인덱스로 묶으면, 어느 위치 기준이든
+        // 양쪽 모두 검색돼야 한다 — 폴더 단위가 아니라 호스트(PC) 단위.
+        let d1 = tempdir().unwrap();
+        let d2 = tempdir().unwrap();
+        std::fs::write(d1.path().join("onlyone_alpha.txt"), b"x").unwrap();
+        std::fs::write(d2.path().join("onlyone_beta.txt"), b"x").unwrap();
+
+        let cache = tempdir().unwrap();
+        let idx = FileIndex::new(cache.path().to_path_buf());
+        let n = idx
+            .build_global_from_roots(vec![d1.path().into(), d2.path().into()], |_| {})
+            .await
+            .unwrap();
+        assert!(n >= 2);
+
+        let a = idx
+            .query_global_local("onlyone_alpha", &SearchOpts::default())
+            .await
+            .expect("global built");
+        assert_eq!(a.len(), 1);
+        let b = idx
+            .query_global_local("onlyone_beta", &SearchOpts::default())
+            .await
+            .expect("global built");
+        assert_eq!(b.len(), 1);
+        // 공통 접두어 — 두 드라이브에 걸친 결과가 한 번에 나와야 함.
+        let both = idx
+            .query_global_local("onlyone", &SearchOpts::default())
+            .await
+            .expect("global built");
+        assert_eq!(both.len(), 2);
+    }
+
+    #[test]
+    fn compact_builder_snapshot_is_partial_view() {
+        // 부분 공개 메커니즘: 빌드 도중 스냅샷은 그때까지 push 된 항목만 담는다.
+        let mut b = CompactBuilder::new();
+        let mk = |name: &str| IndexedPath {
+            path: PathBuf::from("/r").join(name),
+            kind: EntryKind::File,
+            size: 0,
+            modified_ms: None,
+        };
+        b.push(&mk("aa.txt"));
+        b.push(&mk("ab.txt"));
+        let snap = b.snapshot(0);
+        assert_eq!(snap.count(), 2);
+        b.push(&mk("ac.txt"));
+        let full = b.finish(0);
+        assert_eq!(full.count(), 3);
+
+        let partial = run_query(&snap, &SourceId::Local, "a", &SearchOpts::default());
+        assert_eq!(partial.len(), 2);
+        let complete = run_query(&full, &SourceId::Local, "a", &SearchOpts::default());
+        assert_eq!(complete.len(), 3);
     }
 
     #[tokio::test]
