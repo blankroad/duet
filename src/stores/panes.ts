@@ -533,6 +533,16 @@ export function isParentEntry(e: Entry): boolean {
   return e.name === PARENT_NAME;
 }
 
+/**
+ * 경로가 최상위 루트인지 — 위로 갈 부모가 없는 곳. `..` 행을 숨길지 판단.
+ * - Unix/SSH 루트: `/`
+ * - Windows 드라이브 루트: `C:\`, `C:/`, `C:` (드라이브문자 + `:` + 선택적 구분자)
+ */
+export function isRootPath(p: string): boolean {
+  if (p.length === 0 || p === "/") return true;
+  return /^[A-Za-z]:[\\/]?$/.test(p);
+}
+
 export function computeDisplayed(t: TabState): Entry[] {
   let arr = t.entries;
   if (t.filter.length > 0) {
@@ -545,11 +555,8 @@ export function computeDisplayed(t: TabState): Entry[] {
   const sorted = sortEntries(arr, t.sortKey, t.sortOrder);
   // 루트가 아니고 필터가 없을 때만 최상단에 ".." (부모/아카이브 나가기) 행.
   // 정렬과 무관하게 항상 맨 위 고정. 빈 폴더에서도 돌아갈 수 있게 표시.
-  if (
-    t.location.path !== "/" &&
-    t.location.path.length > 0 &&
-    t.filter.length === 0
-  ) {
+  // (아카이브/휴지통 임시 루트는 드라이브 루트가 아니라 isRootPath=false → ".." 유지.)
+  if (!isRootPath(t.location.path) && t.filter.length === 0) {
     return [PARENT_ENTRY, ...sorted];
   }
   return sorted;
