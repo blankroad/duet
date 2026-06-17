@@ -1,9 +1,40 @@
 import { describe, it, expect } from "vitest";
-import { kindLabel, formatPerms, formatFullDate } from "./fileInfo";
+import {
+  kindLabel,
+  formatPerms,
+  formatFullDate,
+  summarizeEntries,
+  countLabel,
+} from "./fileInfo";
 import type { Entry } from "@/types/bindings";
 
-const mk = (name: string, kind: Entry["kind"] = "file", permissions: number | null = null): Entry =>
-  ({ name, kind, size: 0, modified_ms: null, permissions, hidden: false }) as Entry;
+const mk = (
+  name: string,
+  kind: Entry["kind"] = "file",
+  permissions: number | null = null,
+): Entry =>
+  ({
+    name,
+    kind,
+    size: 0,
+    modified_ms: null,
+    permissions,
+    hidden: false,
+  }) as Entry;
+
+const mkSized = (
+  name: string,
+  kind: Entry["kind"],
+  size: number | null,
+): Entry =>
+  ({
+    name,
+    kind,
+    size,
+    modified_ms: null,
+    permissions: null,
+    hidden: false,
+  }) as Entry;
 
 describe("fileInfo", () => {
   it("kindLabel by extension / kind", () => {
@@ -25,5 +56,25 @@ describe("fileInfo", () => {
     expect(formatFullDate(null)).toBe("—");
     // non-null produces a non-empty string (locale-dependent).
     expect(formatFullDate(0).length).toBeGreaterThan(0);
+  });
+
+  it("summarizeEntries counts kinds and sums file sizes only", () => {
+    const entries = [
+      mkSized("a.txt", "file", 100),
+      mkSized("b.bin", "file", 250),
+      mkSized("dir1", "dir", null),
+      mkSized("link", "symlink", 0),
+    ];
+    const s = summarizeEntries(entries);
+    expect(s.folders).toBe(1);
+    expect(s.files).toBe(3); // file, file, symlink (비-dir 은 파일로 집계)
+    expect(s.totalSize).toBe(350);
+  });
+
+  it("countLabel pluralization and empty", () => {
+    expect(countLabel(12, 3)).toBe("12 files, 3 folders");
+    expect(countLabel(1, 0)).toBe("1 file");
+    expect(countLabel(0, 1)).toBe("1 folder");
+    expect(countLabel(0, 0)).toBe("empty");
   });
 });

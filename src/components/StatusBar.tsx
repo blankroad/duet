@@ -1,14 +1,25 @@
-import { usePanes, activeTab } from "@/stores/panes";
+import {
+  usePanes,
+  activeTab,
+  computeDisplayed,
+  isParentEntry,
+} from "@/stores/panes";
+import type { Entry } from "@/types/bindings";
 import { formatSize } from "@/lib/format";
+import {
+  kindLabel,
+  formatPerms,
+  formatFullDate,
+  summarizeEntries,
+  countLabel,
+} from "@/lib/fileInfo";
 
 /**
- * StatusBar — 활성 패널의 항목 통계 + 소스 라벨.
+ * StatusBar — 3 구역: 왼쪽=파일/폴더 집계 + 선택, 가운데=커서 항목 상세, 오른쪽=소스.
  *
- * DESIGN.md 매핑:
- * "12 items • 3 selected (4.2 MB)    user@host"
+ * "12 files, 3 folders · 1.1 GB    report.pdf — PDF document · 4.2 MB · …    user@host"
  *
- * (드래그-아웃은 이제 파일 행을 직접 끌면 됨 — useEntryDrag 가 로컬 항목을 OS
- * 네이티브 드래그로 시작. 하단 전용 버튼은 중복이라 제거.)
+ * (드래그-아웃은 파일 행을 직접 끌면 됨 — useEntryDrag. 하단 전용 버튼은 제거됨.)
  */
 export function StatusBar() {
   const activeId = usePanes((s) => s.activePane);
@@ -18,26 +29,49 @@ export function StatusBar() {
   const sourceLabel =
     src.kind === "local" ? "Local" : `${src.user}@${src.host_ip}`;
 
-  const totalCount = tab.entries.length;
+  // 왼쪽: 파일/폴더 수 + 총 용량(파일만) + 선택.
+  const { files, folders, totalSize } = summarizeEntries(tab.entries);
+  const counts = countLabel(files, folders);
   const selectedCount = tab.selected.size;
   const selectedSize = tab.entries
-    .filter(
-      (e: { name: string; size?: number | null }) =>
-        tab.selected.has(e.name) && e.size != null,
-    )
-    .reduce(
-      (sum: number, e: { size?: number | null }) => sum + (e.size ?? 0),
-      0,
-    );
+    .filter((e: Entry) => tab.selected.has(e.name) && e.size != null)
+    .reduce((sum: number, e: Entry) => sum + (e.size ?? 0), 0);
+
+  // 가운데: 커서가 올라간 단일 항목(".." 제외)의 상세.
+  const displayed = computeDisplayed(tab);
+  const focused = tab.cursorIndex >= 0 ? displayed[tab.cursorIndex] : undefined;
+  const focusedMeta =
+    focused && !isParentEntry(focused)
+      ? [
+          kindLabel(focused),
+          focused.size != null ? formatSize(focused.size) : null,
+          focused.modified_ms != null
+            ? formatFullDate(focused.modified_ms)
+            : null,
+          focused.permissions != null ? formatPerms(focused.permissions) : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : null;
 
   return (
-    <footer className="flex h-6 items-center justify-between border-t border-border px-3 text-meta text-fg-muted">
-      <span>
-        {totalCount} items
+    <footer className="flex h-6 items-center gap-3 border-t border-border px-3 text-meta text-fg-muted">
+      <span className="shrink-0">
+        {counts}
+        {totalSize > 0 && ` · ${formatSize(totalSize)}`}
         {selectedCount > 0 &&
           ` • ${selectedCount} selected (${formatSize(selectedSize)})`}
       </span>
-      <span>{sourceLabel}</span>
+      <span className="min-w-0 flex-1 truncate text-center">
+        {focused && focusedMeta && (
+          <>
+            <span className="font-mono text-fg">{focused.name}</span>
+            {" — "}
+            {focusedMeta}
+          </>
+        )}
+      </span>
+      <span className="shrink-0">{sourceLabel}</span>
     </footer>
   );
 }
