@@ -45,11 +45,3 @@ export function startDragWithPaths(paths: string[]): void {
     useToast.getState().show(`Drag out failed: ${formatErr(e)}`);
   });
 }
-
-/**
- * 편의 함수: 해석 후 드래그. 드래그 직전 await 가 있으므로 제스처가 끊길 수 있다 —
- * 캐시 미스(선택 직후 즉시 드래그) 폴백으로만 사용.
- */
-export async function startDragOut(items: EntryRef[]): Promise<void> {
-  startDragWithPaths(await resolveDragPaths(items));
-}
