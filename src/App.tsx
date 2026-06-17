@@ -694,7 +694,10 @@ function App() {
       closeDialog();
       // 휴지통(delete-confirm)은 confirmWord 무시, 영구삭제(delete-danger)는
       // 사용자가 타이핑한 단어를 백엔드가 검증(§3).
-      const r = await commands.fsDeleteExecute(plan, confirmWord);
+      // 방어: onClick 핸들러로 이벤트 객체가 인자로 새어들어오면 ""로 강제 —
+      // 그대로 IPC 로 보내면 순환참조 직렬화가 깨져 삭제가 통째로 실패한다.
+      const word = typeof confirmWord === "string" ? confirmWord : "";
+      const r = await commands.fsDeleteExecute(plan, word);
       if (r.status === "ok") refreshAffected([plan.source_location]);
       else showToast(`Delete failed: ${formatErr(r.error)}`);
     },
@@ -1103,7 +1106,8 @@ function App() {
           ctaLabel="Delete"
           ctaTone="neutral"
           onCancel={closeDialog}
-          onConfirm={onDeleteConfirm}
+          // 인자 없이 호출 — ConfirmDialog 의 onClick 이 이벤트를 넘기지 않도록 래핑.
+          onConfirm={() => onDeleteConfirm()}
         />
       )}
       {dialog.kind === "compare-scanning" && <CompareScanningDialog />}
