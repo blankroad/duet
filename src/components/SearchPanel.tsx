@@ -3,6 +3,7 @@ import { Loader, Search, X, RefreshCw } from "lucide-react";
 import { commands } from "@/types/bindings";
 import type { SearchHit } from "@/types/bindings";
 import { useSearch } from "@/stores/search";
+import { useIndexStatus } from "@/stores/indexStatus";
 
 /**
  * 글로벌 검색 결과 패널. <header> 와 <main>{panes}</main> 사이.
@@ -30,6 +31,9 @@ export function SearchPanel({
   const setStatus = useSearch((s) => s.setStatus);
   const setError = useSearch((s) => s.setError);
   const close = useSearch((s) => s.close);
+  // 전체 드라이브 인덱싱 진행 상태(전역).
+  const driveIndexed = useIndexStatus((s) => s.indexed);
+  const driveDone = useIndexStatus((s) => s.done);
 
   // 인덱스 재색인 후 재검색 트리거(파일명 모드).
   const [reindexNonce, setReindexNonce] = useState(0);
@@ -170,11 +174,13 @@ export function SearchPanel({
           <Loader size={12} className="shrink-0 animate-spin text-fg-muted" />
         )}
         <span className="shrink-0 text-meta text-fg-muted">
-          {indexing
-            ? "indexing…"
-            : query.trim().length < 2
-              ? "min 2 chars"
-              : `${results.length} hits`}
+          {!content && !driveDone
+            ? `indexing drive… ${driveIndexed.toLocaleString()}`
+            : indexing
+              ? "indexing…"
+              : query.trim().length < 2
+                ? "min 2 chars"
+                : `${results.length} hits`}
         </span>
         <button
           type="button"

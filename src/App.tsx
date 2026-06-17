@@ -92,6 +92,7 @@ import { useOsFileDrop } from "@/hooks/useOsFileDrop";
 import { useJournalEvents } from "@/hooks/useJournalEvents";
 import { useKeymapEvents } from "@/hooks/useKeymapEvents";
 import { useTaskEvents } from "@/hooks/useTaskEvents";
+import { useIndexProgressEvents } from "@/hooks/useIndexProgressEvents";
 import { formatErr } from "@/lib/error";
 import { formatSize } from "@/lib/format";
 import { platform } from "@tauri-apps/plugin-os";
@@ -405,6 +406,7 @@ function App() {
   useOsFileDrop();
   useJournalEvents();
   useKeymapEvents();
+  useIndexProgressEvents();
 
   const dialog = useUIDialogs((s) => s.dialog);
   const closeDialog = useUIDialogs((s) => s.close);

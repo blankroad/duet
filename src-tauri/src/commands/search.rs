@@ -141,7 +141,7 @@ async fn build_index_for(
             let conn = pool.get(connection_id).await?;
             let paths = build_remote_index(&conn, &root.path).await?;
             let key = index_key(&root.source, &root.path);
-            index.store(key, root.path.clone(), paths).await?;
+            index.store(key, paths).await?;
         }
     }
     Ok(())
@@ -160,7 +160,14 @@ pub async fn index_search(
     if pattern.trim().is_empty() {
         return Ok(vec![]);
     }
-    // 1) 캐시(메모리/디스크) 있으면 즉시 — 라이브 연결 불필요.
+    // 로컬은 전역(전체 드라이브) 인덱스가 준비됐으면 그걸로 — 어디서 검색하든 전체 검색.
+    if matches!(root.source, SourceId::Local) {
+        if let Some(hits) = index.query_global_local(&pattern, &opts).await {
+            return Ok(hits);
+        }
+        // 전역 아직 빌드 전 → 현재 폴더 온디맨드로 폴백(즉시성 유지).
+    }
+    // 1) 폴더/원격 캐시 있으면 즉시 — 라이브 연결 불필요.
     if let Some(hits) = index.query(&root.source, &root.path, &pattern, &opts).await {
         return Ok(hits);
     }
@@ -170,6 +177,38 @@ pub async fn index_search(
         .query(&root.source, &root.path, &pattern, &opts)
         .await
         .unwrap_or_default())
+}
+
+/// 전체 드라이브(로컬) 인덱스를 백그라운드로 빌드 — 즉시 반환, 진행률/완료는
+/// `IndexProgressEvent` 로. 이미 빌드 중/완료여도 다시 부르면 재빌드(최신화).
+#[tauri::command]
+#[specta::specta]
+pub async fn index_build_global(
+    app: tauri::AppHandle,
+    index: tauri::State<'_, Arc<FileIndex>>,
+) -> Result<(), DuetError> {
+    use crate::services::index_events::IndexProgressEvent;
+    use tauri_specta::Event;
+    let index = index.inner().clone();
+    tokio::spawn(async move {
+        let app2 = app.clone();
+        let res = index
+            .build_global_local(move |n| {
+                let _ = IndexProgressEvent {
+                    indexed: n,
+                    done: false,
+                }
+                .emit(&app2);
+            })
+            .await;
+        let total = res.unwrap_or(0) as u32;
+        let _ = IndexProgressEvent {
+            indexed: total,
+            done: true,
+        }
+        .emit(&app);
+    });
+    Ok(())
 }
 
 /// root 인덱스를 강제 재빌드(최신화). 연결돼 있어야 원격 빌드 가능.
