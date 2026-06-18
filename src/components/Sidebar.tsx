@@ -19,6 +19,7 @@ import {
   Clock,
   RefreshCw,
   ArrowUpFromLine,
+  Monitor,
 } from "lucide-react";
 import { useEffect, Fragment, type ReactNode } from "react";
 import { useUI } from "@/stores/ui";
@@ -120,6 +121,7 @@ export function Sidebar({
 
   return (
     <aside className="flex w-48 min-h-0 flex-col overflow-y-auto border-r border-border bg-subtle text-base">
+      <LocalAnchor onOpenLocation={onOpenLocation} />
       <PlacesSection
         onOpenLocation={onOpenLocation}
         onTrashActivate={onTrashActivate}
@@ -191,6 +193,44 @@ function DropLine() {
 
 const rowClass =
   "group flex cursor-default items-center gap-1 rounded px-2 py-0.5 hover:bg-border";
+
+// ─────────────────────────── Local anchor (This PC) ───────────────────────────
+
+/**
+ * 항상 보이는 "This PC (Local)" 앵커 — 활성 패널을 로컬(내 PC home)로 전환.
+ * Places/Volumes 는 활성 패널 소스를 따라가므로 패널이 리모트면 로컬로 갈 길이 없었다.
+ * 이게 그 탈출구. 패널이 이미 로컬이면 흐리게, 리모트면 강조(accent)해 눈에 띄게.
+ * ⌘/Ctrl-클릭 = 반대 패널.
+ */
+function LocalAnchor({
+  onOpenLocation,
+}: {
+  onOpenLocation: (location: Location, pane: PaneId) => void;
+}) {
+  const activeSource = useActiveSource();
+  // 로컬 home 경로는 부트스트랩된 로컬 places 캐시에서(백엔드가 OS별 해석 — §7 준수).
+  const localHome = usePlaces(
+    (s) =>
+      s.bySource["local"]?.places.find((p) => p.label === "Home")?.path ??
+      s.bySource["local"]?.places[0]?.path,
+  );
+  if (!localHome) return null; // 로컬 places 부트스트랩 전(거의 즉시 채워짐)
+  const isActiveLocal = activeSource.kind === "local";
+  return (
+    <button
+      type="button"
+      onClick={(e) => onOpenLocation(localLocation(localHome), targetPane(e))}
+      title="Switch this pane to your local machine (⌘/Ctrl-click: other pane)"
+      className={clsx(
+        "flex w-full items-center gap-1 border-b border-border px-2 py-1 text-left hover:bg-border",
+        isActiveLocal ? "text-fg-muted" : "font-medium text-accent",
+      )}
+    >
+      <Monitor size={12} className="shrink-0" />
+      <span className="truncate">This PC (Local)</span>
+    </button>
+  );
+}
 
 // ─────────────────────────── Places ───────────────────────────
 
