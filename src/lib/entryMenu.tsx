@@ -8,6 +8,8 @@ import {
   Star,
   Heart,
   ClipboardCopy,
+  ClipboardPaste,
+  Scissors,
   Trash2,
   Trash,
   RotateCw,
@@ -51,7 +53,11 @@ import {
   triggerSync,
   triggerCompare,
   copyPathsOf,
+  clipCopy,
+  clipCut,
+  clipPaste,
 } from "@/lib/fileActions";
+import { useClipboard } from "@/stores/clipboard";
 import type { MenuEntry } from "@/stores/contextMenu";
 
 /**
@@ -205,6 +211,29 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
 
   items.push(
     {
+      id: "clip-copy",
+      label: "Copy",
+      icon: <Copy size={ICON} />,
+      shortcut: "Ctrl+C",
+      onSelect: () => clipCopy(showToast),
+    },
+    {
+      id: "clip-cut",
+      label: "Cut",
+      icon: <Scissors size={ICON} />,
+      shortcut: "Ctrl+X",
+      onSelect: () => clipCut(showToast),
+    },
+    {
+      id: "clip-paste",
+      label: "Paste into folder",
+      icon: <ClipboardPaste size={ICON} />,
+      shortcut: "Ctrl+V",
+      disabled: !useClipboard.getState().entry,
+      onSelect: () => void clipPaste(open, showToast),
+    },
+    sep(),
+    {
       id: "copy",
       label: "Copy to other pane",
       icon: <Copy size={ICON} />,
@@ -330,6 +359,14 @@ export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
   const alias = sshAlias(location);
 
   const items: MenuEntry[] = [
+    {
+      id: "paste",
+      label: "Paste",
+      icon: <ClipboardPaste size={ICON} />,
+      shortcut: "Ctrl+V",
+      disabled: !useClipboard.getState().entry,
+      onSelect: () => void clipPaste(open, useToast.getState().show),
+    },
     {
       id: "mkdir",
       label: "New folder",

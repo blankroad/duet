@@ -9,8 +9,9 @@ import {
   type PaneId,
 } from "@/stores/panes";
 import type { DialogState } from "@/stores/ui-dialogs";
-import { childLocation } from "@/lib/entryDnd";
+import { childLocation, sameLocation } from "@/lib/entryDnd";
 import { formatErr } from "@/lib/error";
+import { useClipboard } from "@/stores/clipboard";
 
 type OpenFn = (d: DialogState) => void;
 type ToastFn = (msg: string) => void;
@@ -143,6 +144,63 @@ export async function copySelectionNames(showToast: ToastFn): Promise<void> {
   const { targets } = resolveActiveTargets();
   const text = targets.map((t) => t.name).join("\n");
   await copyToClipboard(text, showToast, "Name");
+}
+
+// ── 파일 클립보드 (Ctrl+C / Ctrl+X / Ctrl+V) ─────────────────────────────────
+// OS 클립보드가 아니라 인앱 큐. 붙여넣기는 planTransferTo 로 — 기존 복사/이동 확인
+// 다이얼로그 + journal(§4) 을 그대로 탄다.
+
+const plural = (n: number) => (n === 1 ? "" : "s");
+
+/** Ctrl+C — 활성 패널 선택을 'copy' 로 클립보드에 담는다(원본 유지). */
+export function clipCopy(showToast: ToastFn): void {
+  const { targets } = resolveActiveTargets();
+  if (targets.length === 0) {
+    showToast("Copy: nothing selected");
+    return;
+  }
+  useClipboard.getState().set(targets, "copy");
+  showToast(
+    `Copied ${targets.length} item${plural(targets.length)} — paste with Ctrl+V`,
+  );
+}
+
+/** Ctrl+X — 활성 패널 선택을 'move'(잘라내기) 로 담는다(붙여넣으면 원본 제거). */
+export function clipCut(showToast: ToastFn): void {
+  const { targets } = resolveActiveTargets();
+  if (targets.length === 0) {
+    showToast("Cut: nothing selected");
+    return;
+  }
+  useClipboard.getState().set(targets, "move");
+  showToast(
+    `Cut ${targets.length} item${plural(targets.length)} — paste with Ctrl+V`,
+  );
+}
+
+/** Ctrl+V — 클립보드 항목을 활성 패널 현재 폴더로 붙여넣기(copy/move, 확인 다이얼로그 경유). */
+export async function clipPaste(
+  open: OpenFn,
+  showToast: ToastFn,
+): Promise<void> {
+  const clip = useClipboard.getState().entry;
+  if (!clip || clip.targets.length === 0) {
+    showToast("Clipboard is empty — copy with Ctrl+C first");
+    return;
+  }
+  const { tab } = resolveActiveTargets();
+  const dst = tab.location;
+  // 같은 폴더로 잘라내기-붙여넣기는 의미 없음(no-op).
+  if (
+    clip.mode === "move" &&
+    clip.targets.every((t) => sameLocation(t.location, dst))
+  ) {
+    showToast("Already in this folder");
+    return;
+  }
+  await planTransferTo(clip.targets, dst, clip.mode, open, showToast);
+  // 잘라내기는 한 번 붙여넣으면 소비. 복사는 유지(여러 번 붙여넣기 가능, 탐색기와 동일).
+  if (clip.mode === "move") useClipboard.getState().clear();
 }
 
 /** 두 패널 폴더 비교 — 활성=left, 반대=right. 결과를 비교 다이얼로그로. */

@@ -43,6 +43,9 @@ import {
   triggerUndo,
   copySelectionPaths,
   copySelectionNames,
+  clipCopy,
+  clipCut,
+  clipPaste,
 } from "@/lib/fileActions";
 import { useCommands } from "@/stores/commands";
 import { usePalette } from "@/stores/palette";
@@ -551,6 +554,9 @@ function App() {
       deletePerm: () => void triggerDelete("permanent", openDialog, showToast),
       copyPath: () => void copySelectionPaths(showToast),
       copyName: () => void copySelectionNames(showToast),
+      clipCopy: () => clipCopy(showToast),
+      clipCut: () => clipCut(showToast),
+      clipPaste: () => void clipPaste(openDialog, showToast),
       undo: () => void triggerUndo(showToast),
       setupKeyAuth: () => {
         const src = activeTab(
