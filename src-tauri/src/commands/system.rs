@@ -596,6 +596,26 @@ pub async fn eject_volume(path: PathBuf) -> Result<(), DuetError> {
         .map_err(|e| DuetError::Io(format!("eject task join: {e}")))?
 }
 
+/// 우클릭 "여기서 터미널 열기" — 로컬 폴더에서 OS 터미널 실행. 원격(SSH)은 미지원.
+#[tauri::command]
+#[specta::specta]
+pub async fn open_terminal(location: Location) -> Result<(), DuetError> {
+    match location.source {
+        SourceId::Local => {
+            let dir = location.path;
+            if dir.as_os_str().is_empty() {
+                return Err(DuetError::Io("open terminal: empty path".into()));
+            }
+            tokio::task::spawn_blocking(move || crate::platform::open_terminal(&dir))
+                .await
+                .map_err(|e| DuetError::Io(format!("open terminal task join: {e}")))?
+        }
+        SourceId::Ssh { .. } => Err(DuetError::NotSupported(
+            "open terminal is local-only (remote SSH terminal not supported yet)".into(),
+        )),
+    }
+}
+
 /// 탐색기 폴더/드라이브 우클릭 "Open in duet" 등록 여부 (Windows; 그 외 false).
 #[tauri::command]
 #[specta::specta]

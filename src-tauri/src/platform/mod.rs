@@ -63,6 +63,98 @@ pub fn eject_volume(path: &Path) -> Result<(), DuetError> {
     }
 }
 
+/// 지정 폴더에서 OS 터미널을 연다 (로컬 경로). 우클릭 "여기서 터미널 열기".
+///
+/// - macOS: `open -a Terminal <dir>`
+/// - Windows: Windows Terminal(`wt.exe -d <dir>`), 없으면 `cmd` 새 창(해당 폴더 cwd)
+/// - Linux: `$TERMINAL` → 흔한 터미널(x-terminal-emulator/gnome-terminal/… ) 순차 시도
+///
+/// 새 의존성 없이 OS 표준 도구를 spawn(기존 eject/open 패턴과 동일). 셸을 띄우는 것뿐이라
+/// journal/undo 대상이 아니다. 비-디렉토리/원격은 호출자(command)가 거른다.
+pub fn open_terminal(dir: &Path) -> Result<(), DuetError> {
+    #[cfg(target_os = "macos")]
+    {
+        macos_open_terminal(dir)
+    }
+    #[cfg(target_os = "windows")]
+    {
+        windows_open_terminal(dir)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        linux_open_terminal(dir)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        let _ = dir;
+        Err(DuetError::NotSupported(
+            "open terminal is not supported on this OS".into(),
+        ))
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_open_terminal(dir: &Path) -> Result<(), DuetError> {
+    use std::process::Command;
+    let status = Command::new("open")
+        .arg("-a")
+        .arg("Terminal")
+        .arg(dir)
+        .status()
+        .map_err(|e| DuetError::Io(format!("open terminal: spawn failed: {e}")))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(DuetError::Io(
+            "open terminal: 'open -a Terminal' failed".into(),
+        ))
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn windows_open_terminal(dir: &Path) -> Result<(), DuetError> {
+    use std::process::Command;
+    // 1) Windows Terminal 우선 — `-d <dir>` 로 시작 폴더 지정.
+    if Command::new("wt.exe").arg("-d").arg(dir).spawn().is_ok() {
+        return Ok(());
+    }
+    // 2) 폴백: 새 cmd 창. start 가 새 콘솔을 띄우고, cwd 는 current_dir 로 상속(인용 이슈 회피).
+    Command::new("cmd")
+        .args(["/c", "start", "cmd"])
+        .current_dir(dir)
+        .spawn()
+        .map_err(|e| DuetError::Io(format!("open terminal: cmd spawn failed: {e}")))?;
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn linux_open_terminal(dir: &Path) -> Result<(), DuetError> {
+    use std::process::Command;
+    // 대부분의 터미널은 spawn 의 cwd(current_dir)를 상속해 그 폴더에서 시작한다.
+    let try_spawn = |bin: &str| Command::new(bin).current_dir(dir).spawn().is_ok();
+    if let Ok(t) = std::env::var("TERMINAL") {
+        if !t.is_empty() && try_spawn(&t) {
+            return Ok(());
+        }
+    }
+    for bin in [
+        "x-terminal-emulator",
+        "gnome-terminal",
+        "konsole",
+        "xfce4-terminal",
+        "alacritty",
+        "kitty",
+        "xterm",
+    ] {
+        if try_spawn(bin) {
+            return Ok(());
+        }
+    }
+    Err(DuetError::NotSupported(
+        "open terminal: no known terminal emulator found".into(),
+    ))
+}
+
 /// Windows: 볼륨 경로(`E:\`)에서 드라이브 토큰(`E:`) 추출. 드라이브 문자 형식만 허용.
 #[cfg(any(target_os = "windows", test))]
 fn windows_drive_token(path: &Path) -> Option<String> {

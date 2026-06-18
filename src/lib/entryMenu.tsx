@@ -24,6 +24,7 @@ import {
   Undo2,
   FolderSync,
   FolderGit2,
+  Terminal,
 } from "lucide-react";
 import { commands } from "@/types/bindings";
 import type { Entry, Location } from "@/types/bindings";
@@ -110,6 +111,13 @@ async function revealEntry(target: Location): Promise<void> {
     useToast.getState().show(`Reveal failed: ${formatErr(r.error)}`);
 }
 
+/** 해당 폴더에서 OS 터미널 열기 (로컬 전용). */
+async function openTerminalAt(target: Location): Promise<void> {
+  const r = await commands.openTerminal(target);
+  if (r.status === "error")
+    useToast.getState().show(`Open terminal failed: ${formatErr(r.error)}`);
+}
+
 /** 원격 파일을 에디터로 열고 변경 시 자동 재업로드(편집 라운드트립). */
 async function editRemoteEntry(target: Location, name: string): Promise<void> {
   const r = await commands.sshEditOpen(target);
@@ -193,6 +201,14 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
         icon: <FolderSearch size={ICON} />,
         onSelect: () => void revealEntry(child),
       });
+      if (isDir) {
+        items.push({
+          id: "open-terminal",
+          label: "Open terminal here",
+          icon: <Terminal size={ICON} />,
+          onSelect: () => void openTerminalAt(child),
+        });
+      }
     }
     items.push(sep());
   }
@@ -381,6 +397,16 @@ export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
       shortcut: "Ctrl+R",
       onSelect: () => onRefresh(paneId),
     },
+    ...(location.source.kind === "local"
+      ? [
+          {
+            id: "open-terminal",
+            label: "Open terminal here",
+            icon: <Terminal size={ICON} />,
+            onSelect: () => void openTerminalAt(location),
+          } as MenuEntry,
+        ]
+      : []),
     {
       id: "sync",
       label: "Sync to other pane",

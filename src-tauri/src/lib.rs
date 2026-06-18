@@ -48,6 +48,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::system::ssh_places,
             commands::system::ssh_volumes,
             commands::system::eject_volume,
+            commands::system::open_terminal,
             commands::system::open_in_duet_get,
             commands::system::open_in_duet_set,
             commands::system::startup_open_path,
