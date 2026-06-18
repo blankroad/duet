@@ -50,6 +50,7 @@ import {
   triggerCompress,
   triggerSync,
   triggerCompare,
+  copyPathsOf,
 } from "@/lib/fileActions";
 import type { MenuEntry } from "@/stores/contextMenu";
 
@@ -272,7 +273,9 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
       id: "copy-path",
       label: "Copy path",
       icon: <ClipboardCopy size={ICON} />,
-      onSelect: () => void copyText(String(child.path)),
+      // 로컬은 백엔드 Path::join 으로 — Windows 드라이브문자·네이티브 구분자 보존(§7).
+      onSelect: () =>
+        void copyPathsOf([{ location, name: entry.name }], showToast),
     },
     {
       id: "copy-name",

@@ -1,6 +1,13 @@
 import { commands } from "@/types/bindings";
 import type { DeleteMode, EntryRef, Location } from "@/types/bindings";
-import { usePanes, activeTab, computeDisplayed, isParentEntry, PARENT_NAME, type PaneId } from "@/stores/panes";
+import {
+  usePanes,
+  activeTab,
+  computeDisplayed,
+  isParentEntry,
+  PARENT_NAME,
+  type PaneId,
+} from "@/stores/panes";
 import type { DialogState } from "@/stores/ui-dialogs";
 import { childLocation } from "@/lib/entryDnd";
 import { formatErr } from "@/lib/error";
@@ -37,7 +44,10 @@ export function resolveActiveTargets(): ActiveCtx {
         ? [cursorEntry.name]
         : []
   ).filter((n) => n !== PARENT_NAME); // ".." 는 작업 대상에서 제외
-  const targets: EntryRef[] = names.map((name) => ({ location: tab.location, name }));
+  const targets: EntryRef[] = names.map((name) => ({
+    location: tab.location,
+    name,
+  }));
   return { active, opposite, tab, targets };
 }
 
@@ -75,7 +85,11 @@ export async function triggerUndo(showToast: ToastFn): Promise<void> {
   else showToast(`Undo failed: ${formatErr(r.error)}`);
 }
 
-async function copyToClipboard(text: string, showToast: ToastFn, label: string): Promise<void> {
+async function copyToClipboard(
+  text: string,
+  showToast: ToastFn,
+  label: string,
+): Promise<void> {
   if (!text) {
     showToast(`${label}: nothing selected`);
     return;
@@ -88,11 +102,40 @@ async function copyToClipboard(text: string, showToast: ToastFn, label: string):
   }
 }
 
-/** 선택 항목의 전체 경로를 클립보드로 (여러 개는 줄바꿈). 경로 결합은 childLocation(§7). */
+/**
+ * targets 의 전체 경로를 클립보드로 (여러 개는 줄바꿈).
+ *
+ * 로컬은 **백엔드**에서 결합(`local_abs_paths` → Rust `Path::join`) — 이래야 Windows
+ * 드라이브문자(`C:`)와 네이티브 구분자(`\`)가 보존된다. 프론트에서 `/`로 join 하면
+ * 비-네이티브 경로가 나와 붙여넣기 시 깨진다(§7: 경로 결합은 백엔드 담당).
+ * SSH 는 POSIX 라 프론트 join 으로 충분.
+ */
+export async function copyPathsOf(
+  targets: EntryRef[],
+  showToast: ToastFn,
+): Promise<void> {
+  if (targets.length === 0) {
+    showToast("Path: nothing selected");
+    return;
+  }
+  const allLocal = targets.every((t) => t.location.source.kind === "local");
+  let paths: string[];
+  if (allLocal) {
+    const r = await commands.localAbsPaths(targets);
+    if (r.status !== "ok") {
+      showToast(`Copy path: ${formatErr(r.error)}`);
+      return;
+    }
+    paths = r.data;
+  } else {
+    paths = targets.map((t) => String(childLocation(t.location, t.name).path));
+  }
+  await copyToClipboard(paths.join("\n"), showToast, "Path");
+}
+
+/** 활성 패널 선택 항목의 전체 경로 복사. */
 export async function copySelectionPaths(showToast: ToastFn): Promise<void> {
-  const { targets } = resolveActiveTargets();
-  const text = targets.map((t) => String(childLocation(t.location, t.name).path)).join("\n");
-  await copyToClipboard(text, showToast, "Path");
+  await copyPathsOf(resolveActiveTargets().targets, showToast);
 }
 
 /** 선택 항목의 이름을 클립보드로. */
@@ -103,7 +146,10 @@ export async function copySelectionNames(showToast: ToastFn): Promise<void> {
 }
 
 /** 두 패널 폴더 비교 — 활성=left, 반대=right. 결과를 비교 다이얼로그로. */
-export async function triggerCompare(open: OpenFn, showToast: ToastFn): Promise<void> {
+export async function triggerCompare(
+  open: OpenFn,
+  showToast: ToastFn,
+): Promise<void> {
   const { active, opposite } = resolveActiveTargets();
   const state = usePanes.getState();
   const left = activeTab(state, active).location;
@@ -122,7 +168,8 @@ export async function triggerCompare(open: OpenFn, showToast: ToastFn): Promise<
   const r = await commands.fsCompareDirs(left, right, rules, false);
   if (r.status === "error") {
     // 취소는 조용히 닫기, 그 외는 토스트.
-    if (r.error.kind !== "Cancelled") showToast(`Compare: ${formatErr(r.error)}`);
+    if (r.error.kind !== "Cancelled")
+      showToast(`Compare: ${formatErr(r.error)}`);
     open({ kind: "none" });
     return;
   }
@@ -130,12 +177,18 @@ export async function triggerCompare(open: OpenFn, showToast: ToastFn): Promise<
 }
 
 /** 3-way 비교 — base(공통 조상) 대비 left/right. base 경로는 left 소스 기준. */
-export async function triggerThreeWay(open: OpenFn, showToast: ToastFn): Promise<void> {
+export async function triggerThreeWay(
+  open: OpenFn,
+  showToast: ToastFn,
+): Promise<void> {
   const { active, opposite } = resolveActiveTargets();
   const state = usePanes.getState();
   const left = activeTab(state, active).location;
   const right = activeTab(state, opposite).location;
-  const input = window.prompt("Base (common ancestor) directory path — relative to the left source:", String(left.path));
+  const input = window.prompt(
+    "Base (common ancestor) directory path — relative to the left source:",
+    String(left.path),
+  );
   if (input == null || input.trim() === "") return;
   const baseLoc: Location = { source: left.source, path: input.trim() };
   const r = await commands.fsCompareThreeWay(baseLoc, left, right);
@@ -147,7 +200,10 @@ export async function triggerThreeWay(open: OpenFn, showToast: ToastFn): Promise
 }
 
 /** 단방향 미러 — 활성 패널 dir → 반대 패널 dir. plan 후 확인 다이얼로그. */
-export async function triggerSync(open: OpenFn, showToast: ToastFn): Promise<void> {
+export async function triggerSync(
+  open: OpenFn,
+  showToast: ToastFn,
+): Promise<void> {
   const { active, opposite } = resolveActiveTargets();
   const state = usePanes.getState();
   const src = activeTab(state, active).location;
@@ -157,8 +213,14 @@ export async function triggerSync(open: OpenFn, showToast: ToastFn): Promise<voi
     showToast(`Sync: ${formatErr(r.error)}`);
     return;
   }
-  const label = (loc: Location) => String(loc.path).split("/").filter(Boolean).pop() ?? "/";
-  open({ kind: "sync-confirm", plan: r.data, srcLabel: label(src), dstLabel: label(dst) });
+  const label = (loc: Location) =>
+    String(loc.path).split("/").filter(Boolean).pop() ?? "/";
+  open({
+    kind: "sync-confirm",
+    plan: r.data,
+    srcLabel: label(src),
+    dstLabel: label(dst),
+  });
 }
 
 /** F7 — 활성 패널 현재 디렉토리에 새 폴더. */
@@ -188,14 +250,20 @@ export async function planTransferTo(
 }
 
 /** F5 — 반대 패널로 복사. */
-export async function triggerCopy(open: OpenFn, showToast: ToastFn): Promise<void> {
+export async function triggerCopy(
+  open: OpenFn,
+  showToast: ToastFn,
+): Promise<void> {
   const { opposite, targets } = resolveActiveTargets();
   const dst: Location = activeTab(usePanes.getState(), opposite).location;
   await planTransferTo(targets, dst, "copy", open, showToast);
 }
 
 /** F6 — 반대 패널로 이동. */
-export async function triggerMove(open: OpenFn, showToast: ToastFn): Promise<void> {
+export async function triggerMove(
+  open: OpenFn,
+  showToast: ToastFn,
+): Promise<void> {
   const { opposite, targets } = resolveActiveTargets();
   const dst: Location = activeTab(usePanes.getState(), opposite).location;
   await planTransferTo(targets, dst, "move", open, showToast);
@@ -214,7 +282,8 @@ export async function triggerExtract(showToast: ToastFn): Promise<void> {
     return;
   }
   const exec = await commands.fsExtractExecute(plan.data);
-  if (exec.status === "error") showToast(`Extract failed: ${formatErr(exec.error)}`);
+  if (exec.status === "error")
+    showToast(`Extract failed: ${formatErr(exec.error)}`);
 }
 
 /** 선택 항목들을 압축 — 이름/포맷 선택 다이얼로그 오픈. */
@@ -228,7 +297,8 @@ export function triggerCompress(open: OpenFn, showToast: ToastFn): void {
   const defaultName =
     targets.length === 1
       ? targets[0]!.name
-      : String(targets[0]!.location.path).split("/").filter(Boolean).pop() ?? "archive";
+      : (String(targets[0]!.location.path).split("/").filter(Boolean).pop() ??
+        "archive");
   open({ kind: "compress", items: targets, defaultName });
 }
 
@@ -242,7 +312,10 @@ export async function triggerDelete(
   if (targets.length === 0) return;
   const r = await commands.fsDeletePlan(targets, mode);
   if (r.status === "ok") {
-    open({ kind: mode === "permanent" ? "delete-danger" : "delete-confirm", plan: r.data });
+    open({
+      kind: mode === "permanent" ? "delete-danger" : "delete-confirm",
+      plan: r.data,
+    });
   } else {
     showToast(`Delete plan failed: ${formatErr(r.error)}`);
   }
