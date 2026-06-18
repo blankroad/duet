@@ -26,9 +26,9 @@ import { TopBar } from "@/components/TopBar";
 import { DragGhost } from "@/components/pane/DragGhost";
 import { CommandPalette } from "@/components/CommandPalette";
 import { ContextMenu } from "@/components/ContextMenu";
-import { useContextMenu } from "@/stores/contextMenu";
+import { useContextMenu, type MenuEntry } from "@/stores/contextMenu";
 import { buildEntryMenu, buildEmptyMenu, folderName } from "@/lib/entryMenu";
-import { childLocation } from "@/lib/entryDnd";
+import { childLocation, parentPath, parentLocation } from "@/lib/entryDnd";
 import { isArchiveName } from "@/lib/archive";
 import {
   resolveActiveTargets,
@@ -237,9 +237,9 @@ function App() {
         void navigateTo(id, tab.archive.exitTo);
         return;
       }
-      const path = tab.location.path;
-      if (path === "/" || path.length === 0) return;
-      const parent = path.replace(/\/[^/]+\/?$/, "") || "/";
+      // 부모 경로 — Windows(C:\)·POSIX·혼합 구분자 모두 처리(parentPath). 루트면 멈춤.
+      const parent = parentPath(tab.location.path);
+      if (parent === null) return;
       void navigate(id, parent);
     },
     [navigate, navigateTo],
@@ -254,8 +254,8 @@ function App() {
         return;
       }
       if (entry.kind === "dir") {
-        const sep = tab.location.path.endsWith("/") ? "" : "/";
-        void navigate(id, tab.location.path + sep + entry.name);
+        // 경로 결합은 childLocation 으로 — Windows 드라이브 루트에서 C:\/ 중복 방지.
+        void navigate(id, childLocation(tab.location, entry.name).path);
         return;
       }
       // 아카이브 파일 — 임시 추출 후 그 폴더로 진입(탐색기처럼 내부 열람).
@@ -348,8 +348,27 @@ function App() {
       const s = usePanes.getState();
       s.setActivePane(id);
       s.setCursor(id, index);
-      // ".." 부모 행엔 파일 작업 메뉴 없음.
-      if (entry.name === "..") return;
+      // ".." 부모 행 — 상위 폴더 열기 / 상위 경로 복사 (파일 작업 메뉴는 없음).
+      if (entry.name === "..") {
+        const par = parentLocation(activeTab(s, id).location);
+        const parentItems: MenuEntry[] = [
+          { id: "up", label: "Open parent folder", onSelect: () => onUp(id) },
+        ];
+        if (par) {
+          parentItems.push({
+            id: "copy-parent-path",
+            label: "Copy parent path",
+            onSelect: () => {
+              void navigator.clipboard
+                .writeText(String(par.path))
+                .then(() => showToast("Copied path"))
+                .catch(() => showToast("Clipboard unavailable"));
+            },
+          });
+        }
+        useContextMenu.getState().openAt(e.clientX, e.clientY, parentItems);
+        return;
+      }
       const tab = activeTab(s, id);
       const wasSelected = tab.selected.has(entry.name);
       if (!wasSelected) s.setSelected(id, [entry.name]);
@@ -366,7 +385,7 @@ function App() {
       });
       useContextMenu.getState().openAt(e.clientX, e.clientY, items);
     },
-    [onActivate, onOpenInOtherPane, onPutBack],
+    [onActivate, onOpenInOtherPane, onPutBack, onUp, showToast],
   );
 
   /** 빈 영역 우클릭 — 패널 메뉴(새 폴더/보기/정렬/북마크). */

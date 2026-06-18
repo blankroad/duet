@@ -3,7 +3,12 @@ import { useEffect, useRef } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import clsx from "clsx";
 import type { Entry } from "@/types/bindings";
-import { isParentEntry, type PaneId, type SortKey, type SortOrder } from "@/stores/panes";
+import {
+  isParentEntry,
+  type PaneId,
+  type SortKey,
+  type SortOrder,
+} from "@/stores/panes";
 import { setHoverEntry, clearHover } from "@/stores/previewHover";
 import { useMarquee } from "@/hooks/useMarquee";
 import { useEntryDrag } from "@/hooks/useEntryDrag";
@@ -22,7 +27,11 @@ interface EntryListProps {
   onActivate: (entry: Entry, index: number) => void;
   onToggleSelect: (name: string) => void;
   onSortClick: (key: SortKey) => void;
-  onEntryContextMenu: (e: React.MouseEvent, entry: Entry, index: number) => void;
+  onEntryContextMenu: (
+    e: React.MouseEvent,
+    entry: Entry,
+    index: number,
+  ) => void;
   onEmptyContextMenu: (e: React.MouseEvent) => void;
 }
 
@@ -51,7 +60,9 @@ export function EntryList({
   const onEntryMouseDown = useEntryDrag(id);
   const dragActive = useDragState((s) => s.active);
   const overThisPane = useDragState((s) => s.overPane === id);
-  const overFolder = useDragState((s) => (s.overPane === id ? s.overFolder : null));
+  const overFolder = useDragState((s) =>
+    s.overPane === id ? s.overFolder : null,
+  );
 
   const virtualizer = useVirtualizer({
     count: entries.length,
@@ -82,10 +93,38 @@ export function EntryList({
   return (
     <div className="flex flex-1 min-h-0 flex-col">
       <div className="flex h-6 shrink-0 items-center border-b border-border bg-subtle text-meta text-fg-muted">
-        <ColumnHeader label="Name" col="name" current={sortKey} order={sortOrder} onClick={onSortClick} className="flex-1 px-2" />
-        <ColumnHeader label="Size" col="size" current={sortKey} order={sortOrder} onClick={onSortClick} className="w-20 px-2 text-right" />
-        <ColumnHeader label="Modified" col="mtime" current={sortKey} order={sortOrder} onClick={onSortClick} className="w-32 px-2 text-right" />
-        <ColumnHeader label="Type" col="kind" current={sortKey} order={sortOrder} onClick={onSortClick} className="w-16 px-2" />
+        <ColumnHeader
+          label="Name"
+          col="name"
+          current={sortKey}
+          order={sortOrder}
+          onClick={onSortClick}
+          className="flex-1 px-2"
+        />
+        <ColumnHeader
+          label="Size"
+          col="size"
+          current={sortKey}
+          order={sortOrder}
+          onClick={onSortClick}
+          className="w-20 px-2 text-right"
+        />
+        <ColumnHeader
+          label="Modified"
+          col="mtime"
+          current={sortKey}
+          order={sortOrder}
+          onClick={onSortClick}
+          className="w-32 px-2 text-right"
+        />
+        <ColumnHeader
+          label="Type"
+          col="kind"
+          current={sortKey}
+          order={sortOrder}
+          onClick={onSortClick}
+          className="w-16 px-2"
+        />
       </div>
       <div
         ref={parentRef}
@@ -97,15 +136,21 @@ export function EntryList({
         onMouseDown={onContainerMouseDown}
         onMouseLeave={clearHover}
         onContextMenu={(e) => {
-          if (!(e.target as HTMLElement).closest("[data-entry]")) onEmptyContextMenu(e);
+          if (!(e.target as HTMLElement).closest("[data-entry]"))
+            onEmptyContextMenu(e);
         }}
       >
-        <div style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative" }}>
+        <div
+          style={{
+            height: `${virtualizer.getTotalSize()}px`,
+            position: "relative",
+          }}
+        >
           {virtualizer.getVirtualItems().map((vi) => {
             const entry = entries[vi.index];
             if (entry === undefined) return null;
-            // ".." 부모 행은 드롭 대상/드래그 소스에서 제외.
-            const isDropFolder = entry.kind === "dir" && !isParentEntry(entry);
+            // ".." 부모 행도 드롭 대상(→ 상위 폴더로 이동/복사). 드래그 소스는 useEntryDrag 가 제외.
+            const isDropFolder = entry.kind === "dir";
             return (
               <div
                 key={vi.key}
@@ -120,7 +165,11 @@ export function EntryList({
                   }
                 }}
                 onContextMenu={(e) => onEntryContextMenu(e, entry, vi.index)}
-                className={clsx(dragActive && overFolder === entry.name && "ring-2 ring-inset ring-accent")}
+                className={clsx(
+                  dragActive &&
+                    overFolder === entry.name &&
+                    "ring-2 ring-inset ring-accent",
+                )}
                 style={{
                   position: "absolute",
                   top: 0,
@@ -148,7 +197,11 @@ export function EntryList({
 }
 
 /** 마키 선택 사각형 오버레이 (콘텐츠 좌표). */
-function MarqueeBox({ rect }: { rect: { x1: number; y1: number; x2: number; y2: number } }) {
+function MarqueeBox({
+  rect,
+}: {
+  rect: { x1: number; y1: number; x2: number; y2: number };
+}) {
   const n = normRect(rect);
   return (
     <div
@@ -181,7 +234,8 @@ function ColumnHeader({
       className={`flex h-6 items-center gap-1 hover:text-fg ${className} ${active ? "text-fg" : ""}`}
     >
       <span>{label}</span>
-      {active && (order === "asc" ? <ChevronUp size={11} /> : <ChevronDown size={11} />)}
+      {active &&
+        (order === "asc" ? <ChevronUp size={11} /> : <ChevronDown size={11} />)}
     </button>
   );
 }

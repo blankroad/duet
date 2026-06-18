@@ -22,7 +22,11 @@ interface EntryGridProps {
   onActivate: (entry: Entry, index: number) => void;
   /** grid 컬럼 수를 store 에 보고 (키보드 ↑↓ 이동폭 공유). tiles 는 1. */
   onColumns: (cols: number) => void;
-  onEntryContextMenu: (e: React.MouseEvent, entry: Entry, index: number) => void;
+  onEntryContextMenu: (
+    e: React.MouseEvent,
+    entry: Entry,
+    index: number,
+  ) => void;
   onEmptyContextMenu: (e: React.MouseEvent) => void;
 }
 
@@ -52,7 +56,9 @@ export function EntryGrid({
   const onEntryMouseDown = useEntryDrag(id);
   const dragActive = useDragState((s) => s.active);
   const overThisPane = useDragState((s) => s.overPane === id);
-  const overFolder = useDragState((s) => (s.overPane === id ? s.overFolder : null));
+  const overFolder = useDragState((s) =>
+    s.overPane === id ? s.overFolder : null,
+  );
 
   // 폭 측정 → grid 컬럼 수 계산 후 store 보고. tiles 는 항상 1.
   useEffect(() => {
@@ -84,7 +90,9 @@ export function EntryGrid({
 
   useEffect(() => {
     if (cursorIndex >= 0) {
-      virtualizer.scrollToIndex(Math.floor(cursorIndex / cols), { align: "auto" });
+      virtualizer.scrollToIndex(Math.floor(cursorIndex / cols), {
+        align: "auto",
+      });
     }
   }, [cursorIndex, cols, virtualizer]);
 
@@ -96,9 +104,13 @@ export function EntryGrid({
       const el = parentRef.current;
       if (!el) return [];
       const c = mode === "grid" ? Math.max(1, colsRef.current) : 1;
-      return cellsInRect(rect, c, el.clientWidth / c, rowHeight, entries.length).filter(
-        (i) => !isParentEntry(entries[i]!),
-      );
+      return cellsInRect(
+        rect,
+        c,
+        el.clientWidth / c,
+        rowHeight,
+        entries.length,
+      ).filter((i) => !isParentEntry(entries[i]!));
     },
   });
 
@@ -115,10 +127,16 @@ export function EntryGrid({
       onMouseDown={onContainerMouseDown}
       onMouseLeave={clearHover}
       onContextMenu={(e) => {
-        if (!(e.target as HTMLElement).closest("[data-entry]")) onEmptyContextMenu(e);
+        if (!(e.target as HTMLElement).closest("[data-entry]"))
+          onEmptyContextMenu(e);
       }}
     >
-      <div style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative" }}>
+      <div
+        style={{
+          height: `${virtualizer.getTotalSize()}px`,
+          position: "relative",
+        }}
+      >
         {virtualizer.getVirtualItems().map((vrow) => {
           const start = vrow.index * cols;
           const rowEntries = entries.slice(start, start + cols);
@@ -133,7 +151,10 @@ export function EntryGrid({
                 height: `${vrow.size}px`,
                 transform: `translateY(${vrow.start}px)`,
                 ...(mode === "grid"
-                  ? { display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }
+                  ? {
+                      display: "grid",
+                      gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+                    }
                   : { display: "flex", flexDirection: "column" as const }),
               }}
             >
@@ -149,7 +170,9 @@ export function EntryGrid({
                   onMouseEnter: () => setHoverEntry(id, entry),
                   onMouseDown: (e) => {
                     // 아이콘/이름(핸들) 위에서만 드래그 시작 — 그 외 여백은 마키로.
-                    if ((e.target as HTMLElement).closest("[data-drag-handle]")) {
+                    if (
+                      (e.target as HTMLElement).closest("[data-drag-handle]")
+                    ) {
                       onEntryMouseDown(e, entry);
                     }
                   },
@@ -171,7 +194,12 @@ export function EntryGrid({
             className="pointer-events-none absolute z-10 border border-accent bg-accent/10"
             style={(() => {
               const n = normRect(marquee);
-              return { left: n.x1, top: n.y1, width: n.x2 - n.x1, height: n.y2 - n.y1 };
+              return {
+                left: n.x1,
+                top: n.y1,
+                width: n.x2 - n.x1,
+                height: n.y2 - n.y1,
+              };
             })()}
           />
         )}
@@ -192,24 +220,38 @@ interface CellProps {
   onDoubleClick: () => void;
 }
 
-function GridCell({ entry, isCursor, isSelected, highlight, onMouseEnter, onMouseDown, onContextMenu, onClick, onDoubleClick }: CellProps) {
+function GridCell({
+  entry,
+  isCursor,
+  isSelected,
+  highlight,
+  onMouseEnter,
+  onMouseDown,
+  onContextMenu,
+  onClick,
+  onDoubleClick,
+}: CellProps) {
   if (isParentEntry(entry)) {
     return (
       <div
         data-entry={entry.name}
+        data-drop-folder={entry.name}
         onMouseEnter={onMouseEnter}
         onMouseDown={onMouseDown}
         onContextMenu={onContextMenu}
         onClick={onClick}
         onDoubleClick={onDoubleClick}
-        title="Parent folder"
+        title="Parent folder — drop here to move/copy up"
         className={clsx(
           "m-1 flex flex-col items-center justify-center gap-1 rounded-panel border border-transparent p-2 cursor-default hover:bg-subtle",
           isCursor && "border-accent",
+          highlight && "ring-2 ring-inset ring-accent",
         )}
       >
         <FolderUp size={32} className="text-fg-muted" />
-        <span className="font-mono text-center text-meta text-fg-muted">..</span>
+        <span className="font-mono text-center text-meta text-fg-muted">
+          ..
+        </span>
       </div>
     );
   }
@@ -245,20 +287,34 @@ function GridCell({ entry, isCursor, isSelected, highlight, onMouseEnter, onMous
   );
 }
 
-function TileRow({ entry, isCursor, isSelected, highlight, onMouseEnter, onMouseDown, onContextMenu, onClick, onDoubleClick }: CellProps) {
+function TileRow({
+  entry,
+  isCursor,
+  isSelected,
+  highlight,
+  onMouseEnter,
+  onMouseDown,
+  onContextMenu,
+  onClick,
+  onDoubleClick,
+}: CellProps) {
   if (isParentEntry(entry)) {
     return (
       <div
         data-entry={entry.name}
+        data-drop-folder={entry.name}
         onMouseEnter={onMouseEnter}
         onMouseDown={onMouseDown}
         onContextMenu={onContextMenu}
         onClick={onClick}
         onDoubleClick={onDoubleClick}
-        title="Parent folder"
+        title="Parent folder — drop here to move/copy up"
         className={clsx(
           "flex h-12 items-center gap-3 px-3 cursor-default hover:bg-subtle",
-          isCursor ? "border-l-2 border-l-accent pl-[10px]" : "border-l-2 border-l-transparent",
+          isCursor
+            ? "border-l-2 border-l-accent pl-[10px]"
+            : "border-l-2 border-l-transparent",
+          highlight && "ring-2 ring-inset ring-accent",
         )}
       >
         <FolderUp size={24} className="text-fg-muted" />
@@ -276,7 +332,9 @@ function TileRow({ entry, isCursor, isSelected, highlight, onMouseEnter, onMouse
         "flex h-12 items-center gap-3 px-3 cursor-default",
         // 선택 행은 hover 회색으로 덮지 않음 (마키 드래그 중 파란 선택색 유지).
         isSelected ? "bg-active" : "hover:bg-subtle",
-        isCursor ? "border-l-2 border-l-accent pl-[10px]" : "border-l-2 border-l-transparent",
+        isCursor
+          ? "border-l-2 border-l-accent pl-[10px]"
+          : "border-l-2 border-l-transparent",
         highlight && "ring-2 ring-inset ring-accent",
       )}
       onClick={onClick}
@@ -286,7 +344,12 @@ function TileRow({ entry, isCursor, isSelected, highlight, onMouseEnter, onMouse
       <span data-drag-handle className="flex min-w-0 items-center gap-3">
         <EntryIcon entry={entry} size={24} />
         <div className="flex min-w-0 flex-col">
-          <span className={clsx("font-mono truncate", entry.hidden && "text-fg-muted")}>
+          <span
+            className={clsx(
+              "font-mono truncate",
+              entry.hidden && "text-fg-muted",
+            )}
+          >
             {entry.name}
           </span>
           <span className="text-meta text-fg-muted">

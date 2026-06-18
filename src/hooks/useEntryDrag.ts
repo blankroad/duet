@@ -8,7 +8,7 @@ import {
 import type { Entry, EntryRef } from "@/types/bindings";
 import { exceedsThreshold } from "@/lib/marquee";
 import { useDragState } from "@/stores/dragState";
-import { childLocation, sameLocation } from "@/lib/entryDnd";
+import { childLocation, sameLocation, dropDestination } from "@/lib/entryDnd";
 import { resolveDropAt } from "@/lib/dropTarget";
 import { planTransferTo } from "@/lib/fileActions";
 import { resolveDragPaths, startDragWithPaths } from "@/lib/dragOut";
@@ -125,7 +125,7 @@ export function useEntryDrag(id: PaneId) {
 
         if (!d || !source) return;
         const dstLoc = activeTab(usePanes.getState(), d.pane).location;
-        const dst = d.folder ? childLocation(dstLoc, d.folder) : dstLoc;
+        const dst = dropDestination(dstLoc, d.folder); // ".." = 부모 폴더로 이동/복사
         if (sameLocation(source, dst)) return;
         if (
           dragTargets.some((t) =>
