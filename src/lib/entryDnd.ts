@@ -5,6 +5,25 @@ import type { Location, SourceId } from "@/types/bindings";
  * 드래그 동작 자체는 hooks/useEntryDrag (포인터 기반), 전송은 fileActions.planTransferTo.
  */
 
+/**
+ * 경로 표시 정규화 — 혼합/중복 구분자를 네이티브 한 가지로 통일.
+ * - Windows(`\` 포함): 모든 `/`→`\`, 중복 `\` 1개로(선두 UNC `\\`는 보존). 끝 `\` 제거
+ *   (단, 드라이브 루트 `C:\` 는 유지). → `C:\/Users` → `C:\Users`.
+ * - POSIX: 중복 `/` 1개로, 끝 `/` 제거(루트 `/` 제외).
+ * 저장되는 location.path 를 이걸로 통과시켜 표시(breadcrumb/edit/tab/inspector)를 정리.
+ */
+export function normalizePath(p: string): string {
+  if (p.includes("\\")) {
+    const unc = p.startsWith("\\\\");
+    let s = p.replace(/\//g, "\\").replace(/\\+/g, "\\");
+    if (unc) s = "\\" + s; // 선두 UNC 백슬래시 복원
+    if (!/^[A-Za-z]:\\$/.test(s)) s = s.replace(/\\$/, "") || s; // 끝 `\` 제거(드라이브 루트 제외)
+    return s;
+  }
+  const s = p.replace(/\/+/g, "/");
+  return s.length > 1 ? s.replace(/\/$/, "") : s;
+}
+
 export function sameSource(a: SourceId, b: SourceId): boolean {
   if (a.kind === "local" && b.kind === "local") return true;
   if (a.kind === "ssh" && b.kind === "ssh")

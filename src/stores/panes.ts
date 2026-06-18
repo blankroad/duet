@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { Entry, Location } from "@/types/bindings";
+import { normalizePath } from "@/lib/entryDnd";
 
 export type PaneId = "left" | "right";
 export type SortKey = "name" | "size" | "mtime" | "kind" | "ext";
@@ -215,31 +216,33 @@ export const usePanes = create<PanesState>((set, get) => ({
     }),
   setEntries: (id, location, entries, opts) =>
     set((s) => {
+      // 저장 전 경로 정규화 — C:\/ 등 혼합/중복 구분자를 네이티브로(표시·영속 일관).
+      const loc: Location = { ...location, path: normalizePath(location.path) };
       const p = s.panes[id];
       const cur = p.tabs[p.activeTabIndex];
       if (!cur) return s;
-      const navigated = cur.location.path !== location.path;
+      const navigated = cur.location.path !== loc.path;
       const pushHistory = opts?.pushHistory ?? true;
       let history = cur.history;
       if (navigated && pushHistory) {
         const stack = history.stack.slice(0, history.index + 1);
-        stack.push(location);
+        stack.push(loc);
         const trimmed =
           stack.length > 100 ? stack.slice(stack.length - 100) : stack;
         history = { stack: trimmed, index: trimmed.length - 1 };
       }
       // 아카이브/휴지통 루트 밖으로 이동하면 컨텍스트 해제 (내부 하위폴더면 유지).
       const archive =
-        cur.archive && location.path.startsWith(cur.archive.root)
+        cur.archive && loc.path.startsWith(cur.archive.root)
           ? cur.archive
           : undefined;
       const trashRoot =
-        cur.trashRoot && location.path.startsWith(cur.trashRoot)
+        cur.trashRoot && loc.path.startsWith(cur.trashRoot)
           ? cur.trashRoot
           : undefined;
       const nextTab: TabState = {
         ...cur,
-        location,
+        location: loc,
         entries,
         cursorIndex: entries.length > 0 ? 0 : -1,
         selected: new Set(),
@@ -257,7 +260,10 @@ export const usePanes = create<PanesState>((set, get) => ({
     set(() => {
       const buildPane = (slim: RestoredLayout["panes"][PaneId]): PaneState => {
         const tabs: TabState[] = slim.tabs.map((t) => ({
-          ...initialTab({ source: { kind: "local" }, path: t.path }),
+          ...initialTab({
+            source: { kind: "local" },
+            path: normalizePath(t.path),
+          }),
           sortKey: t.sortKey,
           sortOrder: t.sortOrder,
           showHidden: t.showHidden,

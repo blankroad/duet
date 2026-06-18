@@ -5,6 +5,7 @@ import {
   childLocation,
   parentPath,
   dropDestination,
+  normalizePath,
 } from "./entryDnd";
 import type { Location, SourceId } from "@/types/bindings";
 
@@ -77,6 +78,21 @@ describe("entryDnd — parentPath", () => {
   });
   it("mixed separators", () => {
     expect(parentPath("C:\\Users/foo")).toBe("C:\\Users");
+  });
+});
+
+describe("entryDnd — normalizePath", () => {
+  it("cleans Windows mixed/doubled separators", () => {
+    expect(normalizePath("C:\\/Users")).toBe("C:\\Users"); // 핵심: C:\/ → C:\
+    expect(normalizePath("C:\\Users/foo")).toBe("C:\\Users\\foo");
+    expect(normalizePath("C:\\Users\\")).toBe("C:\\Users"); // 끝 백슬래시 제거
+    expect(normalizePath("C:\\")).toBe("C:\\"); // 드라이브 루트는 유지
+    expect(normalizePath("\\\\server\\share")).toBe("\\\\server\\share"); // UNC 보존
+  });
+  it("cleans POSIX doubled/trailing separators", () => {
+    expect(normalizePath("/home//x/")).toBe("/home/x");
+    expect(normalizePath("/")).toBe("/");
+    expect(normalizePath("/home/x")).toBe("/home/x");
   });
 });
 
