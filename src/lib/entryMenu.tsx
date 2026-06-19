@@ -27,7 +27,7 @@ import {
   Terminal,
 } from "lucide-react";
 import { commands } from "@/types/bindings";
-import type { Entry, Location, ShellVerb, ShellScope } from "@/types/bindings";
+import type { Entry, Location } from "@/types/bindings";
 import { formatErr } from "@/lib/error";
 import { isArchiveName } from "@/lib/archive";
 import {
@@ -80,8 +80,6 @@ export interface EntryMenuDeps {
   onOpenInOtherPane: (id: PaneId, entry: Entry) => void;
   /** 휴지통 항목 원위치 복원. */
   onPutBack?: () => void;
-  /** Windows 정적 셸 verb (App 이 우클릭 전에 비동기로 수집해 주입). 비-Win/원격은 빈/없음. */
-  shellVerbs?: ShellVerb[];
 }
 
 const ICON = 13;
@@ -118,35 +116,6 @@ async function openTerminalAt(target: Location): Promise<void> {
   const r = await commands.openTerminal(target);
   if (r.status === "error")
     useToast.getState().show(`Open terminal failed: ${formatErr(r.error)}`);
-}
-
-/** Windows 셸 verb 실행 (레지스트리 정적 verb). */
-async function shellInvokeAt(
-  target: Location,
-  scope: ShellScope,
-  id: string,
-): Promise<void> {
-  const r = await commands.shellContextInvoke(String(target.path), id, scope);
-  if (r.status === "error")
-    useToast.getState().show(`Action failed: ${formatErr(r.error)}`);
-}
-
-/** 셸 verb 목록을 메뉴 끝에 구분선 + 항목으로 덧붙인다 (있을 때만). */
-function appendShellVerbs(
-  items: MenuEntry[],
-  verbs: ShellVerb[] | undefined,
-  target: Location,
-  scope: ShellScope,
-): void {
-  if (!verbs || verbs.length === 0 || target.source.kind !== "local") return;
-  items.push(sep());
-  for (const v of verbs) {
-    items.push({
-      id: `shell:${v.id}`,
-      label: v.label,
-      onSelect: () => void shellInvokeAt(target, scope, v.id),
-    });
-  }
 }
 
 /** 원격 파일을 에디터로 열고 변경 시 자동 재업로드(편집 라운드트립). */
@@ -377,9 +346,6 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
     },
   );
 
-  // Windows 정적 셸 verb (Explorer/TC 식) — 맨 끝에 구분선 + 항목.
-  appendShellVerbs(items, deps.shellVerbs, child, isDir ? "directory" : "file");
-
   return items;
 }
 
@@ -387,8 +353,6 @@ export interface EmptyMenuDeps {
   paneId: PaneId;
   location: Location;
   onRefresh: (id: PaneId) => void;
-  /** Windows 정적 셸 verb (배경/빈 영역, scope=background). */
-  shellVerbs?: ShellVerb[];
 }
 
 const SORTS: { key: SortKey; label: string }[] = [
@@ -505,9 +469,6 @@ export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
         ),
     });
   }
-
-  // Windows 정적 셸 verb (배경/빈 영역, scope=background).
-  appendShellVerbs(items, deps.shellVerbs, location, "background");
 
   return items;
 }

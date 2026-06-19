@@ -20,7 +20,7 @@ use windows::Win32::System::Com::{
 };
 use windows::Win32::UI::Shell::Common::ITEMIDLIST;
 use windows::Win32::UI::Shell::{
-    IContextMenu, IShellFolder, SHBindToParent, SHParseDisplayName, CMINVOKECOMMANDINFO, CMF_NORMAL,
+    IContextMenu, IShellFolder, SHBindToParent, SHParseDisplayName, CMF_NORMAL, CMINVOKECOMMANDINFO,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreatePopupMenu, DestroyMenu, GetMenuItemCount, GetMenuItemInfoW, MENUITEMINFOW, MFS_DISABLED,
@@ -28,10 +28,25 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SW_SHOWNORMAL,
 };
 
-use crate::platform::{
-    strip_accelerator, ShellMenu, ShellMenuAction, ShellMenuItem, ShellMenuRegistry, ShellScope,
-};
+use crate::platform::{ShellMenu, ShellMenuAction, ShellMenuItem, ShellMenuRegistry, ShellScope};
 use crate::types::DuetError;
+
+/// 메뉴 라벨에서 `&` 가속기 제거 ("E&dit" → "Edit", "&&" → "&").
+fn strip_accelerator(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '&' {
+            if chars.peek() == Some(&'&') {
+                out.push('&');
+                chars.next();
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
 
 const ID_FIRST: u32 = 1;
 const ID_LAST: u32 = 0x7FFF;
@@ -173,7 +188,7 @@ unsafe fn enumerate(hmenu: HMENU_, depth: u32) -> Vec<ShellMenuItem> {
             continue;
         }
         let disabled = (mii.fState.0 & (MFS_DISABLED.0 | MFS_GRAYED.0)) != 0;
-        let children = if mii.hSubMenu.0 != std::ptr::null_mut() {
+        let children = if !mii.hSubMenu.0.is_null() {
             enumerate(mii.hSubMenu, depth + 1)
         } else {
             Vec::new()

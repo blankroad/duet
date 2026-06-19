@@ -49,8 +49,6 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::system::ssh_volumes,
             commands::system::eject_volume,
             commands::system::open_terminal,
-            commands::system::shell_context_verbs,
-            commands::system::shell_context_invoke,
             commands::system::shell_menu_open,
             commands::system::shell_menu_invoke,
             commands::system::shell_menu_close,
