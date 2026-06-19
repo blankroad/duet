@@ -27,6 +27,7 @@ import { DragGhost } from "@/components/pane/DragGhost";
 import { CommandPalette } from "@/components/CommandPalette";
 import { ContextMenu } from "@/components/ContextMenu";
 import { useContextMenu, type MenuEntry } from "@/stores/contextMenu";
+import { openShellMenu, onShellMenuClose } from "@/lib/shellMenu";
 import { buildEntryMenu, buildEmptyMenu, folderName } from "@/lib/entryMenu";
 import { childLocation, parentPath, parentLocation } from "@/lib/entryDnd";
 import { isArchiveName } from "@/lib/archive";
@@ -112,7 +113,6 @@ import type {
   Location,
   SearchHit,
   ShellScope,
-  ShellVerb,
   UserAlias,
   Volume,
 } from "@/types/bindings";
@@ -377,7 +377,9 @@ function App() {
       const wasSelected = tab.selected.has(entry.name);
       if (!wasSelected) s.setSelected(id, [entry.name]);
       const selectedCount = wasSelected ? tab.selected.size : 1;
-      const openWith = (shellVerbs: ShellVerb[]) => {
+      const openWith = (
+        shell: { token: number; entries: MenuEntry[] } | null,
+      ) => {
         const items = buildEntryMenu({
           paneId: id,
           entry,
@@ -387,11 +389,17 @@ function App() {
           onActivate,
           onOpenInOtherPane,
           onPutBack,
-          shellVerbs,
         });
-        useContextMenu.getState().openAt(cx, cy, items);
+        if (shell) {
+          items.push({ kind: "separator" }, ...shell.entries);
+          useContextMenu
+            .getState()
+            .openAt(cx, cy, items, () => onShellMenuClose(shell.token));
+        } else {
+          useContextMenu.getState().openAt(cx, cy, items);
+        }
       };
-      // Windows 로컬 단일 선택: 셸 verb 비동기 수집 후 열기. 그 외: 즉시.
+      // Windows 로컬 단일 선택: 실제 셸 메뉴(Tier 2) 비동기 수집 후 열기. 그 외: 즉시.
       if (
         platform() === "windows" &&
         tab.location.source.kind === "local" &&
@@ -399,11 +407,9 @@ function App() {
       ) {
         const child = childLocation(tab.location, entry.name);
         const scope: ShellScope = entry.kind === "dir" ? "directory" : "file";
-        void commands
-          .shellContextVerbs(String(child.path), scope)
-          .then((r) => openWith(r.status === "ok" ? r.data : []));
+        void openShellMenu(String(child.path), scope).then(openWith);
       } else {
-        openWith([]);
+        openWith(null);
       }
     },
     [onActivate, onOpenInOtherPane, onPutBack, onUp, showToast],
@@ -418,22 +424,30 @@ function App() {
       const s = usePanes.getState();
       s.setActivePane(id);
       const tab = activeTab(s, id);
-      const openWith = (shellVerbs: ShellVerb[]) => {
+      const openWith = (
+        shell: { token: number; entries: MenuEntry[] } | null,
+      ) => {
         const items = buildEmptyMenu({
           paneId: id,
           location: tab.location,
           onRefresh,
-          shellVerbs,
         });
-        useContextMenu.getState().openAt(cx, cy, items);
+        if (shell) {
+          items.push({ kind: "separator" }, ...shell.entries);
+          useContextMenu
+            .getState()
+            .openAt(cx, cy, items, () => onShellMenuClose(shell.token));
+        } else {
+          useContextMenu.getState().openAt(cx, cy, items);
+        }
       };
-      // Windows 로컬: 배경(빈 영역) 셸 verb 를 비동기 수집 후 열기. 그 외: 즉시.
+      // Windows 로컬: 배경(빈 영역) 실제 셸 메뉴(Tier 2) 비동기 수집 후 열기. 그 외: 즉시.
       if (platform() === "windows" && tab.location.source.kind === "local") {
-        void commands
-          .shellContextVerbs(String(tab.location.path), "background")
-          .then((r) => openWith(r.status === "ok" ? r.data : []));
+        void openShellMenu(String(tab.location.path), "background").then(
+          openWith,
+        );
       } else {
-        openWith([]);
+        openWith(null);
       }
     },
     [onRefresh],

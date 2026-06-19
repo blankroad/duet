@@ -641,6 +641,61 @@ pub async fn shell_context_invoke(
         .map_err(|e| DuetError::Io(format!("shell invoke task join: {e}")))?
 }
 
+// ── Tier 2: 실제 셸 컨텍스트 메뉴(IContextMenu) — Explorer/TC 와 동일 ──────────
+
+/// 우클릭 대상의 실제 셸 메뉴를 호스팅하고 항목 트리를 반환(세션 유지). Windows 전용.
+#[tauri::command]
+#[specta::specta]
+pub async fn shell_menu_open(
+    app: tauri::AppHandle,
+    path: PathBuf,
+    scope: crate::platform::ShellScope,
+    registry: tauri::State<'_, std::sync::Arc<crate::platform::ShellMenuRegistry>>,
+) -> Result<crate::platform::ShellMenu, DuetError> {
+    #[cfg(windows)]
+    {
+        use tauri::Manager;
+        let hwnd = app
+            .get_webview_window("main")
+            .and_then(|w| w.hwnd().ok())
+            .map(|h| h.0 as isize)
+            .unwrap_or(0);
+        crate::platform::shell_menu::open(registry.inner().clone(), hwnd, path, scope).await
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (app, path, scope);
+        let _ = registry;
+        Ok(crate::platform::ShellMenu {
+            token: 0,
+            items: Vec::new(),
+        })
+    }
+}
+
+/// 셸 메뉴 세션에서 선택한 항목 실행(세션 스레드가 InvokeCommand).
+#[tauri::command]
+#[specta::specta]
+pub async fn shell_menu_invoke(
+    token: u64,
+    cmd_id: u32,
+    registry: tauri::State<'_, std::sync::Arc<crate::platform::ShellMenuRegistry>>,
+) -> Result<(), DuetError> {
+    registry.dispatch(token, crate::platform::ShellMenuAction::Invoke(cmd_id));
+    Ok(())
+}
+
+/// 셸 메뉴 닫힘(선택 없음) — 세션 정리.
+#[tauri::command]
+#[specta::specta]
+pub async fn shell_menu_close(
+    token: u64,
+    registry: tauri::State<'_, std::sync::Arc<crate::platform::ShellMenuRegistry>>,
+) -> Result<(), DuetError> {
+    registry.dispatch(token, crate::platform::ShellMenuAction::Cancel);
+    Ok(())
+}
+
 /// 탐색기 폴더/드라이브 우클릭 "Open in duet" 등록 여부 (Windows; 그 외 false).
 #[tauri::command]
 #[specta::specta]

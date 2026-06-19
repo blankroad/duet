@@ -27,17 +27,29 @@ interface State {
   x: number;
   y: number;
   items: MenuEntry[];
-  openAt: (x: number, y: number, items: MenuEntry[]) => void;
+  /** 닫힐 때 1회 호출 — 셸 메뉴 세션 정리(미선택 시 취소) 등에 사용. */
+  onClose: (() => void) | undefined;
+  openAt: (
+    x: number,
+    y: number,
+    items: MenuEntry[],
+    onClose?: () => void,
+  ) => void;
   close: () => void;
 }
 
-export const useContextMenu = create<State>((set) => ({
+export const useContextMenu = create<State>((set, get) => ({
   open: false,
   x: 0,
   y: 0,
   items: [],
-  openAt: (x, y, items) => set({ open: true, x, y, items }),
-  close: () => set({ open: false, items: [] }),
+  onClose: undefined,
+  openAt: (x, y, items, onClose) => set({ open: true, x, y, items, onClose }),
+  close: () => {
+    const cb = get().onClose;
+    set({ open: false, items: [], onClose: undefined });
+    cb?.();
+  },
 }));
 
 /** separator 판별 타입 가드. */

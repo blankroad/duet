@@ -51,6 +51,9 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::system::open_terminal,
             commands::system::shell_context_verbs,
             commands::system::shell_context_invoke,
+            commands::system::shell_menu_open,
+            commands::system::shell_menu_invoke,
+            commands::system::shell_menu_close,
             commands::system::open_in_duet_get,
             commands::system::open_in_duet_set,
             commands::system::startup_open_path,
@@ -256,6 +259,7 @@ pub fn run() {
         .manage(user_aliases)
         .manage(app_launchers)
         .manage(keymap)
+        .manage(platform::ShellMenuRegistry::new())
         .invoke_handler(specta_builder.invoke_handler())
         .setup(move |app| {
             specta_builder.mount_events(app);

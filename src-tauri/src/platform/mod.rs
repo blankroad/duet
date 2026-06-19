@@ -12,6 +12,74 @@ use std::path::Path;
 #[cfg(target_os = "macos")]
 mod macos;
 
+#[cfg(windows)]
+pub mod shell_menu;
+
+/// 셸 컨텍스트 메뉴 항목(재귀 트리) — IContextMenu 가 채운 HMENU 를 열거한 결과(Tier 2).
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct ShellMenuItem {
+    /// InvokeCommand 용 명령 id(절대, idCmdFirst 기준). 구분선/서브메뉴-only 는 0.
+    pub id: u32,
+    pub label: String,
+    pub separator: bool,
+    pub disabled: bool,
+    pub children: Vec<ShellMenuItem>,
+}
+
+/// 열린 셸 메뉴 세션 — `token` 으로 invoke/close. items 는 프론트가 렌더.
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct ShellMenu {
+    pub token: u64,
+    pub items: Vec<ShellMenuItem>,
+}
+
+/// 세션 스레드로 보낼 동작 (프론트 선택 결과).
+pub enum ShellMenuAction {
+    /// 선택한 항목의 명령 id(절대) — 해당 verb 실행.
+    Invoke(u32),
+    /// 메뉴 닫힘(선택 없음) — 세션 정리.
+    Cancel,
+}
+
+/// 열린 셸 메뉴 세션 레지스트리 — Tauri state. token → COM STA 세션 스레드의 action sender.
+/// COM 객체는 그 스레드에 살아 있고, 프론트 선택이 도착하면 거기서 InvokeCommand 한다.
+#[derive(Default)]
+pub struct ShellMenuRegistry {
+    next: std::sync::atomic::AtomicU64,
+    sessions:
+        std::sync::Mutex<std::collections::HashMap<u64, std::sync::mpsc::Sender<ShellMenuAction>>>,
+}
+
+impl ShellMenuRegistry {
+    pub fn new() -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self::default())
+    }
+    #[cfg_attr(not(windows), allow(dead_code))]
+    fn alloc(&self) -> u64 {
+        self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    }
+    #[cfg_attr(not(windows), allow(dead_code))]
+    fn register(&self, token: u64, tx: std::sync::mpsc::Sender<ShellMenuAction>) {
+        if let Ok(mut g) = self.sessions.lock() {
+            g.insert(token, tx);
+        }
+    }
+    #[cfg_attr(not(windows), allow(dead_code))]
+    fn remove(&self, token: u64) {
+        if let Ok(mut g) = self.sessions.lock() {
+            g.remove(&token);
+        }
+    }
+    /// token 세션에 동작 전달 (세션 없으면 무시 — 이미 닫힘/타임아웃).
+    pub fn dispatch(&self, token: u64, action: ShellMenuAction) {
+        if let Ok(g) = self.sessions.lock() {
+            if let Some(tx) = g.get(&token) {
+                let _ = tx.send(action);
+            }
+        }
+    }
+}
+
 /// Windows 셸 컨텍스트 verb 1건 (정적 레지스트리 verb). 우클릭 메뉴에 표시.
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct ShellVerb {
