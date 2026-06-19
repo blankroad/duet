@@ -326,9 +326,9 @@ pub(crate) fn capitalize_first(s: &str) -> String {
     }
 }
 
-/// 표시 라벨 선택 — MUIVerb → 기본값 → verb 이름 순. 단 `@dll,-id`(미해석 인다이렉트
-/// 문자열)는 건너뛴다(그대로 두면 `@C:\…,-123` 처럼 보임). 인다이렉트 해석은
-/// `SHLoadIndirectString`(Win32) 필요 — Tier 1(무의존성)에선 verb 이름으로 폴백.
+/// 표시 라벨 선택 — MUIVerb → 기본값 → verb 이름 순. `@dll,-id` 인다이렉트는 호출 측
+/// (win_verb_label)에서 SHLoadIndirectString 로 미리 해석해 넘기므로, 여기 도달하는
+/// 값은 평문이다. 그래도 해석 실패한 `@` 잔여는 한 번 더 건너뛴다.
 #[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn pick_label(muiverb: Option<&str>, default: Option<&str>, verb: &str) -> String {
     for cand in [muiverb, default].into_iter().flatten() {
@@ -338,6 +338,20 @@ pub(crate) fn pick_label(muiverb: Option<&str>, default: Option<&str>, verb: &st
         }
     }
     capitalize_first(verb)
+}
+
+/// `AppliesTo` 조건부 verb 의 근사 평가 — 확장자 기반만 본다. 쿼리에 파일 확장자가
+/// 들어 있으면 적용으로 간주, 그 외(속성/종류 기반 등 평가 불가)는 false(숨김)로
+/// false-positive 를 줄인다 — "탐색기엔 없는데 뜨는" 항목 감소. ext=None 이면 false.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn applies_to_matches(applies_to: &str, ext: Option<&str>) -> bool {
+    match ext {
+        Some(e) if !e.is_empty() => {
+            let needle = format!(".{}", e.to_ascii_lowercase());
+            applies_to.to_ascii_lowercase().contains(&needle)
+        }
+        _ => false,
+    }
 }
 
 #[cfg(windows)]
@@ -373,10 +387,70 @@ fn win_scope_shell_keys(scope: ShellScope, path: &Path) -> Vec<String> {
     }
 }
 
+// SHLoadIndirectString(shlwapi) — `@dll,-id` 인다이렉트 리소스 문자열을 실제 표시명으로.
+// `windows` 크레이트 없이 raw FFI 로 선언(새 의존성 회피, 시스템 DLL 링크만). §8: unsafe 는 platform/ 한정.
+#[cfg(windows)]
+#[link(name = "shlwapi")]
+extern "system" {
+    fn SHLoadIndirectString(
+        psz_source: *const u16,
+        pszout_buf: *mut u16,
+        cchout_buf: u32,
+        ppv_reserved: *mut *mut core::ffi::c_void,
+    ) -> i32; // HRESULT (S_OK == 0)
+}
+
+/// `@<file>,-<id>` 인다이렉트 문자열 → 실제 표시명. 실패 시 None.
+#[cfg(windows)]
+fn resolve_indirect_string(s: &str) -> Option<String> {
+    use std::os::windows::ffi::OsStrExt;
+    let src: Vec<u16> = std::ffi::OsStr::new(s)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut buf = vec![0u16; 512];
+    // SAFETY: src 는 널종단 UTF-16 포인터, buf 는 cchout_buf(=buf.len()) 만큼 쓰기 가능,
+    // reserved 는 null. MS 문서 계약 준수. 실패하면 HRESULT != 0 로 분기.
+    let hr = unsafe {
+        SHLoadIndirectString(
+            src.as_ptr(),
+            buf.as_mut_ptr(),
+            buf.len() as u32,
+            std::ptr::null_mut(),
+        )
+    };
+    if hr != 0 {
+        return None;
+    }
+    let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    let out = String::from_utf16_lossy(&buf[..len]);
+    let t = out.trim();
+    if t.is_empty() {
+        None
+    } else {
+        Some(t.to_string())
+    }
+}
+
+/// 레지스트리 라벨값 정리 — `@` 인다이렉트면 해석 시도(실패 시 None), 평문이면 그대로.
+#[cfg(windows)]
+fn clean_reg_label(v: Option<String>) -> Option<String> {
+    let v = v?;
+    let t = v.trim();
+    if t.is_empty() {
+        return None;
+    }
+    if t.starts_with('@') {
+        resolve_indirect_string(t) // 해석 실패면 None → pick_label 이 다음 후보/verb 이름으로
+    } else {
+        Some(t.to_string())
+    }
+}
+
 #[cfg(windows)]
 fn win_verb_label(vk: &winreg::RegKey, verb: &str) -> String {
-    let mui = vk.get_value::<String, _>("MUIVerb").ok();
-    let def = vk.get_value::<String, _>("").ok();
+    let mui = clean_reg_label(vk.get_value::<String, _>("MUIVerb").ok());
+    let def = clean_reg_label(vk.get_value::<String, _>("").ok());
     pick_label(mui.as_deref(), def.as_deref(), verb)
 }
 
@@ -385,6 +459,11 @@ fn win_shell_verbs(scope: ShellScope, path: &Path) -> Vec<ShellVerb> {
     use winreg::enums::HKEY_CLASSES_ROOT;
     use winreg::RegKey;
     let hkcr = RegKey::predef(HKEY_CLASSES_ROOT);
+    // 파일 scope 일 때만 확장자 — AppliesTo 조건부 verb 평가용.
+    let ext = match scope {
+        ShellScope::File => path.extension().and_then(|e| e.to_str()),
+        _ => None,
+    };
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for shell_key in win_scope_shell_keys(scope, path) {
@@ -395,11 +474,18 @@ fn win_shell_verbs(scope: ShellScope, path: &Path) -> Vec<ShellVerb> {
             let Ok(vk) = sk.open_subkey(&verb) else {
                 continue;
             };
-            // 숨김/프로그램전용 verb 제외.
+            // 숨김/프로그램전용/Shift전용(Extended) verb 제외 — Explorer 기본 메뉴와 맞춤.
             if vk.get_value::<String, _>("LegacyDisable").is_ok()
                 || vk.get_value::<String, _>("ProgrammaticAccessOnly").is_ok()
+                || vk.get_value::<String, _>("Extended").is_ok()
             {
                 continue;
+            }
+            // AppliesTo 조건부 verb — 확장자 매칭 안 되면 숨김(탐색기 미표시 항목 감소).
+            if let Ok(applies) = vk.get_value::<String, _>("AppliesTo") {
+                if !applies_to_matches(&applies, ext) {
+                    continue;
+                }
             }
             // `command` 기본값이 있어야 spawn 가능 (DelegateExecute-only COM verb 제외).
             let has_cmd = vk
@@ -708,6 +794,23 @@ mod tests {
         assert_eq!(strip_accelerator("Scan && clean"), "Scan & clean");
         assert_eq!(capitalize_first("open"), "Open");
         assert_eq!(capitalize_first("runas"), "Runas");
+    }
+
+    #[test]
+    fn applies_to_extension_match() {
+        // 확장자 기반 AppliesTo — 매칭/불매칭.
+        assert!(applies_to_matches(
+            r#"System.FileName:"*.png" OR System.FileName:"*.jpg""#,
+            Some("png")
+        ));
+        assert!(!applies_to_matches(
+            r#"System.FileName:"*.png""#,
+            Some("txt")
+        ));
+        // 속성/종류 기반(확장자 없음) → 평가 불가 → 숨김(false).
+        assert!(!applies_to_matches("System.Kind:=picture", Some("png")));
+        // 확장자 없음 → false.
+        assert!(!applies_to_matches(r#"System.FileName:"*.png""#, None));
     }
 
     #[test]
