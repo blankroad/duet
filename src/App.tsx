@@ -111,6 +111,8 @@ import type {
   HostFavorite,
   Location,
   SearchHit,
+  ShellScope,
+  ShellVerb,
   UserAlias,
   Volume,
 } from "@/types/bindings";
@@ -369,21 +371,40 @@ function App() {
         useContextMenu.getState().openAt(e.clientX, e.clientY, parentItems);
         return;
       }
+      const cx = e.clientX;
+      const cy = e.clientY;
       const tab = activeTab(s, id);
       const wasSelected = tab.selected.has(entry.name);
       if (!wasSelected) s.setSelected(id, [entry.name]);
       const selectedCount = wasSelected ? tab.selected.size : 1;
-      const items = buildEntryMenu({
-        paneId: id,
-        entry,
-        location: tab.location,
-        selectedCount,
-        inTrash: tab.trashRoot !== undefined,
-        onActivate,
-        onOpenInOtherPane,
-        onPutBack,
-      });
-      useContextMenu.getState().openAt(e.clientX, e.clientY, items);
+      const openWith = (shellVerbs: ShellVerb[]) => {
+        const items = buildEntryMenu({
+          paneId: id,
+          entry,
+          location: tab.location,
+          selectedCount,
+          inTrash: tab.trashRoot !== undefined,
+          onActivate,
+          onOpenInOtherPane,
+          onPutBack,
+          shellVerbs,
+        });
+        useContextMenu.getState().openAt(cx, cy, items);
+      };
+      // Windows 로컬 단일 선택: 셸 verb 비동기 수집 후 열기. 그 외: 즉시.
+      if (
+        platform() === "windows" &&
+        tab.location.source.kind === "local" &&
+        selectedCount === 1
+      ) {
+        const child = childLocation(tab.location, entry.name);
+        const scope: ShellScope = entry.kind === "dir" ? "directory" : "file";
+        void commands
+          .shellContextVerbs(String(child.path), scope)
+          .then((r) => openWith(r.status === "ok" ? r.data : []));
+      } else {
+        openWith([]);
+      }
     },
     [onActivate, onOpenInOtherPane, onPutBack, onUp, showToast],
   );
@@ -392,15 +413,28 @@ function App() {
   const onEmptyContextMenu = useCallback(
     (id: PaneId, e: React.MouseEvent) => {
       e.preventDefault();
+      const cx = e.clientX;
+      const cy = e.clientY;
       const s = usePanes.getState();
       s.setActivePane(id);
       const tab = activeTab(s, id);
-      const items = buildEmptyMenu({
-        paneId: id,
-        location: tab.location,
-        onRefresh,
-      });
-      useContextMenu.getState().openAt(e.clientX, e.clientY, items);
+      const openWith = (shellVerbs: ShellVerb[]) => {
+        const items = buildEmptyMenu({
+          paneId: id,
+          location: tab.location,
+          onRefresh,
+          shellVerbs,
+        });
+        useContextMenu.getState().openAt(cx, cy, items);
+      };
+      // Windows 로컬: 배경(빈 영역) 셸 verb 를 비동기 수집 후 열기. 그 외: 즉시.
+      if (platform() === "windows" && tab.location.source.kind === "local") {
+        void commands
+          .shellContextVerbs(String(tab.location.path), "background")
+          .then((r) => openWith(r.status === "ok" ? r.data : []));
+      } else {
+        openWith([]);
+      }
     },
     [onRefresh],
   );

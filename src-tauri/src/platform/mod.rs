@@ -5,10 +5,33 @@
 //! `DuetError::NotSupported` 를 돌려준다.
 
 use crate::types::DuetError;
+use serde::{Deserialize, Serialize};
+use specta::Type;
 use std::path::Path;
 
 #[cfg(target_os = "macos")]
 mod macos;
+
+/// Windows 셸 컨텍스트 verb 1건 (정적 레지스트리 verb). 우클릭 메뉴에 표시.
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct ShellVerb {
+    /// 재실행용 id — `HKCR\<id>\command` 의 기본값을 다시 읽어 spawn.
+    pub id: String,
+    /// 표시 라벨 (MUIVerb / 기본값 / verb 이름).
+    pub label: String,
+}
+
+/// 우클릭 대상 종류 — 스캔할 레지스트리 shell 루트를 결정.
+#[derive(Debug, Clone, Copy, Deserialize, Type)]
+#[serde(rename_all = "lowercase")]
+pub enum ShellScope {
+    /// 파일 항목 — `*`, `AllFilesystemObjects`, 확장자 ProgID 등.
+    File,
+    /// 폴더 항목 — `Directory`, `Folder`.
+    Directory,
+    /// 폴더 빈 영역 — `Directory\Background`.
+    Background,
+}
 
 /// 앱 실행파일(`.exe`)의 OS 네이티브 아이콘을 PNG 바이트로 추출.
 ///
@@ -153,6 +176,281 @@ fn linux_open_terminal(dir: &Path) -> Result<(), DuetError> {
     Err(DuetError::NotSupported(
         "open terminal: no known terminal emulator found".into(),
     ))
+}
+
+// ── Windows 셸 컨텍스트 verb (정적 레지스트리) ───────────────────────────────
+// Explorer/Total Commander 처럼 레지스트리의 `…\shell\<verb>` 정적 verb 를 읽어 우클릭
+// 메뉴에 노출한다. COM 핸들러(`shellex\ContextMenuHandlers`, 7-Zip 등)는 Tier-2 이며 미포함.
+// Windows 외엔 빈 목록 / NotSupported.
+
+/// 우클릭 대상의 정적 셸 verb 목록. Windows 외에선 빈 벡터.
+pub fn shell_context_verbs(scope: ShellScope, path: &Path) -> Vec<ShellVerb> {
+    #[cfg(windows)]
+    {
+        win_shell_verbs(scope, path)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (scope, path);
+        Vec::new()
+    }
+}
+
+/// 선택한 verb 실행 — `HKCR\<id>\command` 를 읽어 경로 치환 후 spawn. Windows 전용.
+pub fn shell_context_invoke(id: &str, scope: ShellScope, path: &Path) -> Result<(), DuetError> {
+    #[cfg(windows)]
+    {
+        win_shell_invoke(id, scope, path)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (id, scope, path);
+        Err(DuetError::NotSupported(
+            "shell context verbs are Windows-only".into(),
+        ))
+    }
+}
+
+/// 셸 command 문자열 → argv. Windows 따옴표 규칙 간소화: `"` 로 묶인 구간은 공백 보존.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn parse_command_line(s: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut cur = String::new();
+    let mut in_q = false;
+    let mut has = false;
+    for c in s.chars() {
+        match c {
+            '"' => {
+                in_q = !in_q;
+                has = true;
+            }
+            c if c.is_whitespace() && !in_q => {
+                if has {
+                    args.push(std::mem::take(&mut cur));
+                    has = false;
+                }
+            }
+            c => {
+                cur.push(c);
+                has = true;
+            }
+        }
+    }
+    if has {
+        args.push(cur);
+    }
+    args
+}
+
+/// `%VAR%`(환경변수)만 확장. 셸 placeholder(`%1`,`%V`,…)는 그대로 둔다(숫자/단일문자라
+/// `%이름%` 패턴에 안 걸림). lookup 이 None 이면 원문 유지.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn expand_env_vars(s: &str, lookup: &dyn Fn(&str) -> Option<String>) -> String {
+    let mut out = String::new();
+    let mut rest = s;
+    while let Some(start) = rest.find('%') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        if let Some(end) = after.find('%') {
+            let name = &after[..end];
+            let is_var = !name.is_empty()
+                && name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '(' || c == ')')
+                && !name.chars().next().unwrap().is_ascii_digit();
+            if is_var {
+                if let Some(v) = lookup(name) {
+                    out.push_str(&v);
+                    rest = &after[end + 1..];
+                    continue;
+                }
+            }
+        }
+        // 변수 아님 — `%` 한 글자만 흘려보내고 계속.
+        out.push('%');
+        rest = after;
+    }
+    out.push_str(rest);
+    out
+}
+
+/// argv 의 셸 placeholder 치환 — `%1/%L/%D/%V`→item, `%W`→workdir, `%*`,`%~`→제거.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn substitute_placeholders(argv: Vec<String>, item: &str, workdir: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for a in argv {
+        if a == "%*" || a == "%~" {
+            continue; // 모든 인자 — 단일 아이템엔 무의미
+        }
+        let r = a
+            .replace("%1", item)
+            .replace("%L", item)
+            .replace("%l", item)
+            .replace("%V", item)
+            .replace("%v", item)
+            .replace("%D", item)
+            .replace("%d", item)
+            .replace("%W", workdir)
+            .replace("%w", workdir);
+        out.push(r);
+    }
+    out
+}
+
+/// 메뉴 라벨에서 `&` 가속기 제거 ("E&dit" → "Edit", "&&" → "&").
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn strip_accelerator(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '&' {
+            if chars.peek() == Some(&'&') {
+                out.push('&');
+                chars.next();
+            }
+            // 단일 '&' 는 가속기 표시 — 버림
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// verb 키 이름을 표시용으로 ("open" → "Open").
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn capitalize_first(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
+}
+
+#[cfg(windows)]
+fn win_scope_shell_keys(scope: ShellScope, path: &Path) -> Vec<String> {
+    use winreg::enums::HKEY_CLASSES_ROOT;
+    use winreg::RegKey;
+    match scope {
+        ShellScope::Background => vec!["Directory\\Background\\shell".to_string()],
+        ShellScope::Directory => vec![
+            "Directory\\shell".to_string(),
+            "Folder\\shell".to_string(),
+            "AllFilesystemObjects\\shell".to_string(),
+        ],
+        ShellScope::File => {
+            let mut keys = vec![
+                "*\\shell".to_string(),
+                "AllFilesystemObjects\\shell".to_string(),
+            ];
+            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                let dotext = format!(".{}", ext.to_ascii_lowercase());
+                keys.push(format!("SystemFileAssociations\\{dotext}\\shell"));
+                if let Ok(progid) = RegKey::predef(HKEY_CLASSES_ROOT)
+                    .open_subkey(&dotext)
+                    .and_then(|k| k.get_value::<String, _>(""))
+                {
+                    if !progid.is_empty() {
+                        keys.push(format!("{progid}\\shell"));
+                    }
+                }
+            }
+            keys
+        }
+    }
+}
+
+#[cfg(windows)]
+fn win_verb_label(vk: &winreg::RegKey, verb: &str) -> String {
+    // MUIVerb 우선(단 `@dll,-id` 인다이렉트는 해석 비용 커서 스킵), 그다음 기본값, 그다음 키 이름.
+    if let Ok(mui) = vk.get_value::<String, _>("MUIVerb") {
+        let m = mui.trim();
+        if !m.is_empty() && !m.starts_with('@') {
+            return strip_accelerator(m);
+        }
+    }
+    if let Ok(def) = vk.get_value::<String, _>("") {
+        let d = def.trim();
+        if !d.is_empty() {
+            return strip_accelerator(d);
+        }
+    }
+    capitalize_first(verb)
+}
+
+#[cfg(windows)]
+fn win_shell_verbs(scope: ShellScope, path: &Path) -> Vec<ShellVerb> {
+    use winreg::enums::HKEY_CLASSES_ROOT;
+    use winreg::RegKey;
+    let hkcr = RegKey::predef(HKEY_CLASSES_ROOT);
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for shell_key in win_scope_shell_keys(scope, path) {
+        let Ok(sk) = hkcr.open_subkey(&shell_key) else {
+            continue;
+        };
+        for verb in sk.enum_keys().flatten() {
+            let Ok(vk) = sk.open_subkey(&verb) else {
+                continue;
+            };
+            // 숨김/프로그램전용 verb 제외.
+            if vk.get_value::<String, _>("LegacyDisable").is_ok()
+                || vk.get_value::<String, _>("ProgrammaticAccessOnly").is_ok()
+            {
+                continue;
+            }
+            // `command` 기본값이 있어야 spawn 가능 (DelegateExecute-only COM verb 제외).
+            let has_cmd = vk
+                .open_subkey("command")
+                .and_then(|c| c.get_value::<String, _>(""))
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false);
+            if !has_cmd {
+                continue;
+            }
+            let label = win_verb_label(&vk, &verb);
+            if label.is_empty() || !seen.insert(label.to_ascii_lowercase()) {
+                continue; // 빈/중복 라벨 스킵
+            }
+            out.push(ShellVerb {
+                id: format!("{shell_key}\\{verb}"),
+                label,
+            });
+        }
+    }
+    out
+}
+
+#[cfg(windows)]
+fn win_shell_invoke(id: &str, scope: ShellScope, path: &Path) -> Result<(), DuetError> {
+    use std::process::Command;
+    use winreg::enums::HKEY_CLASSES_ROOT;
+    use winreg::RegKey;
+    let hkcr = RegKey::predef(HKEY_CLASSES_ROOT);
+    let template: String = hkcr
+        .open_subkey(format!("{id}\\command"))
+        .and_then(|c| c.get_value(""))
+        .map_err(|e| DuetError::Io(format!("shell verb command read: {e}")))?;
+    let expanded = expand_env_vars(&template, &|n| std::env::var(n).ok());
+    let item = path.to_string_lossy().into_owned();
+    let workdir = match scope {
+        ShellScope::File => path
+            .parent()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        ShellScope::Directory | ShellScope::Background => item.clone(),
+    };
+    let argv = substitute_placeholders(parse_command_line(&expanded), &item, &workdir);
+    if argv.is_empty() {
+        return Err(DuetError::Io("shell verb: empty command".into()));
+    }
+    let mut cmd = Command::new(&argv[0]);
+    cmd.args(&argv[1..]);
+    if !workdir.is_empty() {
+        cmd.current_dir(&workdir);
+    }
+    cmd.spawn()
+        .map_err(|e| DuetError::Io(format!("shell verb spawn: {e}")))?;
+    Ok(())
 }
 
 /// Windows: 볼륨 경로(`E:\`)에서 드라이브 토큰(`E:`) 추출. 드라이브 문자 형식만 허용.
@@ -341,6 +639,73 @@ pub fn open_in_duet_unregister() -> Result<(), DuetError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_command_line_respects_quotes() {
+        assert_eq!(
+            parse_command_line(r#""C:\Program Files\App\app.exe" "%1""#),
+            vec![
+                r"C:\Program Files\App\app.exe".to_string(),
+                "%1".to_string()
+            ],
+        );
+        assert_eq!(
+            parse_command_line("notepad.exe %1"),
+            vec!["notepad.exe".to_string(), "%1".to_string()],
+        );
+        assert_eq!(
+            parse_command_line(r#"cmd /s /k pushd "%V""#),
+            vec![
+                "cmd".to_string(),
+                "/s".to_string(),
+                "/k".to_string(),
+                "pushd".to_string(),
+                "%V".to_string()
+            ],
+        );
+    }
+
+    #[test]
+    fn expand_env_vars_only_touches_named_vars() {
+        let look = |n: &str| match n {
+            "SystemRoot" => Some(r"C:\Windows".to_string()),
+            _ => None,
+        };
+        assert_eq!(
+            expand_env_vars(r"%SystemRoot%\system32\cmd.exe", &look),
+            r"C:\Windows\system32\cmd.exe",
+        );
+        // placeholder 는 그대로.
+        assert_eq!(expand_env_vars(r#""%1""#, &look), r#""%1""#);
+        // 미지의 변수는 원문 유지.
+        assert_eq!(expand_env_vars("%NOPE%", &look), "%NOPE%");
+    }
+
+    #[test]
+    fn substitute_placeholders_maps_item_and_workdir() {
+        let argv = vec![
+            "app.exe".to_string(),
+            "%1".to_string(),
+            "/dir:%W".to_string(),
+            "%*".to_string(),
+        ];
+        assert_eq!(
+            substitute_placeholders(argv, r"C:\f.txt", r"C:\"),
+            vec![
+                "app.exe".to_string(),
+                r"C:\f.txt".to_string(),
+                r"/dir:C:\".to_string()
+            ],
+        );
+    }
+
+    #[test]
+    fn strip_accelerator_and_capitalize() {
+        assert_eq!(strip_accelerator("E&dit"), "Edit");
+        assert_eq!(strip_accelerator("Scan && clean"), "Scan & clean");
+        assert_eq!(capitalize_first("open"), "Open");
+        assert_eq!(capitalize_first("runas"), "Runas");
+    }
 
     #[test]
     fn windows_drive_token_extracts_letter() {

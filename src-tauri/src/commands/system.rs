@@ -616,6 +616,31 @@ pub async fn open_terminal(location: Location) -> Result<(), DuetError> {
     }
 }
 
+/// 우클릭 대상의 Windows 정적 셸 verb 목록 (Explorer/TC 식). Windows 외엔 빈 목록.
+#[tauri::command]
+#[specta::specta]
+pub async fn shell_context_verbs(
+    path: PathBuf,
+    scope: crate::platform::ShellScope,
+) -> Result<Vec<crate::platform::ShellVerb>, DuetError> {
+    tokio::task::spawn_blocking(move || crate::platform::shell_context_verbs(scope, &path))
+        .await
+        .map_err(|e| DuetError::Io(format!("shell verbs task join: {e}")))
+}
+
+/// 선택한 셸 verb 실행 (레지스트리 command 재읽기 → 경로 치환 → spawn). Windows 전용.
+#[tauri::command]
+#[specta::specta]
+pub async fn shell_context_invoke(
+    path: PathBuf,
+    id: String,
+    scope: crate::platform::ShellScope,
+) -> Result<(), DuetError> {
+    tokio::task::spawn_blocking(move || crate::platform::shell_context_invoke(&id, scope, &path))
+        .await
+        .map_err(|e| DuetError::Io(format!("shell invoke task join: {e}")))?
+}
+
 /// 탐색기 폴더/드라이브 우클릭 "Open in duet" 등록 여부 (Windows; 그 외 false).
 #[tauri::command]
 #[specta::specta]
