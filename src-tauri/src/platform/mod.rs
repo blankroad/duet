@@ -326,6 +326,20 @@ pub(crate) fn capitalize_first(s: &str) -> String {
     }
 }
 
+/// 표시 라벨 선택 — MUIVerb → 기본값 → verb 이름 순. 단 `@dll,-id`(미해석 인다이렉트
+/// 문자열)는 건너뛴다(그대로 두면 `@C:\…,-123` 처럼 보임). 인다이렉트 해석은
+/// `SHLoadIndirectString`(Win32) 필요 — Tier 1(무의존성)에선 verb 이름으로 폴백.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn pick_label(muiverb: Option<&str>, default: Option<&str>, verb: &str) -> String {
+    for cand in [muiverb, default].into_iter().flatten() {
+        let c = cand.trim();
+        if !c.is_empty() && !c.starts_with('@') {
+            return strip_accelerator(c);
+        }
+    }
+    capitalize_first(verb)
+}
+
 #[cfg(windows)]
 fn win_scope_shell_keys(scope: ShellScope, path: &Path) -> Vec<String> {
     use winreg::enums::HKEY_CLASSES_ROOT;
@@ -361,20 +375,9 @@ fn win_scope_shell_keys(scope: ShellScope, path: &Path) -> Vec<String> {
 
 #[cfg(windows)]
 fn win_verb_label(vk: &winreg::RegKey, verb: &str) -> String {
-    // MUIVerb 우선(단 `@dll,-id` 인다이렉트는 해석 비용 커서 스킵), 그다음 기본값, 그다음 키 이름.
-    if let Ok(mui) = vk.get_value::<String, _>("MUIVerb") {
-        let m = mui.trim();
-        if !m.is_empty() && !m.starts_with('@') {
-            return strip_accelerator(m);
-        }
-    }
-    if let Ok(def) = vk.get_value::<String, _>("") {
-        let d = def.trim();
-        if !d.is_empty() {
-            return strip_accelerator(d);
-        }
-    }
-    capitalize_first(verb)
+    let mui = vk.get_value::<String, _>("MUIVerb").ok();
+    let def = vk.get_value::<String, _>("").ok();
+    pick_label(mui.as_deref(), def.as_deref(), verb)
 }
 
 #[cfg(windows)]
@@ -705,6 +708,26 @@ mod tests {
         assert_eq!(strip_accelerator("Scan && clean"), "Scan & clean");
         assert_eq!(capitalize_first("open"), "Open");
         assert_eq!(capitalize_first("runas"), "Runas");
+    }
+
+    #[test]
+    fn pick_label_skips_indirect_strings() {
+        // 평범한 MUIVerb 사용.
+        assert_eq!(
+            pick_label(Some("Open with &Code"), None, "open"),
+            "Open with Code"
+        );
+        // MUIVerb 가 @인다이렉트 → 기본값으로.
+        assert_eq!(
+            pick_label(Some(r"@C:\app.exe,-101"), Some("Edit"), "edit"),
+            "Edit"
+        );
+        // 둘 다 @인다이렉트(또는 없음) → verb 이름 폴백 (@경로 그대로 노출 금지).
+        assert_eq!(
+            pick_label(Some(r"@shell32.dll,-8506"), Some(r"@C:\x.dll,-5"), "runas"),
+            "Runas"
+        );
+        assert_eq!(pick_label(None, None, "pintohome"), "Pintohome");
     }
 
     #[test]
