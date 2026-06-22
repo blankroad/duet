@@ -151,9 +151,17 @@ async fn smoke_copy_with_conflict_creates_backup_and_undo_restores() {
     assert_eq!(plan.conflicts.len(), 1, "should detect conflict");
 
     let cancel = tokio_util::sync::CancellationToken::new();
-    ops::copy_execute(&local, &local, plan, &env.ctx(), cancel, None)
-        .await
-        .unwrap();
+    ops::copy_execute(
+        &local,
+        &local,
+        plan,
+        ops::ConflictPolicy::Replace,
+        &env.ctx(),
+        cancel,
+        None,
+    )
+    .await
+    .unwrap();
 
     // dst/a.txt = NEW, dst/a.txt.bak.* = OLD
     let new_content = tokio::fs::read(env.dir().join("dst/a.txt")).await.unwrap();
@@ -202,9 +210,17 @@ async fn smoke_move_same_fs_then_undo_restores() {
     assert!(plan.is_same_fs);
 
     let cancel = tokio_util::sync::CancellationToken::new();
-    ops::move_execute(&local, &local, plan, &env.ctx(), cancel, None)
-        .await
-        .unwrap();
+    ops::move_execute(
+        &local,
+        &local,
+        plan,
+        ops::ConflictPolicy::Replace,
+        &env.ctx(),
+        cancel,
+        None,
+    )
+    .await
+    .unwrap();
     assert!(!env.dir().join("src/a").exists());
     assert!(env.dir().join("dst/a").exists());
 

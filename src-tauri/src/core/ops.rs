@@ -68,6 +68,37 @@ pub struct Conflict {
     pub will_become_backup: PathBuf,
 }
 
+/// 충돌(대상에 같은 이름 존재) 시 처리 방식 — 탐색기/파인더/TC 식. 프론트가 선택해 전달.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ConflictPolicy {
+    /// 기존을 .bak 으로 백업 후 교체 (undo 가능 — §4). 충돌 없으면 그냥 복사.
+    #[default]
+    Replace,
+    /// 충돌 항목은 복사/이동 안 함 (기존 그대로).
+    Skip,
+    /// 새 항목을 `name (1).ext` 식 가용 이름으로 복사 (둘 다 유지).
+    KeepBoth,
+}
+
+/// 대상에 이미 있는 이름을 피해 `stem (n).ext` 가용 이름을 찾는다(KeepBoth). 최대 9999회.
+async fn dedup_dst_name(dst_fs: &dyn FileSystem, dir: &std::path::Path, name: &str) -> PathBuf {
+    let (stem, ext) = match name.rfind('.') {
+        // 선두 dot(.bashrc)·끝 dot 은 확장자로 안 봄.
+        Some(i) if i > 0 && i < name.len() - 1 => (&name[..i], &name[i..]),
+        _ => (name, ""),
+    };
+    for n in 1..=9999 {
+        let cand = format!("{stem} ({n}){ext}");
+        let path = dir.join(&cand);
+        if dst_fs.metadata(&path).await.is_err() {
+            return path;
+        }
+    }
+    // 극단적 폴백 — timestamp 로 유일화.
+    dir.join(format!("{stem} ({}){ext}", backup_name("")))
+}
+
 /// `name` → `name.bak.<ts>`. timestamp 충돌 시 .<n> suffix 는 호출자가 retry.
 pub fn backup_name(original: &str) -> String {
     let ts = chrono::Utc::now().format("%Y%m%d-%H%M%S");
@@ -254,16 +285,18 @@ pub async fn copy_execute(
     src_fs: &dyn FileSystem,
     dst_fs: &dyn FileSystem,
     plan: CopyPlan,
+    policy: ConflictPolicy,
     ctx: &OpCtx,
     cancel_token: tokio_util::sync::CancellationToken,
     progress: Option<crate::services::task_queue::ProgressEmitter>,
 ) -> Result<JournalEntry, DuetError> {
     match plan.strategy {
         CopyStrategy::LocalToLocal | CopyStrategy::Relay => {
-            copy_execute_relay(src_fs, dst_fs, plan, ctx, cancel_token, progress).await
+            copy_execute_relay(src_fs, dst_fs, plan, policy, ctx, cancel_token, progress).await
         }
         CopyStrategy::SshSameHost => {
-            copy_execute_same_host(plan, ctx, cancel_token, progress).await
+            // same-host rsync: Skip 만 의미있게 반영(--ignore-existing), 그 외는 기존 동작.
+            copy_execute_same_host(plan, policy, ctx, cancel_token, progress).await
         }
     }
 }
@@ -275,6 +308,7 @@ async fn copy_execute_relay(
     src_fs: &dyn FileSystem,
     dst_fs: &dyn FileSystem,
     plan: CopyPlan,
+    policy: ConflictPolicy,
     ctx: &OpCtx,
     cancel_token: tokio_util::sync::CancellationToken,
     progress: Option<crate::services::task_queue::ProgressEmitter>,
@@ -318,6 +352,7 @@ async fn copy_execute_relay(
 
     let mut copied = Vec::new();
     let mut backups = Vec::new();
+    let mut skipped = 0u32;
     let mut outcome: Result<(), DuetError> = Ok(());
     for (idx, it) in plan.items.iter().enumerate() {
         // 항목 경계 cancel check
@@ -330,18 +365,26 @@ async fn copy_execute_relay(
             *g = (it.name.clone(), idx as u32);
         }
         // 한 항목 처리 — 내부 ?/return 은 이 async 블록만 빠져나와 아래 outcome 으로 잡힘.
-        let step: Result<(), DuetError> = async {
+        let step: Result<bool, DuetError> = async {
             let src_path = it.location.path.join(&it.name);
-            let dst_path = plan.dst.path.join(&it.name);
+            let mut dst_path = plan.dst.path.join(&it.name);
 
-            // 충돌 시 backup 으로 mv (timestamp 충돌은 .<n> suffix 로 retry, 최대 5회)
+            // 충돌 시 policy 분기: Replace=백업후교체, Skip=건너뜀, KeepBoth=새이름.
             if dst_fs.metadata(&dst_path).await.is_ok() {
-                let backup = pick_backup_path(dst_fs, &plan.dst.path, &it.name).await?;
-                dst_fs.rename(&dst_path, &backup).await?;
-                backups.push(BackupRestore {
-                    backup_path: backup,
-                    original_path: dst_path.clone(),
-                });
+                match policy {
+                    ConflictPolicy::Skip => return Ok(true), // skip = 복사 안 함
+                    ConflictPolicy::KeepBoth => {
+                        dst_path = dedup_dst_name(dst_fs, &plan.dst.path, &it.name).await;
+                    }
+                    ConflictPolicy::Replace => {
+                        let backup = pick_backup_path(dst_fs, &plan.dst.path, &it.name).await?;
+                        dst_fs.rename(&dst_path, &backup).await?;
+                        backups.push(BackupRestore {
+                            backup_path: backup,
+                            original_path: dst_path.clone(),
+                        });
+                    }
+                }
             }
 
             // copy 본체 — chunk 스트리밍(메모리 bounded, mid-file cancel). connection loss 면
@@ -377,19 +420,28 @@ async fn copy_execute_relay(
                 Err(e) => return Err(e),
             }
             copied.push(dst_path);
-            Ok(())
+            Ok(false) // false = 실제 복사함(skip 아님)
         }
         .await;
-        if let Err(e) = step {
-            outcome = Err(e);
-            break;
+        match step {
+            Ok(true) => skipped += 1, // 충돌 skip
+            Ok(false) => {}
+            Err(e) => {
+                outcome = Err(e);
+                break;
+            }
         }
     }
 
     // §4: 부분 진행분(복사 완료 + 충돌 백업)이라도 journal 에 기록한 뒤 에러 전파.
     if copied.is_empty() && backups.is_empty() {
-        outcome?;
-        return Err(DuetError::Io("copy affected nothing".into()));
+        if outcome.is_err() {
+            return Err(outcome.err().unwrap());
+        }
+        // 전부 skip(충돌 회피)이면 의도된 no-op — 에러 아님(빈 journal 로 통과).
+        if skipped == 0 {
+            return Err(DuetError::Io("copy affected nothing".into()));
+        }
     }
     let count = copied.len() as u32;
     let undo = UndoAction::UndoCopy {
@@ -432,6 +484,7 @@ pub async fn move_execute(
     src_fs: &dyn FileSystem,
     dst_fs: &dyn FileSystem,
     plan: MovePlan,
+    policy: ConflictPolicy,
     ctx: &OpCtx,
     cancel_token: tokio_util::sync::CancellationToken,
     progress: Option<crate::services::task_queue::ProgressEmitter>,
@@ -485,6 +538,7 @@ pub async fn move_execute(
 
     let mut moved = Vec::new();
     let mut backups = Vec::new();
+    let mut skipped = 0u32;
     let mut outcome: Result<(), DuetError> = Ok(());
     for (idx, it) in plan.items.iter().enumerate() {
         // 항목 경계 cancel check
@@ -497,17 +551,26 @@ pub async fn move_execute(
             *g = (it.name.clone(), idx as u32);
         }
         // 한 항목 처리 — 내부 ?/return 은 이 async 블록만 빠져나와 아래 outcome 으로 잡힘.
-        let step: Result<(), DuetError> = async {
+        let step: Result<bool, DuetError> = async {
             let src_path = it.location.path.join(&it.name);
-            let dst_path = plan.dst.path.join(&it.name);
+            let mut dst_path = plan.dst.path.join(&it.name);
 
+            // 충돌 policy 분기 (copy 와 동일): Replace=백업, Skip=건너뜀, KeepBoth=새이름.
             if dst_fs.metadata(&dst_path).await.is_ok() {
-                let backup = pick_backup_path(dst_fs, &plan.dst.path, &it.name).await?;
-                dst_fs.rename(&dst_path, &backup).await?;
-                backups.push(BackupRestore {
-                    backup_path: backup,
-                    original_path: dst_path.clone(),
-                });
+                match policy {
+                    ConflictPolicy::Skip => return Ok(true),
+                    ConflictPolicy::KeepBoth => {
+                        dst_path = dedup_dst_name(dst_fs, &plan.dst.path, &it.name).await;
+                    }
+                    ConflictPolicy::Replace => {
+                        let backup = pick_backup_path(dst_fs, &plan.dst.path, &it.name).await?;
+                        dst_fs.rename(&dst_path, &backup).await?;
+                        backups.push(BackupRestore {
+                            backup_path: backup,
+                            original_path: dst_path.clone(),
+                        });
+                    }
+                }
             }
 
             if plan.is_same_fs {
@@ -553,19 +616,28 @@ pub async fn move_execute(
                 src_original: src_path,
                 dst_now: dst_path,
             });
-            Ok(())
+            Ok(false)
         }
         .await;
-        if let Err(e) = step {
-            outcome = Err(e);
-            break;
+        match step {
+            Ok(true) => skipped += 1, // 충돌 skip
+            Ok(false) => {}
+            Err(e) => {
+                outcome = Err(e);
+                break;
+            }
         }
     }
 
     // §4: 부분 진행분(이동 완료 + 충돌 백업)이라도 journal 에 기록한 뒤 에러 전파.
     if moved.is_empty() && backups.is_empty() {
-        outcome?;
-        return Err(DuetError::Io("move affected nothing".into()));
+        if outcome.is_err() {
+            return Err(outcome.err().unwrap());
+        }
+        // 전부 skip 이면 의도된 no-op.
+        if skipped == 0 {
+            return Err(DuetError::Io("move affected nothing".into()));
+        }
     }
     let count = moved.len() as u32;
     let undo = UndoAction::UndoMove {
@@ -2777,6 +2849,7 @@ pub(crate) async fn pick_backup_path(
 /// 락 획득 순서: rsync_available → session (역방향 금지 — 데드락 회피).
 async fn copy_execute_same_host(
     plan: CopyPlan,
+    policy: ConflictPolicy,
     ctx: &OpCtx,
     cancel_token: tokio_util::sync::CancellationToken,
     progress: Option<crate::services::task_queue::ProgressEmitter>,
@@ -2867,17 +2940,27 @@ async fn copy_execute_same_host(
             let dst_path = plan.dst.path.join(&it.name);
             let src_arg = shell_escape_path(&src_path)?;
 
+            // same-host 충돌 정책(rsync/cp): Skip=기존 보존(--ignore-existing / cp -n),
+            // 그 외(Replace/KeepBoth)는 rsync/cp 기본(덮어쓰기). KeepBoth 는 same-host
+            // 에선 미지원 → 기본 덮어쓰기로 폴백(relay 경로에서만 새이름 생성).
+            let skip_existing = policy == ConflictPolicy::Skip;
             let cmd = if use_rsync {
                 // rsync 는 SRC(trailing-slash 없음) 를 DEST *디렉토리* 안에 basename
                 // 으로 생성한다. 따라서 dst.path.join(name) (= 최종 경로) 을 주면
                 // dir 복사 시 한 단계 더 중첩됨 (dst/many/many/). 부모 디렉토리
                 // (plan.dst.path) 를 줘야 dst/<name> 으로 떨어진다 — file/dir 동일.
                 let dst_parent_arg = shell_escape_path(&plan.dst.path)?;
-                format!("rsync -a --info=progress2 -- {src_arg} {dst_parent_arg}")
+                let ignore = if skip_existing {
+                    " --ignore-existing"
+                } else {
+                    ""
+                };
+                format!("rsync -a --info=progress2{ignore} -- {src_arg} {dst_parent_arg}")
             } else {
                 // cp 는 DEST 를 새 이름으로 취급 → 최종 경로를 그대로 준다.
                 let dst_arg = shell_escape_path(&dst_path)?;
-                format!("cp -a -- {src_arg} {dst_arg}")
+                let noclobber = if skip_existing { " -n" } else { "" };
+                format!("cp -a{noclobber} -- {src_arg} {dst_arg}")
             };
 
             // progress emit throttle: 1초
@@ -3194,6 +3277,90 @@ mod tests {
         }
     }
 
+    /// 충돌 시 (src/a, dst/a 둘 다 존재) 정책별 동작 — 로컬 relay(맥에서 검증 가능).
+    /// guard(TempDir 들)를 함께 반환해 테스트 종료 전 파일이 삭제되지 않게 한다.
+    async fn run_conflict_copy(
+        policy: ConflictPolicy,
+    ) -> (std::path::PathBuf, TempDir, OpCtx, TempDir) {
+        use crate::core::copy_strategy::CopyStrategy;
+        let dir = TempDir::new().unwrap();
+        let src = dir.path().join("src");
+        let dst = dir.path().join("dst");
+        tokio::fs::create_dir_all(&src).await.unwrap();
+        tokio::fs::create_dir_all(&dst).await.unwrap();
+        tokio::fs::write(src.join("a"), b"NEW").await.unwrap();
+        tokio::fs::write(dst.join("a"), b"OLD").await.unwrap(); // 충돌
+
+        let items = vec![EntryRef {
+            location: Location {
+                source: SourceId::Local,
+                path: src.clone(),
+            },
+            name: "a".into(),
+        }];
+        let plan = CopyPlan {
+            src_source: SourceId::Local,
+            dst: Location {
+                source: SourceId::Local,
+                path: dst.clone(),
+            },
+            items,
+            conflicts: vec![],
+            total_size_bytes: 3,
+            strategy: CopyStrategy::LocalToLocal,
+        };
+        let (ctx, ctx_dir) = mk_ctx().await;
+        let local = LocalFs::new();
+        copy_execute(
+            &local,
+            &local,
+            plan,
+            policy,
+            &ctx,
+            tokio_util::sync::CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+        (dst, dir, ctx, ctx_dir)
+    }
+
+    #[tokio::test]
+    async fn conflict_replace_backs_up_and_overwrites() {
+        let (dst, _dir, _ctx, _cd) = run_conflict_copy(ConflictPolicy::Replace).await;
+        // dst/a 는 새 내용, 기존은 .bak 으로 보존.
+        assert_eq!(tokio::fs::read(dst.join("a")).await.unwrap(), b"NEW");
+        let mut rd = tokio::fs::read_dir(&dst).await.unwrap();
+        let mut has_bak = false;
+        while let Some(e) = rd.next_entry().await.unwrap() {
+            if e.file_name().to_string_lossy().contains(".bak.") {
+                has_bak = true;
+            }
+        }
+        assert!(has_bak, "기존 파일이 .bak 으로 백업됐어야 함");
+    }
+
+    #[tokio::test]
+    async fn conflict_skip_leaves_existing() {
+        let (dst, _dir, _ctx, _cd) = run_conflict_copy(ConflictPolicy::Skip).await;
+        // 건너뜀 — 기존 내용 그대로, 새 파일 안 들어옴, .bak 없음.
+        assert_eq!(tokio::fs::read(dst.join("a")).await.unwrap(), b"OLD");
+        let mut rd = tokio::fs::read_dir(&dst).await.unwrap();
+        let mut count = 0;
+        while let Some(_e) = rd.next_entry().await.unwrap() {
+            count += 1;
+        }
+        assert_eq!(count, 1, "skip 이면 dst 에 항목이 1개(기존)만");
+    }
+
+    #[tokio::test]
+    async fn conflict_keep_both_creates_new_name() {
+        let (dst, _dir, _ctx, _cd) = run_conflict_copy(ConflictPolicy::KeepBoth).await;
+        // 둘 다 유지 — 기존 a + 새 "a (1)".
+        assert_eq!(tokio::fs::read(dst.join("a")).await.unwrap(), b"OLD");
+        assert_eq!(tokio::fs::read(dst.join("a (1)")).await.unwrap(), b"NEW");
+    }
+
     #[tokio::test]
     async fn copy_partial_failure_journals_completed_items() {
         use crate::core::copy_strategy::CopyStrategy;
@@ -3238,6 +3405,7 @@ mod tests {
             &local,
             &local,
             plan,
+            ConflictPolicy::Replace,
             &ctx,
             tokio_util::sync::CancellationToken::new(),
             None,
@@ -3297,6 +3465,7 @@ mod tests {
             &local,
             &local,
             plan,
+            ConflictPolicy::Replace,
             &ctx,
             tokio_util::sync::CancellationToken::new(),
             None,

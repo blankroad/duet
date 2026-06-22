@@ -12,7 +12,7 @@
 
 mod ssh_common;
 
-use duet_lib::core::ops::{copy_execute, copy_plan};
+use duet_lib::core::ops::{copy_execute, copy_plan, ConflictPolicy};
 use duet_lib::fs::SshFs;
 use std::time::Instant;
 use tokio_util::sync::CancellationToken;
@@ -53,9 +53,17 @@ async fn stress_large_single_file() {
     let (ctx, _cfg) = ssh_common::mk_ctx(sess.pool.clone()).await;
 
     let t0 = Instant::now();
-    copy_execute(&ssh_fs, &ssh_fs, plan, &ctx, CancellationToken::new(), None)
-        .await
-        .expect("large file copy failed");
+    copy_execute(
+        &ssh_fs,
+        &ssh_fs,
+        plan,
+        ConflictPolicy::Replace,
+        &ctx,
+        CancellationToken::new(),
+        None,
+    )
+    .await
+    .expect("large file copy failed");
     let elapsed = t0.elapsed();
 
     let src_hash = ssh_common::sha256_file(&sess.conn, &format!("{src}/blob")).await;
@@ -101,9 +109,17 @@ async fn stress_many_small_files() {
     let (ctx, _cfg) = ssh_common::mk_ctx(sess.pool.clone()).await;
 
     let t0 = Instant::now();
-    copy_execute(&ssh_fs, &ssh_fs, plan, &ctx, CancellationToken::new(), None)
-        .await
-        .expect("many files copy failed");
+    copy_execute(
+        &ssh_fs,
+        &ssh_fs,
+        plan,
+        ConflictPolicy::Replace,
+        &ctx,
+        CancellationToken::new(),
+        None,
+    )
+    .await
+    .expect("many files copy failed");
     let elapsed = t0.elapsed();
 
     let copied =

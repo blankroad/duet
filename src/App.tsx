@@ -15,6 +15,7 @@ import { MkdirDialog } from "@/components/dialogs/MkdirDialog";
 import { CompressDialog } from "@/components/dialogs/CompressDialog";
 import { ArgsDialog } from "@/components/dialogs/ArgsDialog";
 import { ConfirmDialog } from "@/components/dialogs/ConfirmDialog";
+import { CopyMoveConfirmDialog } from "@/components/dialogs/CopyMoveConfirmDialog";
 import { DangerConfirmDialog } from "@/components/dialogs/DangerConfirmDialog";
 import { ProgressModal } from "@/components/dialogs/ProgressModal";
 import { SettingsDialog } from "@/components/SettingsDialog";
@@ -110,6 +111,7 @@ import type {
   Entry,
   EntryRef,
   HostFavorite,
+  ConflictPolicy,
   Location,
   SearchHit,
   ShellScope,
@@ -796,17 +798,20 @@ function App() {
     }
   }, [dialog, closeDialog, showToast]);
 
-  const onCopyConfirm = useCallback(async () => {
-    if (dialog.kind !== "copy-confirm") return;
-    const plan = dialog.plan;
-    const r = await commands.fsCopyExecute(plan);
-    if (r.status === "ok") {
-      openDialog({ kind: "progress", title: "Copying…", taskId: r.data });
-    } else {
-      closeDialog();
-      showToast(`Copy failed: ${formatErr(r.error)}`);
-    }
-  }, [dialog, openDialog, closeDialog, showToast]);
+  const onCopyConfirm = useCallback(
+    async (policy: ConflictPolicy) => {
+      if (dialog.kind !== "copy-confirm") return;
+      const plan = dialog.plan;
+      const r = await commands.fsCopyExecute(plan, policy);
+      if (r.status === "ok") {
+        openDialog({ kind: "progress", title: "Copying…", taskId: r.data });
+      } else {
+        closeDialog();
+        showToast(`Copy failed: ${formatErr(r.error)}`);
+      }
+    },
+    [dialog, openDialog, closeDialog, showToast],
+  );
 
   const onSyncConfirm = useCallback(
     async (prune: boolean) => {
@@ -823,17 +828,20 @@ function App() {
     [dialog, openDialog, closeDialog, showToast],
   );
 
-  const onMoveConfirm = useCallback(async () => {
-    if (dialog.kind !== "move-confirm") return;
-    const plan = dialog.plan;
-    const r = await commands.fsMoveExecute(plan);
-    if (r.status === "ok") {
-      openDialog({ kind: "progress", title: "Moving…", taskId: r.data });
-    } else {
-      closeDialog();
-      showToast(`Move failed: ${formatErr(r.error)}`);
-    }
-  }, [dialog, openDialog, closeDialog, showToast]);
+  const onMoveConfirm = useCallback(
+    async (policy: ConflictPolicy) => {
+      if (dialog.kind !== "move-confirm") return;
+      const plan = dialog.plan;
+      const r = await commands.fsMoveExecute(plan, policy);
+      if (r.status === "ok") {
+        openDialog({ kind: "progress", title: "Moving…", taskId: r.data });
+      } else {
+        closeDialog();
+        showToast(`Move failed: ${formatErr(r.error)}`);
+      }
+    },
+    [dialog, openDialog, closeDialog, showToast],
+  );
 
   // 새 연결 다이얼로그 — 호스트 더블클릭/즐겨찾기 자동접속 시 alias 가 들어옴.
   const [dialogAlias, setDialogAlias] = useState<string | null>(null);
@@ -1284,7 +1292,7 @@ function App() {
         />
       )}
       {dialog.kind === "copy-confirm" && (
-        <ConfirmDialog
+        <CopyMoveConfirmDialog
           title="Copy"
           body={
             <CopyOrMovePlanBody
@@ -1296,13 +1304,13 @@ function App() {
             />
           }
           ctaLabel="Copy"
-          ctaTone="neutral"
+          conflicts={dialog.plan.conflicts.length}
           onCancel={closeDialog}
           onConfirm={onCopyConfirm}
         />
       )}
       {dialog.kind === "move-confirm" && (
-        <ConfirmDialog
+        <CopyMoveConfirmDialog
           title="Move"
           body={
             <CopyOrMovePlanBody
@@ -1314,7 +1322,7 @@ function App() {
             />
           }
           ctaLabel="Move"
-          ctaTone="neutral"
+          conflicts={dialog.plan.conflicts.length}
           onCancel={closeDialog}
           onConfirm={onMoveConfirm}
         />
@@ -1359,9 +1367,8 @@ function CopyOrMovePlanBody({
         Strategy: {strategyLabel(strategy)}
       </div>
       {conflicts > 0 && (
-        <div className="text-meta text-fg-muted">
-          {conflicts} conflict(s) — existing file(s) will be backed up to{" "}
-          <span className="font-mono">.bak.&lt;ts&gt;</span>
+        <div className="text-meta text-danger">
+          {conflicts} conflict(s) at destination
         </div>
       )}
     </div>

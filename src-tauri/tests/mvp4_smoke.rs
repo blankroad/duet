@@ -37,6 +37,7 @@ fn smoke_task_dto_roundtrip() {
             speed_bps: Some(50),
             eta_sec: Some(2),
             percent: Some(50),
+            ..Default::default()
         }),
         error_message: None,
         affected_locations: vec![],

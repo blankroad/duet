@@ -161,6 +161,7 @@ pub async fn fs_copy_plan_external(
 #[specta::specta]
 pub async fn fs_copy_execute(
     plan: CopyPlan,
+    policy: ops::ConflictPolicy,
     pool: tauri::State<'_, Arc<ConnectionPool>>,
     settings: tauri::State<'_, Arc<SettingsStore>>,
     journal: tauri::State<'_, Arc<Journal>>,
@@ -205,6 +206,7 @@ pub async fn fs_copy_execute(
                         &*src_fs,
                         &*dst_fs,
                         plan_for_run,
+                        policy,
                         &ctx,
                         cancel_token,
                         Some(progress),
@@ -238,6 +240,7 @@ pub async fn fs_move_plan(
 #[specta::specta]
 pub async fn fs_move_execute(
     plan: MovePlan,
+    policy: ops::ConflictPolicy,
     pool: tauri::State<'_, Arc<ConnectionPool>>,
     settings: tauri::State<'_, Arc<SettingsStore>>,
     journal: tauri::State<'_, Arc<Journal>>,
@@ -282,6 +285,7 @@ pub async fn fs_move_execute(
                         &*src_fs,
                         &*dst_fs,
                         plan_for_run,
+                        policy,
                         &ctx,
                         cancel_token,
                         Some(progress),

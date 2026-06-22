@@ -8,7 +8,7 @@
 mod ssh_common;
 
 use duet_lib::core::copy_strategy::CopyStrategy;
-use duet_lib::core::ops::{copy_execute, copy_plan};
+use duet_lib::core::ops::{copy_execute, copy_plan, ConflictPolicy};
 use duet_lib::fs::SshFs;
 use duet_lib::services::journal::UndoAction;
 use duet_lib::types::DuetError;
@@ -50,9 +50,17 @@ async fn same_host_copy_rsync_integrity() {
     assert_eq!(plan.strategy, CopyStrategy::SshSameHost);
 
     let (ctx, _cfg) = ssh_common::mk_ctx(sess.pool.clone()).await;
-    copy_execute(&ssh_fs, &ssh_fs, plan, &ctx, CancellationToken::new(), None)
-        .await
-        .expect("same-host rsync copy failed");
+    copy_execute(
+        &ssh_fs,
+        &ssh_fs,
+        plan,
+        ConflictPolicy::Replace,
+        &ctx,
+        CancellationToken::new(),
+        None,
+    )
+    .await
+    .expect("same-host rsync copy failed");
 
     let src_hash = ssh_common::sha256_file(&sess.conn, &format!("{src}/big.bin")).await;
     let dst_hash = ssh_common::sha256_file(&sess.conn, &format!("{dst}/big.bin")).await;
@@ -78,9 +86,17 @@ async fn same_host_copy_cp_fallback_integrity() {
     let plan = copy_plan(&ssh_fs, &ssh_fs, items, dst_loc).await.unwrap();
 
     let (ctx, _cfg) = ssh_common::mk_ctx(sess.pool.clone()).await;
-    copy_execute(&ssh_fs, &ssh_fs, plan, &ctx, CancellationToken::new(), None)
-        .await
-        .expect("same-host cp fallback copy failed");
+    copy_execute(
+        &ssh_fs,
+        &ssh_fs,
+        plan,
+        ConflictPolicy::Replace,
+        &ctx,
+        CancellationToken::new(),
+        None,
+    )
+    .await
+    .expect("same-host cp fallback copy failed");
 
     let src_hash = ssh_common::sha256_file(&sess.conn, &format!("{src}/big.bin")).await;
     let dst_hash = ssh_common::sha256_file(&sess.conn, &format!("{dst}/big.bin")).await;
@@ -105,9 +121,17 @@ async fn same_host_copy_conflict_creates_backup() {
     let plan = copy_plan(&ssh_fs, &ssh_fs, items, dst_loc).await.unwrap();
 
     let (ctx, _cfg) = ssh_common::mk_ctx(sess.pool.clone()).await;
-    let entry = copy_execute(&ssh_fs, &ssh_fs, plan, &ctx, CancellationToken::new(), None)
-        .await
-        .expect("conflict copy failed");
+    let entry = copy_execute(
+        &ssh_fs,
+        &ssh_fs,
+        plan,
+        ConflictPolicy::Replace,
+        &ctx,
+        CancellationToken::new(),
+        None,
+    )
+    .await
+    .expect("conflict copy failed");
 
     // 기존 dst 파일이 .bak.<ts> 로 백업됨 (MVP-2 일관).
     let bak_count = ssh_common::stdout_str(
@@ -159,7 +183,16 @@ async fn same_host_copy_failure_is_hard_error() {
     let plan = copy_plan(&ssh_fs, &ssh_fs, items, dst_loc).await.unwrap();
 
     let (ctx, _cfg) = ssh_common::mk_ctx(sess.pool.clone()).await;
-    let res = copy_execute(&ssh_fs, &ssh_fs, plan, &ctx, CancellationToken::new(), None).await;
+    let res = copy_execute(
+        &ssh_fs,
+        &ssh_fs,
+        plan,
+        ConflictPolicy::Replace,
+        &ctx,
+        CancellationToken::new(),
+        None,
+    )
+    .await;
 
     // silent relay 가 아니라 명시적 에러여야 한다 (CLAUDE.md DON'T).
     assert!(
