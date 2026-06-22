@@ -124,6 +124,38 @@ impl FileSystem for SshFs {
         self.conn.source_id()
     }
 
+    /// 원격 총 크기 — `du -sb`(서버측, 라운드트립 1회)로 stat 폭주 회피. du 실패 시
+    /// 기본 재귀(list+metadata) 폴백 안 하고 0 반환(=총량 미상, 진행률은 indeterminate).
+    async fn dir_size(&self, path: &Path) -> Result<u64, DuetError> {
+        let session = match self.conn.session.as_ref() {
+            Some(s) => s,
+            None => return Ok(0),
+        };
+        let p = match remote_path_str(path).and_then(|s| posix_shell_quote(&s)) {
+            Ok(q) => q,
+            Err(_) => return Ok(0),
+        };
+        // -s 합계, -b 바이트(apparent X — 실제 블록 아님; GNU du). BusyBox 는 -b 미지원일
+        // 수 있어 실패하면 0(미상). LC_ALL=C 로 출력 안정화.
+        let cmd = format!("LC_ALL=C du -sb -- {p}");
+        let out = {
+            let handle = session.lock().await;
+            match crate::ssh::remote_exec::exec(&handle, &cmd).await {
+                Ok(o) => o,
+                Err(_) => return Ok(0),
+            }
+        };
+        if out.exit_status != 0 {
+            return Ok(0);
+        }
+        // 출력: "<bytes>\t<path>" — 첫 토큰이 바이트.
+        let s = String::from_utf8_lossy(&out.stdout);
+        Ok(s.split_whitespace()
+            .next()
+            .and_then(|t| t.parse::<u64>().ok())
+            .unwrap_or(0))
+    }
+
     async fn metadata(&self, path: &Path) -> Result<crate::types::EntryMeta, DuetError> {
         let sftp = self.open_sftp().await?;
         let owned = remote_path_str(path)?;

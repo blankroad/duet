@@ -73,6 +73,22 @@ pub trait FileSystem: Send + Sync {
         Ok((head, truncated))
     }
 
+    /// 경로의 총 바이트 크기(디렉토리면 하위 전체 재귀 합). 복사/이동 진행률의 분모로 쓴다.
+    /// 기본 구현은 `list`+`metadata` 재귀 — 로컬엔 빠르지만 SSH 는 round-trip 폭주라
+    /// `du -sb` override 권장. 파일은 `metadata().size`.
+    async fn dir_size(&self, path: &Path) -> Result<u64, DuetError> {
+        let meta = self.metadata(path).await?;
+        if !matches!(meta.kind, crate::types::EntryKind::Dir) {
+            return Ok(meta.size.unwrap_or(0));
+        }
+        let mut total = 0u64;
+        for e in self.list(path).await? {
+            // async_trait 는 메서드를 Box<Future> 로 desugar — 재귀는 그냥 호출.
+            total += self.dir_size(&path.join(&e.name)).await?;
+        }
+        Ok(total)
+    }
+
     /// 파일의 `[offset, offset+len)` 바이트 범위 읽기 (스트리밍 미리보기 Range 응답용).
     /// 파일 끝을 넘으면 가능한 만큼만 반환. 기본 구현은 `read_full` 후 슬라이스
     /// (비효율) — impl 별 seek 기반 override 권장.

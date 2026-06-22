@@ -265,9 +265,9 @@ pub async fn copy_plan(
             });
         }
         let src_path = it.location.path.join(&it.name);
-        if let Ok(m) = src_fs.metadata(&src_path).await {
-            total += m.size.unwrap_or(0);
-        }
+        // 디렉토리는 하위 전체 크기(dir_size: 로컬=재귀 walk, SSH=du -sb)로 합산 →
+        // 폴더 복사도 진행률 분모(총량)가 정확해져 "얼마 남았는지" 표시 가능. 실패 시 0.
+        total += src_fs.dir_size(&src_path).await.unwrap_or(0);
     }
 
     let strategy = decide_strategy(&src_source, &dst.source);

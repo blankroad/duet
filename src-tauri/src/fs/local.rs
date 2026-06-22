@@ -726,4 +726,21 @@ mod tests {
         // 폴더 자체가 아니라 내부 파일 3개가 각각 보고돼야 함.
         assert_eq!(got, vec!["a.txt", "b.txt", "c.txt"]);
     }
+
+    /// dir_size 는 디렉토리 하위 전체 바이트를 재귀 합산(진행률 분모용).
+    #[tokio::test]
+    async fn dir_size_sums_tree() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().join("d");
+        fs::create_dir_all(root.join("sub")).await.unwrap();
+        fs::write(root.join("a"), vec![0u8; 100]).await.unwrap();
+        fs::write(root.join("sub").join("b"), vec![0u8; 250])
+            .await
+            .unwrap();
+        let local = LocalFs::new();
+        // 디렉토리 = 100 + 250.
+        assert_eq!(local.dir_size(&root).await.unwrap(), 350);
+        // 단일 파일 = 그 크기.
+        assert_eq!(local.dir_size(&root.join("a")).await.unwrap(), 100);
+    }
 }
