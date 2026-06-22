@@ -120,12 +120,14 @@ pub async fn copy_relay(
 ) -> Result<(), DuetError> {
     // 진행률/취소 없는 호출(undo 등) — 절대 취소 안 되는 토큰 + no-op 콜백, 재개 없음.
     let cancel = CancellationToken::new();
-    copy_tree(src_fs, src, dst_fs, dst, false, &cancel, &|_| {}).await
+    copy_tree(src_fs, src, dst_fs, dst, false, &cancel, &|_| {}, &|_| {}).await
 }
 
 /// `copy_relay` 의 진행률/취소/재개 지원 변형. `on_bytes(delta)` 는 파일에서 쓴
-/// 바이트 증분마다 호출(진행률 emit 용). `cancel` 은 chunk 경계마다 검사.
-/// `resume=true` 면 중단된 `.part` 의 현재 크기부터 이어쓰기(전송 재개).
+/// 바이트 증분마다 호출(진행률 emit 용). `on_file(src_path)` 는 **각 파일 복사 시작 시**
+/// 그 파일 경로로 호출(현재 파일명 표시용 — 폴더 내부도 개별 파일까지). `cancel` 은 chunk
+/// 경계마다 검사. `resume=true` 면 중단된 `.part` 의 현재 크기부터 이어쓰기(전송 재개).
+#[allow(clippy::too_many_arguments)]
 pub async fn copy_relay_streaming(
     src_fs: &dyn FileSystem,
     src: &std::path::Path,
@@ -134,10 +136,12 @@ pub async fn copy_relay_streaming(
     resume: bool,
     cancel: &CancellationToken,
     on_bytes: &(dyn Fn(u64) + Send + Sync),
+    on_file: &(dyn Fn(&std::path::Path) + Send + Sync),
 ) -> Result<(), DuetError> {
-    copy_tree(src_fs, src, dst_fs, dst, resume, cancel, on_bytes).await
+    copy_tree(src_fs, src, dst_fs, dst, resume, cancel, on_bytes, on_file).await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn copy_tree(
     src_fs: &dyn FileSystem,
     src: &std::path::Path,
@@ -146,6 +150,7 @@ async fn copy_tree(
     resume: bool,
     cancel: &CancellationToken,
     on_bytes: &(dyn Fn(u64) + Send + Sync),
+    on_file: &(dyn Fn(&std::path::Path) + Send + Sync),
 ) -> Result<(), DuetError> {
     let meta = src_fs.metadata(src).await?;
     match meta.kind {
@@ -156,14 +161,17 @@ async fn copy_tree(
                 let child_src = src.join(&e.name);
                 let child_dst = dst.join(&e.name);
                 Box::pin(copy_tree(
-                    src_fs, &child_src, dst_fs, &child_dst, resume, cancel, on_bytes,
+                    src_fs, &child_src, dst_fs, &child_dst, resume, cancel, on_bytes, on_file,
                 ))
                 .await?;
             }
             Ok(())
         }
         // Symlink/Other 는 target 내용을 따라가 복사 (MVP-2).
-        _ => stream_copy_file(src_fs, src, dst_fs, dst, resume, cancel, on_bytes).await,
+        _ => {
+            on_file(src); // 현재 복사 중인 실제 파일 알림(폴더 내부 개별 파일 포함)
+            stream_copy_file(src_fs, src, dst_fs, dst, resume, cancel, on_bytes).await
+        }
     }
 }
 

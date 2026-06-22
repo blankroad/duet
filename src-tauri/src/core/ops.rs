@@ -319,9 +319,10 @@ async fn copy_execute_relay(
     // 누적 바이트 진행률 — plan 전체 크기 대비. chunk 마다 호출되되 ~150ms throttle.
     let total = plan.total_size_bytes;
     let done = std::sync::atomic::AtomicU64::new(0);
-    let last = std::sync::Mutex::new(std::time::Instant::now());
+    // (직전 emit 시각, 직전 emit 바이트) — throttle + 순간속도 계산.
+    let last = std::sync::Mutex::new((std::time::Instant::now(), 0u64));
     let files_total = plan.items.len() as u32;
-    // 현재 처리 중인 (항목명, 완료한 항목 수) — 루프가 항목마다 갱신, 바이트 콜백이 읽어 emit.
+    // 현재 처리 중인 (실제 파일명, top-level 항목 idx) — on_file 이 파일명, 루프가 idx 갱신.
     let cur = std::sync::Arc::new(std::sync::Mutex::new((String::new(), 0u32)));
     let cur_cb = cur.clone();
     let on_bytes = move |delta: u64| {
@@ -330,13 +331,17 @@ async fn copy_execute_relay(
         let Some(p) = progress.as_ref() else { return };
         // total==0(폴더 등 총량 미상) 이면 "완료" 판정을 바이트로 못 하므로 throttle 만.
         let complete = total > 0 && d >= total;
-        if let Ok(mut l) = last.lock() {
+        let speed = if let Ok(mut l) = last.lock() {
             let now = std::time::Instant::now();
-            if !complete && now.duration_since(*l) < std::time::Duration::from_millis(150) {
+            if !complete && now.duration_since(l.0) < std::time::Duration::from_millis(150) {
                 return;
             }
-            *l = now;
-        }
+            let s = calc_speed(l.1, l.0, d);
+            *l = (now, d);
+            s
+        } else {
+            None
+        };
         let (current_file, files_done) = cur_cb
             .lock()
             .map(|g| (Some(g.0.clone()).filter(|s| !s.is_empty()), g.1))
@@ -344,10 +349,21 @@ async fn copy_execute_relay(
         p.emit(byte_progress(
             d,
             total,
+            speed,
             current_file,
             files_done,
             files_total,
         ));
+    };
+    // 복사 중인 실제 파일명 갱신(폴더 내부 개별 파일까지). copy_tree 가 파일마다 호출.
+    let cur_file = cur.clone();
+    let on_file = move |path: &std::path::Path| {
+        if let Ok(mut g) = cur_file.lock() {
+            g.0 = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+        }
     };
 
     let mut copied = Vec::new();
@@ -360,7 +376,7 @@ async fn copy_execute_relay(
             outcome = Err(DuetError::Cancelled);
             break;
         }
-        // 현재 항목명 + 완료 수(idx = 앞서 끝낸 항목 수) — 바이트 콜백이 emit 에 포함.
+        // top-level 항목 idx + 초기 파일명(폴더면 on_file 이 곧 내부 파일로 덮어씀).
         if let Ok(mut g) = cur.lock() {
             *g = (it.name.clone(), idx as u32);
         }
@@ -397,6 +413,7 @@ async fn copy_execute_relay(
                 false,
                 &cancel_token,
                 &on_bytes,
+                &on_file,
             )
             .await
             {
@@ -414,6 +431,7 @@ async fn copy_execute_relay(
                         true, // 재개 — 이미 쓴 .part 이어받기
                         &cancel_token,
                         &on_bytes,
+                        &on_file,
                     )
                     .await?;
                 }
@@ -504,7 +522,7 @@ pub async fn move_execute(
     // (same-fs rename 은 atomic·즉시라 항목 완료마다만 갱신.)
     let total = plan.total_size_bytes;
     let done = std::sync::atomic::AtomicU64::new(0);
-    let last = std::sync::Mutex::new(std::time::Instant::now());
+    let last = std::sync::Mutex::new((std::time::Instant::now(), 0u64));
     let files_total = plan.items.len() as u32;
     let cur = std::sync::Arc::new(std::sync::Mutex::new((String::new(), 0u32)));
     let cur_cb = cur.clone();
@@ -516,13 +534,17 @@ pub async fn move_execute(
             return;
         };
         let complete = total > 0 && d >= total;
-        if let Ok(mut l) = last.lock() {
+        let speed = if let Ok(mut l) = last.lock() {
             let now = std::time::Instant::now();
-            if !complete && now.duration_since(*l) < std::time::Duration::from_millis(150) {
+            if !complete && now.duration_since(l.0) < std::time::Duration::from_millis(150) {
                 return;
             }
-            *l = now;
-        }
+            let s = calc_speed(l.1, l.0, d);
+            *l = (now, d);
+            s
+        } else {
+            None
+        };
         let (current_file, files_done) = cur_cb
             .lock()
             .map(|g| (Some(g.0.clone()).filter(|s| !s.is_empty()), g.1))
@@ -530,10 +552,20 @@ pub async fn move_execute(
         p.emit(byte_progress(
             d,
             total,
+            speed,
             current_file,
             files_done,
             files_total,
         ));
+    };
+    let cur_file = cur.clone();
+    let on_file = move |path: &std::path::Path| {
+        if let Ok(mut g) = cur_file.lock() {
+            g.0 = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+        }
     };
 
     let mut moved = Vec::new();
@@ -586,6 +618,7 @@ pub async fn move_execute(
                     false,
                     &cancel_token,
                     &on_bytes,
+                    &on_file,
                 )
                 .await
                 {
@@ -603,6 +636,7 @@ pub async fn move_execute(
                             true,
                             &cancel_token,
                             &on_bytes,
+                            &on_file,
                         )
                         .await?;
                     }
@@ -1373,10 +1407,12 @@ pub async fn merge_bidir(
 
 /// 바이트 진행률 → ProgressInfo (copy/move 공용). `total==0`(폴더 등 총량 미상)이면
 /// indeterminate(bytes_total/percent = None) — 프론트가 게이지를 0%로 고정하지 않고
-/// "진행 중" 애니메이션 바로 표시하게 한다. total>0 이면 percent 계산.
+/// "진행 중" 애니메이션 바로 표시하게 한다. total>0 이면 percent + ETA 계산.
+#[allow(clippy::too_many_arguments)]
 fn byte_progress(
     done: u64,
     total: u64,
+    speed_bps: Option<u64>,
     current_file: Option<String>,
     files_done: u32,
     files_total: u32,
@@ -1387,16 +1423,31 @@ fn byte_progress(
     } else {
         (done, None, None)
     };
+    // ETA = 남은 바이트 / 속도 (총량·속도 둘 다 있을 때만).
+    let eta_sec = match (bytes_total, speed_bps) {
+        (Some(t), Some(s)) if s > 0 && t > bytes_done => Some(((t - bytes_done) / s) as u32),
+        _ => None,
+    };
     crate::services::task_events::ProgressInfo {
         bytes_done,
         bytes_total,
-        speed_bps: None,
-        eta_sec: None,
+        speed_bps,
+        eta_sec,
         percent,
         current_file,
         files_done,
         files_total,
     }
+}
+
+/// 순간 속도(bytes/sec) 추정 — 직전 emit 이후의 (Δbytes / Δtime). throttle 간격(~150ms)
+/// 기준이라 즉각 반응. 시간차 0 또는 역행이면 None.
+fn calc_speed(prev_bytes: u64, prev_at: std::time::Instant, now_bytes: u64) -> Option<u64> {
+    let ms = prev_at.elapsed().as_millis();
+    if ms == 0 || now_bytes <= prev_bytes {
+        return None;
+    }
+    Some((now_bytes - prev_bytes) * 1000 / ms as u64)
 }
 
 /// merge 진행률 emit (항목 개수 기준).

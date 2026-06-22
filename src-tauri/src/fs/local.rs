@@ -613,6 +613,7 @@ mod tests {
             false,
             &cancel,
             &on_bytes,
+            &|_| {},
         )
         .await
         .unwrap();
@@ -645,6 +646,7 @@ mod tests {
             false,
             &cancel,
             &|_| {},
+            &|_| {},
         )
         .await;
         assert!(matches!(r, Err(DuetError::Cancelled)));
@@ -673,6 +675,7 @@ mod tests {
             true, // 재개
             &cancel,
             &|_| {},
+            &|_| {},
         )
         .await
         .unwrap();
@@ -681,5 +684,46 @@ mod tests {
         assert_eq!(out, data, "resumed copy is byte-exact");
         // .part 는 rename 으로 사라짐.
         assert!(!dir.path().join("out.bin.duet-part").exists());
+    }
+
+    /// 폴더 트리 복사 시 on_file 이 **내부 개별 파일마다** 호출된다(현재 파일명 표시용).
+    #[tokio::test]
+    async fn copy_relay_streaming_reports_each_file_in_tree() {
+        use std::sync::{Arc, Mutex};
+        let dir = TempDir::new().unwrap();
+        let src = dir.path().join("srcdir");
+        fs::create_dir_all(src.join("sub")).await.unwrap();
+        fs::write(src.join("a.txt"), b"a").await.unwrap();
+        fs::write(src.join("b.txt"), b"bb").await.unwrap();
+        fs::write(src.join("sub").join("c.txt"), b"ccc")
+            .await
+            .unwrap();
+
+        let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+        let seen_cb = seen.clone();
+        let on_file = move |p: &std::path::Path| {
+            if let Some(n) = p.file_name().and_then(|n| n.to_str()) {
+                seen_cb.lock().unwrap().push(n.to_string());
+            }
+        };
+        let local = LocalFs::new();
+        let cancel = tokio_util::sync::CancellationToken::new();
+        crate::fs::copy_relay_streaming(
+            &local,
+            &src,
+            &local,
+            &dir.path().join("dstdir"),
+            false,
+            &cancel,
+            &|_| {},
+            &on_file,
+        )
+        .await
+        .unwrap();
+
+        let mut got = seen.lock().unwrap().clone();
+        got.sort();
+        // 폴더 자체가 아니라 내부 파일 3개가 각각 보고돼야 함.
+        assert_eq!(got, vec!["a.txt", "b.txt", "c.txt"]);
     }
 }
