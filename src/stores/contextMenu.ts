@@ -27,6 +27,8 @@ interface State {
   x: number;
   y: number;
   items: MenuEntry[];
+  /** 이 메뉴 오픈의 토큰 — openAt 마다 증가. 비동기 appendItems 가 stale 인지 판별. */
+  seq: number;
   /** 닫힐 때 1회 호출 — 셸 메뉴 세션 정리(미선택 시 취소) 등에 사용. */
   onClose: (() => void) | undefined;
   openAt: (
@@ -34,7 +36,9 @@ interface State {
     y: number,
     items: MenuEntry[],
     onClose?: () => void,
-  ) => void;
+  ) => number;
+  /** 같은 메뉴(seq 일치)가 아직 열려 있으면 항목을 뒤에 덧붙인다(비동기 셸 메뉴용). */
+  appendItems: (seq: number, extra: MenuEntry[], onClose?: () => void) => void;
   close: () => void;
 }
 
@@ -43,8 +47,27 @@ export const useContextMenu = create<State>((set, get) => ({
   x: 0,
   y: 0,
   items: [],
+  seq: 0,
   onClose: undefined,
-  openAt: (x, y, items, onClose) => set({ open: true, x, y, items, onClose }),
+  openAt: (x, y, items, onClose) => {
+    const seq = get().seq + 1;
+    set({ open: true, x, y, items, onClose, seq });
+    return seq;
+  },
+  appendItems: (seq, extra, onClose) => {
+    const s = get();
+    if (!s.open || s.seq !== seq || extra.length === 0) return;
+    set({
+      items: [...s.items, ...extra],
+      // 셸 세션 정리 콜백을 합성 — 기존 onClose 도 보존.
+      onClose: onClose
+        ? () => {
+            s.onClose?.();
+            onClose();
+          }
+        : s.onClose,
+    });
+  },
   close: () => {
     const cb = get().onClose;
     set({ open: false, items: [], onClose: undefined });

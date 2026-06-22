@@ -379,29 +379,19 @@ function App() {
       const wasSelected = tab.selected.has(entry.name);
       if (!wasSelected) s.setSelected(id, [entry.name]);
       const selectedCount = wasSelected ? tab.selected.size : 1;
-      const openWith = (
-        shell: { token: number; entries: MenuEntry[] } | null,
-      ) => {
-        const items = buildEntryMenu({
-          paneId: id,
-          entry,
-          location: tab.location,
-          selectedCount,
-          inTrash: tab.trashRoot !== undefined,
-          onActivate,
-          onOpenInOtherPane,
-          onPutBack,
-        });
-        if (shell) {
-          items.push({ kind: "separator" }, ...shell.entries);
-          useContextMenu
-            .getState()
-            .openAt(cx, cy, items, () => onShellMenuClose(shell.token));
-        } else {
-          useContextMenu.getState().openAt(cx, cy, items);
-        }
-      };
-      // Windows 로컬 단일 선택: 실제 셸 메뉴(Tier 2) 비동기 수집 후 열기. 그 외: 즉시.
+      // duet 메뉴를 *즉시* 연다(셸 메뉴 빌드를 안 기다림 — 우클릭 지연 제거).
+      const items = buildEntryMenu({
+        paneId: id,
+        entry,
+        location: tab.location,
+        selectedCount,
+        inTrash: tab.trashRoot !== undefined,
+        onActivate,
+        onOpenInOtherPane,
+        onPutBack,
+      });
+      const seq = useContextMenu.getState().openAt(cx, cy, items);
+      // Windows 로컬 단일 선택: 실제 셸 메뉴(Tier 2)를 백그라운드로 받아 준비되면 덧붙인다.
       if (
         platform() === "windows" &&
         tab.location.source.kind === "local" &&
@@ -409,9 +399,17 @@ function App() {
       ) {
         const child = childLocation(tab.location, entry.name);
         const scope: ShellScope = entry.kind === "dir" ? "directory" : "file";
-        void openShellMenu(String(child.path), scope).then(openWith);
-      } else {
-        openWith(null);
+        void openShellMenu(String(child.path), scope).then((shell) => {
+          if (!shell) return;
+          const st = useContextMenu.getState();
+          if (st.open && st.seq === seq) {
+            st.appendItems(seq, [{ kind: "separator" }, ...shell.entries], () =>
+              onShellMenuClose(shell.token),
+            );
+          } else {
+            onShellMenuClose(shell.token); // 메뉴 이미 닫힘 — 셸 세션 정리
+          }
+        });
       }
     },
     [onActivate, onOpenInOtherPane, onPutBack, onUp, showToast],
@@ -426,30 +424,30 @@ function App() {
       const s = usePanes.getState();
       s.setActivePane(id);
       const tab = activeTab(s, id);
-      const openWith = (
-        shell: { token: number; entries: MenuEntry[] } | null,
-      ) => {
-        const items = buildEmptyMenu({
-          paneId: id,
-          location: tab.location,
-          onRefresh,
-        });
-        if (shell) {
-          items.push({ kind: "separator" }, ...shell.entries);
-          useContextMenu
-            .getState()
-            .openAt(cx, cy, items, () => onShellMenuClose(shell.token));
-        } else {
-          useContextMenu.getState().openAt(cx, cy, items);
-        }
-      };
-      // Windows 로컬: 배경(빈 영역) 실제 셸 메뉴(Tier 2) 비동기 수집 후 열기. 그 외: 즉시.
+      // duet 메뉴를 *즉시* 연다(셸 메뉴 빌드를 안 기다림).
+      const items = buildEmptyMenu({
+        paneId: id,
+        location: tab.location,
+        onRefresh,
+      });
+      const seq = useContextMenu.getState().openAt(cx, cy, items);
+      // Windows 로컬: 배경(빈 영역) 셸 메뉴를 백그라운드로 받아 준비되면 덧붙인다.
       if (platform() === "windows" && tab.location.source.kind === "local") {
         void openShellMenu(String(tab.location.path), "background").then(
-          openWith,
+          (shell) => {
+            if (!shell) return;
+            const st = useContextMenu.getState();
+            if (st.open && st.seq === seq) {
+              st.appendItems(
+                seq,
+                [{ kind: "separator" }, ...shell.entries],
+                () => onShellMenuClose(shell.token),
+              );
+            } else {
+              onShellMenuClose(shell.token);
+            }
+          },
         );
-      } else {
-        openWith(null);
       }
     },
     [onRefresh],
