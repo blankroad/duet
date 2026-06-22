@@ -148,9 +148,41 @@ pub fn parse_rsync_itemize_delete(line: &str) -> Option<String> {
     }
 }
 
+/// `--out-format=DUETF:%n` 으로 찍힌 전송 파일명 라인에서 **basename** 추출(현재 파일명
+/// 표시용). 디렉토리(끝 `/`)·빈 줄은 None. 예: `DUETF:sub/dir/photo.jpg` → `photo.jpg`.
+pub fn parse_rsync_out_format_name(line: &str) -> Option<String> {
+    let line = line.trim_end_matches(['\r', '\n']);
+    let rel = line.strip_prefix("DUETF:")?;
+    if rel.is_empty() || rel.ends_with('/') {
+        return None; // 디렉토리 항목 / 빈 줄 제외
+    }
+    let base = rel.rsplit(['/', '\\']).next().unwrap_or(rel);
+    if base.is_empty() {
+        None
+    } else {
+        Some(base.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn out_format_name_extracts_basename_skips_dirs() {
+        assert_eq!(
+            parse_rsync_out_format_name("DUETF:sub/dir/photo.jpg").as_deref(),
+            Some("photo.jpg")
+        );
+        assert_eq!(
+            parse_rsync_out_format_name("DUETF:top.txt").as_deref(),
+            Some("top.txt")
+        );
+        // 디렉토리(끝 /) · 접두 없는 라인(progress2 등) · 빈 줄 → None.
+        assert_eq!(parse_rsync_out_format_name("DUETF:sub/"), None);
+        assert_eq!(parse_rsync_out_format_name("DUETF:"), None);
+        assert_eq!(parse_rsync_out_format_name("  42,123  17%  ..."), None);
+    }
 
     #[test]
     fn itemize_transfer_and_delete() {

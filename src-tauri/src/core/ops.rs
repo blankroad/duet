@@ -2908,7 +2908,7 @@ async fn copy_execute_same_host(
     if plan.items.is_empty() {
         return Err(DuetError::Io("plan has no items".into()));
     }
-    use crate::core::copy_progress::parse_rsync_progress2_line;
+    use crate::core::copy_progress::{parse_rsync_out_format_name, parse_rsync_progress2_line};
     use crate::core::copy_strategy::shell_escape_path;
     use crate::ssh::remote_exec::{exec, exec_streaming};
 
@@ -3006,7 +3006,11 @@ async fn copy_execute_same_host(
                 } else {
                     ""
                 };
-                format!("rsync -a --info=progress2{ignore} -- {src_arg} {dst_parent_arg}")
+                // --out-format=DUETF:%n 로 전송 파일명을 한 줄씩 찍게 해 현재 파일명 표시.
+                // (progress2 의 집계 라인과 구분되도록 DUETF: 접두 sentinel.)
+                format!(
+                    "rsync -a --info=progress2{ignore} --out-format=DUETF:%n -- {src_arg} {dst_parent_arg}"
+                )
             } else {
                 // cp 는 DEST 를 새 이름으로 취급 → 최종 경로를 그대로 준다.
                 let dst_arg = shell_escape_path(&dst_path)?;
@@ -3025,9 +3029,15 @@ async fn copy_execute_same_host(
             // metadata 등) 가 블락됨. 후속에서 exec_streaming 을 두 단계로 분리:
             // (1) lock 잡고 channel_open_session 만 → (2) lock 풀고 channel 위에
             // wait loop. MVP-3 v1 은 modal 안에서 사용자 대기라 acceptable.
+            let mut current_file: Option<String> = None;
             let exec_result = {
                 let handle = session_mutex.lock().await;
                 exec_streaming(&handle, &cmd, |line| {
+                    // 파일명 라인(DUETF:<relpath>) — 현재 전송 중인 파일명 갱신(디렉토리 제외).
+                    if let Some(name) = parse_rsync_out_format_name(line) {
+                        current_file = Some(name);
+                        return;
+                    }
                     if let Some(p) = parse_rsync_progress2_line(line) {
                         let now = std::time::Instant::now();
                         let is_final = p.percent == 100;
@@ -3046,6 +3056,7 @@ async fn copy_execute_same_host(
                                     speed_bps: Some(p.speed_bps),
                                     eta_sec: Some(p.eta_sec),
                                     percent: Some(p.percent),
+                                    current_file: current_file.clone(),
                                     ..Default::default()
                                 });
                             }
