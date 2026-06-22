@@ -31,7 +31,9 @@ export function ProgressModal({
           onPointerDownOutside={(e) => e.preventDefault()}
         >
           <div className="mb-3 flex items-start justify-between gap-2">
-            <Dialog.Title className="text-title font-medium">{title}</Dialog.Title>
+            <Dialog.Title className="text-title font-medium">
+              {title}
+            </Dialog.Title>
             <button
               type="button"
               onClick={onBackground}
@@ -75,6 +77,19 @@ function ProgressBody({ p }: { p: ProgressInfo }) {
   const pct = p.percent ?? 0;
   return (
     <div className="mt-3 space-y-2">
+      {/* 현재 파일 + 항목 카운트 (탐색기/TC 식 "지금 뭘 하는지"). */}
+      {(p.current_file || p.files_total > 0) && (
+        <div className="flex items-baseline justify-between gap-2 text-base">
+          <span className="min-w-0 flex-1 truncate font-mono text-fg">
+            {p.current_file ?? "…"}
+          </span>
+          {p.files_total > 0 && (
+            <span className="shrink-0 text-meta text-fg-muted">
+              {Math.min(p.files_done + 1, p.files_total)} / {p.files_total}
+            </span>
+          )}
+        </div>
+      )}
       <div className="h-2 w-full overflow-hidden rounded bg-subtle">
         <div
           className="h-full bg-accent transition-all"
@@ -85,6 +100,7 @@ function ProgressBody({ p }: { p: ProgressInfo }) {
         <span>
           {formatSize(p.bytes_done)}
           {p.bytes_total ? ` / ${formatSize(p.bytes_total)}` : ""}
+          {p.percent != null ? ` · ${p.percent}%` : ""}
         </span>
         <span>
           {p.speed_bps ? `${formatSize(p.speed_bps)}/s` : ""}

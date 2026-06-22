@@ -36,6 +36,7 @@ describe("tasks store", () => {
     useTasks.getState().add(mk("a"));
     useTasks.getState().setProgress("a", {
       bytes_done: 100, bytes_total: 200, speed_bps: 50, eta_sec: 2, percent: 50,
+      current_file: "f.txt", files_done: 0, files_total: 1,
     });
     expect(useTasks.getState().tasks.get("a")?.progress?.percent).toBe(50);
   });

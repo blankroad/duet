@@ -52,7 +52,7 @@ pub enum TaskStatus {
 
 /// MVP-3 ProgressEvent 의 모양 — TaskEvent::Progress 안에서 재사용.
 /// 별도 module 으로 옮기지 않고 task_events 에 inline (사용처가 여기 한 곳).
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
 pub struct ProgressInfo {
     pub bytes_done: u64,
     pub bytes_total: Option<u64>,
@@ -60,6 +60,11 @@ pub struct ProgressInfo {
     pub eta_sec: Option<u32>,
     /// 0..=100
     pub percent: Option<u8>,
+    /// 현재 처리 중인 항목 이름 (탐색기/TC 식 "Copying <name>" 표시용). 없으면 None.
+    pub current_file: Option<String>,
+    /// 완료한 항목 수 / 전체 항목 수 (top-level plan.items 기준). 0 = 미집계.
+    pub files_done: u32,
+    pub files_total: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]

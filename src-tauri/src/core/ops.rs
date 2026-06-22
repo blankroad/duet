@@ -286,6 +286,10 @@ async fn copy_execute_relay(
     let total = plan.total_size_bytes;
     let done = std::sync::atomic::AtomicU64::new(0);
     let last = std::sync::Mutex::new(std::time::Instant::now());
+    let files_total = plan.items.len() as u32;
+    // 현재 처리 중인 (항목명, 완료한 항목 수) — 루프가 항목마다 갱신, 바이트 콜백이 읽어 emit.
+    let cur = std::sync::Arc::new(std::sync::Mutex::new((String::new(), 0u32)));
+    let cur_cb = cur.clone();
     let on_bytes = move |delta: u64| {
         use std::sync::atomic::Ordering::Relaxed;
         let d = done.fetch_add(delta, Relaxed) + delta;
@@ -304,23 +308,34 @@ async fn copy_execute_relay(
         } else {
             0
         };
+        let (current_file, files_done) = cur_cb
+            .lock()
+            .map(|g| (Some(g.0.clone()).filter(|s| !s.is_empty()), g.1))
+            .unwrap_or((None, 0));
         p.emit(crate::services::task_events::ProgressInfo {
             bytes_done: shown,
             bytes_total: Some(total),
             speed_bps: None,
             eta_sec: None,
             percent: Some(percent),
+            current_file,
+            files_done,
+            files_total,
         });
     };
 
     let mut copied = Vec::new();
     let mut backups = Vec::new();
     let mut outcome: Result<(), DuetError> = Ok(());
-    for it in &plan.items {
+    for (idx, it) in plan.items.iter().enumerate() {
         // 항목 경계 cancel check
         if cancel_token.is_cancelled() {
             outcome = Err(DuetError::Cancelled);
             break;
+        }
+        // 현재 항목명 + 완료 수(idx = 앞서 끝낸 항목 수) — 바이트 콜백이 emit 에 포함.
+        if let Ok(mut g) = cur.lock() {
+            *g = (it.name.clone(), idx as u32);
         }
         // 한 항목 처리 — 내부 ?/return 은 이 async 블록만 빠져나와 아래 outcome 으로 잡힘.
         let step: Result<(), DuetError> = async {
@@ -728,6 +743,7 @@ async fn mirror_dir(
                             speed_bps: None,
                             eta_sec: None,
                             percent: Some(pct),
+                            ..Default::default()
                         });
                     }
                 }
@@ -904,6 +920,7 @@ async fn sync_execute_same_host(
                             speed_bps: Some(p.speed_bps),
                             eta_sec: Some(p.eta_sec),
                             percent: Some(p.percent),
+                            ..Default::default()
                         });
                     }
                 }
@@ -1249,6 +1266,7 @@ fn emit_merge_progress(
             speed_bps: None,
             eta_sec: None,
             percent: Some(percent),
+            ..Default::default()
         });
     }
 }
@@ -2815,6 +2833,7 @@ async fn copy_execute_same_host(
                                     speed_bps: Some(p.speed_bps),
                                     eta_sec: Some(p.eta_sec),
                                     percent: Some(p.percent),
+                                    ..Default::default()
                                 });
                             }
                         }
