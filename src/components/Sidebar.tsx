@@ -20,6 +20,8 @@ import {
   RefreshCw,
   ArrowUpFromLine,
   Monitor,
+  Loader,
+  ArrowRightLeft,
 } from "lucide-react";
 import { useEffect, Fragment, type ReactNode } from "react";
 import { useUI } from "@/stores/ui";
@@ -61,7 +63,10 @@ import {
 import { usePanes, activeTab, type PaneId } from "@/stores/panes";
 import { useContextMenu, type MenuEntry } from "@/stores/contextMenu";
 import { useToast } from "@/stores/toast";
+import { useTasks, selectActive } from "@/stores/tasks";
 import { useReorderable } from "@/hooks/useReorderable";
+import { commands } from "@/types/bindings";
+import { formatSize } from "@/lib/format";
 import type {
   SavedHost,
   Bookmark as BookmarkType,
@@ -70,6 +75,7 @@ import type {
   Location,
   Place,
   SourceId,
+  TaskDto,
   Volume,
 } from "@/types/bindings";
 import clsx from "clsx";
@@ -121,6 +127,7 @@ export function Sidebar({
 
   return (
     <aside className="flex w-48 min-h-0 flex-col overflow-y-auto border-r border-border bg-subtle text-base">
+      <TasksSection />
       <LocalAnchor onOpenLocation={onOpenLocation} />
       <PlacesSection
         onOpenLocation={onOpenLocation}
@@ -193,6 +200,89 @@ function DropLine() {
 
 const rowClass =
   "group flex cursor-default items-center gap-1 rounded px-2 py-0.5 hover:bg-border";
+
+// ─────────────────────────── Tasks (background ops) ───────────────────────────
+
+const TASK_VERB: Record<TaskDto["kind"], string> = {
+  copy: "Copying",
+  move: "Moving",
+  extract: "Extracting",
+  compress: "Compressing",
+  sync: "Syncing",
+};
+
+/**
+ * 진행 중 백그라운드 작업(복사/이동/압축 등) 상태 — 활성 task 있을 때만 사이드바 최상단에
+ * 표시. 각 행: 동사 + 현재 파일명 + 진행 바 + 바이트/속도 + 취소(X). 모달을 백그라운드로
+ * 보내도 여기서 진행을 계속 본다. (데이터: useTasks — TasksBar 와 동일 소스.)
+ */
+function TasksSection() {
+  const tasks = useTasks((s) => s.tasks);
+  const active = selectActive(tasks);
+  if (active.length === 0) return null;
+  return (
+    <div className="border-b border-border bg-base px-2 py-1.5">
+      <div className="mb-1 flex items-center gap-1 text-meta text-fg-muted">
+        <ArrowRightLeft size={12} />
+        <span>Tasks</span>
+        <span className="ml-auto opacity-50">{active.length}</span>
+      </div>
+      <div className="space-y-1.5">
+        {active.map((t) => (
+          <SidebarTaskRow key={t.id} task={t} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SidebarTaskRow({ task }: { task: TaskDto }) {
+  const p = task.progress;
+  const indeterminate = !p || p.percent == null;
+  const pct = p?.percent ?? 0;
+  // 현재 파일명 우선, 없으면 task title.
+  const label = p?.current_file || task.title;
+  return (
+    <div className="text-meta">
+      <div className="flex items-center gap-1">
+        <Loader size={11} className="shrink-0 animate-spin text-accent" />
+        <span className="truncate text-fg" title={label}>
+          {label}
+        </span>
+        <button
+          type="button"
+          onClick={() => commands.taskCancel(task.id)}
+          className="ml-auto shrink-0 rounded p-0.5 text-fg-muted hover:bg-border hover:text-danger"
+          aria-label="Cancel task"
+          title="Cancel"
+        >
+          <X size={11} />
+        </button>
+      </div>
+      <div className="mt-1 h-1 w-full overflow-hidden rounded bg-subtle">
+        {indeterminate ? (
+          <div className="h-full w-1/3 animate-indeterminate rounded bg-accent" />
+        ) : (
+          <div
+            className="h-full bg-accent transition-all"
+            style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+          />
+        )}
+      </div>
+      {p && (
+        <div className="mt-0.5 flex justify-between text-fg-muted">
+          <span>
+            {TASK_VERB[task.kind]}
+            {p.bytes_total
+              ? ` ${formatSize(p.bytes_done)}/${formatSize(p.bytes_total)}`
+              : ` ${formatSize(p.bytes_done)}`}
+          </span>
+          <span>{p.speed_bps ? `${formatSize(p.speed_bps)}/s` : ""}</span>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ─────────────────────────── Local anchor (This PC) ───────────────────────────
 
