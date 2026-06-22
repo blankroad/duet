@@ -31,20 +31,131 @@ const register = (icon: LucideIcon, exts: string[]) => {
 };
 
 register(FileCode, [
-  "js", "jsx", "ts", "tsx", "mjs", "cjs",
-  "py", "rs", "go", "java", "kt", "c", "h", "cpp", "cc", "hpp",
-  "rb", "php", "swift", "scala", "sh", "bash", "zsh", "fish",
-  "html", "htm", "css", "scss", "sass", "less", "vue", "svelte", "lua", "dart",
+  "js",
+  "jsx",
+  "ts",
+  "tsx",
+  "mjs",
+  "cjs",
+  "py",
+  "rs",
+  "go",
+  "java",
+  "kt",
+  "c",
+  "h",
+  "cpp",
+  "cc",
+  "hpp",
+  "rb",
+  "php",
+  "swift",
+  "scala",
+  "sh",
+  "bash",
+  "zsh",
+  "fish",
+  "html",
+  "htm",
+  "css",
+  "scss",
+  "sass",
+  "less",
+  "vue",
+  "svelte",
+  "lua",
+  "dart",
 ]);
-register(FileJson, ["json", "jsonc", "yaml", "yml", "toml", "xml", "ini", "env"]);
-register(FileText, ["txt", "md", "markdown", "rst", "rtf", "doc", "docx", "odt", "pdf", "log", "tex"]);
-register(FileImage, ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "tiff", "tif", "heic", "avif"]);
+register(FileJson, [
+  "json",
+  "jsonc",
+  "yaml",
+  "yml",
+  "toml",
+  "xml",
+  "ini",
+  "env",
+]);
+register(FileText, [
+  "txt",
+  "md",
+  "markdown",
+  "rst",
+  "rtf",
+  "doc",
+  "docx",
+  "odt",
+  "pdf",
+  "log",
+  "tex",
+]);
+register(FileImage, [
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "svg",
+  "bmp",
+  "ico",
+  "tiff",
+  "tif",
+  "heic",
+  "avif",
+]);
 register(FileAudio, ["mp3", "wav", "flac", "ogg", "m4a", "aac", "wma", "opus"]);
-register(FileVideo, ["mp4", "mkv", "mov", "avi", "webm", "flv", "wmv", "m4v", "mpg", "mpeg"]);
-register(FileArchive, ["zip", "tar", "gz", "tgz", "bz2", "xz", "zst", "7z", "rar", "lz4"]);
+register(FileVideo, [
+  "mp4",
+  "mkv",
+  "mov",
+  "avi",
+  "webm",
+  "flv",
+  "wmv",
+  "m4v",
+  "mpg",
+  "mpeg",
+]);
+register(FileArchive, [
+  "zip",
+  "tar",
+  "gz",
+  "tgz",
+  "bz2",
+  "xz",
+  "zst",
+  "7z",
+  "rar",
+  "lz4",
+]);
 register(FileSpreadsheet, ["csv", "tsv", "xls", "xlsx", "ods"]);
-register(FileCog, ["exe", "dll", "so", "dylib", "bin", "app", "deb", "rpm", "dmg", "msi", "appimage", "o", "wasm"]);
-register(FileKey, ["pem", "key", "crt", "cert", "cer", "pub", "gpg", "asc", "p12", "pfx"]);
+register(FileCog, [
+  "exe",
+  "dll",
+  "so",
+  "dylib",
+  "bin",
+  "app",
+  "deb",
+  "rpm",
+  "dmg",
+  "msi",
+  "appimage",
+  "o",
+  "wasm",
+]);
+register(FileKey, [
+  "pem",
+  "key",
+  "crt",
+  "cert",
+  "cer",
+  "pub",
+  "gpg",
+  "asc",
+  "p12",
+  "pfx",
+]);
 register(FileType, ["ttf", "otf", "woff", "woff2", "eot"]);
 
 /** name 에서 소문자 확장자 추출 (표시 전용 — 경로 조작 아님). */
@@ -55,15 +166,19 @@ function extOf(name: string): string {
 }
 
 /** entry 종류에 맞는 lucide 아이콘 컴포넌트 + 색 토큰 클래스. */
-export function iconForEntry(entry: Entry): { Icon: LucideIcon; className: string } {
+export function iconForEntry(entry: Entry): {
+  Icon: LucideIcon;
+  className: string;
+} {
   if (entry.kind === "dir") return { Icon: Folder, className: "text-accent" };
-  if (entry.kind === "symlink") return { Icon: LinkIcon, className: "text-fg-muted" };
+  if (entry.kind === "symlink")
+    return { Icon: LinkIcon, className: "text-fg-muted" };
   const Icon = EXT_ICON[extOf(entry.name)] ?? File;
   return { Icon, className: "text-fg-muted" };
 }
 
-/** 바로 렌더 가능한 아이콘 엘리먼트. */
+/** 바로 렌더 가능한 아이콘 엘리먼트. flex 안에서 긴 파일명이 밀어 줄어들지 않게 shrink-0. */
 export function EntryIcon({ entry, size }: { entry: Entry; size: number }) {
   const { Icon, className } = iconForEntry(entry);
-  return <Icon size={size} className={className} />;
+  return <Icon size={size} className={`shrink-0 ${className}`} />;
 }
