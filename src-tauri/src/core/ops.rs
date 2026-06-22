@@ -294,7 +294,8 @@ async fn copy_execute_relay(
         use std::sync::atomic::Ordering::Relaxed;
         let d = done.fetch_add(delta, Relaxed) + delta;
         let Some(p) = progress.as_ref() else { return };
-        let complete = d >= total;
+        // total==0(폴더 등 총량 미상) 이면 "완료" 판정을 바이트로 못 하므로 throttle 만.
+        let complete = total > 0 && d >= total;
         if let Ok(mut l) = last.lock() {
             let now = std::time::Instant::now();
             if !complete && now.duration_since(*l) < std::time::Duration::from_millis(150) {
@@ -302,26 +303,17 @@ async fn copy_execute_relay(
             }
             *l = now;
         }
-        let shown = d.min(total);
-        let percent = if total > 0 {
-            (shown * 100 / total) as u8
-        } else {
-            0
-        };
         let (current_file, files_done) = cur_cb
             .lock()
             .map(|g| (Some(g.0.clone()).filter(|s| !s.is_empty()), g.1))
             .unwrap_or((None, 0));
-        p.emit(crate::services::task_events::ProgressInfo {
-            bytes_done: shown,
-            bytes_total: Some(total),
-            speed_bps: None,
-            eta_sec: None,
-            percent: Some(percent),
+        p.emit(byte_progress(
+            d,
+            total,
             current_file,
             files_done,
             files_total,
-        });
+        ));
     };
 
     let mut copied = Vec::new();
@@ -442,7 +434,7 @@ pub async fn move_execute(
     plan: MovePlan,
     ctx: &OpCtx,
     cancel_token: tokio_util::sync::CancellationToken,
-    _progress: Option<crate::services::task_queue::ProgressEmitter>,
+    progress: Option<crate::services::task_queue::ProgressEmitter>,
 ) -> Result<JournalEntry, DuetError> {
     if plan.items.is_empty() {
         return Err(DuetError::Io("plan has no items".into()));
@@ -455,14 +447,54 @@ pub async fn move_execute(
         ));
     }
 
+    // cross-fs 이동(=copy+trash)은 바이트 진행률을 emit — copy 와 동일 메커니즘.
+    // (same-fs rename 은 atomic·즉시라 항목 완료마다만 갱신.)
+    let total = plan.total_size_bytes;
+    let done = std::sync::atomic::AtomicU64::new(0);
+    let last = std::sync::Mutex::new(std::time::Instant::now());
+    let files_total = plan.items.len() as u32;
+    let cur = std::sync::Arc::new(std::sync::Mutex::new((String::new(), 0u32)));
+    let cur_cb = cur.clone();
+    let progress_cb = progress.clone();
+    let on_bytes = move |delta: u64| {
+        use std::sync::atomic::Ordering::Relaxed;
+        let d = done.fetch_add(delta, Relaxed) + delta;
+        let Some(p) = progress_cb.as_ref() else {
+            return;
+        };
+        let complete = total > 0 && d >= total;
+        if let Ok(mut l) = last.lock() {
+            let now = std::time::Instant::now();
+            if !complete && now.duration_since(*l) < std::time::Duration::from_millis(150) {
+                return;
+            }
+            *l = now;
+        }
+        let (current_file, files_done) = cur_cb
+            .lock()
+            .map(|g| (Some(g.0.clone()).filter(|s| !s.is_empty()), g.1))
+            .unwrap_or((None, 0));
+        p.emit(byte_progress(
+            d,
+            total,
+            current_file,
+            files_done,
+            files_total,
+        ));
+    };
+
     let mut moved = Vec::new();
     let mut backups = Vec::new();
     let mut outcome: Result<(), DuetError> = Ok(());
-    for it in &plan.items {
+    for (idx, it) in plan.items.iter().enumerate() {
         // 항목 경계 cancel check
         if cancel_token.is_cancelled() {
             outcome = Err(DuetError::Cancelled);
             break;
+        }
+        // 현재 항목명 + 완료 수 — on_bytes 가 emit 에 포함.
+        if let Ok(mut g) = cur.lock() {
+            *g = (it.name.clone(), idx as u32);
         }
         // 한 항목 처리 — 내부 ?/return 은 이 async 블록만 빠져나와 아래 outcome 으로 잡힘.
         let step: Result<(), DuetError> = async {
@@ -482,15 +514,34 @@ pub async fn move_execute(
                 // 같은 fs: 단순 rename — 빠르고 atomic
                 src_fs.rename(&src_path, &dst_path).await?;
             } else {
-                // copy 본체 — connection loss 면 1회 retry
-                match crate::fs::copy_relay(src_fs, &src_path, dst_fs, &dst_path).await {
+                // copy 본체(스트리밍 — 바이트 진행률 emit) — connection loss 면 1회 retry(재개).
+                match crate::fs::copy_relay_streaming(
+                    src_fs,
+                    &src_path,
+                    dst_fs,
+                    &dst_path,
+                    false,
+                    &cancel_token,
+                    &on_bytes,
+                )
+                .await
+                {
                     Ok(()) => {}
                     Err(e) if crate::services::retry::is_retryable_error(&e) => {
                         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                         if cancel_token.is_cancelled() {
                             return Err(DuetError::Cancelled);
                         }
-                        crate::fs::copy_relay(src_fs, &src_path, dst_fs, &dst_path).await?;
+                        crate::fs::copy_relay_streaming(
+                            src_fs,
+                            &src_path,
+                            dst_fs,
+                            &dst_path,
+                            true,
+                            &cancel_token,
+                            &on_bytes,
+                        )
+                        .await?;
                     }
                     Err(e) => return Err(e),
                 }
@@ -1245,6 +1296,34 @@ pub async fn merge_bidir(
             )
             .await
         }
+    }
+}
+
+/// 바이트 진행률 → ProgressInfo (copy/move 공용). `total==0`(폴더 등 총량 미상)이면
+/// indeterminate(bytes_total/percent = None) — 프론트가 게이지를 0%로 고정하지 않고
+/// "진행 중" 애니메이션 바로 표시하게 한다. total>0 이면 percent 계산.
+fn byte_progress(
+    done: u64,
+    total: u64,
+    current_file: Option<String>,
+    files_done: u32,
+    files_total: u32,
+) -> crate::services::task_events::ProgressInfo {
+    let (bytes_done, bytes_total, percent) = if total > 0 {
+        let shown = done.min(total);
+        (shown, Some(total), Some((shown * 100 / total) as u8))
+    } else {
+        (done, None, None)
+    };
+    crate::services::task_events::ProgressInfo {
+        bytes_done,
+        bytes_total,
+        speed_bps: None,
+        eta_sec: None,
+        percent,
+        current_file,
+        files_done,
+        files_total,
     }
 }
 

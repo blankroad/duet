@@ -45,6 +45,16 @@ const config: Config = {
         base: ["13px", { lineHeight: "1.5" }],
         title: ["15px", { lineHeight: "1.4", fontWeight: "500" }],
       },
+      // 총량 미상 진행률 바 — 좌→우 왕복 슬라이드(indeterminate).
+      keyframes: {
+        indeterminate: {
+          "0%": { transform: "translateX(-100%)" },
+          "100%": { transform: "translateX(400%)" },
+        },
+      },
+      animation: {
+        indeterminate: "indeterminate 1.2s ease-in-out infinite",
+      },
     },
   },
   plugins: [require("tailwindcss-animate")],

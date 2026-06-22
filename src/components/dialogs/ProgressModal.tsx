@@ -74,6 +74,8 @@ function SpinnerBody() {
 }
 
 function ProgressBody({ p }: { p: ProgressInfo }) {
+  // percent==null = 총량 미상(폴더 등) → 게이지를 0% 고정 대신 "진행 중" 애니메이션.
+  const indeterminate = p.percent == null;
   const pct = p.percent ?? 0;
   return (
     <div className="mt-3 space-y-2">
@@ -91,15 +93,19 @@ function ProgressBody({ p }: { p: ProgressInfo }) {
         </div>
       )}
       <div className="h-2 w-full overflow-hidden rounded bg-subtle">
-        <div
-          className="h-full bg-accent transition-all"
-          style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
-        />
+        {indeterminate ? (
+          <div className="h-full w-1/3 animate-indeterminate rounded bg-accent" />
+        ) : (
+          <div
+            className="h-full bg-accent transition-all"
+            style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+          />
+        )}
       </div>
       <div className="flex justify-between text-meta text-fg-muted">
         <span>
           {formatSize(p.bytes_done)}
-          {p.bytes_total ? ` / ${formatSize(p.bytes_total)}` : ""}
+          {p.bytes_total ? ` / ${formatSize(p.bytes_total)}` : " copied"}
           {p.percent != null ? ` · ${p.percent}%` : ""}
         </span>
         <span>
