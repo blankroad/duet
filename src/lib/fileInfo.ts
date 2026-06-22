@@ -53,6 +53,22 @@ const EXT_LABEL: Record<string, string> = {
   css: "CSS",
 };
 
+/**
+ * 파일명을 stem + 확장자로 분리 (TC 식 확장자 컬럼용). 디렉토리/도트파일/확장자없음은
+ * ext="" 로 (이름 전체가 stem). 예: "a.tar.gz" → {stem:"a.tar", ext:"gz"},
+ * ".bashrc" → {stem:".bashrc", ext:""}, "Makefile" → {stem:"Makefile", ext:""}.
+ */
+export function splitNameExt(
+  name: string,
+  isDir: boolean,
+): { stem: string; ext: string } {
+  if (isDir) return { stem: name, ext: "" };
+  const dot = name.lastIndexOf(".");
+  // dot<=0: 확장자 없음 또는 선두 도트(.bashrc) → 분리 안 함. 끝 도트도 분리 안 함.
+  if (dot <= 0 || dot === name.length - 1) return { stem: name, ext: "" };
+  return { stem: name.slice(0, dot), ext: name.slice(dot + 1) };
+}
+
 /** entry 의 종류 라벨 (Folder / 확장자 기반 / Symlink 등). */
 export function kindLabel(entry: Entry): string {
   if (entry.kind === "dir") return "Folder";

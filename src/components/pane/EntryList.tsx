@@ -10,6 +10,7 @@ import {
   type SortOrder,
 } from "@/stores/panes";
 import { setHoverEntry, clearHover } from "@/stores/previewHover";
+import { useUI } from "@/stores/ui";
 import { useMarquee } from "@/hooks/useMarquee";
 import { useEntryDrag } from "@/hooks/useEntryDrag";
 import { useDragState } from "@/stores/dragState";
@@ -58,6 +59,7 @@ export function EntryList({
 }: EntryListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const onEntryMouseDown = useEntryDrag(id);
+  const splitExt = useUI((s) => s.splitExt);
   const dragActive = useDragState((s) => s.active);
   const overThisPane = useDragState((s) => s.overPane === id);
   const overFolder = useDragState((s) =>
@@ -101,6 +103,16 @@ export function EntryList({
           onClick={onSortClick}
           className="flex-1 px-2"
         />
+        {splitExt && (
+          <ColumnHeader
+            label="Ext"
+            col="ext"
+            current={sortKey}
+            order={sortOrder}
+            onClick={onSortClick}
+            className="w-16 px-2"
+          />
+        )}
         <ColumnHeader
           label="Size"
           col="size"
@@ -183,6 +195,7 @@ export function EntryList({
                   entry={entry}
                   isCursor={cursorIndex === vi.index}
                   isSelected={selected.has(entry.name)}
+                  splitExt={splitExt}
                   onClick={(e) => onCursorMove(vi.index, e)}
                   onDoubleClick={() => onActivate(entry, vi.index)}
                 />

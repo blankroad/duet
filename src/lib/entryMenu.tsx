@@ -25,6 +25,7 @@ import {
   FolderSync,
   FolderGit2,
   Terminal,
+  Columns3,
 } from "lucide-react";
 import { commands } from "@/types/bindings";
 import type { Entry, Location } from "@/types/bindings";
@@ -37,6 +38,7 @@ import {
   type ViewMode,
 } from "@/stores/panes";
 import { useUIDialogs } from "@/stores/ui-dialogs";
+import { useUI } from "@/stores/ui";
 import { useToast } from "@/stores/toast";
 import { useConnections } from "@/stores/connections";
 import { bookmarkLocation } from "@/lib/bookmarkActions";
@@ -446,6 +448,14 @@ export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
       icon: <Eye size={ICON} />,
       shortcut: "Ctrl+H",
       onSelect: () => p.toggleShowHidden(paneId),
+    },
+    {
+      id: "split-ext",
+      label: useUI.getState().splitExt
+        ? "Hide extension column"
+        : "Show extension column",
+      icon: <Columns3 size={ICON} />,
+      onSelect: () => useUI.getState().toggleSplitExt(),
     },
     sep(),
     {

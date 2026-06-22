@@ -7,6 +7,23 @@ import type { PaneId } from "@/stores/panes";
  */
 
 const COLLAPSE_KEY = "duet.sidebar.collapsed";
+const SPLITEXT_KEY = "duet.view.splitExt";
+
+/** boolean UI 설정 localStorage 로드 (비민감). */
+function loadBool(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+function saveBool(key: string, v: boolean): void {
+  try {
+    localStorage.setItem(key, v ? "1" : "0");
+  } catch {
+    /* localStorage 불가 — 메모리 상태만 */
+  }
+}
 
 /** 사이드바 섹션 접힘 상태 localStorage 로드 (비민감 UI 설정). */
 function loadCollapsed(): Record<string, boolean> {
@@ -39,6 +56,9 @@ interface UIState {
   /** 사이드바 섹션/그룹 접힘 상태 (key → collapsed). 영속. */
   collapsed: Record<string, boolean>;
   toggleSection: (key: string) => void;
+  /** 상세 뷰에서 확장자를 별도 컬럼으로 분리 표시 (TC 식). 영속. */
+  splitExt: boolean;
+  toggleSplitExt: () => void;
   /** "경로 직접 입력" 요청 — Ctrl+L 등에서 활성 패널 PathBar 를 편집 모드로.
    *  nonce 가 증가하면 editPathPane 패널의 PathBar 가 편집 진입. */
   editPathPane: PaneId | null;
@@ -60,6 +80,13 @@ export const useUI = create<UIState>((set) => ({
       const collapsed = { ...s.collapsed, [key]: !s.collapsed[key] };
       saveCollapsed(collapsed);
       return { collapsed };
+    }),
+  splitExt: loadBool(SPLITEXT_KEY),
+  toggleSplitExt: () =>
+    set((s) => {
+      const splitExt = !s.splitExt;
+      saveBool(SPLITEXT_KEY, splitExt);
+      return { splitExt };
     }),
   editPathPane: null,
   editPathNonce: 0,

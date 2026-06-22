@@ -5,6 +5,7 @@ import {
   formatFullDate,
   summarizeEntries,
   countLabel,
+  splitNameExt,
 } from "./fileInfo";
 import type { Entry } from "@/types/bindings";
 
@@ -69,6 +70,34 @@ describe("fileInfo", () => {
     expect(s.folders).toBe(1);
     expect(s.files).toBe(3); // file, file, symlink (비-dir 은 파일로 집계)
     expect(s.totalSize).toBe(350);
+  });
+
+  it("splitNameExt splits stem/ext, handles edge cases", () => {
+    expect(splitNameExt("photo.jpg", false)).toEqual({
+      stem: "photo",
+      ext: "jpg",
+    });
+    expect(splitNameExt("a.tar.gz", false)).toEqual({
+      stem: "a.tar",
+      ext: "gz",
+    });
+    expect(splitNameExt(".bashrc", false)).toEqual({
+      stem: ".bashrc",
+      ext: "",
+    });
+    expect(splitNameExt("Makefile", false)).toEqual({
+      stem: "Makefile",
+      ext: "",
+    });
+    expect(splitNameExt("trailing.", false)).toEqual({
+      stem: "trailing.",
+      ext: "",
+    });
+    // 디렉토리는 분리 안 함(이름에 점 있어도).
+    expect(splitNameExt("my.folder", true)).toEqual({
+      stem: "my.folder",
+      ext: "",
+    });
   });
 
   it("countLabel pluralization and empty", () => {
