@@ -16,13 +16,18 @@ import { useUIDialogs } from "@/stores/ui-dialogs";
 import { useToast } from "@/stores/toast";
 
 /**
- * 항목 행/셀의 포인터 기반 드래그.
+ * 항목 행/셀의 포인터 기반 드래그. **드래그 시작 시점의 Ctrl** 로 메커니즘이 갈린다:
  *
- * - **창 안에서 드롭**(다른 패널/폴더): 인앱 DOM 드래그. copy 기본 / **드롭 순간 Ctrl =
- *   이동**. 모디파이어는 *드롭 시점*에 읽으므로 드래그 도중 아무 때나 Ctrl 을 눌렀다
- *   떼도 된다(시작 시점 고정 X — 그게 "될 때도 안 될 때도" 버그의 원인이었다).
- * - **창 밖으로 나가면**(로컬만): OS 네이티브 드래그로 인계 → 탐색기/다른 앱에 드롭(copy,
- *   원본 보존). 창을 떠나는 순간(`mouseout` relatedTarget=null)에 핸드오프.
+ * - **로컬 + Ctrl 없음** → **OS 네이티브 드래그**(startDrag). 탐색기/다른 앱/다른 패널
+ *   어디로든 드롭(창 밖으로 나갈 수 있음), 항상 copy. 절대경로는 mousedown 에 미리
+ *   해석해 두고 임계 도달 시 동기 발사(제스처 유지).
+ * - **로컬 + Ctrl** → 인앱 DOM 드래그 → 패널↔패널 **이동**(onUp).
+ * - **원격(SSH)** → 로컬 경로 없어 OS 드래그-아웃 불가 → 인앱 드래그(복사 기본 / Ctrl=이동).
+ *
+ * 왜 시작 시점인가: OS 드래그는 한 번 시작하면 도중에 "이동/내보내기"를 바꿀 수 없고
+ * (네이티브 캡처), 버튼 누른 동안엔 창-이탈(mouseout)도 신뢰성 있게 안 잡힌다. 그래서
+ * "드롭 순간 판정"이나 "창 밖에서 OS 인계" 방식은 drag-out 이 깨졌다(회귀). 시작 시점
+ * Ctrl 로 확정하는 게 유일하게 견고한 방식 — 이동하려면 *끌기 전에* Ctrl 을 눌러둔다.
  *
  * 드래그가 발생하면 뒤따르는 click(커서 이동)은 1회 억제.
  */
@@ -36,8 +41,12 @@ export function useEntryDrag(id: PaneId) {
       if (isParentEntry(entry)) return; // ".." 행은 드래그 소스 아님
       const sx = e.clientX;
       const sy = e.clientY;
+      // 시작 시점 모디파이어 — OS 드래그는 도중 전환 불가라 여기서 확정.
+      const wantMove = e.ctrlKey || e.shiftKey;
       const tab = activeTab(usePanes.getState(), id);
       const isLocal = tab.location.source.kind === "local";
+      // Ctrl 없는 로컬 = OS 드래그-아웃 경로.
+      const useOsDrag = isLocal && !wantMove;
       // 드래그 대상: 누른 항목이 기존 선택에 속하면 선택 전체, 아니면 그 항목만.
       const dragWholeSelection =
         tab.selected.size > 0 && tab.selected.has(entry.name);
@@ -49,16 +58,16 @@ export function useEntryDrag(id: PaneId) {
         name,
       }));
 
-      // 로컬: 창 밖으로 나갈 때 OS 드래그-아웃에 쓸 절대경로를 미리 해석(핸드오프 시 동기 발사).
+      // OS 드래그 경로면 절대경로를 미리 해석(임계 도달 시 await 없이 동기 발사).
       let osPaths: string[] = [];
-      if (isLocal) {
+      if (useOsDrag) {
         void resolveDragPaths(targets).then((p) => {
           osPaths = p;
         });
       }
 
       let started = false;
-      let handedToOs = false; // 창 밖으로 나가 OS 가 인계 — 이후 인앱 후처리 없음
+      let handedToOs = false; // OS 가 드래그를 인계받음 — 이후 인앱 후처리 없음
 
       // 드래그 직후의 합성 click 1회 억제 (커서가 튀지 않도록).
       const suppressNextClick = () => {
@@ -84,6 +93,16 @@ export function useEntryDrag(id: PaneId) {
           if (!dragWholeSelection) {
             usePanes.getState().setSelected(id, [entry.name]);
           }
+          if (useOsDrag) {
+            // OS 네이티브 드래그로 인계 — 동기 발사(제스처 유지). 인앱 리스너 정리.
+            handedToOs = true;
+            cleanup();
+            if (osPaths.length > 0) startDragWithPaths(osPaths);
+            else void resolveDragPaths(targets).then(startDragWithPaths);
+            suppressNextClick();
+            return;
+          }
+          // 내부 DOM 드래그(고스트) — 패널↔패널 이동/복사.
           useDragState.getState().start({
             source: tab.location,
             targets,
@@ -98,19 +117,6 @@ export function useEntryDrag(id: PaneId) {
         useDragState
           .getState()
           .move(ev.clientX, ev.clientY, d?.pane ?? null, d?.folder ?? null);
-      };
-
-      // 로컬: 드래그 중 포인터가 창 밖으로 나가면 OS 드래그-아웃으로 인계(탐색기 등).
-      const onOut = (ev: MouseEvent) => {
-        if (!started || handedToOs || !isLocal) return;
-        if (ev.relatedTarget !== null) return; // 창 안 다른 요소로 이동 — 무시
-        handedToOs = true;
-        useDragState.getState().end();
-        document.body.style.cursor = "";
-        cleanup();
-        if (osPaths.length > 0) startDragWithPaths(osPaths);
-        else void resolveDragPaths(targets).then(startDragWithPaths);
-        suppressNextClick();
       };
 
       const onUp = (ev: MouseEvent) => {
@@ -133,20 +139,23 @@ export function useEntryDrag(id: PaneId) {
           )
         )
           return;
-        // 모디파이어는 *드롭 순간* 평가 — Ctrl(또는 Shift) 누른 채 놓으면 이동.
-        const mode = ev.ctrlKey || ev.shiftKey ? "move" : "copy";
-        void planTransferTo(dragTargets, dst, mode, open, showToast);
+        // 내부 드래그는 wantMove(시작 시 Ctrl/Shift)로 이동, 아니면 복사.
+        void planTransferTo(
+          dragTargets,
+          dst,
+          wantMove ? "move" : "copy",
+          open,
+          showToast,
+        );
       };
 
       const cleanup = () => {
         window.removeEventListener("mousemove", onMove);
         window.removeEventListener("mouseup", onUp, true);
-        document.removeEventListener("mouseout", onOut, true);
       };
 
       window.addEventListener("mousemove", onMove);
       window.addEventListener("mouseup", onUp, true);
-      document.addEventListener("mouseout", onOut, true);
     },
     [id, open, showToast],
   );
