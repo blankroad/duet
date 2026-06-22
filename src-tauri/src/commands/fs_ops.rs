@@ -85,22 +85,60 @@ pub async fn fs_delete_execute(
     pool: tauri::State<'_, Arc<ConnectionPool>>,
     settings: tauri::State<'_, Arc<SettingsStore>>,
     journal: tauri::State<'_, Arc<Journal>>,
+    queue: tauri::State<'_, Arc<TaskQueue>>,
     app: tauri::AppHandle,
-) -> Result<JournalId, DuetError> {
-    let fs = fs_for(&plan.source, pool.inner()).await?;
-    let entry = ops::delete_execute(
-        &*fs,
-        plan,
-        &ctx(
-            settings.inner().clone(),
-            journal.inner().clone(),
-            pool.inner().clone(),
-            app.clone(),
-        ),
-        &confirm_word,
-    )
-    .await?;
-    Ok(emit_pushed(&app, entry))
+) -> Result<TaskId, DuetError> {
+    // 삭제도 백그라운드 task 로 — 사이드바/TasksBar 에 진행 표시. 대량/원격 삭제도
+    // UI 블록 없이 진행·취소 가능. §3/§4 게이트는 delete_execute 내부 그대로.
+    let host_key = match &plan.source {
+        SourceId::Ssh { host_ip, .. } => HostKey::Ssh {
+            host_ip: host_ip.to_string(),
+        },
+        SourceId::Local => HostKey::Local,
+    };
+    let title = match plan.mode {
+        DeleteMode::Permanent => format!("Deleting {} item(s)", plan.total_count),
+        DeleteMode::Trash => format!("Moving {} item(s) to trash", plan.total_count),
+    };
+    let affected = vec![plan.source_location.clone()];
+
+    let pool_inner = pool.inner().clone();
+    let settings_inner = settings.inner().clone();
+    let journal_inner = journal.inner().clone();
+    let app_for_run = app.clone();
+    let plan_for_run = plan;
+
+    let task_id = queue
+        .inner()
+        .clone()
+        .enqueue(
+            TaskKind::Delete,
+            title,
+            host_key,
+            affected,
+            Box::new(move |_cancel_token, progress| {
+                Box::pin(async move {
+                    let fs = fs_for(&plan_for_run.source, &pool_inner).await?;
+                    let octx = ctx(
+                        settings_inner,
+                        journal_inner.clone(),
+                        pool_inner.clone(),
+                        app_for_run.clone(),
+                    );
+                    let entry = ops::delete_execute(
+                        &*fs,
+                        plan_for_run,
+                        &octx,
+                        &confirm_word,
+                        Some(progress),
+                    )
+                    .await?;
+                    Ok(emit_pushed(&app_for_run, entry))
+                })
+            }),
+        )
+        .await;
+    Ok(task_id)
 }
 
 #[tauri::command]

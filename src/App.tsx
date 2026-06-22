@@ -770,11 +770,13 @@ function App() {
       // 방어: onClick 핸들러로 이벤트 객체가 인자로 새어들어오면 ""로 강제 —
       // 그대로 IPC 로 보내면 순환참조 직렬화가 깨져 삭제가 통째로 실패한다.
       const word = typeof confirmWord === "string" ? confirmWord : "";
+      // 삭제는 이제 백그라운드 task — 완료 시 useTaskEvents 가 affected_locations 로
+      // refresh. 여기선 enqueue 결과만 확인(즉시 refresh 하면 아직 삭제 전이라 stale).
       const r = await commands.fsDeleteExecute(plan, word);
-      if (r.status === "ok") refreshAffected([plan.source_location]);
-      else showToast(`Delete failed: ${formatErr(r.error)}`);
+      if (r.status === "error")
+        showToast(`Delete failed: ${formatErr(r.error)}`);
     },
-    [dialog, closeDialog, refreshAffected, showToast],
+    [dialog, closeDialog, showToast],
   );
 
   /** 볼륨 우클릭 "Eject" → 확인 다이얼로그 오픈. */

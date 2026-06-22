@@ -38,6 +38,7 @@ pub enum TaskKind {
     Extract,
     Compress,
     Sync,
+    Delete,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]

@@ -209,6 +209,7 @@ const TASK_VERB: Record<TaskDto["kind"], string> = {
   extract: "Extracting",
   compress: "Compressing",
   sync: "Syncing",
+  delete: "Deleting",
 };
 
 /**

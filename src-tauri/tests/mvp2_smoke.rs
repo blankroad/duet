@@ -245,7 +245,7 @@ async fn smoke_permanent_delete_blocked_then_allowed() {
         .unwrap();
 
     // settings off → NotPermitted (확인 단어가 맞아도 settings 게이트에서 먼저 차단)
-    let result = ops::delete_execute(&local, plan.clone(), &env.ctx(), "delete").await;
+    let result = ops::delete_execute(&local, plan.clone(), &env.ctx(), "delete", None).await;
     assert!(matches!(result, Err(DuetError::NotPermitted)));
     assert!(env.dir().join("a").exists(), "file should still exist");
 
@@ -257,7 +257,7 @@ async fn smoke_permanent_delete_blocked_then_allowed() {
         })
         .await
         .unwrap();
-    let entry = ops::delete_execute(&local, plan, &env.ctx(), "delete")
+    let entry = ops::delete_execute(&local, plan, &env.ctx(), "delete", None)
         .await
         .unwrap();
     assert!(!env.dir().join("a").exists());
@@ -288,7 +288,7 @@ async fn smoke_trash_then_undo_restores_on_linux_windows() {
     .await
     .unwrap();
     // Trash 모드 — confirm 단어는 무시됨.
-    ops::delete_execute(&local, plan, &env.ctx(), "")
+    ops::delete_execute(&local, plan, &env.ctx(), "", None)
         .await
         .unwrap();
     assert!(!target_path.exists(), "file should be in trash");

@@ -143,11 +143,35 @@ pub async fn delete_plan(
 /// 영구삭제 확인 단어 — 사용자가 DangerConfirm 다이얼로그에 타이핑해야 하는 값.
 pub const PERMANENT_DELETE_CONFIRM_WORD: &str = "delete";
 
+/// 항목 개수 기준 진행률(삭제처럼 바이트 무관한 작업용). current_file 포함.
+fn count_progress(
+    done: u32,
+    total: u32,
+    current_file: Option<String>,
+) -> crate::services::task_events::ProgressInfo {
+    let percent = if total > 0 {
+        (done.min(total) * 100 / total) as u8
+    } else {
+        0
+    };
+    crate::services::task_events::ProgressInfo {
+        bytes_done: 0,
+        bytes_total: None,
+        speed_bps: None,
+        eta_sec: None,
+        percent: Some(percent),
+        current_file,
+        files_done: done,
+        files_total: total,
+    }
+}
+
 pub async fn delete_execute(
     fs: &dyn FileSystem,
     plan: DeletePlan,
     ctx: &OpCtx,
     confirm_word: &str,
+    progress: Option<crate::services::task_queue::ProgressEmitter>,
 ) -> Result<JournalEntry, DuetError> {
     if matches!(plan.mode, DeleteMode::Permanent) {
         let s = ctx.settings.get().await;
@@ -160,6 +184,7 @@ pub async fn delete_execute(
             return Err(DuetError::NotPermitted);
         }
     }
+    let total = plan.targets.len() as u32;
 
     // §4: 항목별로 진행하며 누적하고, 중간 실패 시에도 '여기까지'를 journal 에 기록한 뒤
     // 에러를 전파한다. 그래야 이미 휴지통으로 옮겨진 1..N-1 항목을 Ctrl+Z 로 복원할 수 있다.
@@ -168,7 +193,10 @@ pub async fn delete_execute(
             let batch_id = crate::services::trash::new_batch_id();
             let mut items = Vec::new();
             let mut outcome: Result<(), DuetError> = Ok(());
-            for t in &plan.targets {
+            for (idx, t) in plan.targets.iter().enumerate() {
+                if let Some(p) = progress.as_ref() {
+                    p.emit(count_progress(idx as u32, total, Some(t.name.clone())));
+                }
                 let p = t.location.path.join(&t.name);
                 match fs.trash(&p, &batch_id).await {
                     Ok(loc) => {
@@ -209,7 +237,10 @@ pub async fn delete_execute(
         DeleteMode::Permanent => {
             let mut removed = 0u32;
             let mut outcome: Result<(), DuetError> = Ok(());
-            for t in &plan.targets {
+            for (idx, t) in plan.targets.iter().enumerate() {
+                if let Some(p) = progress.as_ref() {
+                    p.emit(count_progress(idx as u32, total, Some(t.name.clone())));
+                }
                 let p = t.location.path.join(&t.name);
                 match fs.remove(&p).await {
                     Ok(()) => removed += 1,
@@ -3198,7 +3229,7 @@ mod tests {
             .unwrap();
 
         let (ctx, _ctx_dir) = mk_ctx().await;
-        let result = delete_execute(&local, plan, &ctx, "delete").await;
+        let result = delete_execute(&local, plan, &ctx, "delete", None).await;
         assert!(matches!(result, Err(DuetError::NotPermitted)));
         assert!(dir.path().join("a").exists());
     }
@@ -3227,12 +3258,12 @@ mod tests {
             .unwrap();
 
         // 틀린 단어 → 거부, 파일 보존.
-        let bad = delete_execute(&local, mk_plan().await, &ctx, "wrong").await;
+        let bad = delete_execute(&local, mk_plan().await, &ctx, "wrong", None).await;
         assert!(matches!(bad, Err(DuetError::NotPermitted)));
         assert!(dir.path().join("a").exists());
 
         // 올바른 단어 → 삭제.
-        let ok = delete_execute(&local, mk_plan().await, &ctx, "delete").await;
+        let ok = delete_execute(&local, mk_plan().await, &ctx, "delete", None).await;
         assert!(ok.is_ok());
         assert!(!dir.path().join("a").exists());
     }
@@ -3327,7 +3358,7 @@ mod tests {
         };
         let (ctx, _d) = mk_ctx().await;
         let fs = FailingTrashFs::default();
-        let result = delete_execute(&fs, plan, &ctx, "").await;
+        let result = delete_execute(&fs, plan, &ctx, "", None).await;
         assert!(result.is_err(), "2번째 항목 실패로 에러여야 함");
         let hist = ctx.journal.history(10).await;
         assert_eq!(hist.len(), 1, "부분 진행분이 journal 에 1건 기록되어야 함");
