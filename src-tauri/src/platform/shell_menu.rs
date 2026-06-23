@@ -54,6 +54,11 @@ enum Req {
     Close {
         token: u64,
     },
+    /// 핸들러 예열 — 메뉴를 만들었다 바로 버린다(셸 확장 COM 을 메모리에 로드만).
+    Prewarm {
+        hwnd: isize,
+        path: PathBuf,
+    },
 }
 
 /// 핫 COM 스레드 핸들 — 명령 레이어가 Build/Invoke/Close 를 보낸다. 첫 사용 시 lazy 생성.
@@ -100,6 +105,11 @@ impl Worker {
 
     pub fn close(&self, token: u64) {
         let _ = self.tx.send(Req::Close { token });
+    }
+
+    /// 시작 시 호출 — 셸 핸들러를 백그라운드로 예열(첫 우클릭도 빠르게).
+    pub fn prewarm(&self, hwnd: isize, path: PathBuf) {
+        let _ = self.tx.send(Req::Prewarm { hwnd, path });
     }
 }
 
@@ -161,8 +171,24 @@ fn worker_loop(rx: mpsc::Receiver<Req>) {
                 order.retain(|t| *t != token);
                 destroy(&mut open, token);
             }
+            Req::Prewarm { hwnd, path } => {
+                // 메뉴를 만들었다 즉시 버린다 — 핸들러 COM 만 메모리에 로드(warm).
+                // SAFETY: 셸 객체 생성/파기 전부 이 스레드에서.
+                if let Ok((_cm, hmenu)) =
+                    unsafe { build_menu(HWND(hwnd as *mut _), &path, scope_dir()) }
+                {
+                    unsafe {
+                        let _ = DestroyMenu(hmenu);
+                    }
+                }
+            }
         }
     }
+}
+
+/// prewarm 용 더미 scope (build_menu 는 scope 를 안 쓰지만 시그니처상 필요).
+fn scope_dir() -> ShellScope {
+    ShellScope::Directory
 }
 
 /// 경로 → IContextMenu + 채워진 HMENU. (모든 호출 unsafe COM)

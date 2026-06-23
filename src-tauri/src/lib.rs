@@ -280,6 +280,25 @@ pub fn run() {
             app.manage(commands::fs_ops::ActiveCompare::new());
             // 파일명 인덱스(Everything 식 즉시·오프라인 검색) — 디스크 캐시 <config>/duet/index.
             app.manage(services::file_index::FileIndex::load_default().expect("file index init"));
+            // Windows: 셸 메뉴 핫 워커를 시작 시 예열 — 첫 우클릭도 빠르게(핸들러 warm).
+            #[cfg(windows)]
+            {
+                use tauri::Manager;
+                let hwnd = app
+                    .get_webview_window("main")
+                    .and_then(|w| w.hwnd().ok())
+                    .map(|h| h.0 as isize)
+                    .unwrap_or(0);
+                let reg = app.state::<std::sync::Arc<platform::ShellMenuRegistry>>();
+                let worker = reg.worker();
+                // 파일(*·확장자) 핸들러: 실행파일 경로. 디렉토리 핸들러: home.
+                if let Ok(exe) = std::env::current_exe() {
+                    worker.prewarm(hwnd, exe);
+                }
+                if let Some(home) = dirs::home_dir() {
+                    worker.prewarm(hwnd, home);
+                }
+            }
             Ok(())
         })
         .run(tauri::generate_context!())
