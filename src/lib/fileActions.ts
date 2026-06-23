@@ -119,18 +119,12 @@ export async function copyPathsOf(
     showToast("Path: nothing selected");
     return;
   }
-  const allLocal = targets.every((t) => t.location.source.kind === "local");
-  let paths: string[];
-  if (allLocal) {
-    const r = await commands.localAbsPaths(targets);
-    if (r.status !== "ok") {
-      showToast(`Copy path: ${formatErr(r.error)}`);
-      return;
-    }
-    paths = r.data;
-  } else {
-    paths = targets.map((t) => String(childLocation(t.location, t.name).path));
-  }
+  // 경로 텍스트는 forward-slash 로 통일 — D:/test/test1/test2. 백엔드 Path::join 은
+  // 드라이브를 *추가하지 못하고* 구분자만 섞어(D:/a\b) 오히려 망가뜨렸다. childLocation
+  // 은 location.path 의 드라이브를 그대로 보존하고, 마지막에 모든 `\`→`/` 로 정규화.
+  const paths = targets.map((t) =>
+    String(childLocation(t.location, t.name).path).replace(/\\/g, "/"),
+  );
   await copyToClipboard(paths.join("\n"), showToast, "Path");
 }
 

@@ -363,8 +363,9 @@ function App() {
             id: "copy-parent-path",
             label: "Copy parent path",
             onSelect: () => {
+              // forward-slash 통일(D:/test/test1) — copyPathsOf 와 동일.
               void navigator.clipboard
-                .writeText(String(par.path))
+                .writeText(String(par.path).replace(/\\/g, "/"))
                 .then(() => showToast("Copied path"))
                 .catch(() => showToast("Clipboard unavailable"));
             },
