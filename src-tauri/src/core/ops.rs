@@ -124,7 +124,7 @@ pub async fn delete_plan(
     }
     let mut total_size_bytes = 0u64;
     for t in &targets {
-        let p = t.location.path.join(&t.name);
+        let p = fs.join(&t.location.path, &t.name);
         if let Ok(m) = fs.metadata(&p).await {
             total_size_bytes += m.size.unwrap_or(0);
         }
@@ -197,7 +197,7 @@ pub async fn delete_execute(
                 if let Some(p) = progress.as_ref() {
                     p.emit(count_progress(idx as u32, total, Some(t.name.clone())));
                 }
-                let p = t.location.path.join(&t.name);
+                let p = fs.join(&t.location.path, &t.name);
                 match fs.trash(&p, &batch_id).await {
                     Ok(loc) => {
                         let trash_path = match &loc {
@@ -241,7 +241,7 @@ pub async fn delete_execute(
                 if let Some(p) = progress.as_ref() {
                     p.emit(count_progress(idx as u32, total, Some(t.name.clone())));
                 }
-                let p = t.location.path.join(&t.name);
+                let p = fs.join(&t.location.path, &t.name);
                 match fs.remove(&p).await {
                     Ok(()) => removed += 1,
                     Err(e) => {
@@ -287,15 +287,15 @@ pub async fn copy_plan(
     let mut conflicts = Vec::new();
     let mut total = 0u64;
     for it in &items {
-        let dst_path = dst.path.join(&it.name);
+        let dst_path = dst_fs.join(&dst.path, &it.name);
         if dst_fs.metadata(&dst_path).await.is_ok() {
             conflicts.push(Conflict {
                 name: it.name.clone(),
                 dst_path: dst_path.clone(),
-                will_become_backup: dst.path.join(backup_name(&it.name)),
+                will_become_backup: dst_fs.join(&dst.path, &backup_name(&it.name)),
             });
         }
-        let src_path = it.location.path.join(&it.name);
+        let src_path = src_fs.join(&it.location.path, &it.name);
         // 디렉토리는 하위 전체 크기(dir_size: 로컬=재귀 walk, SSH=du -sb)로 합산 →
         // 폴더 복사도 진행률 분모(총량)가 정확해져 "얼마 남았는지" 표시 가능. 실패 시 0.
         total += src_fs.dir_size(&src_path).await.unwrap_or(0);
@@ -413,8 +413,8 @@ async fn copy_execute_relay(
         }
         // 한 항목 처리 — 내부 ?/return 은 이 async 블록만 빠져나와 아래 outcome 으로 잡힘.
         let step: Result<bool, DuetError> = async {
-            let src_path = it.location.path.join(&it.name);
-            let mut dst_path = plan.dst.path.join(&it.name);
+            let src_path = src_fs.join(&it.location.path, &it.name);
+            let mut dst_path = dst_fs.join(&plan.dst.path, &it.name);
 
             // 충돌 시 policy 분기: Replace=백업후교체, Skip=건너뜀, KeepBoth=새이름.
             if dst_fs.metadata(&dst_path).await.is_ok() {
@@ -615,8 +615,8 @@ pub async fn move_execute(
         }
         // 한 항목 처리 — 내부 ?/return 은 이 async 블록만 빠져나와 아래 outcome 으로 잡힘.
         let step: Result<bool, DuetError> = async {
-            let src_path = it.location.path.join(&it.name);
-            let mut dst_path = plan.dst.path.join(&it.name);
+            let src_path = src_fs.join(&it.location.path, &it.name);
+            let mut dst_path = dst_fs.join(&plan.dst.path, &it.name);
 
             // 충돌 policy 분기 (copy 와 동일): Replace=백업, Skip=건너뜀, KeepBoth=새이름.
             if dst_fs.metadata(&dst_path).await.is_ok() {
@@ -1075,7 +1075,7 @@ async fn sync_execute_same_host(
     let mut created = Vec::new();
     for line in String::from_utf8_lossy(&dry_out.stdout).lines() {
         if let Some(rel) = parse_rsync_itemize_created_file(line) {
-            created.push(plan.dst.path.join(&rel));
+            created.push(crate::fs::posix_join(&plan.dst.path, &rel));
         }
     }
 
@@ -2562,8 +2562,8 @@ pub async fn rename(
     if new_name.contains('/') || new_name.is_empty() {
         return Err(DuetError::Io(format!("invalid name: {new_name}")));
     }
-    let from = target.location.path.join(&target.name);
-    let to = target.location.path.join(&new_name);
+    let from = fs.join(&target.location.path, &target.name);
+    let to = fs.join(&target.location.path, &new_name);
     if fs.metadata(&to).await.is_ok() {
         return Err(DuetError::Io(format!("target exists: {}", to.display())));
     }
@@ -2759,7 +2759,7 @@ async fn compute_batch_mapping(
         } else if dup_in_batch || overlaps_selected_old {
             true
         } else {
-            fs.metadata(&location.path.join(new)).await.is_ok() // 선택 밖 기존 파일
+            fs.metadata(&fs.join(&location.path, new)).await.is_ok() // 선택 밖 기존 파일
         };
         out.push((old.clone(), new.clone(), collision));
     }
@@ -2830,8 +2830,8 @@ pub async fn batch_rename_execute(
     let mut tos = Vec::new();
     for (old, new, _) in &mapping {
         if old != new {
-            froms.push(location.path.join(old));
-            tos.push(location.path.join(new));
+            froms.push(fs.join(&location.path, old));
+            tos.push(fs.join(&location.path, new));
         }
     }
     if froms.is_empty() {
@@ -2989,7 +2989,7 @@ async fn copy_execute_same_host(
             break;
         }
         let step: Result<(), DuetError> = async {
-            let dst_path = plan.dst.path.join(&it.name);
+            let dst_path = crate::fs::posix_join(&plan.dst.path, &it.name);
             if dst_fs.metadata(&dst_path).await.is_ok() {
                 let backup = pick_backup_path(&dst_fs, &plan.dst.path, &it.name).await?;
                 dst_fs.rename(&dst_path, &backup).await?;
@@ -3018,8 +3018,8 @@ async fn copy_execute_same_host(
             break;
         }
         let step: Result<(), DuetError> = async {
-            let src_path = it.location.path.join(&it.name);
-            let dst_path = plan.dst.path.join(&it.name);
+            let src_path = crate::fs::posix_join(&it.location.path, &it.name);
+            let dst_path = crate::fs::posix_join(&plan.dst.path, &it.name);
             let src_arg = shell_escape_path(&src_path)?;
 
             // same-host 충돌 정책(rsync/cp): Skip=기존 보존(--ignore-existing / cp -n),

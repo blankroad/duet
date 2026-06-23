@@ -15,11 +15,33 @@ use tokio_util::sync::CancellationToken;
 pub use local::LocalFs;
 pub use ssh::SshFs;
 
+/// POSIX 경로 결합 — `base` 끝 `/` 정리 후 `/name`. **이름은 opaque**(`\` 등 그대로 보존).
+/// 호스트 OS 무관(Windows 에서도 `/` 사용). SshFs::join 과 same-host(core) 가 공유한다.
+/// 원격(리눅스) 파일명에 `\` 가 들어가도 깨지지 않게 하는 핵심.
+pub fn posix_join(base: &Path, name: &str) -> std::path::PathBuf {
+    let b = base.to_string_lossy();
+    let b = b.trim_end_matches('/');
+    if b.is_empty() {
+        std::path::PathBuf::from(format!("/{name}"))
+    } else {
+        std::path::PathBuf::from(format!("{b}/{name}"))
+    }
+}
+
 #[async_trait]
 pub trait FileSystem: Send + Sync {
     /// 이 파일시스템의 식별자.
     /// 같은-호스트 판정에 사용 (`SourceId::Ssh.host_ip` 일치 시 same-host).
     fn source_id(&self) -> SourceId;
+
+    /// 디렉토리 경로 + 항목 이름 → 자식 경로. **이 fs 의 구분자 규칙**으로 결합한다.
+    ///
+    /// 기본(로컬): 호스트 OS 의 `Path::join`. SSH 는 항상 POSIX(`/`)로 결합하도록 override —
+    /// Windows 호스트에서 `PathBuf::join` 이 `\` 를 끼워넣거나, 이름에 들어간 `\`(리눅스 파일명
+    /// 은 `\` 허용)를 구분자로 오해해 원격 경로가 깨지는 걸 막는다. (§7: 구분자 분기는 여기서.)
+    fn join(&self, base: &Path, name: &str) -> std::path::PathBuf {
+        base.join(name)
+    }
 
     /// 디렉토리 항목 나열. 정렬은 호출자 책임.
     async fn list(&self, path: &Path) -> Result<Vec<Entry>, DuetError>;
@@ -174,8 +196,9 @@ async fn copy_tree(
             dst_fs.mkdir(dst).await?;
             let entries = src_fs.list(src).await?;
             for e in entries {
-                let child_src = src.join(&e.name);
-                let child_dst = dst.join(&e.name);
+                // 각 fs 의 구분자 규칙으로 결합(원격=POSIX, 이름의 `\` 보존).
+                let child_src = src_fs.join(src, &e.name);
+                let child_dst = dst_fs.join(dst, &e.name);
                 Box::pin(copy_tree(
                     src_fs, &child_src, dst_fs, &child_dst, resume, cancel, on_bytes, on_file,
                 ))
@@ -284,11 +307,38 @@ async fn finalize_part(
 
 #[cfg(test)]
 mod tests {
-    use super::{finalize_part, FileSystem};
+    use super::{finalize_part, posix_join, FileSystem};
     use crate::types::{DuetError, Entry, EntryKind, EntryMeta, SourceId, TrashLocation};
     use async_trait::async_trait;
     use std::path::Path;
     use std::pin::Pin;
+
+    #[test]
+    fn posix_join_preserves_name_backslash_and_uses_forward_slash() {
+        // 일반 결합 — 항상 `/`.
+        assert_eq!(
+            posix_join(Path::new("/home/u"), "doc.txt")
+                .to_str()
+                .unwrap(),
+            "/home/u/doc.txt"
+        );
+        // 끝 `/` 중복 방지.
+        assert_eq!(
+            posix_join(Path::new("/home/u/"), "doc.txt")
+                .to_str()
+                .unwrap(),
+            "/home/u/doc.txt"
+        );
+        // 루트.
+        assert_eq!(posix_join(Path::new("/"), "x").to_str().unwrap(), "/x");
+        // 핵심: 이름의 `\` 는 구분자가 아니라 파일명 일부 — 그대로 보존(리눅스 파일명).
+        assert_eq!(
+            posix_join(Path::new("/home/u"), "weird\\name.txt")
+                .to_str()
+                .unwrap(),
+            "/home/u/weird\\name.txt"
+        );
+    }
     use std::sync::Mutex;
 
     /// 호출 순서를 기록하는 mock — finalize_part 의 rename/remove 시퀀스 검증용.

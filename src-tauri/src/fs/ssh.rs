@@ -124,6 +124,11 @@ impl FileSystem for SshFs {
         self.conn.source_id()
     }
 
+    /// 원격은 항상 POSIX 결합 — Windows 호스트 `\` 끼임 / 파일명 `\` 오해 방지.
+    fn join(&self, base: &Path, name: &str) -> std::path::PathBuf {
+        crate::fs::posix_join(base, name)
+    }
+
     /// 원격 총 크기 — `du -sb`(서버측, 라운드트립 1회)로 stat 폭주 회피. du 실패 시
     /// 기본 재귀(list+metadata) 폴백 안 하고 0 반환(=총량 미상, 진행률은 indeterminate).
     async fn dir_size(&self, path: &Path) -> Result<u64, DuetError> {
@@ -434,7 +439,9 @@ fn remote_path_str(path: &Path) -> Result<String, DuetError> {
     let s = path
         .to_str()
         .ok_or_else(|| DuetError::Io("non-UTF8 path".into()))?;
-    Ok(s.replace('\\', "/"))
+    // 원격 경로는 항상 POSIX(`/`)로 결합돼 들어온다(SshFs::join / posix_join). 따라서 `\` 는
+    // 구분자가 아니라 *파일명의 일부*(리눅스 파일명은 `\` 허용) — 절대 치환하지 않는다.
+    Ok(s.to_string())
 }
 
 /// POSIX shell single-quote escape (exec 인자 안전화). NUL 은 거부.
@@ -567,30 +574,24 @@ mod tests {
     }
 
     #[test]
-    fn remote_path_str_normalizes_backslashes() {
+    fn remote_path_str_preserves_backslash_in_name() {
         use std::path::Path;
-        // §7 회귀: Windows 클라이언트의 PathBuf 가 끼워넣은 `\` → 원격 POSIX `/`.
-        // 수정 전엔 `/home/u/projects\app.zip` 가 그대로 SFTP 로 나가, 리눅스가
-        // home 에 `projects\app.zip` 라는 이름의 파일을 만들었음.
-        assert_eq!(
-            super::remote_path_str(Path::new("/home/u/projects\\app.zip")).unwrap(),
-            "/home/u/projects/app.zip"
-        );
-        // 휴지통 base 도 동일 — `/home/u\.duet-trash` → `/home/u/.duet-trash`.
-        assert_eq!(
-            super::remote_path_str(Path::new("/home/u\\.duet-trash\\b\\home\\u\\f.txt")).unwrap(),
-            "/home/u/.duet-trash/b/home/u/f.txt"
-        );
-        // 정상 POSIX 경로는 변형 없음.
+        // 정상 POSIX 경로는 그대로.
         assert_eq!(
             super::remote_path_str(Path::new("/home/u/a/b")).unwrap(),
             "/home/u/a/b"
         );
+        // 핵심 수정: 원격 경로는 항상 POSIX 로 결합돼 들어오므로(posix_join/SshFs::join),
+        // `\` 는 구분자가 아니라 *리눅스 파일명의 일부* — 절대 치환하지 않는다.
+        // (예전엔 무차별 `\`→`/` 로 이름이 깨졌다.)
+        assert_eq!(
+            super::remote_path_str(Path::new("/home/u/weird\\name.zip")).unwrap(),
+            "/home/u/weird\\name.zip"
+        );
     }
 
     #[test]
-    fn posix_shell_quote_escapes_and_normalizes() {
-        use std::path::Path;
+    fn posix_shell_quote_escapes() {
         assert_eq!(super::posix_shell_quote("/a/b").unwrap(), "'/a/b'");
         // 작은따옴표는 '\'' 로.
         assert_eq!(
@@ -599,9 +600,11 @@ mod tests {
         );
         // NUL 거부.
         assert!(super::posix_shell_quote("/a/\0b").is_err());
-        // remote_path_str + quote 조합 — Windows `\` 는 `/` 로 정규화되어 안전.
-        let p = super::remote_path_str(Path::new("/mnt/d\\f")).unwrap();
-        assert_eq!(super::posix_shell_quote(&p).unwrap(), "'/mnt/d/f'");
+        // 파일명의 `\` 는 그대로 quote (POSIX 파일명 문자라 escape 불필요).
+        assert_eq!(
+            super::posix_shell_quote("/home/u/weird\\name").unwrap(),
+            "'/home/u/weird\\name'"
+        );
     }
 
     #[test]
