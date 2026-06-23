@@ -404,24 +404,45 @@ impl FileSystem for SshFs {
             if name == "." || name == ".." {
                 continue;
             }
+            // readdir 은 lstat(링크 자체) — symlink 은 EntryKind::Symlink 로 보인다.
             let meta = ent.metadata();
-            let kind = if meta.is_dir() {
-                EntryKind::Dir
-            } else if meta.is_regular() {
-                EntryKind::File
-            } else if meta.is_symlink() {
-                EntryKind::Symlink
-            } else {
-                EntryKind::Other
+            let classify = |m: &russh_sftp::protocol::FileAttributes| {
+                if m.is_dir() {
+                    EntryKind::Dir
+                } else if m.is_regular() {
+                    EntryKind::File
+                } else if m.is_symlink() {
+                    EntryKind::Symlink
+                } else {
+                    EntryKind::Other
+                }
             };
+            let mut kind = classify(&meta);
+            let mut size = meta.size;
+            let mut mtime = meta.mtime;
+            let mut perms = meta.permissions;
+            // 로컬과 동일하게 **symlink 은 따라가** target 종류로 분류한다(디렉토리 링크가
+            // 네비 가능하도록 — Dir 로). target stat(=sftp.metadata, 링크 추적) 1회 추가.
+            // 깨진 링크(stat 실패)는 그대로 Symlink 로 둔다.
+            if matches!(kind, EntryKind::Symlink) {
+                let child = crate::fs::posix_join(path, &name);
+                if let Ok(child_str) = remote_path_str(&child) {
+                    if let Ok(tmeta) = sftp.metadata(child_str).await {
+                        kind = classify(&tmeta);
+                        size = tmeta.size;
+                        mtime = tmeta.mtime;
+                        perms = tmeta.permissions;
+                    }
+                }
+            }
             let hidden = name.starts_with('.');
             entries.push(Entry {
                 name,
                 kind,
-                size: meta.size,
+                size,
                 // mtime: u32 초 단위 → ms 단위 i64 (JS Date 호환)
-                modified_ms: meta.mtime.map(|t| i64::from(t) * 1000),
-                permissions: meta.permissions.map(|p| p & 0o777),
+                modified_ms: mtime.map(|t| i64::from(t) * 1000),
+                permissions: perms.map(|p| p & 0o777),
                 hidden,
             });
         }
