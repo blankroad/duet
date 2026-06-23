@@ -618,7 +618,7 @@ pub async fn open_terminal(location: Location) -> Result<(), DuetError> {
 
 // ── 셸 컨텍스트 메뉴(IContextMenu) — Explorer/TC 와 동일 ──────────
 
-/// 우클릭 대상의 실제 셸 메뉴를 호스팅하고 항목 트리를 반환(세션 유지). Windows 전용.
+/// 우클릭 대상의 실제 셸 메뉴를 핫 COM 워커로 빌드해 항목 트리 반환(token 으로 보관). Windows 전용.
 #[tauri::command]
 #[specta::specta]
 pub async fn shell_menu_open(
@@ -635,7 +635,9 @@ pub async fn shell_menu_open(
             .and_then(|w| w.hwnd().ok())
             .map(|h| h.0 as isize)
             .unwrap_or(0);
-        crate::platform::shell_menu::open(registry.inner().clone(), hwnd, path, scope).await
+        let token = registry.alloc_token();
+        let items = registry.worker().build(token, hwnd, path, scope).await;
+        Ok(crate::platform::ShellMenu { token, items })
     }
     #[cfg(not(windows))]
     {
@@ -648,7 +650,7 @@ pub async fn shell_menu_open(
     }
 }
 
-/// 셸 메뉴 세션에서 선택한 항목 실행(세션 스레드가 InvokeCommand).
+/// 셸 메뉴에서 선택한 항목 실행(핫 워커가 보관 중인 IContextMenu 로 InvokeCommand).
 #[tauri::command]
 #[specta::specta]
 pub async fn shell_menu_invoke(
@@ -656,18 +658,28 @@ pub async fn shell_menu_invoke(
     cmd_id: u32,
     registry: tauri::State<'_, std::sync::Arc<crate::platform::ShellMenuRegistry>>,
 ) -> Result<(), DuetError> {
-    registry.dispatch(token, crate::platform::ShellMenuAction::Invoke(cmd_id));
+    #[cfg(windows)]
+    registry.worker().invoke(token, cmd_id);
+    #[cfg(not(windows))]
+    {
+        let _ = (token, cmd_id, registry);
+    }
     Ok(())
 }
 
-/// 셸 메뉴 닫힘(선택 없음) — 세션 정리.
+/// 셸 메뉴 닫힘(선택 없음) — 보관 중인 메뉴 정리.
 #[tauri::command]
 #[specta::specta]
 pub async fn shell_menu_close(
     token: u64,
     registry: tauri::State<'_, std::sync::Arc<crate::platform::ShellMenuRegistry>>,
 ) -> Result<(), DuetError> {
-    registry.dispatch(token, crate::platform::ShellMenuAction::Cancel);
+    #[cfg(windows)]
+    registry.worker().close(token);
+    #[cfg(not(windows))]
+    {
+        let _ = (token, registry);
+    }
     Ok(())
 }
 

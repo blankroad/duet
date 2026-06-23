@@ -1,122 +1,168 @@
 //! Tier 2: 실제 셸 컨텍스트 메뉴(IContextMenu) 호스팅 — Explorer/TC 와 동일하게 셸에
 //! 위임해 이름·필터·COM 핸들러(7-Zip 등)·서브메뉴를 정확히 가져온다.
 //!
-//! 흐름: COM STA 전용 스레드에서 IContextMenu + HMENU 를 만들고, HMENU 를 재귀
-//! 열거해 프론트로 보낸 뒤, 그 스레드를 **살려둔 채** 프론트 선택을 기다렸다가 같은
-//! 스레드에서 InvokeCommand 한다(COM 객체는 만든 스레드에 affinity 가 있음).
+//! **핫 스레드**: COM STA 전용 스레드를 *하나만* 앱 수명 내내 살려둔다(CoUninitialize 안
+//! 함). 그래야 셸 확장 핸들러가 메모리에 따뜻하게 남아, 탐색기처럼 둘째 우클릭부터 빠르다.
+//! (매 클릭마다 스레드+COM 을 차갑게 재로딩하던 게 느림의 근본 원인이었다.)
 //!
-//! 모든 COM 호출은 unsafe — platform/ 한정(§8). 새 의존성 `windows`(§6 승인).
+//! 흐름: 명령은 Build/Invoke/Close 요청을 채널로 워커에 보낸다. 워커가 IContextMenu+HMENU
+//! 를 만들어 token 으로 보관(COM 객체는 이 스레드에 affinity), Build 응답으로 enumerate 한
+//! items 를 돌려준다. 프론트가 항목 클릭 시 Invoke(token, id), 메뉴 닫힘 시 Close(token).
+//!
+//! 모든 COM 호출은 unsafe — platform/ 한정(§8). 의존성 `windows`(§6 승인).
 
+use std::collections::{HashMap, VecDeque};
 use std::os::windows::ffi::OsStrExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
-use std::sync::Arc;
-use std::time::Duration;
 
 use windows::core::{PCSTR, PCWSTR};
 use windows::Win32::Foundation::HWND;
-use windows::Win32::System::Com::{
-    CoInitializeEx, CoTaskMemFree, CoUninitialize, COINIT_APARTMENTTHREADED,
-};
+use windows::Win32::System::Com::{CoInitializeEx, CoTaskMemFree, COINIT_APARTMENTTHREADED};
 use windows::Win32::UI::Shell::Common::ITEMIDLIST;
 use windows::Win32::UI::Shell::{
     IContextMenu, IShellFolder, SHBindToParent, SHParseDisplayName, CMF_NORMAL, CMINVOKECOMMANDINFO,
 };
+use windows::Win32::UI::WindowsAndMessaging::HMENU;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreatePopupMenu, DestroyMenu, GetMenuItemCount, GetMenuItemInfoW, MENUITEMINFOW, MFS_DISABLED,
     MFS_GRAYED, MFT_SEPARATOR, MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING, MIIM_SUBMENU,
     SW_SHOWNORMAL,
 };
 
-use crate::platform::{ShellMenu, ShellMenuAction, ShellMenuItem, ShellMenuRegistry, ShellScope};
-use crate::types::DuetError;
-
-/// 메뉴 라벨에서 `&` 가속기 제거 ("E&dit" → "Edit", "&&" → "&").
-fn strip_accelerator(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '&' {
-            if chars.peek() == Some(&'&') {
-                out.push('&');
-                chars.next();
-            }
-        } else {
-            out.push(c);
-        }
-    }
-    out
-}
+use crate::platform::{ShellMenuItem, ShellScope};
 
 const ID_FIRST: u32 = 1;
 const ID_LAST: u32 = 0x7FFF;
 const MAX_DEPTH: u32 = 6;
+/// 보관 중인 열린 메뉴 상한 — 정상엔 1개지만, Close 누락 대비 누수 방지(초과 시 오래된 것 파기).
+const MAX_OPEN: usize = 8;
 
-/// 셸 메뉴 세션 시작 — STA 스레드 spawn, HMENU 열거 결과를 받아 반환. 세션은 token 으로
-/// 살아 있으며 invoke/close 를 기다린다.
-pub async fn open(
-    registry: Arc<ShellMenuRegistry>,
-    hwnd: isize,
-    path: std::path::PathBuf,
-    scope: ShellScope,
-) -> Result<ShellMenu, DuetError> {
-    let token = registry.alloc();
-    let (action_tx, action_rx) = mpsc::channel::<ShellMenuAction>();
-    registry.register(token, action_tx);
-    let (items_tx, items_rx) = tokio::sync::oneshot::channel::<Vec<ShellMenuItem>>();
-
-    let reg2 = registry.clone();
-    std::thread::spawn(move || {
-        run_session(reg2, token, hwnd, &path, scope, items_tx, action_rx);
-    });
-
-    let items = items_rx
-        .await
-        .map_err(|_| DuetError::Io("shell menu: session aborted before items".into()))?;
-    Ok(ShellMenu { token, items })
+/// 워커로 보내는 요청.
+enum Req {
+    Build {
+        token: u64,
+        hwnd: isize,
+        path: PathBuf,
+        scope: ShellScope,
+        reply: tokio::sync::oneshot::Sender<Vec<ShellMenuItem>>,
+    },
+    Invoke {
+        token: u64,
+        cmd_id: u32,
+    },
+    Close {
+        token: u64,
+    },
 }
 
-/// STA 세션 스레드 — COM init → 메뉴 구성 → items 송신 → 선택 대기 → invoke → 정리.
-fn run_session(
-    registry: Arc<ShellMenuRegistry>,
-    token: u64,
-    hwnd: isize,
-    path: &Path,
-    scope: ShellScope,
-    items_tx: tokio::sync::oneshot::Sender<Vec<ShellMenuItem>>,
-    action_rx: mpsc::Receiver<ShellMenuAction>,
-) {
-    // SAFETY: 이 스레드용 STA COM 초기화. 짝으로 CoUninitialize.
+/// 핫 COM 스레드 핸들 — 명령 레이어가 Build/Invoke/Close 를 보낸다. 첫 사용 시 lazy 생성.
+pub struct Worker {
+    tx: mpsc::Sender<Req>,
+}
+
+impl Worker {
+    /// COM STA 워커 스레드 spawn (앱 수명 내내 유지). 한 번만 호출(레지스트리 OnceLock).
+    pub fn start() -> Worker {
+        let (tx, rx) = mpsc::channel::<Req>();
+        std::thread::spawn(move || worker_loop(rx));
+        Worker { tx }
+    }
+
+    /// token 으로 메뉴 빌드 요청 후 enumerate 된 항목을 받는다(채널 끊기면 빈 벡터).
+    pub async fn build(
+        &self,
+        token: u64,
+        hwnd: isize,
+        path: PathBuf,
+        scope: ShellScope,
+    ) -> Vec<ShellMenuItem> {
+        let (reply, rx) = tokio::sync::oneshot::channel();
+        if self
+            .tx
+            .send(Req::Build {
+                token,
+                hwnd,
+                path,
+                scope,
+                reply,
+            })
+            .is_err()
+        {
+            return Vec::new();
+        }
+        rx.await.unwrap_or_default()
+    }
+
+    pub fn invoke(&self, token: u64, cmd_id: u32) {
+        let _ = self.tx.send(Req::Invoke { token, cmd_id });
+    }
+
+    pub fn close(&self, token: u64) {
+        let _ = self.tx.send(Req::Close { token });
+    }
+}
+
+/// 워커 루프 — COM 한 번 초기화(끝까지 유지), 요청을 직렬 처리. IContextMenu 는 이 스레드에만.
+fn worker_loop(rx: mpsc::Receiver<Req>) {
+    // SAFETY: 이 스레드용 STA COM 초기화. CoUninitialize 안 함(핸들러 warm 유지가 목적).
     let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
 
-    // SAFETY: 셸 객체 생성/열거/실행은 전부 이 스레드에서만.
-    let built = unsafe { build_menu(HWND(hwnd as *mut _), path, scope) };
-    match built {
-        Ok((cm, hmenu)) => {
-            let items = unsafe { enumerate(hmenu, 0) };
-            let _ = items_tx.send(items);
-            // 프론트 선택 대기(닫힘/타임아웃 안전장치 120s).
-            if let Ok(ShellMenuAction::Invoke(cmd_id)) =
-                action_rx.recv_timeout(Duration::from_secs(120))
-            {
-                if (ID_FIRST..=ID_LAST).contains(&cmd_id) {
-                    // SAFETY: cm 는 이 스레드에서 만든 살아있는 IContextMenu.
-                    let _ = unsafe { invoke(&cm, HWND(hwnd as *mut _), cmd_id) };
-                }
-            }
-            // SAFETY: 우리가 만든 HMENU 해제. cm 은 스코프 종료 시 Release.
+    // token → (IContextMenu, HMENU, owner hwnd). cm 은 invoke 까지 살아 있어야 함.
+    let mut open: HashMap<u64, (IContextMenu, HMENU, isize)> = HashMap::new();
+    let mut order: VecDeque<u64> = VecDeque::new();
+
+    let destroy = |open: &mut HashMap<u64, (IContextMenu, HMENU, isize)>, token: u64| {
+        if let Some((_cm, hmenu, _)) = open.remove(&token) {
+            // SAFETY: 우리가 만든 HMENU 파기. cm 은 drop 시 Release(이 스레드).
             unsafe {
                 let _ = DestroyMenu(hmenu);
             }
         }
-        Err(_) => {
-            let _ = items_tx.send(Vec::new());
+    };
+
+    while let Ok(req) = rx.recv() {
+        match req {
+            Req::Build {
+                token,
+                hwnd,
+                path,
+                scope,
+                reply,
+            } => {
+                // SAFETY: 셸 객체 생성/열거는 이 스레드에서만.
+                let items = match unsafe { build_menu(HWND(hwnd as *mut _), &path, scope) } {
+                    Ok((cm, hmenu)) => {
+                        let items = unsafe { enumerate(hmenu, 0) };
+                        open.insert(token, (cm, hmenu, hwnd));
+                        order.push_back(token);
+                        while order.len() > MAX_OPEN {
+                            if let Some(old) = order.pop_front() {
+                                destroy(&mut open, old);
+                            }
+                        }
+                        items
+                    }
+                    Err(_) => Vec::new(),
+                };
+                let _ = reply.send(items);
+            }
+            Req::Invoke { token, cmd_id } => {
+                if let Some((cm, _, hwnd)) = open.get(&token) {
+                    if (ID_FIRST..=ID_LAST).contains(&cmd_id) {
+                        // SAFETY: cm 은 이 스레드에서 만든 살아있는 IContextMenu.
+                        let _ = unsafe { invoke(cm, HWND(*hwnd as *mut _), cmd_id) };
+                    }
+                }
+                order.retain(|t| *t != token);
+                destroy(&mut open, token);
+            }
+            Req::Close { token } => {
+                order.retain(|t| *t != token);
+                destroy(&mut open, token);
+            }
         }
     }
-
-    registry.remove(token);
-    // SAFETY: 위 CoInitializeEx 와 짝.
-    unsafe { CoUninitialize() };
 }
 
 /// 경로 → IContextMenu + 채워진 HMENU. (모든 호출 unsafe COM)
@@ -124,7 +170,7 @@ unsafe fn build_menu(
     hwnd: HWND,
     path: &Path,
     _scope: ShellScope,
-) -> windows::core::Result<(IContextMenu, HMENU_)> {
+) -> windows::core::Result<(IContextMenu, HMENU)> {
     // 경로 → 절대 PIDL.
     let wide: Vec<u16> = path
         .as_os_str()
@@ -151,7 +197,7 @@ unsafe fn build_menu(
 }
 
 /// HMENU 를 재귀 열거 → ShellMenuItem 트리. (unsafe Win32)
-unsafe fn enumerate(hmenu: HMENU_, depth: u32) -> Vec<ShellMenuItem> {
+unsafe fn enumerate(hmenu: HMENU, depth: u32) -> Vec<ShellMenuItem> {
     if depth > MAX_DEPTH {
         return Vec::new();
     }
@@ -217,5 +263,19 @@ unsafe fn invoke(cm: &IContextMenu, hwnd: HWND, cmd_id: u32) -> windows::core::R
     cm.InvokeCommand(&info)
 }
 
-// HMENU 별칭 — windows 0.58 의 HMENU 타입.
-use windows::Win32::UI::WindowsAndMessaging::HMENU as HMENU_;
+/// 메뉴 라벨에서 `&` 가속기 제거 ("E&dit" → "Edit", "&&" → "&").
+fn strip_accelerator(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '&' {
+            if chars.peek() == Some(&'&') {
+                out.push('&');
+                chars.next();
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
