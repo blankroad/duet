@@ -11,6 +11,7 @@ import {
 } from "@/stores/panes";
 import { setHoverEntry, clearHover } from "@/stores/previewHover";
 import { useUI } from "@/stores/ui";
+import { useContextMenu } from "@/stores/contextMenu";
 import { useMarquee } from "@/hooks/useMarquee";
 import { useEntryDrag } from "@/hooks/useEntryDrag";
 import { useDragState } from "@/stores/dragState";
@@ -92,9 +93,24 @@ export function EntryList({
   // 이 패널의 빈 영역 위로 드래그 중 (폴더 위가 아닐 때) — 패널 하이라이트
   const paneHighlight = dragActive && overThisPane && overFolder === null;
 
+  // 컬럼 헤더 우클릭 → 컬럼 옵션(확장자 분리 토글) — 탐색기/엑셀 관례.
+  const onHeaderContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    useContextMenu.getState().openAt(e.clientX, e.clientY, [
+      {
+        id: "split-ext",
+        label: splitExt ? "Hide extension column" : "Show extension column",
+        onSelect: () => useUI.getState().toggleSplitExt(),
+      },
+    ]);
+  };
+
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      <div className="flex h-6 shrink-0 items-center border-b border-border bg-subtle text-meta text-fg-muted">
+      <div
+        className="flex h-6 shrink-0 items-center border-b border-border bg-subtle text-meta text-fg-muted"
+        onContextMenu={onHeaderContextMenu}
+      >
         <ColumnHeader
           label="Name"
           col="name"
