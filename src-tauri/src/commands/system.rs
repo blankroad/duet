@@ -235,11 +235,11 @@ pub async fn open_path(
         SourceId::Local => location.path.clone(),
         SourceId::Ssh { .. } => download_to_temp(&location, pool.inner()).await?,
     };
-    // opener::open 은 OS 런처 프로세스를 띄우는 blocking 호출 — 런타임 블록 회피.
-    tokio::task::spawn_blocking(move || opener::open(&target))
+    // 작업 디렉토리를 파일의 부모로 설정해 연다(탐색기 동작 — .bat/스크립트가 제 폴더에서
+    // 실행). OS 런처는 blocking 이라 spawn_blocking.
+    tokio::task::spawn_blocking(move || crate::platform::open_default(&target))
         .await
         .map_err(|e| DuetError::Io(format!("open task join: {e}")))?
-        .map_err(|e| DuetError::Io(format!("open failed: {e}")))
 }
 
 /// 원격 파일을 로컬 temp 로 받아 OS 기본 에디터로 열고, temp 변경을 감지해 원격으로

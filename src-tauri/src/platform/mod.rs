@@ -57,6 +57,63 @@ impl ShellMenuRegistry {
     }
 }
 
+/// 파일을 OS 기본 앱으로 연다 — **작업 디렉토리를 파일의 부모 폴더로** 설정(탐색기와 동일).
+///
+/// 이게 중요: `.bat`/스크립트/exe 는 CWD 가 자기 폴더여야 상대경로가 맞는다. `opener::open`
+/// 은 Windows 에서 lpDirectory=NULL 이라 duet 프로세스 CWD 를 물려받아(=엉뚱한 폴더에서 실행)
+/// 버그였다. Windows 는 `ShellExecuteW(.., lpDirectory=parent)` 로 직접 호출.
+/// macOS/Linux 는 `opener::open`(문서 열기엔 CWD 무관).
+pub fn open_default(path: &Path) -> Result<(), DuetError> {
+    #[cfg(windows)]
+    {
+        win_shell_open(path)
+    }
+    #[cfg(not(windows))]
+    {
+        opener::open(path).map_err(|e| DuetError::Io(format!("open failed: {e}")))
+    }
+}
+
+#[cfg(windows)]
+fn win_shell_open(path: &Path) -> Result<(), DuetError> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    let to_wide =
+        |s: &std::ffi::OsStr| -> Vec<u16> { s.encode_wide().chain(std::iter::once(0)).collect() };
+    let file = to_wide(path.as_os_str());
+    // 작업 디렉토리 = 파일의 부모 폴더(탐색기 동작). 부모 없으면 NULL(=duet CWD).
+    let dir = path.parent().map(|d| to_wide(d.as_os_str()));
+    let dir_ptr = dir
+        .as_ref()
+        .map(|v| PCWSTR(v.as_ptr()))
+        .unwrap_or(PCWSTR::null());
+
+    // SAFETY: 모두 널종단 UTF-16 포인터. lpVerb=NULL(기본 동작=더블클릭), lpDirectory=부모.
+    let h = unsafe {
+        ShellExecuteW(
+            HWND::default(),
+            PCWSTR::null(),
+            PCWSTR(file.as_ptr()),
+            PCWSTR::null(),
+            dir_ptr,
+            SW_SHOWNORMAL,
+        )
+    };
+    // ShellExecute 는 성공 시 HINSTANCE > 32 반환, <= 32 이면 에러 코드.
+    if (h.0 as usize) <= 32 {
+        Err(DuetError::Io(format!(
+            "ShellExecute failed (code {})",
+            h.0 as usize
+        )))
+    } else {
+        Ok(())
+    }
+}
+
 /// 우클릭 대상 종류 — 스캔할 레지스트리 shell 루트를 결정.
 #[derive(Debug, Clone, Copy, Deserialize, Type)]
 #[serde(rename_all = "lowercase")]
