@@ -196,38 +196,58 @@ impl FileSystem for LocalFs {
                 Ok(s) => s,
                 Err(_) => continue, // 비-UTF8 이름은 스킵
             };
-            let metadata = match entry.metadata().await {
+            // lstat(링크 추적 X) — 심볼릭 링크는 깨졌어도 항상 목록에 보이게(Dolphin 처럼).
+            // entry.metadata() 는 링크를 따라가 target 이 못 닿으면 실패→skip 됐다(=안 보임).
+            let lmeta = match tokio::fs::symlink_metadata(entry.path()).await {
                 Ok(m) => m,
-                Err(_) => continue, // 권한 없는 항목은 스킵 (전체 list는 진행)
+                Err(_) => continue, // 정말 접근 불가한 항목만 스킵
             };
-            let kind = if metadata.is_dir() {
-                EntryKind::Dir
-            } else if metadata.is_file() {
-                EntryKind::File
-            } else if metadata.is_symlink() {
-                EntryKind::Symlink
-            } else {
-                EntryKind::Other
+            let classify = |m: &std::fs::Metadata| {
+                if m.is_dir() {
+                    EntryKind::Dir
+                } else if m.is_file() {
+                    EntryKind::File
+                } else if m.file_type().is_symlink() {
+                    EntryKind::Symlink
+                } else {
+                    EntryKind::Other
+                }
             };
-            let size = if metadata.is_file() {
-                Some(metadata.len())
-            } else {
-                None
+            let perms_of = |m: &std::fs::Metadata| -> Option<u32> {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    Some(m.permissions().mode() & 0o777)
+                }
+                #[cfg(not(unix))]
+                {
+                    let _ = m;
+                    None
+                }
             };
-            let modified_ms = metadata
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_millis() as i64);
-            #[cfg(unix)]
-            let permissions = {
-                use std::os::unix::fs::PermissionsExt;
-                Some(metadata.permissions().mode() & 0o777)
+            let size_of = |m: &std::fs::Metadata| if m.is_file() { Some(m.len()) } else { None };
+            let mtime_of = |m: &std::fs::Metadata| {
+                m.modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_millis() as i64)
             };
-            #[cfg(not(unix))]
-            let permissions = None;
 
-            let hidden = name.starts_with('.') || is_os_hidden(&metadata);
+            let mut kind = classify(&lmeta);
+            let mut size = size_of(&lmeta);
+            let mut modified_ms = mtime_of(&lmeta);
+            let mut permissions = perms_of(&lmeta);
+            let hidden = name.starts_with('.') || is_os_hidden(&lmeta);
+            // 심볼릭 링크는 target 을 따라가 종류 결정(폴더 링크 → Dir → 진입 가능).
+            // 깨진 링크(target stat 실패)는 그대로 Symlink 로 둔다.
+            if matches!(kind, EntryKind::Symlink) {
+                if let Ok(t) = tokio::fs::metadata(entry.path()).await {
+                    kind = classify(&t);
+                    size = size_of(&t);
+                    modified_ms = mtime_of(&t);
+                    permissions = perms_of(&t);
+                }
+            }
 
             entries.push(Entry {
                 name,
@@ -353,6 +373,31 @@ mod tests {
     use std::path::PathBuf;
     use tempfile::TempDir;
     use tokio::fs;
+
+    /// 심볼릭 링크: 폴더 링크는 Dir(진입 가능), 깨진 링크도 목록에 보임(Symlink).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn list_follows_symlink_to_dir_and_keeps_broken() {
+        use std::os::unix::fs::symlink;
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir(root.join("real_dir")).await.unwrap();
+        fs::write(root.join("real_file"), b"x").await.unwrap();
+        symlink(root.join("real_dir"), root.join("link_to_dir")).unwrap();
+        symlink(root.join("real_file"), root.join("link_to_file")).unwrap();
+        symlink(root.join("does_not_exist"), root.join("broken_link")).unwrap();
+
+        let local = LocalFs::new();
+        let entries = local.list(root).await.unwrap();
+        let by = |n: &str| entries.iter().find(|e| e.name == n).cloned();
+
+        // 폴더 링크 → Dir (진입 가능하게 — Dolphin 처럼 폴더로).
+        assert_eq!(by("link_to_dir").unwrap().kind, EntryKind::Dir);
+        // 파일 링크 → File.
+        assert_eq!(by("link_to_file").unwrap().kind, EntryKind::File);
+        // 깨진 링크 → 목록에 *보이고* Symlink 로 유지(예전엔 skip 돼 안 보였음).
+        assert_eq!(by("broken_link").unwrap().kind, EntryKind::Symlink);
+    }
 
     #[test]
     fn paths_eq_absorbs_separator_and_case() {
