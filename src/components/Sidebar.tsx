@@ -68,6 +68,17 @@ import { useReorderable } from "@/hooks/useReorderable";
 import { ShelfSection } from "@/components/ShelfSection";
 import { useHostNicknames, setHostNickname } from "@/stores/hostNicknames";
 import { aliasLabel } from "@/lib/hostLabel";
+import { TagBar } from "@/components/TagBar";
+import {
+  useTags,
+  tagsFor,
+  matchesTagFilter,
+  editTagsPrompt,
+  hostTagKey,
+  bmTagKey,
+  favTagKey,
+} from "@/stores/tags";
+import { useTagFilter } from "@/stores/tagFilter";
 import { commands } from "@/types/bindings";
 import { formatSize } from "@/lib/format";
 import type {
@@ -130,6 +141,7 @@ export function Sidebar({
     <aside className="flex w-48 min-h-0 flex-col overflow-y-auto border-r border-border bg-subtle text-base">
       <TasksSection />
       <LocalAnchor onOpenLocation={onOpenLocation} />
+      <TagBar />
       <PlacesSection
         onOpenLocation={onOpenLocation}
         onTrashActivate={onTrashActivate}
@@ -698,7 +710,12 @@ function SavedHostsBody({
   onActivate: (host: SavedHost) => void;
   hideAliases: Set<string>;
 }) {
-  const allHosts = useSavedHosts((s) => s.hosts);
+  const rawHosts = useSavedHosts((s) => s.hosts);
+  const byKey = useTags((s) => s.byKey);
+  const active = useTagFilter((s) => s.active);
+  const allHosts = rawHosts.filter((h) =>
+    matchesTagFilter(tagsFor(byKey, hostTagKey(h.alias)), active),
+  );
   const hosts = allHosts.filter((h) => !hideAliases.has(h.alias));
   const groups = useHostGroups((s) => s.groups);
   const byAlias = new Map(hosts.map((h) => [h.alias, h]));
@@ -886,6 +903,7 @@ function SavedHostItem({
   reorder?: { dragging: boolean; onMouseDown: (e: React.MouseEvent) => void };
 }) {
   const nickname = useHostNicknames((s) => s.byAlias)[host.alias];
+  const tags = tagsFor(useTags((s) => s.byKey), hostTagKey(host.alias));
   const display = nickname ?? host.alias;
   const menu: MenuEntry[] = [
     {
@@ -903,6 +921,11 @@ function SavedHostItem({
         );
         if (next !== null) void setHostNickname(host.alias, next);
       },
+    },
+    {
+      id: "tags",
+      label: "Edit tags…",
+      onSelect: () => editTagsPrompt(hostTagKey(host.alias), tags),
     },
     moveToGroupEntry(host, currentGroupId, groups),
     { kind: "separator" },
@@ -931,6 +954,7 @@ function SavedHostItem({
           {host.alias}
         </span>
       )}
+      <InlineTags tags={tags} />
       <DeleteBtn
         label={`Remove saved host ${host.alias}`}
         onClick={() => void removeSavedHost(host.alias)}
@@ -954,10 +978,19 @@ function BookmarksSection({
   onAdd: () => void;
   onOpenHostPath: (hostAlias: string, path: string, pane: PaneId) => void;
 }) {
-  const items = useBookmarks((s) => s.items);
-  const favItems = useHostFavorites((s) => s.items);
+  const allItems = useBookmarks((s) => s.items);
+  const allFav = useHostFavorites((s) => s.items);
+  const byKey = useTags((s) => s.byKey);
+  const tagFilter = useTagFilter((s) => s.active);
   const activeAliases = new Set(
     Object.values(useConnections((s) => s.active)).map((c) => c.alias),
+  );
+  // 태그 필터 — 로컬 북마크는 bm:<id>, 원격 즐겨찾기는 fav:<id> 키.
+  const items = allItems.filter((b) =>
+    matchesTagFilter(tagsFor(byKey, bmTagKey(b.id)), tagFilter),
+  );
+  const favItems = allFav.filter((f) =>
+    matchesTagFilter(tagsFor(byKey, favTagKey(f.id)), tagFilter),
   );
   const { dragKey, insertBeforeKey, onItemMouseDown } = useReorderable({
     group: "bookmarks",
@@ -967,6 +1000,8 @@ function BookmarksSection({
   const favGroups: Record<string, HostFavorite[]> = {};
   for (const f of favItems) (favGroups[f.host_alias] ??= []).push(f);
   const favKeys = Object.keys(favGroups).sort();
+  // 전체 개수(배지·빈상태 판단)는 필터 무관, 표시는 필터 적용분.
+  const totalAll = allItems.length + allFav.length;
   const total = items.length + favItems.length;
 
   return (
@@ -974,11 +1009,13 @@ function BookmarksSection({
       sectionKey="bookmarks"
       title="Bookmarks"
       icon={<Star size={14} />}
-      count={total}
+      count={totalAll}
       action={<AddBtn label="Bookmark active tab" onClick={onAdd} />}
     >
-      {total === 0 ? (
+      {totalAll === 0 ? (
         <Item label="(none — + to bookmark active tab)" muted />
+      ) : total === 0 ? (
+        <Item label="(no items match the tag filter)" muted />
       ) : (
         <>
           {items.length > 0 && <SubLabel>Local</SubLabel>}
@@ -1022,6 +1059,7 @@ function BookmarkItem({
   onMouseDown: (e: React.MouseEvent) => void;
 }) {
   const sshPrefix = bookmark.location.source.kind === "ssh" ? "ssh:" : "";
+  const tags = tagsFor(useTags((s) => s.byKey), bmTagKey(bookmark.id));
   const menu: MenuEntry[] = [
     {
       id: "open",
@@ -1037,6 +1075,11 @@ function BookmarkItem({
       id: "copy-path",
       label: "Copy path",
       onSelect: () => copyText(String(bookmark.location.path)),
+    },
+    {
+      id: "tags",
+      label: "Edit tags…",
+      onSelect: () => editTagsPrompt(bmTagKey(bookmark.id), tags),
     },
     { kind: "separator" },
     {
@@ -1058,6 +1101,7 @@ function BookmarkItem({
     >
       <Star size={11} className="shrink-0 text-fg-muted" />
       <span className="truncate">{bookmark.name}</span>
+      <InlineTags tags={tags} />
       <DeleteBtn
         label="Remove bookmark"
         onClick={() => void removeBookmark(bookmark.id)}
@@ -1138,6 +1182,7 @@ function FavoriteItem({
   onMouseDown: (e: React.MouseEvent) => void;
 }) {
   const path = String(fav.path);
+  const tags = tagsFor(useTags((s) => s.byKey), favTagKey(fav.id));
   const menu: MenuEntry[] = [
     {
       id: "open",
@@ -1151,6 +1196,11 @@ function FavoriteItem({
       onSelect: () => onOpen(fav.host_alias, path, otherPane()),
     },
     { id: "copy-path", label: "Copy path", onSelect: () => copyText(path) },
+    {
+      id: "tags",
+      label: "Edit tags…",
+      onSelect: () => editTagsPrompt(favTagKey(fav.id), tags),
+    },
     { kind: "separator" },
     {
       id: "remove",
@@ -1171,6 +1221,7 @@ function FavoriteItem({
     >
       <Heart size={11} className="shrink-0 text-fg-muted" />
       <span className="truncate">{fav.name}</span>
+      <InlineTags tags={tags} />
       <DeleteBtn
         label="Remove favorite"
         onClick={() => void removeHostFavorite(fav.id)}
@@ -1194,20 +1245,26 @@ function HostsSection({
   onAdHocOpen: () => void;
   onSavedActivate: (host: SavedHost) => void;
 }) {
-  const hosts = useConnections((s) => s.hosts);
+  const allHosts = useConnections((s) => s.hosts);
   const stateByAlias = useConnections((s) => s.stateByAlias)();
   const savedCount = useSavedHosts((s) => s.hosts.length);
-  const configAliases = new Set(hosts.map((h) => h.alias));
+  const byKey = useTags((s) => s.byKey);
+  const active = useTagFilter((s) => s.active);
+  const configAliases = new Set(allHosts.map((h) => h.alias));
+  // 태그 필터 — config 호스트는 host:<alias> 키.
+  const hosts = allHosts.filter((h) =>
+    matchesTagFilter(tagsFor(byKey, hostTagKey(h.alias)), active),
+  );
 
   return (
     <Section
       sectionKey="hosts"
       title="Hosts"
       icon={<Server size={14} />}
-      count={hosts.length + savedCount}
+      count={allHosts.length + savedCount}
       action={<AddBtn label="Connect to host…" onClick={onAdHocOpen} />}
     >
-      {hosts.length === 0 && savedCount === 0 ? (
+      {allHosts.length === 0 && savedCount === 0 ? (
         <Item label="(no hosts — Connect to host…)" muted />
       ) : (
         <>
@@ -1240,6 +1297,8 @@ function HostItem({
   onActivate: () => void;
 }) {
   const nicks = useHostNicknames((s) => s.byAlias);
+  const byKey = useTags((s) => s.byKey);
+  const tags = tagsFor(byKey, hostTagKey(host.alias));
   const nickname = nicks[host.alias];
   const display = nickname ?? host.alias;
 
@@ -1256,6 +1315,11 @@ function HostItem({
   const menu: MenuEntry[] = [
     { id: "connect", label: "Connect…", onSelect: onActivate },
     { id: "rename", label: "Set display name…", onSelect: promptName },
+    {
+      id: "tags",
+      label: "Edit tags…",
+      onSelect: () => editTagsPrompt(hostTagKey(host.alias), tags),
+    },
   ];
   if (nickname) {
     menu.push({
@@ -1278,6 +1342,7 @@ function HostItem({
           {host.alias}
         </span>
       )}
+      <InlineTags tags={tags} />
       {host.has_proxy_jump && (
         <Network
           size={11}
@@ -1363,6 +1428,19 @@ function DeleteBtn({ label, onClick }: { label: string; onClick: () => void }) {
     >
       <X size={11} />
     </button>
+  );
+}
+
+/** 행에 붙는 태그 표시(작은 회색 #tag). 없으면 렌더 안 함. */
+function InlineTags({ tags }: { tags: string[] }) {
+  if (tags.length === 0) return null;
+  return (
+    <span
+      className="shrink-0 truncate text-meta text-fg-muted/60"
+      title={tags.map((t) => `#${t}`).join(" ")}
+    >
+      {tags.map((t) => `#${t}`).join(" ")}
+    </span>
   );
 }
 

@@ -71,6 +71,8 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::host_nicknames::host_nickname_list,
             commands::host_nicknames::host_nickname_set,
             commands::host_nicknames::host_nickname_remove,
+            commands::tags::tag_list,
+            commands::tags::tag_set,
             commands::saved_hosts::saved_hosts_list,
             commands::saved_hosts::saved_hosts_upsert,
             commands::saved_hosts::saved_hosts_remove,
@@ -247,6 +249,9 @@ pub fn run() {
         services::host_nicknames::HostNicknamesStore::load_default().await
     })
     .expect("host nicknames load");
+    let tags =
+        tauri::async_runtime::block_on(async { services::tags::TagsStore::load_default().await })
+            .expect("tags load");
 
     tauri::Builder::default()
         // duet-preview:// 스트리밍 프로토콜 (Range 지원, 로컬+SSH) — 미디어/PDF 미리보기.
@@ -272,6 +277,7 @@ pub fn run() {
         .manage(keymap)
         .manage(frecency)
         .manage(host_nicknames)
+        .manage(tags)
         .manage(platform::ShellMenuRegistry::new())
         .invoke_handler(specta_builder.invoke_handler())
         .setup(move |app| {

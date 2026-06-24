@@ -15,6 +15,7 @@ pub mod search;
 pub mod secret_vault;
 pub mod settings;
 pub mod system;
+pub mod tags;
 pub mod tasks;
 pub mod undo;
 pub mod user_aliases;

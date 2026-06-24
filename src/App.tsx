@@ -88,6 +88,7 @@ import { recordRecent } from "@/stores/recents";
 import { loadSession, initSessionPersist } from "@/stores/session";
 import { bootstrapHostGroups } from "@/stores/sidebarGroups";
 import { bootstrapHostNicknames } from "@/stores/hostNicknames";
+import { bootstrapTags } from "@/stores/tags";
 import { useDynamicCommands } from "@/lib/dynamicCommands";
 import { useConnections } from "@/stores/connections";
 import { useTauri } from "@/hooks/useTauri";
@@ -1100,6 +1101,7 @@ function App() {
       void bootstrapPlaces();
       void bootstrapHostGroups();
       void bootstrapHostNicknames();
+      void bootstrapTags();
       // 설정 적용 — 테마 + 새 탭 기본값(정렬/뷰/숨김), 기존 탭에도 즉시 반영.
       void commands.settingsGet().then((r) => {
         if (r.status === "ok") {

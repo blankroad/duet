@@ -25,6 +25,7 @@ pub mod retry;
 pub mod saved_hosts;
 pub mod secret_vault;
 pub mod settings;
+pub mod tags;
 pub mod task_events;
 pub mod task_queue;
 pub mod trash;

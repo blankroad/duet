@@ -137,7 +137,9 @@
       구분, alias dedup, saved 도 별명 편집). (2026-06-24)
 - [x] **Phase 3 — Bookmarks 통합** — Host Favorites 를 "Bookmarks" 섹션으로 흡수
       (Local/Remote SubLabel, "+" 가 소스별 라우팅, fav 그룹 헤더 별명). (2026-06-24)
-- [ ] Phase 4 — 태그(다대다) + 필터 칩
+- [x] **Phase 4 — 태그(다대다)** — tags.json(키→태그[], key=host:/bm:/fav:) +
+      tag_list/set. TagBar 칩 필터(OR), 우클릭 "Edit tags…", 행 인라인 #tag 표시.
+      Hosts·Bookmarks 가 활성 태그로 좁혀짐. (2026-06-24)
 - [ ] Phase 5 — 섹션 정리(Places+Volumes, This PC 흡수, 순서)
 
 ## 벤치마킹 후속 (2026-06-24) — 경쟁 탐색기 대비 가치 향상
