@@ -32,6 +32,7 @@ export interface BuiltinDeps {
   back: () => void;
   forward: () => void;
   editPath: () => void;
+  jump: () => void;
   // view
   refresh: () => void;
   toggleHidden: () => void;
@@ -145,6 +146,13 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
       category: "Navigation",
       defaultKey: "Ctrl+L",
       action: deps.editPath,
+    },
+    {
+      id: "nav.jump",
+      label: "Jump to frequent folder",
+      category: "Navigation",
+      defaultKey: "Ctrl+J",
+      action: deps.jump,
     },
     {
       id: "view.refresh",

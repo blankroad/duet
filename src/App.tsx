@@ -26,6 +26,8 @@ import { QuickLook } from "@/components/pane/QuickLook";
 import { TopBar } from "@/components/TopBar";
 import { DragGhost } from "@/components/pane/DragGhost";
 import { CommandPalette } from "@/components/CommandPalette";
+import { FrecencyJumper } from "@/components/FrecencyJumper";
+import { useFrecency } from "@/stores/frecency";
 import { ContextMenu } from "@/components/ContextMenu";
 import { useContextMenu, type MenuEntry } from "@/stores/contextMenu";
 import { openShellMenu, onShellMenuClose } from "@/lib/shellMenu";
@@ -146,7 +148,10 @@ function App() {
         // navigate 성공 후 watcher 갱신. 실패는 silent — fs:changed 알림 안 옴
         // 정도의 영향. (사용자가 명시 새로고침으로 우회 가능.)
         void commands.paneWatchSet(id, location);
-        if (opts.pushHistory !== false) recordRecent(location);
+        if (opts.pushHistory !== false) {
+          recordRecent(location);
+          void commands.frecencyRecord(location); // 점퍼(Ctrl+J) 랭킹용
+        }
       } catch (e) {
         // 사용자가 더블클릭해도 silent fail 면 무반응으로 인식. toast 로 노출.
         const msg =
@@ -172,7 +177,10 @@ function App() {
           pushHistory: opts.pushHistory ?? true,
         });
         void commands.paneWatchSet(id, location);
-        if (opts.pushHistory !== false) recordRecent(location);
+        if (opts.pushHistory !== false) {
+          recordRecent(location);
+          void commands.frecencyRecord(location); // 점퍼(Ctrl+J) 랭킹용
+        }
       } catch (e) {
         const msg =
           e && typeof e === "object" && "kind" in e
@@ -580,6 +588,7 @@ function App() {
       },
       back: () => onBack(usePanes.getState().activePane),
       forward: () => onForward(usePanes.getState().activePane),
+      jump: () => useFrecency.getState().open(),
       editPath: () =>
         useUI.getState().requestEditPath(usePanes.getState().activePane),
       refresh: () => onRefresh(usePanes.getState().activePane),
@@ -1391,6 +1400,7 @@ function App() {
       {quickLookOpen && <QuickLook />}
       <Toast />
       <CommandPalette />
+      <FrecencyJumper onOpenLocation={onOpenLocation} />
       <ContextMenu />
       <DragGhost />
     </div>

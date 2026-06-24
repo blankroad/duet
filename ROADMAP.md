@@ -136,7 +136,9 @@
 - [x] **동기화 브라우징** — 양 패널 상대경로 동행 이동(존재 시). 프론트 전용.
       폴더 진입/위로에만 동행, 툴바 토글 + `view.syncBrowse`. (2026-06-24)
       → `docs/specs/2026-06-24-synchronized-browsing.md`
-- [ ] **frecency 점프 (Ctrl+J)** — 자주·최근 방문 폴더 부분문자열 점프. 작은 저장소.
+- [x] **frecency 점프 (Ctrl+J)** — 자주·최근 방문 폴더 부분문자열 점프.
+      services/frecency.rs(JSON, ln(count)×최근성 감쇠) + frecency_record/query +
+      FrecencyJumper. navigate 성공 시 기록. (2026-06-24)
       → `docs/specs/2026-06-24-frecency-jump.md`
 - [x] **Drop Stack / Shelf ⭐** — 여러 위치 수집 후 활성 패널로 일괄 복사/이동.
       기존 ops·저널·undo·same-host 전략 재사용(IPC 신규 없음). 사이드바 Shelf 섹션 +

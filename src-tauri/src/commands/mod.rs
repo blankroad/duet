@@ -3,6 +3,7 @@
 pub mod apps;
 pub mod bookmarks;
 pub mod connection;
+pub mod frecency;
 pub mod fs_ops;
 pub mod host_favorites;
 pub mod host_groups;

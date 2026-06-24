@@ -123,6 +123,8 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::fs_ops::fs_compress_execute,
             commands::undo::undo_last,
             commands::undo::undo_history,
+            commands::frecency::frecency_record,
+            commands::frecency::frecency_query,
             commands::tasks::tasks_list,
             commands::tasks::task_cancel,
             commands::user_aliases::user_aliases_list,
@@ -234,6 +236,10 @@ pub fn run() {
     })
     .expect("keymap load");
     let keymap_for_setup = keymap.clone();
+    let frecency = tauri::async_runtime::block_on(async {
+        services::frecency::FrecencyStore::load_default().await
+    })
+    .expect("frecency load");
 
     tauri::Builder::default()
         // duet-preview:// 스트리밍 프로토콜 (Range 지원, 로컬+SSH) — 미디어/PDF 미리보기.
@@ -257,6 +263,7 @@ pub fn run() {
         .manage(user_aliases)
         .manage(app_launchers)
         .manage(keymap)
+        .manage(frecency)
         .manage(platform::ShellMenuRegistry::new())
         .invoke_handler(specta_builder.invoke_handler())
         .setup(move |app| {
