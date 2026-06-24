@@ -18,6 +18,11 @@ export interface MenuItem {
   disabled?: boolean;
   onSelect?: () => void;
   children?: MenuEntry[];
+  /**
+   * 지연 서브메뉴 — 펼칠 때 1회 호출해 children 을 가져온다(Windows 셸 메뉴 등 비싼 조회).
+   * children 과 동시 사용 금지. 빈 배열 반환 시 "(none)" 표시.
+   */
+  loadChildren?: () => Promise<MenuEntry[]>;
 }
 
 export type MenuEntry = MenuItem | { kind: "separator" };

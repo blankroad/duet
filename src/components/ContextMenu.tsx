@@ -1,34 +1,56 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import clsx from "clsx";
-import { useContextMenu, isSeparator, type MenuItem } from "@/stores/contextMenu";
+import {
+  useContextMenu,
+  isSeparator,
+  type MenuEntry,
+  type MenuItem,
+} from "@/stores/contextMenu";
 
 /**
- * 우클릭 컨텍스트 메뉴 — App 루트에 1개만 마운트 (Toast/DragGhost 와 동일).
- * 커스텀 구현(의존성 추가 없음). 키보드 ↑/↓/Enter/Esc, 1-레벨 서브메뉴(hover/→),
+ * 우클릭 컨텍스트 메뉴 — App 루트에 1개만 마운트.
+ * 다단계(재귀) 서브메뉴 + 지연 로딩(loadChildren) 지원. 키보드 ↑/↓/→/←/Enter/Esc,
  * 뷰포트 밖이면 위치 보정, 바깥 클릭/스크롤/blur 로 닫힘.
+ *
+ * 상태 모델: `path` = 펼쳐진 서브메뉴 id 스택(루트→깊이), `cursor` = 레벨별 커서 인덱스.
+ * 활성(키보드) 레벨 = path.length. loadChildren 항목은 펼칠 때 1회 조회해 `loaded` 캐시.
  */
+
+type Loaded = Record<string, MenuEntry[] | "loading" | "empty">;
+
+/** 보이는(선택가능) 항목만 — separator/disabled 제외. */
+function selectable(entries: MenuEntry[]): MenuItem[] {
+  return entries.filter((e): e is MenuItem => !isSeparator(e) && !e.disabled);
+}
+
+function hasSubmenu(item: MenuItem): boolean {
+  return (!!item.children && item.children.length > 0) || !!item.loadChildren;
+}
+
+/** 항목의 자식 — 정적이면 배열, 지연이면 캐시 상태("loading"/"empty"/배열), 없으면 null. */
+function childrenOf(item: MenuItem, loaded: Loaded): MenuEntry[] | "loading" | "empty" | null {
+  if (item.children && item.children.length > 0) return item.children;
+  if (item.loadChildren) return loaded[item.id] ?? "loading";
+  return null;
+}
+
 export function ContextMenu() {
   const { open, x, y, items, close } = useContextMenu();
   const panelRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ x, y });
-  // 키보드 포커스 대상: 루트 리스트 또는 열린 서브메뉴
-  const [cursor, setCursor] = useState(0);
-  const [openSub, setOpenSub] = useState<string | null>(null);
-  const [inSub, setInSub] = useState(false);
-  const [subCursor, setSubCursor] = useState(0);
+  const [path, setPath] = useState<string[]>([]);
+  const [cursor, setCursor] = useState<number[]>([0]);
+  const [loaded, setLoaded] = useState<Loaded>({});
 
-  // 열릴 때 상태 초기화
   useEffect(() => {
     if (open) {
-      setCursor(0);
-      setOpenSub(null);
-      setInSub(false);
-      setSubCursor(0);
+      setPath([]);
+      setCursor([0]);
+      setLoaded({});
     }
   }, [open, x, y]);
 
-  // 마운트 후 크기 측정 → 뷰포트 밖이면 좌/상으로 클램프
   useLayoutEffect(() => {
     if (!open) return;
     const el = panelRef.current;
@@ -39,20 +61,56 @@ export function ContextMenu() {
     setPos({ x: nx, y: ny });
   }, [open, x, y, items]);
 
-  const selectable = items.filter((e): e is MenuItem => !isSeparator(e) && !e.disabled);
-  const subItems = (() => {
-    const parent = items.find((e): e is MenuItem => !isSeparator(e) && e.id === openSub);
-    return (parent?.children ?? []).filter((e): e is MenuItem => !isSeparator(e) && !e.disabled);
-  })();
-  // 우측 공간 부족하면 서브메뉴를 왼쪽으로 펼침
+  // 우측 공간 부족하면 서브메뉴를 왼쪽으로.
   const flipLeft = pos.x > window.innerWidth / 2;
 
-  const run = (item: MenuItem) => {
+  // 펼쳐진 경로를 따라 각 레벨의 항목 배열을 해석. 지연 미완료면 거기서 멈추고 상태 기록.
+  const levels: MenuEntry[][] = [items];
+  let pendingStatus: "loading" | "empty" | null = null;
+  for (let k = 0; k < path.length; k++) {
+    const parent = levels[k]!.find(
+      (e): e is MenuItem => !isSeparator(e) && e.id === path[k],
+    );
+    if (!parent) break;
+    const kids = childrenOf(parent, loaded);
+    if (kids === "loading" || kids === "empty" || kids === null) {
+      pendingStatus = kids === null ? "empty" : kids;
+      break;
+    }
+    levels.push(kids);
+  }
+
+  const setCursorAt = (level: number, idx: number) =>
+    setCursor((c) => {
+      const n = c.slice(0, level + 1);
+      n[level] = idx;
+      return n;
+    });
+
+  /** level 의 item 을 펼친다(자식 있을 때만) + 지연 로딩 트리거. */
+  const openItem = (level: number, item: MenuItem) => {
+    if (!hasSubmenu(item)) return;
+    setPath((p) => [...p.slice(0, level), item.id]);
+    setCursor((c) => {
+      const n = c.slice(0, level + 1);
+      n[level + 1] = 0;
+      return n;
+    });
+    if (item.loadChildren && loaded[item.id] === undefined) {
+      setLoaded((m) => ({ ...m, [item.id]: "loading" }));
+      void item
+        .loadChildren()
+        .then((kids) =>
+          setLoaded((m) => ({ ...m, [item.id]: kids.length ? kids : "empty" })),
+        )
+        .catch(() => setLoaded((m) => ({ ...m, [item.id]: "empty" })));
+    }
+  };
+
+  const run = (level: number, item: MenuItem) => {
     if (item.disabled) return;
-    if (item.children) {
-      setOpenSub(item.id);
-      setInSub(true);
-      setSubCursor(0);
+    if (hasSubmenu(item)) {
+      openItem(level, item);
       return;
     }
     close();
@@ -62,32 +120,30 @@ export function ContextMenu() {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      const list = inSub ? subItems : selectable;
-      const cur = inSub ? subCursor : cursor;
-      const set = inSub ? setSubCursor : setCursor;
+      const level = path.length;
+      const list = selectable(levels[level] ?? []);
+      const cur = cursor[level] ?? 0;
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        set(Math.min(list.length - 1, cur + 1));
+        setCursorAt(level, Math.min(list.length - 1, cur + 1));
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
-        set(Math.max(0, cur - 1));
+        setCursorAt(level, Math.max(0, cur - 1));
       } else if (e.key === "ArrowRight") {
         const item = list[cur];
-        if (!inSub && item?.children) {
+        if (item && hasSubmenu(item)) {
           e.preventDefault();
-          setOpenSub(item.id);
-          setInSub(true);
-          setSubCursor(0);
+          openItem(level, item);
         }
       } else if (e.key === "ArrowLeft") {
-        if (inSub) {
+        if (level > 0) {
           e.preventDefault();
-          setInSub(false);
+          setPath((p) => p.slice(0, -1));
         }
       } else if (e.key === "Enter") {
         e.preventDefault();
         const item = list[cur];
-        if (item) run(item);
+        if (item) run(level, item);
       } else if (e.key === "Escape") {
         e.preventDefault();
         close();
@@ -100,9 +156,51 @@ export function ContextMenu() {
       window.removeEventListener("blur", close);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, inSub, cursor, subCursor, selectable.length, subItems.length]);
+  }, [open, path, cursor, levels.length]);
 
   if (!open) return null;
+
+  const renderPanel = (level: number, entries: MenuEntry[]): React.ReactNode => {
+    const sel = selectable(entries);
+    const activeId = sel[cursor[level] ?? 0]?.id;
+    return (
+      <div
+        ref={level === 0 ? panelRef : undefined}
+        className="min-w-44 rounded-panel border border-border bg-base py-1 shadow-panel"
+        style={level === 0 ? { position: "fixed", left: pos.x, top: pos.y, zIndex: 61 } : undefined}
+        onContextMenu={(e) => e.preventDefault()}
+      >
+        {entries.map((entry, i) =>
+          isSeparator(entry) ? (
+            <div key={`sep-${level}-${i}`} className="my-1 h-px bg-border" />
+          ) : (
+            <Row
+              key={entry.id}
+              item={entry}
+              active={path[level] === entry.id || (path.length === level && activeId === entry.id)}
+              onMouseEnter={() => {
+                const idx = sel.findIndex((s) => s.id === entry.id);
+                if (idx >= 0) setCursorAt(level, idx);
+                if (hasSubmenu(entry)) openItem(level, entry);
+                else setPath((p) => p.slice(0, level));
+              }}
+              onClick={() => run(level, entry)}
+            >
+              {path[level] === entry.id && (
+                <div className={clsx("absolute top-0", flipLeft ? "right-full" : "left-full")}>
+                  {level + 1 < levels.length ? (
+                    renderPanel(level + 1, levels[level + 1]!)
+                  ) : pendingStatus ? (
+                    <StatusPanel status={pendingStatus} />
+                  ) : null}
+                </div>
+              )}
+            </Row>
+          ),
+        )}
+      </div>
+    );
+  };
 
   return (
     <>
@@ -115,60 +213,18 @@ export function ContextMenu() {
         }}
         onWheel={close}
       />
-      <div
-        ref={panelRef}
-        className="fixed z-[61] min-w-44 rounded-panel border border-border bg-base py-1 shadow-panel"
-        style={{ left: pos.x, top: pos.y }}
-        onContextMenu={(e) => e.preventDefault()}
-      >
-        {items.map((entry, i) =>
-          isSeparator(entry) ? (
-            <div key={`sep-${i}`} className="my-1 h-px bg-border" />
-          ) : (
-            <Row
-              key={entry.id}
-              item={entry}
-              active={!inSub && selectable[cursor]?.id === entry.id}
-              onMouseEnter={() => {
-                const idx = selectable.findIndex((s) => s.id === entry.id);
-                if (idx >= 0) {
-                  setCursor(idx);
-                  setInSub(false);
-                }
-                setOpenSub(entry.children ? entry.id : null);
-              }}
-              onClick={() => run(entry)}
-            >
-              {openSub === entry.id && entry.children && (
-                <div className={clsx("absolute top-0", flipLeft ? "right-full" : "left-full")}>
-                  <div className="min-w-44 rounded-panel border border-border bg-base py-1 shadow-panel">
-                    {entry.children.map((c, ci) =>
-                      isSeparator(c) ? (
-                        <div key={`subsep-${ci}`} className="my-1 h-px bg-border" />
-                      ) : (
-                        <Row
-                          key={c.id}
-                          item={c}
-                          active={inSub && subItems[subCursor]?.id === c.id}
-                          onMouseEnter={() => {
-                            const idx = subItems.findIndex((s) => s.id === c.id);
-                            if (idx >= 0) {
-                              setSubCursor(idx);
-                              setInSub(true);
-                            }
-                          }}
-                          onClick={() => run(c)}
-                        />
-                      ),
-                    )}
-                  </div>
-                </div>
-              )}
-            </Row>
-          ),
-        )}
-      </div>
+      {renderPanel(0, items)}
     </>
+  );
+}
+
+function StatusPanel({ status }: { status: "loading" | "empty" }) {
+  return (
+    <div className="min-w-32 rounded-panel border border-border bg-base py-1 shadow-panel">
+      <div className="px-3 py-1 text-meta text-fg-muted">
+        {status === "loading" ? "Loading…" : "(none)"}
+      </div>
+    </div>
   );
 }
 
@@ -185,6 +241,7 @@ function Row({
   onClick: () => void;
   children?: React.ReactNode;
 }) {
+  const hasKids = (!!item.children && item.children.length > 0) || !!item.loadChildren;
   return (
     <div className="relative px-1" onMouseEnter={onMouseEnter}>
       <button
@@ -204,7 +261,7 @@ function Row({
         {item.shortcut && (
           <span className="shrink-0 text-meta text-fg-muted">{item.shortcut}</span>
         )}
-        {item.children && <ChevronRight size={12} className="shrink-0 text-fg-muted" />}
+        {hasKids && <ChevronRight size={12} className="shrink-0 text-fg-muted" />}
       </button>
       {children}
     </div>

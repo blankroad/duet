@@ -437,8 +437,9 @@ function App() {
         onOpenInOtherPane,
         onPutBack,
       });
-      const seq = useContextMenu.getState().openAt(cx, cy, items);
-      // Windows 로컬 단일 선택: 실제 셸 메뉴(Tier 2)를 백그라운드로 받아 준비되면 덧붙인다.
+      // Windows 로컬 단일 선택: 실제 셸 메뉴(Tier 2)를 "More options ▸" 지연 항목으로.
+      // 펼칠 때만 COM 조회 → 매번 읽지 않고, 메뉴가 갑자기 커지지도 않음(Win11 방식).
+      let onClose: (() => void) | undefined;
       if (
         platform() === "windows" &&
         tab.location.source.kind === "local" &&
@@ -446,18 +447,25 @@ function App() {
       ) {
         const child = childLocation(tab.location, entry.name);
         const scope: ShellScope = entry.kind === "dir" ? "directory" : "file";
-        void openShellMenu(String(child.path), scope).then((shell) => {
-          if (!shell) return;
-          const st = useContextMenu.getState();
-          if (st.open && st.seq === seq) {
-            st.appendItems(seq, [{ kind: "separator" }, ...shell.entries], () =>
-              onShellMenuClose(shell.token),
-            );
-          } else {
-            onShellMenuClose(shell.token); // 메뉴 이미 닫힘 — 셸 세션 정리
-          }
-        });
+        let shellToken: number | null = null;
+        items.push(
+          { kind: "separator" },
+          {
+            id: "win-more",
+            label: "More options",
+            loadChildren: async () => {
+              const shell = await openShellMenu(String(child.path), scope);
+              if (!shell) return [];
+              shellToken = shell.token;
+              return shell.entries;
+            },
+          },
+        );
+        onClose = () => {
+          if (shellToken != null) onShellMenuClose(shellToken);
+        };
       }
+      useContextMenu.getState().openAt(cx, cy, items, onClose);
     },
     [onActivate, onOpenInOtherPane, onPutBack, onUp, showToast],
   );
@@ -477,25 +485,29 @@ function App() {
         location: tab.location,
         onRefresh,
       });
-      const seq = useContextMenu.getState().openAt(cx, cy, items);
-      // Windows 로컬: 배경(빈 영역) 셸 메뉴를 백그라운드로 받아 준비되면 덧붙인다.
+      // Windows 로컬: 배경(빈 영역) 셸 메뉴를 "More options ▸" 지연 항목으로(펼칠 때만 조회).
+      let onClose: (() => void) | undefined;
       if (platform() === "windows" && tab.location.source.kind === "local") {
-        void openShellMenu(String(tab.location.path), "background").then(
-          (shell) => {
-            if (!shell) return;
-            const st = useContextMenu.getState();
-            if (st.open && st.seq === seq) {
-              st.appendItems(
-                seq,
-                [{ kind: "separator" }, ...shell.entries],
-                () => onShellMenuClose(shell.token),
-              );
-            } else {
-              onShellMenuClose(shell.token);
-            }
+        const bgPath = String(tab.location.path);
+        let shellToken: number | null = null;
+        items.push(
+          { kind: "separator" },
+          {
+            id: "win-more",
+            label: "More options",
+            loadChildren: async () => {
+              const shell = await openShellMenu(bgPath, "background");
+              if (!shell) return [];
+              shellToken = shell.token;
+              return shell.entries;
+            },
           },
         );
+        onClose = () => {
+          if (shellToken != null) onShellMenuClose(shellToken);
+        };
       }
+      useContextMenu.getState().openAt(cx, cy, items, onClose);
     },
     [onRefresh],
   );
