@@ -140,13 +140,12 @@ export function Sidebar({
   return (
     <aside className="flex w-48 min-h-0 flex-col overflow-y-auto border-r border-border bg-subtle text-base">
       <TasksSection />
-      <LocalAnchor onOpenLocation={onOpenLocation} />
       <TagBar />
       <PlacesSection
         onOpenLocation={onOpenLocation}
         onTrashActivate={onTrashActivate}
+        onEject={onEject}
       />
-      <VolumesSection onOpenLocation={onOpenLocation} onEject={onEject} />
       <HostsSection
         onHostActivate={onHostActivate}
         onAdHocOpen={onAdHocOpen}
@@ -313,37 +312,7 @@ function SidebarTaskRow({ task }: { task: TaskDto }) {
  * 이게 그 탈출구. 패널이 이미 로컬이면 흐리게, 리모트면 강조(accent)해 눈에 띄게.
  * ⌘/Ctrl-클릭 = 반대 패널.
  */
-function LocalAnchor({
-  onOpenLocation,
-}: {
-  onOpenLocation: (location: Location, pane: PaneId) => void;
-}) {
-  const activeSource = useActiveSource();
-  // 로컬 home 경로는 부트스트랩된 로컬 places 캐시에서(백엔드가 OS별 해석 — §7 준수).
-  const localHome = usePlaces(
-    (s) =>
-      s.bySource["local"]?.places.find((p) => p.label === "Home")?.path ??
-      s.bySource["local"]?.places[0]?.path,
-  );
-  if (!localHome) return null; // 로컬 places 부트스트랩 전(거의 즉시 채워짐)
-  const isActiveLocal = activeSource.kind === "local";
-  return (
-    <button
-      type="button"
-      onClick={(e) => onOpenLocation(localLocation(localHome), targetPane(e))}
-      title="Switch this pane to your local machine (⌘/Ctrl-click: other pane)"
-      className={clsx(
-        "flex w-full items-center gap-1 border-b border-border px-2 py-1 text-left hover:bg-border",
-        isActiveLocal ? "text-fg-muted" : "font-medium text-accent",
-      )}
-    >
-      <Monitor size={12} className="shrink-0" />
-      <span className="truncate">This PC (Local)</span>
-    </button>
-  );
-}
-
-// ─────────────────────────── Places ───────────────────────────
+// ─────────────────── Places (+ This PC 앵커 + Volumes) ───────────────────
 
 function placeIcon(label: string): ReactNode {
   const cls = "shrink-0 text-fg-muted";
@@ -363,23 +332,69 @@ function placeIcon(label: string): ReactNode {
   }
 }
 
+/**
+ * 통합 Places 섹션 — 활성 패널 소스의 표준폴더 + Trash + Volumes(SubLabel) 한 묶음.
+ * 활성 패널이 원격일 때만 상단에 "This PC" 앵커(로컬로 전환). 11→정리의 핵심.
+ */
 function PlacesSection({
   onOpenLocation,
   onTrashActivate,
+  onEject,
 }: {
   onOpenLocation: (location: Location, pane: PaneId) => void;
   onTrashActivate: (pane?: PaneId) => void;
+  onEject: (volume: Volume) => void;
 }) {
   const source = useActiveSource();
   const places =
     usePlaces((s) => s.bySource[sourceKey(source)]?.places) ?? EMPTY_PLACES;
+  const volumes =
+    usePlaces((s) => s.bySource[sourceKey(source)]?.volumes) ?? EMPTY_VOLUMES;
+  // 로컬 home — This PC 앵커용(백엔드가 OS별 해석 — §7 준수).
+  const localHome = usePlaces(
+    (s) =>
+      s.bySource["local"]?.places.find((p) => p.label === "Home")?.path ??
+      s.bySource["local"]?.places[0]?.path,
+  );
+  const rescan = () => {
+    if (source.kind === "local") void refreshVolumes();
+    else void refreshRemoteVolumes(source.connection_id);
+  };
+  // 로컬 볼륨은 사이드바 마운트 시 1회 재스캔.
+  useEffect(() => {
+    void refreshVolumes();
+  }, []);
   return (
     <Section
       sectionKey="places"
       title="Places"
       icon={<Folder size={14} />}
-      count={places.length}
+      count={places.length + volumes.length}
+      action={
+        <button
+          type="button"
+          onClick={rescan}
+          className="rounded p-0.5 text-fg-muted hover:bg-border hover:text-fg"
+          title="Rescan volumes"
+          aria-label="Rescan volumes"
+        >
+          <RefreshCw size={11} />
+        </button>
+      }
     >
+      {localHome && source.kind !== "local" && (
+        <button
+          type="button"
+          onClick={(e) =>
+            onOpenLocation(localLocation(localHome), targetPane(e))
+          }
+          title="Switch this pane to your local machine (⌘/Ctrl-click: other pane)"
+          className={clsx(rowClass, "w-full text-left font-medium text-accent")}
+        >
+          <Monitor size={11} className="shrink-0" />
+          <span className="truncate">This PC (Local)</span>
+        </button>
+      )}
       {places.map((p) => (
         <PlaceItem
           key={p.label}
@@ -389,6 +404,16 @@ function PlacesSection({
         />
       ))}
       <TrashItem onTrashActivate={onTrashActivate} />
+      {volumes.length > 0 && <SubLabel>Volumes</SubLabel>}
+      {volumes.map((v) => (
+        <VolumeItem
+          key={String(v.path)}
+          volume={v}
+          source={source}
+          onOpenLocation={onOpenLocation}
+          onEject={onEject}
+        />
+      ))}
     </Section>
   );
 }
@@ -465,62 +490,6 @@ function TrashItem({
       <Trash2 size={11} className="shrink-0 text-fg-muted" />
       <span className="truncate">Trash</span>
     </button>
-  );
-}
-
-// ─────────────────────────── Volumes ───────────────────────────
-
-function VolumesSection({
-  onOpenLocation,
-  onEject,
-}: {
-  onOpenLocation: (location: Location, pane: PaneId) => void;
-  onEject: (volume: Volume) => void;
-}) {
-  const source = useActiveSource();
-  const volumes =
-    usePlaces((s) => s.bySource[sourceKey(source)]?.volumes) ?? EMPTY_VOLUMES;
-  const rescan = () => {
-    if (source.kind === "local") void refreshVolumes();
-    else void refreshRemoteVolumes(source.connection_id);
-  };
-  // 로컬은 사이드바가 열릴 때 재스캔. 원격은 연결 시 로드되며 포커스 전환 시 재조회 안 함
-  // (수동 새로고침 버튼으로 갱신).
-  useEffect(() => {
-    void refreshVolumes();
-  }, []);
-  return (
-    <Section
-      sectionKey="volumes"
-      title="Volumes"
-      icon={<HardDrive size={14} />}
-      count={volumes.length}
-      action={
-        <button
-          type="button"
-          onClick={rescan}
-          className="rounded p-0.5 text-fg-muted hover:bg-border hover:text-fg"
-          title="Rescan volumes"
-          aria-label="Rescan volumes"
-        >
-          <RefreshCw size={11} />
-        </button>
-      }
-    >
-      {volumes.length === 0 ? (
-        <Item label="(no mounted volumes)" muted />
-      ) : (
-        volumes.map((v) => (
-          <VolumeItem
-            key={String(v.path)}
-            volume={v}
-            source={source}
-            onOpenLocation={onOpenLocation}
-            onEject={onEject}
-          />
-        ))
-      )}
-    </Section>
   );
 }
 

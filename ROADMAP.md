@@ -140,7 +140,8 @@
 - [x] **Phase 4 — 태그(다대다)** — tags.json(키→태그[], key=host:/bm:/fav:) +
       tag_list/set. TagBar 칩 필터(OR), 우클릭 "Edit tags…", 행 인라인 #tag 표시.
       Hosts·Bookmarks 가 활성 태그로 좁혀짐. (2026-06-24)
-- [ ] Phase 5 — 섹션 정리(Places+Volumes, This PC 흡수, 순서)
+- [x] **Phase 5 — 섹션 정리** — Places+Volumes+This PC 를 한 "Places" 섹션으로
+      (Volumes SubLabel, 원격일 때만 This PC 앵커). 11 → 6 섹션(+TagBar). (2026-06-24)
 
 ## 벤치마킹 후속 (2026-06-24) — 경쟁 탐색기 대비 가치 향상
 
