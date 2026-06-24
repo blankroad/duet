@@ -126,6 +126,23 @@
 - [ ] Drag & Drop (외부 앱 → duet, duet → 외부)
 - [x] 다중 선택 일괄 이름 변경 (batch rename)
 
+## 벤치마킹 후속 (2026-06-24) — 경쟁 탐색기 대비 가치 향상
+
+> 대표 탐색기 24종(Directory Opus·TC·yazi·ForkLift·WinSCP·Path Finder·Dolphin 등)
+> 벤치마킹 후 선정. 작은 승리 4종 + 간판 1종. spec 은 `docs/specs/2026-06-24-*`.
+
+- [ ] **패턴 선택 (glob-select)** — `*.jpg` 일괄 선택/해제. 프론트 전용.
+      → `docs/specs/2026-06-24-glob-select.md`
+- [ ] **동기화 브라우징** — 양 패널 상대경로 동행 이동(존재 시). 프론트 전용.
+      → `docs/specs/2026-06-24-synchronized-browsing.md`
+- [ ] **frecency 점프 (Ctrl+J)** — 자주·최근 방문 폴더 부분문자열 점프. 작은 저장소.
+      → `docs/specs/2026-06-24-frecency-jump.md`
+- [ ] **Drop Stack / Shelf ⭐** — 여러 위치 수집 후 활성 패널로 일괄 복사/이동.
+      기존 ops·저널·undo·same-host 전략 재사용(IPC 신규 없음). 간판 차별화.
+      → `docs/specs/2026-06-24-drop-stack-shelf.md`
+- [ ] **그리드/타일 썸네일** — 이미지 lazy 썸네일 + 캐시(1차 순수 Rust, 영상 제외).
+      `image` 크레이트 §6 승인 필요. → `docs/specs/2026-06-24-thumbnail-grid.md`
+
 ---
 
 ## 현재 단계
