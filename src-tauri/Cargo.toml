@@ -46,6 +46,18 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 tar = "0.4"
 flate2 = "1"
 
+# === 이미지 썸네일 (그리드/타일 뷰) ===
+# §6 승인(2026-06): image = Rust 이미지 처리 사실상 표준(total 142M / recent 90d 33M dl).
+# 대안 zune-image(68k dl, 미성숙·리사이즈 API 부족) 검토 후 채택. C 의존성 회피 위해
+# AVIF(dav1d) 제외, 순수 Rust 코덱만(png/jpeg/gif/webp/bmp).
+image = { version = "0.25", default-features = false, features = [
+    "png",
+    "jpeg",
+    "gif",
+    "webp",
+    "bmp",
+] }
+
 # === Encoding ===
 unicode-normalization = "0.1"
 unicode-width = "0.2"

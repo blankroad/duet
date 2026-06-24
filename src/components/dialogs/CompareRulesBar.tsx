@@ -43,6 +43,7 @@ export function CompareRulesBar({
       default_view: null,
       show_hidden_default: null,
       single_click_open: null,
+      show_thumbnails: null,
     });
   };
 

@@ -1,12 +1,21 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FolderUp } from "lucide-react";
 import clsx from "clsx";
-import type { Entry } from "@/types/bindings";
-import { gridColumns, isParentEntry, type PaneId } from "@/stores/panes";
+import type { Entry, Location } from "@/types/bindings";
+import {
+  activeTab,
+  gridColumns,
+  isParentEntry,
+  usePanes,
+  type PaneId,
+} from "@/stores/panes";
 import { setHoverEntry, clearHover } from "@/stores/previewHover";
 import { formatSize, formatTime } from "@/lib/format";
 import { EntryIcon } from "@/lib/fileIcon";
+import { useAppSettings } from "@/stores/settings";
+import { thumbUrl } from "@/lib/previewUrl";
+import { childLocation } from "@/lib/entryDnd";
 import { useMarquee } from "@/hooks/useMarquee";
 import { useEntryDrag } from "@/hooks/useEntryDrag";
 import { useDragState } from "@/stores/dragState";
@@ -53,6 +62,8 @@ export function EntryGrid({
 }: EntryGridProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const colsRef = useRef(1);
+  // 썸네일 URL 빌드용 — 현재 패널 폴더 location.
+  const location = usePanes((s) => activeTab(s, id).location);
   const onEntryMouseDown = useEntryDrag(id);
   const dragActive = useDragState((s) => s.active);
   const overThisPane = useDragState((s) => s.overPane === id);
@@ -164,6 +175,7 @@ export function EntryGrid({
                 const isSelected = selected.has(entry.name);
                 const cellProps: CellProps = {
                   entry,
+                  location,
                   isCursor,
                   isSelected,
                   highlight: dragActive && overFolder === entry.name,
@@ -210,6 +222,7 @@ export function EntryGrid({
 
 interface CellProps {
   entry: Entry;
+  location: Location;
   isCursor: boolean;
   isSelected: boolean;
   highlight: boolean;
@@ -220,8 +233,48 @@ interface CellProps {
   onDoubleClick: () => void;
 }
 
+/** 썸네일 대상 이미지 확장자(백엔드 활성 코덱과 일치). */
+const THUMB_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp"]);
+function isThumbable(e: Entry): boolean {
+  if (e.kind !== "file") return false;
+  const i = e.name.lastIndexOf(".");
+  return i >= 0 && THUMB_EXTS.has(e.name.slice(i + 1).toLowerCase());
+}
+
+/**
+ * 썸네일 또는 아이콘 — 설정 ON + 이미지면 `duet-thumb://` 이미지, 아니면/실패 시 타입 아이콘.
+ * `loading="lazy"` 로 화면에 들어올 때만 요청, onError 시 아이콘 fallback.
+ */
+function Thumb({
+  entry,
+  location,
+  size,
+}: {
+  entry: Entry;
+  location: Location;
+  size: number;
+}) {
+  const show = useAppSettings((s) => s.showThumbnails);
+  const [failed, setFailed] = useState(false);
+  if (!show || failed || !isThumbable(entry)) {
+    return <EntryIcon entry={entry} size={size} />;
+  }
+  return (
+    <img
+      src={thumbUrl(childLocation(location, entry.name))}
+      loading="lazy"
+      decoding="async"
+      alt=""
+      onError={() => setFailed(true)}
+      className="shrink-0 rounded object-cover bg-subtle"
+      style={{ width: size, height: size }}
+    />
+  );
+}
+
 function GridCell({
   entry,
+  location,
   isCursor,
   isSelected,
   highlight,
@@ -273,7 +326,7 @@ function GridCell({
     >
       {/* 드래그 핸들 = 아이콘+이름. 셀 여백/간격은 마키 시작 영역. */}
       <span data-drag-handle className="flex flex-col items-center gap-1">
-        <EntryIcon entry={entry} size={32} />
+        <Thumb entry={entry} location={location} size={48} />
         <span
           className={clsx(
             "font-mono text-meta text-center line-clamp-2 break-all",
@@ -289,6 +342,7 @@ function GridCell({
 
 function TileRow({
   entry,
+  location,
   isCursor,
   isSelected,
   highlight,
@@ -342,7 +396,7 @@ function TileRow({
     >
       {/* 드래그 핸들 = 아이콘+이름/메타. 행 우측 여백은 마키 시작 영역. */}
       <span data-drag-handle className="flex min-w-0 items-center gap-3">
-        <EntryIcon entry={entry} size={24} />
+        <Thumb entry={entry} location={location} size={24} />
         <div className="flex min-w-0 flex-col">
           <span
             className={clsx(

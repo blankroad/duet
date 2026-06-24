@@ -45,6 +45,13 @@ pub struct Settings {
     /// 단일 클릭으로 항목 열기/실행 (탐색기 single-click 모드). 디폴트 false(더블클릭).
     #[serde(default)]
     pub single_click_open: bool,
+    /// 그리드/타일 뷰에서 이미지 썸네일 표시. 디폴트 true.
+    #[serde(default = "default_true")]
+    pub show_thumbnails: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for Settings {
@@ -58,6 +65,7 @@ impl Default for Settings {
             default_view: default_view(),
             show_hidden_default: false,
             single_click_open: false,
+            show_thumbnails: true,
         }
     }
 }
@@ -72,6 +80,7 @@ pub struct SettingsPatch {
     pub default_view: Option<String>,
     pub show_hidden_default: Option<bool>,
     pub single_click_open: Option<bool>,
+    pub show_thumbnails: Option<bool>,
 }
 
 /// In-memory cache + on-disk TOML. 동시 접근은 RwLock.
@@ -132,6 +141,9 @@ impl SettingsStore {
         }
         if let Some(v) = patch.single_click_open {
             s.single_click_open = v;
+        }
+        if let Some(v) = patch.show_thumbnails {
+            s.show_thumbnails = v;
         }
         let snapshot = s.clone();
         // 디스크 동기화 — write lock 잡은 채로 (race 방지)

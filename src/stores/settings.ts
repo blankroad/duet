@@ -9,9 +9,14 @@ interface AppSettingsState {
   /** 단일 클릭으로 항목 열기/실행 (디폴트 false = 더블클릭). */
   singleClickOpen: boolean;
   setSingleClickOpen: (v: boolean) => void;
+  /** 그리드/타일 뷰 이미지 썸네일 표시 (디폴트 true). */
+  showThumbnails: boolean;
+  setShowThumbnails: (v: boolean) => void;
 }
 
 export const useAppSettings = create<AppSettingsState>((set) => ({
   singleClickOpen: false,
   setSingleClickOpen: (v) => set({ singleClickOpen: v }),
+  showThumbnails: true,
+  setShowThumbnails: (v) => set({ showThumbnails: v }),
 }));

@@ -161,8 +161,10 @@
       기존 ops·저널·undo·same-host 전략 재사용(IPC 신규 없음). 사이드바 Shelf 섹션 +
       "Add to shelf"(Ctrl+Shift+A). 혼합 소스 순차 적용은 후속. (2026-06-24)
       → `docs/specs/2026-06-24-drop-stack-shelf.md`
-- [ ] **그리드/타일 썸네일** — 이미지 lazy 썸네일 + 캐시(1차 순수 Rust, 영상 제외).
-      `image` 크레이트 §6 승인 필요. → `docs/specs/2026-06-24-thumbnail-grid.md`
+- [x] **그리드/타일 썸네일** — `duet-thumb://` 프로토콜(디코드→256px→JPEG 캐시
+      `<config>/duet/thumbs/`), 그리드/타일 lazy `<img>` + 아이콘 fallback, 설정 토글.
+      `image` 0.25 순수 Rust(png/jpg/gif/webp/bmp, AVIF 제외). 영상/PDF/EXIF회전 후속.
+      (2026-06-24) → `docs/specs/2026-06-24-thumbnail-grid.md`
 
 ---
 

@@ -20,6 +20,7 @@ function buildPatch(over: Partial<SettingsPatch>): SettingsPatch {
     default_view: null,
     show_hidden_default: null,
     single_click_open: null,
+    show_thumbnails: null,
     ...over,
   };
 }
@@ -70,6 +71,7 @@ export function GeneralSection() {
       showHidden: r.data.show_hidden_default ?? false,
     });
     useAppSettings.getState().setSingleClickOpen(r.data.single_click_open ?? false);
+    useAppSettings.getState().setShowThumbnails(r.data.show_thumbnails ?? true);
   };
 
   if (loading || !settings) return <div className="text-base text-fg-muted">Loading…</div>;
@@ -147,6 +149,22 @@ export function GeneralSection() {
           <div className="text-meta text-fg-muted">
             Single-click opens folders and files. Off = double-click (default). Hold Ctrl/Shift to
             select without opening.
+          </div>
+        </div>
+      </label>
+
+      <label className="flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={settings.show_thumbnails}
+          onChange={(e) => void save({ show_thumbnails: e.target.checked })}
+          className="mt-0.5"
+        />
+        <div className="flex-1">
+          <div className="text-base">Show image thumbnails</div>
+          <div className="text-meta text-fg-muted">
+            Render thumbnails for images (PNG/JPG/GIF/WebP/BMP) in Grid and Tiles views. Cached on
+            disk.
           </div>
         </div>
       </label>

@@ -35,8 +35,8 @@ fn hex_to_string(s: &str) -> Option<String> {
     String::from_utf8(hex_decode(s)?).ok()
 }
 
-/// URL path 에서 (SourceId, 파일경로) 파싱.
-fn parse_target(uri_path: &str) -> Option<(SourceId, PathBuf)> {
+/// URL path 에서 (SourceId, 파일경로) 파싱. duet-thumb 핸들러도 공유.
+pub(crate) fn parse_target(uri_path: &str) -> Option<(SourceId, PathBuf)> {
     let segs: Vec<&str> = uri_path.trim_start_matches('/').split('/').collect();
     match segs.as_slice() {
         ["local", phex] => Some((SourceId::Local, PathBuf::from(hex_to_string(phex)?))),
@@ -53,7 +53,10 @@ fn parse_target(uri_path: &str) -> Option<(SourceId, PathBuf)> {
     }
 }
 
-async fn fs_for<R: Runtime>(app: &AppHandle<R>, source: &SourceId) -> Option<Box<dyn FileSystem>> {
+pub(crate) async fn fs_for<R: Runtime>(
+    app: &AppHandle<R>,
+    source: &SourceId,
+) -> Option<Box<dyn FileSystem>> {
     match source {
         SourceId::Local => Some(Box::new(LocalFs::new())),
         SourceId::Ssh { connection_id, .. } => {

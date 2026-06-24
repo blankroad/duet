@@ -261,6 +261,13 @@ pub fn run() {
                 responder.respond(services::preview_stream::handle(app, request).await);
             });
         })
+        // duet-thumb:// — 그리드/타일 썸네일(이미지 디코드→축소→JPEG 캐시).
+        .register_asynchronous_uri_scheme_protocol("duet-thumb", |ctx, request, responder| {
+            let app = ctx.app_handle().clone();
+            tauri::async_runtime::spawn(async move {
+                responder.respond(services::thumbnail::handle(app, request).await);
+            });
+        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_drag::init())
