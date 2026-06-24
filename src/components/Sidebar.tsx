@@ -65,6 +65,7 @@ import { useContextMenu, type MenuEntry } from "@/stores/contextMenu";
 import { useToast } from "@/stores/toast";
 import { useTasks, selectActive } from "@/stores/tasks";
 import { useReorderable } from "@/hooks/useReorderable";
+import { ShelfSection } from "@/components/ShelfSection";
 import { commands } from "@/types/bindings";
 import { formatSize } from "@/lib/format";
 import type {
@@ -142,6 +143,7 @@ export function Sidebar({
         onOpenLocation={onOpenLocation}
         onOpenHostPath={onOpenHostPath}
       />
+      <ShelfSection />
     </aside>
   );
 }

@@ -8,9 +8,11 @@ import {
   Rows3,
   Eye,
   EyeOff,
+  FolderSync,
 } from "lucide-react";
 import clsx from "clsx";
 import { usePanes, activeTab, type PaneId, type ViewMode } from "@/stores/panes";
+import { useUI } from "@/stores/ui";
 import { useUIDialogs } from "@/stores/ui-dialogs";
 import { useToast } from "@/stores/toast";
 import { triggerCopy, triggerDelete, triggerMove, triggerMkdir } from "@/lib/fileActions";
@@ -31,6 +33,8 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
   const showHidden = usePanes((s) => activeTab(s, id).showHidden);
   const setViewMode = usePanes((s) => s.setViewMode);
   const toggleShowHidden = usePanes((s) => s.toggleShowHidden);
+  const syncBrowse = useUI((s) => s.syncBrowse);
+  const toggleSyncBrowse = useUI((s) => s.toggleSyncBrowse);
   const open = useUIDialogs((s) => s.open);
   const showToast = useToast((s) => s.show);
 
@@ -66,6 +70,17 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
 
       <Divider />
 
+      <ToolButton
+        label={
+          syncBrowse
+            ? "Synchronized browsing: ON — 양 패널 동반 이동"
+            : "Synchronized browsing: OFF"
+        }
+        active={syncBrowse}
+        onClick={() => toggleSyncBrowse()}
+      >
+        <FolderSync size={15} />
+      </ToolButton>
       <ToolButton
         label={showHidden ? "Hide hidden files (Ctrl+H)" : "Show hidden files (Ctrl+H)"}
         active={showHidden}

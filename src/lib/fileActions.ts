@@ -9,9 +9,10 @@ import {
   type PaneId,
 } from "@/stores/panes";
 import type { DialogState } from "@/stores/ui-dialogs";
-import { childLocation, sameLocation } from "@/lib/entryDnd";
+import { childLocation, sameLocation, sourceKey } from "@/lib/entryDnd";
 import { formatErr } from "@/lib/error";
 import { useClipboard } from "@/stores/clipboard";
+import { useShelf } from "@/stores/shelf";
 
 type OpenFn = (d: DialogState) => void;
 type ToastFn = (msg: string) => void;
@@ -298,6 +299,56 @@ export async function planTransferTo(
     const r = await commands.fsCopyPlan(targets, dst);
     if (r.status === "ok") open({ kind: "copy-confirm", plan: r.data });
     else showToast(`Copy plan failed: ${formatErr(r.error)}`);
+  }
+}
+
+// ── Drop Stack / Shelf ───────────────────────────────────────────────────────
+
+/** 활성 패널 선택(또는 cursor)을 선반에 담는다(여러 위치·호스트 누적). */
+export function addSelectionToShelf(showToast: ToastFn): void {
+  const { targets } = resolveActiveTargets();
+  if (targets.length === 0) {
+    showToast("Shelf: nothing selected");
+    return;
+  }
+  const n = useShelf.getState().add(targets);
+  const total = useShelf.getState().items.length;
+  showToast(
+    n === 0
+      ? "이미 선반에 있음"
+      : `선반에 ${n}개 담음 (총 ${total})`,
+  );
+}
+
+/**
+ * 선반 항목을 활성 패널 현재 폴더로 복사/이동.
+ * fs_copy_plan 은 단일 소스 가정 → 소스별 그룹화 후 첫 그룹을 확인 다이얼로그로 적용.
+ * 다른 소스 그룹은 선반에 남기고 토스트 안내(혼합 소스 순차 적용은 후속).
+ */
+export async function applyShelfTo(
+  mode: "copy" | "move",
+  open: OpenFn,
+  showToast: ToastFn,
+): Promise<void> {
+  const items = useShelf.getState().items;
+  if (items.length === 0) {
+    showToast("선반이 비어 있음");
+    return;
+  }
+  const dst = resolveActiveTargets().tab.location;
+  const groups = new Map<string, EntryRef[]>();
+  for (const it of items) {
+    const k = sourceKey(it.location.source);
+    const g = groups.get(k);
+    if (g) g.push(it);
+    else groups.set(k, [it]);
+  }
+  const groupList = [...groups.values()];
+  await planTransferTo(groupList[0]!, dst, mode, open, showToast);
+  if (groupList.length > 1) {
+    showToast(
+      `다른 소스 ${groupList.length - 1}개 그룹은 선반에 남음 — 다시 적용하세요`,
+    );
   }
 }
 

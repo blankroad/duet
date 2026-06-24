@@ -37,6 +37,7 @@ export interface BuiltinDeps {
   toggleHidden: () => void;
   toggleSidebar: () => void;
   togglePreview: () => void;
+  toggleSyncBrowse: () => void;
   quickLook: () => void;
   viewDetails: () => void;
   viewGrid: () => void;
@@ -53,6 +54,11 @@ export interface BuiltinDeps {
   // select (glob/substring pattern)
   selectByPattern: () => void;
   deselectByPattern: () => void;
+  // shelf (drop stack)
+  shelfAdd: () => void;
+  shelfApplyCopy: () => void;
+  shelfApplyMove: () => void;
+  shelfClear: () => void;
   // file (two-pane)
   compareFolders: () => void;
   threeWayCompare: () => void;
@@ -175,6 +181,12 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
       action: deps.quickLook,
     },
     {
+      id: "view.syncBrowse",
+      label: "Toggle synchronized browsing",
+      category: "View",
+      action: deps.toggleSyncBrowse,
+    },
+    {
       id: "view.details",
       label: "View: Details",
       category: "View",
@@ -261,6 +273,31 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
       category: "Select",
       defaultKey: "Ctrl+-",
       action: deps.deselectByPattern,
+    },
+    {
+      id: "shelf.add",
+      label: "Add to shelf",
+      category: "File",
+      defaultKey: "Ctrl+Shift+A",
+      action: deps.shelfAdd,
+    },
+    {
+      id: "shelf.applyCopy",
+      label: "Shelf: copy here",
+      category: "File",
+      action: deps.shelfApplyCopy,
+    },
+    {
+      id: "shelf.applyMove",
+      label: "Shelf: move here",
+      category: "File",
+      action: deps.shelfApplyMove,
+    },
+    {
+      id: "shelf.clear",
+      label: "Shelf: clear",
+      category: "File",
+      action: deps.shelfClear,
     },
     {
       id: "file.compare",

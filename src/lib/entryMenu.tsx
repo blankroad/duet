@@ -26,6 +26,7 @@ import {
   FolderGit2,
   Terminal,
   Columns3,
+  Layers,
 } from "lucide-react";
 import { commands } from "@/types/bindings";
 import type { Entry, Location } from "@/types/bindings";
@@ -59,6 +60,7 @@ import {
   clipCopy,
   clipCut,
   clipPaste,
+  addSelectionToShelf,
 } from "@/lib/fileActions";
 import { useClipboard } from "@/stores/clipboard";
 import type { MenuEntry } from "@/stores/contextMenu";
@@ -264,6 +266,13 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
       icon: <FolderInput size={ICON} />,
       shortcut: "F6",
       onSelect: () => void triggerMove(open, showToast),
+    },
+    {
+      id: "shelf-add",
+      label: "Add to shelf",
+      icon: <Layers size={ICON} />,
+      shortcut: "Ctrl+Shift+A",
+      onSelect: () => addSelectionToShelf(showToast),
     },
     {
       id: "compress",

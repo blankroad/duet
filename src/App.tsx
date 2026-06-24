@@ -48,11 +48,14 @@ import {
   clipCopy,
   clipCut,
   clipPaste,
+  addSelectionToShelf,
+  applyShelfTo,
 } from "@/lib/fileActions";
 import { useCommands } from "@/stores/commands";
 import { usePalette } from "@/stores/palette";
 import { buildBuiltins } from "@/lib/commands";
 import { useUI } from "@/stores/ui";
+import { useShelf } from "@/stores/shelf";
 import { useAppSettings } from "@/stores/settings";
 import {
   usePanes,
@@ -187,6 +190,28 @@ function App() {
     [navigateTo],
   );
 
+  /**
+   * 동기화 브라우징 — 활성 패널의 폴더 진입/위로를 반대 패널(opposite)에 동행.
+   * setEntries 직접 호출(navigate 우회)이라 재진입/무한루프 없음. 대응 경로가 없거나
+   * 권한 실패면 조용히 무시(토스트 X) — 반대 패널은 그대로 둔다.
+   */
+  const syncMirror = useCallback(
+    (opposite: PaneId, target: Location) => {
+      void (async () => {
+        try {
+          const entries = await listDirectory(target);
+          usePanes
+            .getState()
+            .setEntries(opposite, target, entries, { pushHistory: true });
+          void commands.paneWatchSet(opposite, target);
+        } catch {
+          /* 반대편에 대응 경로 없음 — 동행 skip */
+        }
+      })();
+    },
+    [listDirectory],
+  );
+
   /** 활성 패널을 그 소스의 휴지통으로 이동 — 삭제 항목 보기/복구(복사·이동으로). */
   const onTrashActivate = useCallback(
     (pane?: PaneId) => {
@@ -245,8 +270,15 @@ function App() {
       const parent = parentPath(tab.location.path);
       if (parent === null) return;
       void navigate(id, parent);
+      // 동기화 브라우징 — 반대 패널도 한 단계 위로(아카이브/휴지통 컨텍스트면 skip).
+      if (useUI.getState().syncBrowse && !tab.archive && !tab.trashRoot) {
+        const opp: PaneId = id === "left" ? "right" : "left";
+        const oppTab = activeTab(usePanes.getState(), opp);
+        const oppParent = parentLocation(oppTab.location);
+        if (oppParent && !oppTab.archive) syncMirror(opp, oppParent);
+      }
     },
-    [navigate, navigateTo],
+    [navigate, navigateTo, syncMirror],
   );
 
   const onActivate = useCallback(
@@ -260,6 +292,13 @@ function App() {
       if (entry.kind === "dir") {
         // 경로 결합은 childLocation 으로 — Windows 드라이브 루트에서 C:\/ 중복 방지.
         void navigate(id, childLocation(tab.location, entry.name).path);
+        // 동기화 브라우징 — 반대 패널도 같은 이름 하위폴더로(있으면).
+        if (useUI.getState().syncBrowse && !tab.archive && !tab.trashRoot) {
+          const opp: PaneId = id === "left" ? "right" : "left";
+          const oppTab = activeTab(usePanes.getState(), opp);
+          if (!oppTab.archive)
+            syncMirror(opp, childLocation(oppTab.location, entry.name));
+        }
         return;
       }
       // 아카이브 파일 — 임시 추출 후 그 폴더로 진입(탐색기처럼 내부 열람).
@@ -291,7 +330,7 @@ function App() {
           showToast(`Cannot open ${entry.name} — ${formatErr(r.error)}`);
       })();
     },
-    [navigate, navigateTo, onUp, showToast],
+    [navigate, navigateTo, onUp, showToast, syncMirror],
   );
 
   const onRefresh = useCallback(
@@ -548,6 +587,7 @@ function App() {
         usePanes.getState().toggleShowHidden(usePanes.getState().activePane),
       toggleSidebar: () => toggleSidebar(),
       togglePreview: () => togglePreview(),
+      toggleSyncBrowse: () => useUI.getState().toggleSyncBrowse(),
       quickLook: () => useUI.getState().toggleQuickLook(),
       viewDetails: () =>
         usePanes
@@ -607,6 +647,10 @@ function App() {
         useUI
           .getState()
           .requestSelectPattern(usePanes.getState().activePane, "remove"),
+      shelfAdd: () => addSelectionToShelf(showToast),
+      shelfApplyCopy: () => void applyShelfTo("copy", openDialog, showToast),
+      shelfApplyMove: () => void applyShelfTo("move", openDialog, showToast),
+      shelfClear: () => useShelf.getState().clear(),
       compareFolders: () => void triggerCompare(openDialog, showToast),
       threeWayCompare: () => void triggerThreeWay(openDialog, showToast),
       syncFolders: () => void triggerSync(openDialog, showToast),

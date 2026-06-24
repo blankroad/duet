@@ -35,6 +35,11 @@ export function sameLocation(a: Location, b: Location): boolean {
   return sameSource(a.source, b.source) && a.path === b.path;
 }
 
+/** 소스 식별 키 — 로컬은 "local", SSH 는 connection 별. dedup/그룹화용 안정 문자열. */
+export function sourceKey(s: SourceId): string {
+  return s.kind === "local" ? "local" : `ssh:${s.connection_id}`;
+}
+
 /**
  * 부모 Location + 이름 → 자식 Location (디렉토리 드롭/네비 대상). 표시용 경로 결합.
  *
