@@ -6,6 +6,7 @@ import {
 } from "@/stores/panes";
 import type { Entry } from "@/types/bindings";
 import { formatSize } from "@/lib/format";
+import { useHostLabel } from "@/lib/hostLabel";
 import {
   kindLabel,
   formatPerms,
@@ -26,8 +27,7 @@ export function StatusBar() {
   const tab = usePanes((s) => activeTab(s, activeId));
 
   const src = tab.location.source;
-  const sourceLabel =
-    src.kind === "local" ? "Local" : `${src.user}@${src.host_ip}`;
+  const sourceLabel = useHostLabel(src);
 
   // 왼쪽: 파일/폴더 수 + 총 용량(파일만) + 선택.
   const { files, folders, totalSize } = summarizeEntries(tab.entries);

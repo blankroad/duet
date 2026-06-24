@@ -37,6 +37,7 @@ import {
   sameBookmarkLocation,
 } from "@/stores/bookmarks";
 import { folderName } from "@/lib/entryMenu";
+import { useHostLabel } from "@/lib/hostLabel";
 import { bookmarkLocation } from "@/lib/bookmarkActions";
 import { useHostFavorites } from "@/stores/hostFavorites";
 import { useContextMenu, type MenuEntry } from "@/stores/contextMenu";
@@ -67,10 +68,7 @@ interface PathBarProps {
  */
 export function PathBar({ location, archive, canBack, canForward, onBack, onForward, onUp, onRefresh, onSegmentClick, onUpdateArchive, editNonce, editActive }: PathBarProps) {
   const isLocal = location.source.kind === "local";
-  const sourceTitle =
-    location.source.kind === "local"
-      ? "Local"
-      : `${location.source.user}@${location.source.host_ip}`;
+  const sourceTitle = useHostLabel(location.source);
   const winLocal = isLocal && platform() === "windows";
   const crumbs = buildCrumbs(String(location.path), winLocal);
 

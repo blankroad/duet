@@ -7,6 +7,7 @@ pub mod frecency;
 pub mod fs_ops;
 pub mod host_favorites;
 pub mod host_groups;
+pub mod host_nicknames;
 pub mod keymap;
 pub mod pane;
 pub mod saved_hosts;

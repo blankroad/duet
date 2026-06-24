@@ -80,16 +80,14 @@ import {
   findBookmarkId,
 } from "@/stores/bookmarks";
 import { bookmarkLocation } from "@/lib/bookmarkActions";
-import {
-  bootstrapHostFavorites,
-  addHostFavorite,
-} from "@/stores/hostFavorites";
+import { bootstrapHostFavorites } from "@/stores/hostFavorites";
 import { bootstrapUserAliases } from "@/stores/userAliases";
 import { bootstrapAppLaunchers, setAppArgs } from "@/stores/appLaunchers";
 import { bootstrapPlaces, refreshVolumes } from "@/stores/places";
 import { recordRecent } from "@/stores/recents";
 import { loadSession, initSessionPersist } from "@/stores/session";
 import { bootstrapHostGroups } from "@/stores/sidebarGroups";
+import { bootstrapHostNicknames } from "@/stores/hostNicknames";
 import { useDynamicCommands } from "@/lib/dynamicCommands";
 import { useConnections } from "@/stores/connections";
 import { useTauri } from "@/hooks/useTauri";
@@ -962,26 +960,6 @@ function App() {
     void bookmarkLocation(tab.location, folderName(tab.location));
   }, []);
 
-  const onAddFavorite = useCallback(() => {
-    const id = usePanes.getState().activePane;
-    const tab = activeTab(usePanes.getState(), id);
-    if (tab.location.source.kind !== "ssh") {
-      showToast("Favorites: switch to SSH pane first");
-      return;
-    }
-    const connId = tab.location.source.connection_id;
-    const activeRecord = useConnections.getState().active;
-    const conn = Object.values(activeRecord).find((c) => c.id === connId);
-    if (!conn) {
-      showToast("Active connection not found");
-      return;
-    }
-    const path = String(tab.location.path);
-    const defaultName = path.split("/").filter(Boolean).pop() ?? "/";
-    const name = window.prompt("Favorite name", defaultName);
-    if (name) void addHostFavorite(conn.alias, name, path);
-  }, [showToast]);
-
   // ad-hoc connect 다이얼로그 (Sidebar + 버튼 또는 saved host 더블클릭)
   const [adHocOpen, setAdHocOpen] = useState(false);
   const [adHocPrefill, setAdHocPrefill] = useState<
@@ -1121,6 +1099,7 @@ function App() {
       void bootstrapAppLaunchers();
       void bootstrapPlaces();
       void bootstrapHostGroups();
+      void bootstrapHostNicknames();
       // 설정 적용 — 테마 + 새 탭 기본값(정렬/뷰/숨김), 기존 탭에도 즉시 반영.
       void commands.settingsGet().then((r) => {
         if (r.status === "ok") {
@@ -1155,7 +1134,6 @@ function App() {
           onOpenLocation={onOpenLocation}
           onOpenHostPath={onOpenHostPath}
           onAddBookmark={onAddBookmark}
-          onAddFavorite={onAddFavorite}
           onTrashActivate={onTrashActivate}
           onEject={onEject}
         />

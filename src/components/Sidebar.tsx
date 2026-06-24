@@ -66,6 +66,8 @@ import { useToast } from "@/stores/toast";
 import { useTasks, selectActive } from "@/stores/tasks";
 import { useReorderable } from "@/hooks/useReorderable";
 import { ShelfSection } from "@/components/ShelfSection";
+import { useHostNicknames, setHostNickname } from "@/stores/hostNicknames";
+import { aliasLabel } from "@/lib/hostLabel";
 import { commands } from "@/types/bindings";
 import { formatSize } from "@/lib/format";
 import type {
@@ -105,7 +107,6 @@ export function Sidebar({
   onOpenLocation,
   onOpenHostPath,
   onAddBookmark,
-  onAddFavorite,
   onTrashActivate,
   onEject,
 }: {
@@ -117,7 +118,6 @@ export function Sidebar({
   /** 호스트 경로로 이동(필요 시 자동 접속) — 지정 패널. */
   onOpenHostPath: (hostAlias: string, path: string, pane: PaneId) => void;
   onAddBookmark: () => void;
-  onAddFavorite: () => void;
   /** 패널을 그 소스의 휴지통으로 이동 (삭제 항목 보기/복구). */
   onTrashActivate: (pane?: PaneId) => void;
   /** 볼륨 eject (확인 다이얼로그 오픈). */
@@ -135,10 +135,16 @@ export function Sidebar({
         onTrashActivate={onTrashActivate}
       />
       <VolumesSection onOpenLocation={onOpenLocation} onEject={onEject} />
-      <HostsSection onHostActivate={onHostActivate} onAdHocOpen={onAdHocOpen} />
-      <SavedHostsSection onActivate={onSavedActivate} />
-      <BookmarksSection onOpen={onOpenLocation} onAdd={onAddBookmark} />
-      <HostFavoritesSection onOpen={onOpenHostPath} onAdd={onAddFavorite} />
+      <HostsSection
+        onHostActivate={onHostActivate}
+        onAdHocOpen={onAdHocOpen}
+        onSavedActivate={onSavedActivate}
+      />
+      <BookmarksSection
+        onOpen={onOpenLocation}
+        onAdd={onAddBookmark}
+        onOpenHostPath={onOpenHostPath}
+      />
       <RecentSection
         onOpenLocation={onOpenLocation}
         onOpenHostPath={onOpenHostPath}
@@ -681,12 +687,19 @@ function RecentItem({
 
 // ─────────────────────────── Saved hosts ───────────────────────────
 
-function SavedHostsSection({
+/**
+ * 저장 호스트 본문(Section 래퍼 없음) — 통합 Hosts 섹션 안에서 config 호스트 아래에
+ * 렌더된다. `hideAliases` 로 config 와 중복되는 alias 는 숨겨(같은 머신 2중 표시 방지).
+ */
+function SavedHostsBody({
   onActivate,
+  hideAliases,
 }: {
   onActivate: (host: SavedHost) => void;
+  hideAliases: Set<string>;
 }) {
-  const hosts = useSavedHosts((s) => s.hosts);
+  const allHosts = useSavedHosts((s) => s.hosts);
+  const hosts = allHosts.filter((h) => !hideAliases.has(h.alias));
   const groups = useHostGroups((s) => s.groups);
   const byAlias = new Map(hosts.map((h) => [h.alias, h]));
   // 그룹에 배정된 alias 집합 (live 호스트만 — dangling 멤버 무시).
@@ -700,49 +713,49 @@ function SavedHostsSection({
     keys: ungrouped.map((h) => h.alias),
     onCommit: (next) => void reorderSavedHosts(next),
   });
+  if (allHosts.length === 0) return null;
   return (
-    <Section
-      sectionKey="saved"
-      title="Saved hosts"
-      icon={<Bookmark size={14} />}
-      count={hosts.length}
-    >
-      {hosts.length === 0 ? (
-        <Item label="(none — Save host on connect)" muted />
-      ) : (
-        <>
-          {groups.map((g, gi) => (
-            <HostGroupFolder
-              key={g.id}
-              group={g}
-              members={g.members
-                .map((a) => byAlias.get(a))
-                .filter((h): h is SavedHost => !!h)}
-              groups={groups}
-              onActivate={onActivate}
-              isFirst={gi === 0}
-              isLast={gi === groups.length - 1}
-            />
-          ))}
-          {ungrouped.map((h) => (
-            <Fragment key={h.alias}>
-              {dragKey && insertBeforeKey === h.alias && <DropLine />}
-              <SavedHostItem
-                host={h}
-                currentGroupId={null}
-                groups={groups}
-                onActivate={onActivate}
-                reorder={{
-                  dragging: dragKey === h.alias,
-                  onMouseDown: (e) => onItemMouseDown(e, h.alias),
-                }}
-              />
-            </Fragment>
-          ))}
-          {dragKey && insertBeforeKey === null && <DropLine />}
-        </>
-      )}
-    </Section>
+    <>
+      <SubLabel>Saved</SubLabel>
+      {groups.map((g, gi) => (
+        <HostGroupFolder
+          key={g.id}
+          group={g}
+          members={g.members
+            .map((a) => byAlias.get(a))
+            .filter((h): h is SavedHost => !!h)}
+          groups={groups}
+          onActivate={onActivate}
+          isFirst={gi === 0}
+          isLast={gi === groups.length - 1}
+        />
+      ))}
+      {ungrouped.map((h) => (
+        <Fragment key={h.alias}>
+          {dragKey && insertBeforeKey === h.alias && <DropLine />}
+          <SavedHostItem
+            host={h}
+            currentGroupId={null}
+            groups={groups}
+            onActivate={onActivate}
+            reorder={{
+              dragging: dragKey === h.alias,
+              onMouseDown: (e) => onItemMouseDown(e, h.alias),
+            }}
+          />
+        </Fragment>
+      ))}
+      {dragKey && insertBeforeKey === null && <DropLine />}
+    </>
+  );
+}
+
+/** 통합 Hosts 섹션 내부의 작은 구분 라벨(~/.ssh/config / Saved). */
+function SubLabel({ children }: { children: ReactNode }) {
+  return (
+    <div className="px-2 pb-0.5 pt-1 text-meta uppercase tracking-wide text-fg-muted/50">
+      {children}
+    </div>
   );
 }
 
@@ -872,11 +885,24 @@ function SavedHostItem({
   onActivate: (host: SavedHost) => void;
   reorder?: { dragging: boolean; onMouseDown: (e: React.MouseEvent) => void };
 }) {
+  const nickname = useHostNicknames((s) => s.byAlias)[host.alias];
+  const display = nickname ?? host.alias;
   const menu: MenuEntry[] = [
     {
       id: "connect",
       label: "Connect / Edit…",
       onSelect: () => onActivate(host),
+    },
+    {
+      id: "rename",
+      label: "Set display name…",
+      onSelect: () => {
+        const next = window.prompt(
+          `Display name for "${host.alias}" (empty = reset):`,
+          nickname ?? "",
+        );
+        if (next !== null) void setHostNickname(host.alias, next);
+      },
     },
     moveToGroupEntry(host, currentGroupId, groups),
     { kind: "separator" },
@@ -895,11 +921,16 @@ function SavedHostItem({
       onMouseDown={reorder?.onMouseDown}
       onDoubleClick={() => onActivate(host)}
       onContextMenu={(e) => openMenu(e, menu)}
-      title={`${host.user}@${host.host}:${host.port}${host.key_path ? ` (key: ${host.key_path})` : ""}`}
+      title={`${host.user}@${host.host}:${host.port}${host.key_path ? ` (key: ${host.key_path})` : ""}${nickname ? ` · ${host.alias}` : ""}`}
       className={clsx(rowClass, reorder?.dragging && "opacity-50")}
     >
       <Bookmark size={11} className="shrink-0 text-fg-muted" />
-      <span className="truncate">{host.alias}</span>
+      <span className="truncate">{display}</span>
+      {nickname && (
+        <span className="shrink-0 truncate text-meta text-fg-muted/60">
+          {host.alias}
+        </span>
+      )}
       <DeleteBtn
         label={`Remove saved host ${host.alias}`}
         onClick={() => void removeSavedHost(host.alias)}
@@ -910,43 +941,71 @@ function SavedHostItem({
 
 // ─────────────────────────── Bookmarks ───────────────────────────
 
+/**
+ * 통합 Bookmarks 섹션 — 로컬 북마크 + 원격 즐겨찾기(호스트별)를 한 목록으로.
+ * "+" 는 활성 탭을 북마크(bookmarkLocation 이 로컬→북마크 / SSH→호스트 즐겨찾기로 라우팅).
+ */
 function BookmarksSection({
   onOpen,
   onAdd,
+  onOpenHostPath,
 }: {
   onOpen: (location: Location, pane: PaneId) => void;
   onAdd: () => void;
+  onOpenHostPath: (hostAlias: string, path: string, pane: PaneId) => void;
 }) {
   const items = useBookmarks((s) => s.items);
+  const favItems = useHostFavorites((s) => s.items);
+  const activeAliases = new Set(
+    Object.values(useConnections((s) => s.active)).map((c) => c.alias),
+  );
   const { dragKey, insertBeforeKey, onItemMouseDown } = useReorderable({
     group: "bookmarks",
     keys: items.map((b) => b.id),
     onCommit: (next) => void reorderBookmarks(next),
   });
+  const favGroups: Record<string, HostFavorite[]> = {};
+  for (const f of favItems) (favGroups[f.host_alias] ??= []).push(f);
+  const favKeys = Object.keys(favGroups).sort();
+  const total = items.length + favItems.length;
+
   return (
     <Section
       sectionKey="bookmarks"
       title="Bookmarks"
       icon={<Star size={14} />}
-      count={items.length}
-      action={<AddBtn label="Add active tab to bookmarks" onClick={onAdd} />}
+      count={total}
+      action={<AddBtn label="Bookmark active tab" onClick={onAdd} />}
     >
-      {items.length === 0 ? (
-        <Item label="(none — + to add active tab)" muted />
+      {total === 0 ? (
+        <Item label="(none — + to bookmark active tab)" muted />
       ) : (
-        items.map((b) => (
-          <Fragment key={b.id}>
-            {dragKey && insertBeforeKey === b.id && <DropLine />}
-            <BookmarkItem
-              bookmark={b}
-              onOpen={onOpen}
-              dragging={dragKey === b.id}
-              onMouseDown={(e) => onItemMouseDown(e, b.id)}
+        <>
+          {items.length > 0 && <SubLabel>Local</SubLabel>}
+          {items.map((b) => (
+            <Fragment key={b.id}>
+              {dragKey && insertBeforeKey === b.id && <DropLine />}
+              <BookmarkItem
+                bookmark={b}
+                onOpen={onOpen}
+                dragging={dragKey === b.id}
+                onMouseDown={(e) => onItemMouseDown(e, b.id)}
+              />
+            </Fragment>
+          ))}
+          {dragKey && insertBeforeKey === null && <DropLine />}
+          {favKeys.length > 0 && <SubLabel>Remote</SubLabel>}
+          {favKeys.map((alias) => (
+            <FavoriteGroup
+              key={alias}
+              alias={alias}
+              favs={favGroups[alias]!}
+              connected={activeAliases.has(alias)}
+              onOpen={onOpenHostPath}
             />
-          </Fragment>
-        ))
+          ))}
+        </>
       )}
-      {dragKey && insertBeforeKey === null && <DropLine />}
     </Section>
   );
 }
@@ -1007,49 +1066,7 @@ function BookmarkItem({
   );
 }
 
-// ─────────────────────────── Host favorites ───────────────────────────
-
-function HostFavoritesSection({
-  onOpen,
-  onAdd,
-}: {
-  onOpen: (hostAlias: string, path: string, pane: PaneId) => void;
-  onAdd: () => void;
-}) {
-  const items = useHostFavorites((s) => s.items);
-  const activeRecord = useConnections((s) => s.active);
-  const activeAliases = new Set(
-    Object.values(activeRecord).map((c) => c.alias),
-  );
-  // 모든 즐겨찾기 표시(연결 안 돼도) — 클릭 시 자동 접속, 어디서나 관리/삭제 가능.
-  const groups: Record<string, HostFavorite[]> = {};
-  for (const f of items) (groups[f.host_alias] ??= []).push(f);
-  const groupKeys = Object.keys(groups).sort();
-
-  return (
-    <Section
-      sectionKey="favorites"
-      title="Favorites"
-      icon={<Heart size={14} />}
-      count={items.length}
-      action={<AddBtn label="Add active tab path (SSH only)" onClick={onAdd} />}
-    >
-      {groupKeys.length === 0 ? (
-        <Item label="(none — bookmark an SSH folder)" muted />
-      ) : (
-        groupKeys.map((alias) => (
-          <FavoriteGroup
-            key={alias}
-            alias={alias}
-            favs={groups[alias]!}
-            connected={activeAliases.has(alias)}
-            onOpen={onOpen}
-          />
-        ))
-      )}
-    </Section>
-  );
-}
+// ─────────────────────── Host favorites (Bookmarks 내 원격 그룹) ───────────────────────
 
 function FavoriteGroup({
   alias,
@@ -1064,6 +1081,7 @@ function FavoriteGroup({
 }) {
   const collapsed = useUI((s) => s.collapsed[`fav:${alias}`]);
   const toggle = useUI((s) => s.toggleSection);
+  const nicks = useHostNicknames((s) => s.byAlias);
   const { dragKey, insertBeforeKey, onItemMouseDown } = useReorderable({
     group: `fav:${alias}`,
     keys: favs.map((f) => f.id),
@@ -1088,7 +1106,7 @@ function FavoriteGroup({
             connected ? "bg-green-500" : "bg-fg-muted/30",
           )}
         />
-        <span className="truncate">{alias}</span>
+        <span className="truncate">{aliasLabel(alias, nicks)}</span>
         {collapsed && <span className="ml-auto opacity-50">{favs.length}</span>}
       </button>
       {!collapsed &&
@@ -1163,35 +1181,50 @@ function FavoriteItem({
 
 // ─────────────────────────── Hosts (read-only) ───────────────────────────
 
+/**
+ * 통합 Hosts 섹션 — ~/.ssh/config 호스트 + 저장(ad-hoc) 호스트를 한 목록으로.
+ * 같은 alias 가 양쪽에 있으면 config 가 우선(저장본은 숨김) → 같은 머신 2중 표시 방지.
+ */
 function HostsSection({
   onHostActivate,
   onAdHocOpen,
+  onSavedActivate,
 }: {
   onHostActivate: (alias: string) => void;
   onAdHocOpen: () => void;
+  onSavedActivate: (host: SavedHost) => void;
 }) {
   const hosts = useConnections((s) => s.hosts);
   const stateByAlias = useConnections((s) => s.stateByAlias)();
+  const savedCount = useSavedHosts((s) => s.hosts.length);
+  const configAliases = new Set(hosts.map((h) => h.alias));
 
   return (
     <Section
       sectionKey="hosts"
       title="Hosts"
       icon={<Server size={14} />}
-      count={hosts.length}
+      count={hosts.length + savedCount}
       action={<AddBtn label="Connect to host…" onClick={onAdHocOpen} />}
     >
-      {hosts.length === 0 ? (
-        <Item label="(no hosts in ~/.ssh/config)" muted />
+      {hosts.length === 0 && savedCount === 0 ? (
+        <Item label="(no hosts — Connect to host…)" muted />
       ) : (
-        hosts.map((h) => (
-          <HostItem
-            key={h.alias}
-            host={h}
-            state={stateByAlias[h.alias] ?? { kind: "disconnected" }}
-            onActivate={() => onHostActivate(h.alias)}
+        <>
+          {hosts.length > 0 && <SubLabel>~/.ssh/config</SubLabel>}
+          {hosts.map((h) => (
+            <HostItem
+              key={h.alias}
+              host={h}
+              state={stateByAlias[h.alias] ?? { kind: "disconnected" }}
+              onActivate={() => onHostActivate(h.alias)}
+            />
+          ))}
+          <SavedHostsBody
+            onActivate={onSavedActivate}
+            hideAliases={configAliases}
           />
-        ))
+        </>
       )}
     </Section>
   );
@@ -1206,18 +1239,45 @@ function HostItem({
   state: ConnectionState;
   onActivate: () => void;
 }) {
+  const nicks = useHostNicknames((s) => s.byAlias);
+  const nickname = nicks[host.alias];
+  const display = nickname ?? host.alias;
+
+  // 별명 설정/해제 — config alias 키로 저장. 패널·상태바도 이 별명을 따른다.
+  const promptName = () => {
+    const next = window.prompt(
+      `Display name for "${host.alias}" (empty = reset):`,
+      nickname ?? "",
+    );
+    if (next === null) return;
+    void setHostNickname(host.alias, next);
+  };
+
   const menu: MenuEntry[] = [
     { id: "connect", label: "Connect…", onSelect: onActivate },
+    { id: "rename", label: "Set display name…", onSelect: promptName },
   ];
+  if (nickname) {
+    menu.push({
+      id: "reset-name",
+      label: "Reset display name",
+      onSelect: () => void setHostNickname(host.alias, ""),
+    });
+  }
   return (
     <div
       onDoubleClick={onActivate}
       onContextMenu={(e) => openMenu(e, menu)}
-      title={`${host.user}@${host.hostname}:${host.port}${host.has_proxy_jump ? " (via jump)" : ""}`}
+      title={`${host.user}@${host.hostname}:${host.port}${host.has_proxy_jump ? " (via jump)" : ""}${nickname ? ` · ${host.alias}` : ""}`}
       className="flex cursor-default items-center gap-1 rounded px-2 py-0.5 hover:bg-border"
     >
       <StateDot state={state} />
-      <span className="truncate">{host.alias}</span>
+      <span className="truncate">{display}</span>
+      {nickname && (
+        <span className="shrink-0 truncate text-meta text-fg-muted/60">
+          {host.alias}
+        </span>
+      )}
       {host.has_proxy_jump && (
         <Network
           size={11}

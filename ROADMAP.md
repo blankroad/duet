@@ -126,6 +126,20 @@
 - [ ] Drag & Drop (외부 앱 → duet, duet → 외부)
 - [x] 다중 선택 일괄 이름 변경 (batch rename)
 
+## 사이드바 재설계 (2026-06-24) — 11섹션 정리·통합
+
+> 리서치(Transmit·ForkLift·Cyberduck·Termius·FileZilla·Finder·Dolphin 등) 기반.
+> 별명 전파 + 호스트/북마크 통합 + 태그. spec `docs/specs/2026-06-24-sidebar-redesign.md`.
+
+- [x] **Phase 1 — 호스트 별명** — host-nicknames.json + hostLabel. 사이드바 Hosts 행
+      별명 편집(우클릭) + 패널/상태바가 IP 대신 별명 표시. (2026-06-24)
+- [x] **Phase 2 — Hosts 통합** — ssh-config + saved 를 한 "Hosts" 섹션으로(SubLabel
+      구분, alias dedup, saved 도 별명 편집). (2026-06-24)
+- [x] **Phase 3 — Bookmarks 통합** — Host Favorites 를 "Bookmarks" 섹션으로 흡수
+      (Local/Remote SubLabel, "+" 가 소스별 라우팅, fav 그룹 헤더 별명). (2026-06-24)
+- [ ] Phase 4 — 태그(다대다) + 필터 칩
+- [ ] Phase 5 — 섹션 정리(Places+Volumes, This PC 흡수, 순서)
+
 ## 벤치마킹 후속 (2026-06-24) — 경쟁 탐색기 대비 가치 향상
 
 > 대표 탐색기 24종(Directory Opus·TC·yazi·ForkLift·WinSCP·Path Finder·Dolphin 등)
