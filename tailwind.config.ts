@@ -20,6 +20,20 @@ const config: Config = {
         accent: "hsl(var(--accent) / <alpha-value>)",
         danger: "hsl(var(--danger) / <alpha-value>)",
         border: "hsl(var(--border) / <alpha-value>)",
+        // 파일 종류 구분 색역 (globals.css --icon-*). text-icon-* 로 사용.
+        // UI 강조색이 아닌 "정보 전달용 스코프 팔레트" — DESIGN.md 색상 절.
+        icon: {
+          code: "hsl(var(--icon-code) / <alpha-value>)",
+          data: "hsl(var(--icon-data) / <alpha-value>)",
+          doc: "hsl(var(--icon-doc) / <alpha-value>)",
+          image: "hsl(var(--icon-image) / <alpha-value>)",
+          audio: "hsl(var(--icon-audio) / <alpha-value>)",
+          video: "hsl(var(--icon-video) / <alpha-value>)",
+          archive: "hsl(var(--icon-archive) / <alpha-value>)",
+          sheet: "hsl(var(--icon-sheet) / <alpha-value>)",
+          key: "hsl(var(--icon-key) / <alpha-value>)",
+          font: "hsl(var(--icon-font) / <alpha-value>)",
+        },
       },
       backgroundColor: {
         base: "hsl(var(--bg-base) / <alpha-value>)",

@@ -45,6 +45,18 @@
   --syntax-number: 25 80% 42%;
   --syntax-title: 220 75% 48%;
   --syntax-builtin: 190 65% 36%;
+  /* 파일 종류 구분 색역 — 리스트/그리드 아이콘 전용. UI 강조색(≤4)과 분리된
+     스코프 팔레트 (DESIGN.md 색상 절). 윈도우 탐색기처럼 종류 한눈에 구분. */
+  --icon-code: 45 85% 47%;
+  --icon-data: 200 80% 45%;
+  --icon-doc: 255 60% 58%;
+  --icon-image: 160 55% 40%;
+  --icon-audio: 330 65% 55%;
+  --icon-video: 280 55% 58%;
+  --icon-archive: 30 75% 44%;
+  --icon-sheet: 135 50% 38%;
+  --icon-key: 350 65% 52%;
+  --icon-font: 305 50% 52%;
 }
 
 [data-theme="dark"] {
@@ -65,6 +77,17 @@
   --syntax-number: 25 85% 65%;
   --syntax-title: 210 90% 70%;
   --syntax-builtin: 190 70% 62%;
+  /* 파일 종류 구분 색역 — dark (밝게). */
+  --icon-code: 45 90% 62%;
+  --icon-data: 200 85% 65%;
+  --icon-doc: 255 75% 75%;
+  --icon-image: 160 55% 55%;
+  --icon-audio: 330 70% 68%;
+  --icon-video: 280 65% 72%;
+  --icon-archive: 30 70% 58%;
+  --icon-sheet: 135 50% 55%;
+  --icon-key: 350 75% 68%;
+  --icon-font: 305 55% 68%;
 }
 
 /* 시스템 다크 모드 자동 감지 (data-theme이 명시 안 된 경우) */
@@ -86,6 +109,17 @@
     --syntax-number: 25 85% 65%;
     --syntax-title: 210 90% 70%;
     --syntax-builtin: 190 70% 62%;
+    /* 파일 종류 구분 색역 — system dark. */
+    --icon-code: 45 90% 62%;
+    --icon-data: 200 85% 65%;
+    --icon-doc: 255 75% 75%;
+    --icon-image: 160 55% 55%;
+    --icon-audio: 330 70% 68%;
+    --icon-video: 280 65% 72%;
+    --icon-archive: 30 70% 58%;
+    --icon-sheet: 135 50% 55%;
+    --icon-key: 350 75% 68%;
+    --icon-font: 305 55% 68%;
   }
 }
 
