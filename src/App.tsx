@@ -599,6 +599,14 @@ function App() {
         const tab = activeTab(usePanes.getState(), id);
         useSearch.getState().open(id, tab.location);
       },
+      selectByPattern: () =>
+        useUI
+          .getState()
+          .requestSelectPattern(usePanes.getState().activePane, "add"),
+      deselectByPattern: () =>
+        useUI
+          .getState()
+          .requestSelectPattern(usePanes.getState().activePane, "remove"),
       compareFolders: () => void triggerCompare(openDialog, showToast),
       threeWayCompare: () => void triggerThreeWay(openDialog, showToast),
       syncFolders: () => void triggerSync(openDialog, showToast),

@@ -2,6 +2,7 @@ import { useMemo, useRef } from "react";
 import { TabBar } from "./TabBar";
 import { PathBar } from "./PathBar";
 import { PaneFilterBar } from "./PaneFilterBar";
+import { SelectPatternBar } from "./SelectPatternBar";
 import { PaneToolbar } from "./PaneToolbar";
 import { EntryList } from "./EntryList";
 import { EntryGrid } from "./EntryGrid";
@@ -110,6 +111,7 @@ export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward,
       />
       <PaneToolbar id={id} />
       <PaneFilterBar id={id} />
+      <SelectPatternBar id={id} />
       {tab.viewMode === "details" ? (
         <EntryList
           id={id}

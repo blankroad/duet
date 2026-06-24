@@ -5,6 +5,7 @@ export type CommandCategory =
   | "Sort"
   | "Filter"
   | "Search"
+  | "Select"
   | "File"
   | "Connection"
   | "Settings"
@@ -49,6 +50,9 @@ export interface BuiltinDeps {
   // filter / search
   focusFilter: () => void;
   openSearch: () => void;
+  // select (glob/substring pattern)
+  selectByPattern: () => void;
+  deselectByPattern: () => void;
   // file (two-pane)
   compareFolders: () => void;
   threeWayCompare: () => void;
@@ -243,6 +247,20 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
       category: "Search",
       defaultKey: "Ctrl+Shift+F",
       action: deps.openSearch,
+    },
+    {
+      id: "select.byPattern",
+      label: "Select by pattern (glob)",
+      category: "Select",
+      defaultKey: "Ctrl+=",
+      action: deps.selectByPattern,
+    },
+    {
+      id: "select.removeByPattern",
+      label: "Deselect by pattern (glob)",
+      category: "Select",
+      defaultKey: "Ctrl+-",
+      action: deps.deselectByPattern,
     },
     {
       id: "file.compare",

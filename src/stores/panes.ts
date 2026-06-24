@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { Entry, Location } from "@/types/bindings";
 import { normalizePath } from "@/lib/entryDnd";
+import { patternToMatcher } from "@/lib/glob";
 
 export type PaneId = "left" | "right";
 export type SortKey = "name" | "size" | "mtime" | "kind" | "ext";
@@ -76,6 +77,13 @@ interface PanesState {
   toggleSelected: (id: PaneId, name: string) => void;
   /** 선택 집합을 names 로 교체 (마키 드래그 선택용). */
   setSelected: (id: PaneId, names: string[]) => void;
+  /** glob/substring 패턴에 맞는 표시 항목을 선택집합에 추가/해제 (".." 제외).
+   *  영향받은(매치된) 항목 수를 반환 — 호출부 토스트 피드백용. */
+  selectByPattern: (
+    id: PaneId,
+    pattern: string,
+    mode: "add" | "remove",
+  ) => number;
   clearSelection: (id: PaneId) => void;
   setSort: (id: PaneId, key: SortKey, order: SortOrder) => void;
   toggleSortKey: (id: PaneId, key: SortKey) => void;
@@ -330,6 +338,42 @@ export const usePanes = create<PanesState>((set, get) => ({
         })),
       },
     })),
+  selectByPattern: (id, pattern, mode) => {
+    const matcher = patternToMatcher(pattern);
+    // 표시 항목(필터/숨김/정렬 반영분) 중 매치 — 합성 ".." 행은 제외.
+    const t = activeTab(get(), id);
+    const matched = computeDisplayed(t).filter(
+      (e) => !isParentEntry(e) && matcher(e.name),
+    );
+    // add 는 매치 전부, remove 는 현재 선택된 것만 실제 영향.
+    const affected =
+      mode === "add"
+        ? matched.length
+        : matched.filter((e) => t.selected.has(e.name)).length;
+    if (matched.length === 0) return 0;
+    set((s) => ({
+      panes: {
+        ...s.panes,
+        [id]: withActiveTab(s.panes[id], (tt) => {
+          const sel = new Set(tt.selected);
+          for (const e of matched) {
+            if (mode === "add") sel.add(e.name);
+            else sel.delete(e.name);
+          }
+          // add 시 첫 매치로 커서 이동 → 가상 스크롤이 뷰포트로 끌어와 가시화.
+          let cursorIndex = tt.cursorIndex;
+          if (mode === "add" && matched[0]) {
+            const firstName = matched[0].name;
+            const disp = computeDisplayed(tt);
+            const first = disp.findIndex((e) => e.name === firstName);
+            if (first >= 0) cursorIndex = first;
+          }
+          return { ...tt, selected: sel, cursorIndex };
+        }),
+      },
+    }));
+    return affected;
+  },
   clearSelection: (id) =>
     set((s) => ({
       panes: {

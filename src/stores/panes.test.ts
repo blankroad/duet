@@ -445,6 +445,71 @@ describe("panes — setSelected", () => {
   });
 });
 
+describe("panes — selectByPattern (glob-select)", () => {
+  beforeEach(reset);
+
+  const seed = () =>
+    usePanes
+      .getState()
+      .setEntries("left", { source: { kind: "local" }, path: "/proj" }, [
+        mk("a.ts"),
+        mk("b.ts"),
+        mk("c.tsx"),
+        mk("readme.md"),
+        mk("src", "dir"),
+      ]);
+
+  it("add mode selects glob matches, excludes '..'", () => {
+    seed();
+    const n = usePanes.getState().selectByPattern("left", "*.ts", "add");
+    const sel = activeTab(usePanes.getState(), "left").selected;
+    expect(sel).toEqual(new Set(["a.ts", "b.ts"]));
+    expect(sel.has("..")).toBe(false);
+    expect(n).toBe(2); // 매치 수 반환
+  });
+
+  it("returns 0 and changes nothing when no match", () => {
+    seed();
+    const n = usePanes.getState().selectByPattern("left", "*.zip", "add");
+    expect(n).toBe(0);
+    expect(activeTab(usePanes.getState(), "left").selected.size).toBe(0);
+  });
+
+  it("moves cursor to first match (brings it into view) on add", () => {
+    seed(); // dirs-first 정렬: [.., src, a.ts, b.ts, c.tsx, readme.md]
+    usePanes.getState().selectByPattern("left", "readme*", "add");
+    const t = activeTab(usePanes.getState(), "left");
+    const disp = selectDisplayedEntries("left", usePanes.getState());
+    expect(disp[t.cursorIndex]?.name).toBe("readme.md");
+  });
+
+  it("remove mode unselects matches, leaves the rest", () => {
+    seed();
+    usePanes.getState().setSelected("left", ["a.ts", "b.ts", "readme.md"]);
+    usePanes.getState().selectByPattern("left", "*.ts", "remove");
+    expect(activeTab(usePanes.getState(), "left").selected).toEqual(
+      new Set(["readme.md"]),
+    );
+  });
+
+  it("substring pattern (no glob meta) matches by inclusion", () => {
+    seed();
+    usePanes.getState().selectByPattern("left", "re", "add");
+    expect(activeTab(usePanes.getState(), "left").selected).toEqual(
+      new Set(["readme.md"]),
+    );
+  });
+
+  it("only targets displayed entries (respects active filter)", () => {
+    seed();
+    usePanes.getState().setFilter("left", "b"); // displays only b.ts
+    usePanes.getState().selectByPattern("left", "*.ts", "add");
+    expect(activeTab(usePanes.getState(), "left").selected).toEqual(
+      new Set(["b.ts"]),
+    );
+  });
+});
+
 describe("panes — swap / move tab", () => {
   beforeEach(reset);
 

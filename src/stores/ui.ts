@@ -64,6 +64,12 @@ interface UIState {
   editPathPane: PaneId | null;
   editPathNonce: number;
   requestEditPath: (pane: PaneId) => void;
+  /** "패턴 선택" 요청 — Ctrl+= / Ctrl+- 에서 활성 패널의 SelectPatternBar 오픈.
+   *  nonce 증가 시 selectPatternPane 패널의 바가 selectPatternMode 로 열린다. */
+  selectPatternPane: PaneId | null;
+  selectPatternMode: "add" | "remove";
+  selectPatternNonce: number;
+  requestSelectPattern: (pane: PaneId, mode: "add" | "remove") => void;
 }
 
 export const useUI = create<UIState>((set) => ({
@@ -92,4 +98,13 @@ export const useUI = create<UIState>((set) => ({
   editPathNonce: 0,
   requestEditPath: (pane) =>
     set((s) => ({ editPathPane: pane, editPathNonce: s.editPathNonce + 1 })),
+  selectPatternPane: null,
+  selectPatternMode: "add",
+  selectPatternNonce: 0,
+  requestSelectPattern: (pane, mode) =>
+    set((s) => ({
+      selectPatternPane: pane,
+      selectPatternMode: mode,
+      selectPatternNonce: s.selectPatternNonce + 1,
+    })),
 }));
