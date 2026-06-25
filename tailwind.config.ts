@@ -33,6 +33,7 @@ const config: Config = {
           sheet: "hsl(var(--icon-sheet) / <alpha-value>)",
           key: "hsl(var(--icon-key) / <alpha-value>)",
           font: "hsl(var(--icon-font) / <alpha-value>)",
+          slides: "hsl(var(--icon-slides) / <alpha-value>)",
         },
       },
       backgroundColor: {

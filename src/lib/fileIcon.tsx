@@ -11,6 +11,7 @@ import {
   FileCog,
   FileKey,
   FileType,
+  Presentation,
   File,
   Link as LinkIcon,
   type LucideIcon,
@@ -71,6 +72,29 @@ register({ Icon: FileCode, className: "text-icon-code" }, [
   "svelte",
   "lua",
   "dart",
+  "sql",
+  "r",
+  "jl",
+  "ex",
+  "exs",
+  "clj",
+  "groovy",
+  "gradle",
+  "cmake",
+  "mk",
+  "mak",
+  "proto",
+  "graphql",
+  "gql",
+  "tf",
+  "vim",
+  "el",
+]);
+register({ Icon: Presentation, className: "text-icon-slides" }, [
+  "ppt",
+  "pptx",
+  "pptm",
+  "odp",
 ]);
 register({ Icon: FileJson, className: "text-icon-data" }, [
   "json",
@@ -94,6 +118,10 @@ register({ Icon: FileText, className: "text-icon-doc" }, [
   "pdf",
   "log",
   "tex",
+  "epub",
+  "mobi",
+  "pages",
+  "org",
 ]);
 register({ Icon: FileImage, className: "text-icon-image" }, [
   "png",
@@ -108,6 +136,10 @@ register({ Icon: FileImage, className: "text-icon-image" }, [
   "tif",
   "heic",
   "avif",
+  "psd",
+  "ai",
+  "raw",
+  "jfif",
 ]);
 register({ Icon: FileAudio, className: "text-icon-audio" }, [
   "mp3",
@@ -118,6 +150,9 @@ register({ Icon: FileAudio, className: "text-icon-audio" }, [
   "aac",
   "wma",
   "opus",
+  "aiff",
+  "mid",
+  "midi",
 ]);
 register({ Icon: FileVideo, className: "text-icon-video" }, [
   "mp4",
@@ -130,6 +165,9 @@ register({ Icon: FileVideo, className: "text-icon-video" }, [
   "m4v",
   "mpg",
   "mpeg",
+  "3gp",
+  "ogv",
+  "m2ts",
 ]);
 register({ Icon: FileArchive, className: "text-icon-archive" }, [
   "zip",
@@ -142,13 +180,20 @@ register({ Icon: FileArchive, className: "text-icon-archive" }, [
   "7z",
   "rar",
   "lz4",
+  "iso",
+  "jar",
+  "cab",
+  "lz",
+  "lzma",
 ]);
 register({ Icon: FileSpreadsheet, className: "text-icon-sheet" }, [
   "csv",
   "tsv",
   "xls",
   "xlsx",
+  "xlsm",
   "ods",
+  "numbers",
 ]);
 // 시스템/바이너리는 색을 빼고 muted — 클릭 빈도 낮고 시각 노이즈 줄임.
 register({ Icon: FileCog, className: "text-fg-muted" }, [

@@ -57,6 +57,7 @@
   --icon-sheet: 135 50% 38%;
   --icon-key: 350 65% 52%;
   --icon-font: 305 50% 52%;
+  --icon-slides: 18 82% 50%;
 }
 
 [data-theme="dark"] {
@@ -88,6 +89,7 @@
   --icon-sheet: 135 50% 55%;
   --icon-key: 350 75% 68%;
   --icon-font: 305 55% 68%;
+  --icon-slides: 18 88% 64%;
 }
 
 /* 시스템 다크 모드 자동 감지 (data-theme이 명시 안 된 경우) */
@@ -120,6 +122,7 @@
     --icon-sheet: 135 50% 55%;
     --icon-key: 350 75% 68%;
     --icon-font: 305 55% 68%;
+    --icon-slides: 18 88% 64%;
   }
 }
 
