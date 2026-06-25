@@ -4,7 +4,10 @@
 //! URL 형식은 duet-preview 와 동일(`/local/<hex>` · `/ssh/<connId hex>/<hex>`).
 //! 원격도 SFTP 로 바이트만 가져와 생성(원본 통째 다운로드 회피 — 같은-호스트 원칙).
 //!
-//! v1: 래스터 이미지(png/jpg/gif/webp/bmp)만. 영상(ffmpeg)·PDF·SVG·AVIF·EXIF 회전은 후속.
+//! 래스터 이미지(png/jpg/gif/webp/bmp)는 `image` 크레이트로 디코드(로컬·원격 모두).
+//! 영상 등 디코드 불가 타입은 **OS 셸 썸네일러**(Windows `IShellItemImageFactory`)로 —
+//! 로컬 파일만(원격은 바이트 다운로드가 비싸 아이콘 fallback). macOS QuickLook·PDF·
+//! SVG·AVIF·EXIF 회전은 후속.
 
 use crate::services::preview_stream::{fs_for, parse_target};
 use crate::services::settings::duet_config_dir;
@@ -29,7 +32,15 @@ fn sem() -> &'static Semaphore {
     SEM.get_or_init(|| Semaphore::new(MAX_CONCURRENT))
 }
 
-/// 썸네일 대상 확장자인지 — 활성화된 순수 Rust 코덱만.
+/// 썸네일 생성 방식.
+enum ThumbKind {
+    /// image 크레이트로 바이트 디코드(로컬·원격 모두). 래스터 이미지.
+    Decode,
+    /// OS 셸 썸네일러(경로 기반). 영상 등 — 로컬·지원 플랫폼(Windows)만.
+    OsShell,
+}
+
+/// 바이트 디코드 대상 확장자 — 활성화된 순수 Rust 코덱만.
 fn is_thumbnailable(path: &Path) -> bool {
     matches!(
         path.extension()
@@ -37,6 +48,32 @@ fn is_thumbnailable(path: &Path) -> bool {
             .map(|e| e.to_ascii_lowercase())
             .as_deref(),
         Some("png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp")
+    )
+}
+
+/// OS 셸 썸네일러 대상 확장자(영상 위주). 코드 `.ts` 오인 방지 위해 ts 는 제외.
+fn is_os_thumbnailable(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase())
+            .as_deref(),
+        Some(
+            "mp4"
+                | "mkv"
+                | "mov"
+                | "avi"
+                | "webm"
+                | "wmv"
+                | "flv"
+                | "m4v"
+                | "mpg"
+                | "mpeg"
+                | "3gp"
+                | "m2ts"
+                | "mts"
+                | "ogv"
+        )
     )
 }
 
@@ -98,17 +135,28 @@ async fn try_handle<R: Runtime>(
 ) -> Option<Response<Vec<u8>>> {
     let uri_path = request.uri().path();
     let (source, path) = parse_target(uri_path)?;
-    if !is_thumbnailable(&path) {
+    let is_local = matches!(source, crate::types::SourceId::Local);
+    // 디코드(이미지) 우선, 안 되면 로컬 파일 + 지원 플랫폼이면 OS 셸 썸네일(영상 등).
+    let kind = if is_thumbnailable(&path) {
+        ThumbKind::Decode
+    } else if is_local && crate::platform::supports_shell_thumbnail() && is_os_thumbnailable(&path)
+    {
+        ThumbKind::OsShell
+    } else {
         return Some(err(StatusCode::UNSUPPORTED_MEDIA_TYPE));
-    }
+    };
     let fs = fs_for(app, &source).await?;
     let meta = fs.metadata(&path).await.ok()?;
     if meta.kind != EntryKind::File {
         return Some(err(StatusCode::NOT_FOUND));
     }
     let size = meta.size.unwrap_or(0);
-    if size == 0 || size > MAX_SRC_BYTES {
-        return Some(err(StatusCode::PAYLOAD_TOO_LARGE)); // 너무 큼/빔 → fallback
+    if size == 0 {
+        return Some(err(StatusCode::PAYLOAD_TOO_LARGE)); // 빈 파일 → fallback
+    }
+    // 이미지는 통째로 메모리에 디코드하니 상한; OS 셸은 파일을 직접/lazy 하게 읽어 상한 불필요.
+    if matches!(kind, ThumbKind::Decode) && size > MAX_SRC_BYTES {
+        return Some(err(StatusCode::PAYLOAD_TOO_LARGE)); // 너무 큼 → fallback
     }
     let key = cache_key(uri_path, meta.modified_ms.unwrap_or(0), size);
 
@@ -121,10 +169,23 @@ async fn try_handle<R: Runtime>(
 
     // 동시 생성 제한
     let _permit = sem().acquire().await.ok()?;
-    let bytes = fs.read_range(&path, 0, size as usize).await.ok()?;
-    let jpeg = tokio::task::spawn_blocking(move || generate(&bytes))
-        .await
-        .ok()??;
+    let jpeg = match kind {
+        ThumbKind::Decode => {
+            let bytes = fs.read_range(&path, 0, size as usize).await.ok()?;
+            tokio::task::spawn_blocking(move || generate(&bytes))
+                .await
+                .ok()??
+        }
+        ThumbKind::OsShell => {
+            // 로컬 경로를 OS 셸 썸네일러로. blocking(COM/디코드).
+            let p = path.clone();
+            tokio::task::spawn_blocking(move || {
+                crate::platform::shell_thumbnail(&p, THUMB_MAX).ok()
+            })
+            .await
+            .ok()??
+        }
+    };
 
     // 캐시 write(best-effort)
     if let Some(cp) = cache_path(&key) {

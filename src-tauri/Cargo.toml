@@ -111,6 +111,8 @@ windows = { version = "0.58", features = [
     "Win32_UI_Shell",
     "Win32_UI_Shell_Common",
     "Win32_UI_WindowsAndMessaging",
+    # OS 셸 썸네일(IShellItemImageFactory) 의 HBITMAP→픽셀 변환(GetDIBits 등).
+    "Win32_Graphics_Gdi",
 ] }
 
 [features]

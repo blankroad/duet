@@ -143,6 +143,153 @@ fn win_shell_open(path: &Path) -> Result<(), DuetError> {
     }
 }
 
+/// OS 셸 썸네일러로 파일 썸네일(영상 프레임 등)을 만들 수 있는 플랫폼인가 (현재 Windows 만).
+#[cfg(windows)]
+pub fn supports_shell_thumbnail() -> bool {
+    true
+}
+#[cfg(not(windows))]
+pub fn supports_shell_thumbnail() -> bool {
+    false
+}
+
+/// 로컬 파일의 OS 셸 썸네일을 JPEG 바이트로 — 영상/PSD 등 image 크레이트로 못 여는 타입을
+/// 탐색기와 동일하게. CPU/IO 작업이라 spawn_blocking 안에서 호출. 미지원 플랫폼이나
+/// 썸네일 없음은 `Err` → 호출부가 타입 아이콘으로 fallback.
+#[cfg(windows)]
+pub fn shell_thumbnail(path: &Path, max: u32) -> Result<Vec<u8>, DuetError> {
+    win_shell_thumbnail(path, max)
+}
+#[cfg(not(windows))]
+pub fn shell_thumbnail(_path: &Path, _max: u32) -> Result<Vec<u8>, DuetError> {
+    Err(DuetError::NotSupported(
+        "shell thumbnail unsupported on this OS".into(),
+    ))
+}
+
+#[cfg(windows)]
+fn win_shell_thumbnail(path: &Path, max: u32) -> Result<Vec<u8>, DuetError> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::SIZE;
+    use windows::Win32::Graphics::Gdi::{DeleteObject, HGDIOBJ};
+    use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
+    use windows::Win32::UI::Shell::{
+        IShellItemImageFactory, SHCreateItemFromParsingName, SIIGBF_BIGGERSIZEOK,
+        SIIGBF_THUMBNAILONLY,
+    };
+
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    // SAFETY: 이 (blocking) 워커 스레드에 COM init. 이미 init 된 스레드면 S_FALSE 반환 —
+    // 그래도 사용 가능. is_ok()(S_OK/S_FALSE) 면 ref 를 우리가 더했으니 끝에서 CoUninitialize.
+    let hr = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+    let need_uninit = hr.is_ok();
+
+    let result = (|| -> Result<Vec<u8>, DuetError> {
+        // SAFETY: wide 는 널종단 UTF-16. IShellItemImageFactory 로 QueryInterface.
+        let factory: IShellItemImageFactory =
+            unsafe { SHCreateItemFromParsingName(PCWSTR(wide.as_ptr()), None) }
+                .map_err(|e| DuetError::Io(format!("shell item: {e}")))?;
+
+        let size = SIZE {
+            cx: max as i32,
+            cy: max as i32,
+        };
+        // SAFETY: factory 유효. THUMBNAILONLY = 썸네일 없으면 실패(아이콘 안 받음 → fallback).
+        let hbitmap = unsafe { factory.GetImage(size, SIIGBF_THUMBNAILONLY | SIIGBF_BIGGERSIZEOK) }
+            .map_err(|e| DuetError::Io(format!("getimage: {e}")))?;
+
+        // SAFETY: hbitmap 은 유효한 32bpp DIB. 변환 후 DeleteObject.
+        let bytes = unsafe { hbitmap_to_jpeg(hbitmap) };
+        // SAFETY: GDI 객체 해제.
+        unsafe {
+            let _ = DeleteObject(HGDIOBJ(hbitmap.0));
+        }
+        bytes
+    })();
+
+    if need_uninit {
+        // SAFETY: CoInitializeEx 와 짝.
+        unsafe { CoUninitialize() };
+    }
+    result
+}
+
+/// HBITMAP(셸 썸네일, 32bpp) → JPEG 바이트. BGRA→RGB.
+///
+/// SAFETY: `hbitmap` 은 유효한 GDI 비트맵 핸들이어야 한다.
+#[cfg(windows)]
+unsafe fn hbitmap_to_jpeg(
+    hbitmap: windows::Win32::Graphics::Gdi::HBITMAP,
+) -> Result<Vec<u8>, DuetError> {
+    use std::ffi::c_void;
+    use windows::Win32::Graphics::Gdi::{
+        GetDC, GetDIBits, GetObjectW, ReleaseDC, BITMAP, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
+        DIB_RGB_COLORS, HGDIOBJ,
+    };
+
+    let mut bmp = BITMAP::default();
+    let got = GetObjectW(
+        HGDIOBJ(hbitmap.0),
+        std::mem::size_of::<BITMAP>() as i32,
+        Some(&mut bmp as *mut _ as *mut c_void),
+    );
+    if got == 0 || bmp.bmWidth <= 0 || bmp.bmHeight <= 0 {
+        return Err(DuetError::Io("GetObject(bitmap) failed".into()));
+    }
+    let w = bmp.bmWidth;
+    let h = bmp.bmHeight;
+
+    let mut info = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: w,
+            biHeight: -h, // 음수 = top-down (행 순서 정방향)
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut buf = vec![0u8; (w as usize) * (h as usize) * 4];
+
+    let hdc = GetDC(None);
+    let scan = GetDIBits(
+        hdc,
+        hbitmap,
+        0,
+        h as u32,
+        Some(buf.as_mut_ptr() as *mut c_void),
+        &mut info,
+        DIB_RGB_COLORS,
+    );
+    ReleaseDC(None, hdc);
+    if scan == 0 {
+        return Err(DuetError::Io("GetDIBits failed".into()));
+    }
+
+    // DIB 는 BGRA. JPEG 는 알파 미지원 → BGR 순서를 RGB 로 바꿔 rgb8 인코드(알파 무시).
+    let mut rgb = Vec::with_capacity((w as usize) * (h as usize) * 3);
+    for px in buf.chunks_exact(4) {
+        rgb.push(px[2]);
+        rgb.push(px[1]);
+        rgb.push(px[0]);
+    }
+    let img = image::RgbImage::from_raw(w as u32, h as u32, rgb)
+        .ok_or_else(|| DuetError::Io("rgb buffer size mismatch".into()))?;
+    let mut out = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgb8(img)
+        .write_to(&mut out, image::ImageFormat::Jpeg)
+        .map_err(|e| DuetError::Io(format!("jpeg encode: {e}")))?;
+    Ok(out.into_inner())
+}
+
 /// 우클릭 대상 종류 — 스캔할 레지스트리 shell 루트를 결정.
 #[derive(Debug, Clone, Copy, Deserialize, Type)]
 #[serde(rename_all = "lowercase")]

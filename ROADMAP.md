@@ -163,7 +163,8 @@
       → `docs/specs/2026-06-24-drop-stack-shelf.md`
 - [x] **그리드/타일 썸네일** — `duet-thumb://` 프로토콜(디코드→256px→JPEG 캐시
       `<config>/duet/thumbs/`), 그리드/타일 lazy `<img>` + 아이콘 fallback, 설정 토글.
-      `image` 0.25 순수 Rust(png/jpg/gif/webp/bmp, AVIF 제외). 영상/PDF/EXIF회전 후속.
+      `image` 0.25 순수 Rust(png/jpg/gif/webp/bmp, AVIF 제외). 영상 등은 OS 셸 썸네일러
+      (Windows `IShellItemImageFactory`, 로컬 전용). macOS QuickLook·PDF·EXIF회전 후속.
       (2026-06-24) → `docs/specs/2026-06-24-thumbnail-grid.md`
 
 ---

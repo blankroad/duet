@@ -1,6 +1,7 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useRef, useState } from "react";
 import { FolderUp } from "lucide-react";
+import { platform } from "@tauri-apps/plugin-os";
 import clsx from "clsx";
 import type { Entry, Location } from "@/types/bindings";
 import {
@@ -233,12 +234,36 @@ interface CellProps {
   onDoubleClick: () => void;
 }
 
-/** 썸네일 대상 이미지 확장자(백엔드 활성 코덱과 일치). */
+/** 썸네일 대상 이미지 확장자(백엔드 활성 코덱과 일치). 로컬·원격 모두. */
 const THUMB_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp"]);
-function isThumbable(e: Entry): boolean {
+/** OS 셸 썸네일 대상(영상). 백엔드 is_os_thumbnailable 과 일치 — 로컬+지원 OS 만. */
+const OS_THUMB_EXTS = new Set([
+  "mp4",
+  "mkv",
+  "mov",
+  "avi",
+  "webm",
+  "wmv",
+  "flv",
+  "m4v",
+  "mpg",
+  "mpeg",
+  "3gp",
+  "m2ts",
+  "mts",
+  "ogv",
+]);
+/** OS 셸 썸네일을 쓰는 플랫폼인가 (현재 Windows. macOS QuickLook 은 후속). */
+const osThumbs = platform() === "windows";
+
+function isThumbable(e: Entry, location: Location): boolean {
   if (e.kind !== "file") return false;
   const i = e.name.lastIndexOf(".");
-  return i >= 0 && THUMB_EXTS.has(e.name.slice(i + 1).toLowerCase());
+  if (i < 0) return false;
+  const ext = e.name.slice(i + 1).toLowerCase();
+  if (THUMB_EXTS.has(ext)) return true;
+  // 영상 등은 OS 셸 썸네일 — 지원 플랫폼 + 로컬 파일만(원격은 비싸서 아이콘).
+  return osThumbs && location.source.kind === "local" && OS_THUMB_EXTS.has(ext);
 }
 
 /**
@@ -256,7 +281,7 @@ function Thumb({
 }) {
   const show = useAppSettings((s) => s.showThumbnails);
   const [failed, setFailed] = useState(false);
-  if (!show || failed || !isThumbable(entry)) {
+  if (!show || failed || !isThumbable(entry, location)) {
     return <EntryIcon entry={entry} size={size} />;
   }
   return (
