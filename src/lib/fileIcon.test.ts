@@ -38,4 +38,12 @@ describe("fileIcon — iconForEntry 우선순위", () => {
     const dir: Entry = { ...file("foo"), kind: "dir" };
     expect(iconForEntry(dir, { foo: "image" }).className).toBe("text-accent");
   });
+
+  it("확장자 없는 잘 알려진 파일명 매칭 (대소문자 무관)", () => {
+    expect(iconForEntry(file("Makefile")).className).toBe("text-icon-code");
+    expect(iconForEntry(file("Dockerfile")).className).toBe("text-icon-code");
+    expect(iconForEntry(file(".gitignore")).className).toBe("text-icon-data");
+    expect(iconForEntry(file("README")).className).toBe("text-icon-doc");
+    expect(iconForEntry(file("LICENSE")).className).toBe("text-icon-doc");
+  });
 });

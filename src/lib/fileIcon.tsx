@@ -281,6 +281,73 @@ register({ Icon: FileType, className: "text-icon-font" }, [
   "eot",
 ]);
 
+/**
+ * 확장자가 없는(또는 점으로 시작하는) 잘 알려진 파일명 → 아이콘. 소문자 전체 이름 기준.
+ * Makefile / Dockerfile / .gitignore / README 처럼 extOf 가 빈 문자열을 주는 것들.
+ */
+const NAME_ICON: Record<string, IconDesc> = {};
+const registerName = (desc: IconDesc, names: string[]) => {
+  for (const n of names) NAME_ICON[n.toLowerCase()] = desc;
+};
+
+registerName({ Icon: FileCode, className: "text-icon-code" }, [
+  "makefile",
+  "gnumakefile",
+  "dockerfile",
+  "containerfile",
+  "rakefile",
+  "gemfile",
+  "procfile",
+  "vagrantfile",
+  "jenkinsfile",
+  "brewfile",
+  "justfile",
+  "cmakelists.txt",
+  "build",
+  "workspace",
+  ".bashrc",
+  ".zshrc",
+  ".bash_profile",
+  ".zprofile",
+  ".profile",
+  ".vimrc",
+]);
+registerName({ Icon: FileJson, className: "text-icon-data" }, [
+  ".gitignore",
+  ".gitattributes",
+  ".gitmodules",
+  ".gitconfig",
+  ".dockerignore",
+  ".npmrc",
+  ".nvmrc",
+  ".editorconfig",
+  ".prettierrc",
+  ".eslintrc",
+  ".babelrc",
+  ".env",
+  ".netrc",
+  ".bazelrc",
+  ".npmignore",
+  ".eslintignore",
+  ".prettierignore",
+]);
+registerName({ Icon: FileText, className: "text-icon-doc" }, [
+  "readme",
+  "license",
+  "licence",
+  "copying",
+  "copyright",
+  "authors",
+  "changelog",
+  "contributing",
+  "notice",
+  "todo",
+  "news",
+  "install",
+  "codeowners",
+  "maintainers",
+]);
+
 /** name 에서 소문자 확장자 추출 (표시 전용 — 경로 조작 아님). */
 function extOf(name: string): string {
   const dot = name.lastIndexOf(".");
@@ -307,6 +374,9 @@ export function iconForEntry(
     const desc = paletteIcon(overrideName);
     if (desc) return desc;
   }
+  // 확장자 없는 잘 알려진 파일명 (Makefile, Dockerfile, .gitignore, README 등).
+  const named = NAME_ICON[entry.name.toLowerCase()];
+  if (named) return named;
   return EXT_ICON[ext] ?? { Icon: File, className: "text-fg-muted" };
 }
 
