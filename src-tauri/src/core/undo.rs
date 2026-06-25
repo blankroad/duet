@@ -133,11 +133,19 @@ pub async fn execute_undo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
                         refreshed_locations: vec![],
                     };
                 }
-                if src_source == dst_source {
-                    if let Err(e) = src_fs.rename(&m.dst_now, &m.src_original).await {
-                        return error("rename back", e);
+                // 같은 source 면 rename 으로 되돌림(빠름). 단 로컬 C:↔D: 처럼 물리 드라이브가
+                // 달라 rename 이 cross-device 로 거부되면 copy+remove 로 폴백(cross-source 와
+                // 동일) — 안 그러면 undo 가 실패하고 원본이 휴지통에 갇힌다(§4 위반).
+                let renamed = if src_source == dst_source {
+                    match src_fs.rename(&m.dst_now, &m.src_original).await {
+                        Ok(()) => true,
+                        Err(DuetError::CrossDevice(_)) => false,
+                        Err(e) => return error("rename back", e),
                     }
                 } else {
+                    false
+                };
+                if !renamed {
                     if let Err(e) =
                         copy_relay(&*dst_fs, &m.dst_now, &*src_fs, &m.src_original).await
                     {

@@ -48,6 +48,12 @@ pub trait FileSystem: Send + Sync {
 
     // === MVP-2 신규 ===
     async fn metadata(&self, path: &Path) -> Result<crate::types::EntryMeta, DuetError>;
+    /// 심볼릭 링크를 **따라가지 않는** 메타데이터(lstat). 재귀 복사/삭제가 링크 *대상*
+    /// 트리로 들어가는 걸 막는 판정용. 기본은 `metadata` 와 동일 — LocalFs 는 이미 lstat.
+    /// SshFs 의 `metadata` 는 stat(follow)이므로 override 해서 lstat 를 쓴다.
+    async fn symlink_metadata(&self, path: &Path) -> Result<crate::types::EntryMeta, DuetError> {
+        self.metadata(path).await
+    }
     async fn rename(&self, from: &Path, to: &Path) -> Result<(), DuetError>;
     async fn mkdir(&self, path: &Path) -> Result<(), DuetError>;
     async fn trash(
@@ -190,7 +196,9 @@ async fn copy_tree(
     on_bytes: &(dyn Fn(u64) + Send + Sync),
     on_file: &(dyn Fn(&std::path::Path) + Send + Sync),
 ) -> Result<(), DuetError> {
-    let meta = src_fs.metadata(src).await?;
+    // lstat 로 판정 — 심볼릭-디렉토리를 따라가 재귀하지 않게(원격 symlink 무한 복사/사이클
+    // 방지). 링크는 아래 `_` 갈래로 가서 단일 항목으로 처리(파일 내용은 open_read 가 따라감).
+    let meta = src_fs.symlink_metadata(src).await?;
     match meta.kind {
         crate::types::EntryKind::Dir => {
             dst_fs.mkdir(dst).await?;

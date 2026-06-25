@@ -186,6 +186,33 @@ impl FileSystem for SshFs {
         })
     }
 
+    async fn symlink_metadata(&self, path: &Path) -> Result<crate::types::EntryMeta, DuetError> {
+        // sftp.metadata 는 stat(링크 추적). symlink_metadata 는 lstat(링크 자체) — 재귀
+        // 복사/삭제가 링크 대상으로 들어가지 않도록 SshFs 만 override (LocalFs 는 이미 lstat).
+        let sftp = self.open_sftp().await?;
+        let owned = remote_path_str(path)?;
+        let path_str = owned.as_str();
+        let meta = sftp
+            .symlink_metadata(path_str.to_string())
+            .await
+            .map_err(|e| map_sftp_error(e, path_str))?;
+        let kind = if meta.is_dir() {
+            crate::types::EntryKind::Dir
+        } else if meta.is_regular() {
+            crate::types::EntryKind::File
+        } else if meta.is_symlink() {
+            crate::types::EntryKind::Symlink
+        } else {
+            crate::types::EntryKind::Other
+        };
+        Ok(crate::types::EntryMeta {
+            kind,
+            size: meta.size,
+            modified_ms: meta.mtime.map(|t| i64::from(t) * 1000),
+            permissions: meta.permissions.map(|p| p & 0o777),
+        })
+    }
+
     async fn rename(&self, from: &Path, to: &Path) -> Result<(), DuetError> {
         let sftp = self.open_sftp().await?;
         let from_owned = remote_path_str(from)?;
@@ -515,8 +542,10 @@ async fn remove_recursive(
 ) -> Result<(), DuetError> {
     let owned = remote_path_str(path)?;
     let path_str = owned.as_str();
+    // lstat — 심볼릭 링크면 is_dir()=false 라 remove_file 로 *링크만* 지운다. (stat 면
+    // 링크 대상이 dir 일 때 그 대상 트리를 재귀 삭제 = 트리 밖 데이터 손실.)
     let meta = sftp
-        .metadata(path_str.to_string())
+        .symlink_metadata(path_str.to_string())
         .await
         .map_err(|e| map_sftp_error(e, path_str))?;
     if meta.is_dir() {

@@ -399,6 +399,31 @@ mod tests {
         assert_eq!(by("broken_link").unwrap().kind, EntryKind::Symlink);
     }
 
+    /// copy 는 심볼릭-디렉토리를 따라가 *재귀*하지 않는다 — copy_tree 가 lstat
+    /// (symlink_metadata)로 판정. (원격 symlink 무한 사이클/대상 트리 중복 삭제·복사 방지의
+    /// 로컬 검증. list 는 진입용으로 Dir 로 보이지만 copy 판정은 lstat.)
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn copy_does_not_recurse_into_symlinked_dir() {
+        use std::os::unix::fs::symlink;
+        let dir = TempDir::new().unwrap();
+        let src = dir.path().join("src");
+        let sub = src.join("sub");
+        fs::create_dir_all(&sub).await.unwrap();
+        fs::write(sub.join("f.txt"), b"hi").await.unwrap();
+        symlink(&sub, src.join("link")).unwrap(); // link → sub (디렉토리 링크)
+        let dst = dir.path().join("dst");
+
+        let local = LocalFs::new();
+        // link 에서 에러가 날 수 있으나(파일 갈래로 가 open_read 실패) 무한루프 없이 종료해야 하고,
+        let _ = crate::fs::copy_relay(&local, &src, &local, &dst).await;
+        // 무엇보다 link 를 디렉토리로 재귀해 dst/link/f.txt 를 만들면 안 된다.
+        assert!(
+            !dst.join("link").join("f.txt").exists(),
+            "symlink-to-dir must not be recursed/duplicated"
+        );
+    }
+
     #[test]
     fn paths_eq_absorbs_separator_and_case() {
         assert!(paths_eq(Path::new("/a/b.txt"), Path::new("/a/b.txt")));
