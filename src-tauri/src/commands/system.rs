@@ -2,6 +2,7 @@
 
 use crate::fs::{FileSystem, LocalFs, SshFs};
 use crate::services::connection_pool::ConnectionPool;
+use crate::services::settings::SettingsStore;
 use crate::types::{
     ConnectionId, DuetError, EntryKind, EntryRef, Location, SourceId, TrashLocation,
 };
@@ -220,26 +221,36 @@ mod trash_tests {
     }
 }
 
-/// 파일을 OS 기본 앱으로 연다.
+/// 파일을 연다 — 확장자별 연결 프로그램이 지정돼 있으면 그 앱으로, 아니면 OS 기본.
 ///
-/// 로컬: 경로를 그대로 `opener::open`.
-/// 원격(SSH): SFTP 로 임시 디렉토리에 다운로드한 뒤 그 사본을 연다 — 일반 파일
-/// 매니저 관례 (읽기 전용 열람. 편집 후 재업로드는 미지원, 향후 watch 로 확장 여지).
+/// 로컬: 경로를 그대로. 원격(SSH): SFTP 로 임시 디렉토리에 다운로드한 뒤 그 사본을 연다
+/// — 일반 파일 매니저 관례 (읽기 전용 열람. 편집 후 재업로드는 미지원, 향후 watch 로 확장).
 #[tauri::command]
 #[specta::specta]
 pub async fn open_path(
     location: Location,
     pool: tauri::State<'_, Arc<ConnectionPool>>,
+    settings: tauri::State<'_, Arc<SettingsStore>>,
 ) -> Result<(), DuetError> {
     let target = match &location.source {
         SourceId::Local => location.path.clone(),
         SourceId::Ssh { .. } => download_to_temp(&location, pool.inner()).await?,
     };
+    // 확장자별 연결 프로그램 override (소문자 확장자, 점 없음). 없으면 OS 기본.
+    let app_overrides = settings.get().await.ext_app_overrides;
+    let app_override = target
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_lowercase)
+        .and_then(|ext| app_overrides.get(&ext).cloned());
     // 작업 디렉토리를 파일의 부모로 설정해 연다(탐색기 동작 — .bat/스크립트가 제 폴더에서
     // 실행). OS 런처는 blocking 이라 spawn_blocking.
-    tokio::task::spawn_blocking(move || crate::platform::open_default(&target))
-        .await
-        .map_err(|e| DuetError::Io(format!("open task join: {e}")))?
+    tokio::task::spawn_blocking(move || match app_override {
+        Some(app) => crate::platform::open_with(std::path::Path::new(&app), &target),
+        None => crate::platform::open_default(&target),
+    })
+    .await
+    .map_err(|e| DuetError::Io(format!("open task join: {e}")))?
 }
 
 /// 원격 파일을 로컬 temp 로 받아 OS 기본 에디터로 열고, temp 변경을 감지해 원격으로

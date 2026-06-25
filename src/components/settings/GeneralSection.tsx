@@ -6,24 +6,9 @@ import type { Settings, SettingsPatch } from "@/types/bindings";
 import { applyTabDefaults, type SortKey, type ViewMode } from "@/stores/panes";
 import { useAppSettings } from "@/stores/settings";
 import { applyTheme } from "@/lib/theme";
+import { buildSettingsPatch as buildPatch } from "@/lib/settingsPatch";
 
 const isWindows = platform() === "windows";
-
-/** null 로 채운 전체 patch + override (특정 필드만 변경). */
-function buildPatch(over: Partial<SettingsPatch>): SettingsPatch {
-  return {
-    permanent_delete_enabled: null,
-    compare_ignore_globs: null,
-    compare_mtime_tolerance_ms: null,
-    theme: null,
-    default_sort: null,
-    default_view: null,
-    show_hidden_default: null,
-    single_click_open: null,
-    show_thumbnails: null,
-    ...over,
-  };
-}
 
 const selectClass =
   "rounded border border-border bg-subtle px-2 py-1 text-base focus:border-accent focus:outline-none";

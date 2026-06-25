@@ -4,11 +4,15 @@ import { X } from "lucide-react";
 import { GeneralSection } from "./settings/GeneralSection";
 import { KeymapSection } from "./settings/KeymapSection";
 import { AliasesSection } from "./settings/AliasesSection";
+import { ExtIconsSection } from "./settings/ExtIconsSection";
+import { OpenWithSection } from "./settings/OpenWithSection";
 
-type SectionId = "general" | "keymap" | "aliases";
+type SectionId = "general" | "icons" | "openwith" | "keymap" | "aliases";
 
 const SECTIONS: { id: SectionId; label: string }[] = [
   { id: "general", label: "General" },
+  { id: "icons", label: "File icons" },
+  { id: "openwith", label: "Open with" },
   { id: "keymap", label: "Keymap" },
   { id: "aliases", label: "Aliases" },
 ];
@@ -47,6 +51,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             </aside>
             <main className="flex-1 overflow-auto p-4">
               {section === "general" && <GeneralSection />}
+              {section === "icons" && <ExtIconsSection />}
+              {section === "openwith" && <OpenWithSection />}
               {section === "keymap" && <KeymapSection />}
               {section === "aliases" && <AliasesSection />}
             </main>

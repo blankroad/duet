@@ -12,6 +12,9 @@ interface AppSettingsState {
   /** 그리드/타일 뷰 이미지 썸네일 표시 (디폴트 true). */
   showThumbnails: boolean;
   setShowThumbnails: (v: boolean) => void;
+  /** 확장자(소문자, 점 없음) → 아이콘 팔레트 이름. 유저 지정. EntryIcon 이 읽음. */
+  extIconOverrides: Record<string, string>;
+  setExtIconOverrides: (v: Record<string, string>) => void;
 }
 
 export const useAppSettings = create<AppSettingsState>((set) => ({
@@ -19,4 +22,6 @@ export const useAppSettings = create<AppSettingsState>((set) => ({
   setSingleClickOpen: (v) => set({ singleClickOpen: v }),
   showThumbnails: true,
   setShowThumbnails: (v) => set({ showThumbnails: v }),
+  extIconOverrides: {},
+  setExtIconOverrides: (v) => set({ extIconOverrides: v }),
 }));

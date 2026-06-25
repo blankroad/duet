@@ -74,6 +74,35 @@ pub fn open_default(path: &Path) -> Result<(), DuetError> {
     }
 }
 
+/// 파일을 **지정한 앱**으로 연다 (확장자별 연결 프로그램). 작업 디렉토리는 파일의 부모.
+///
+/// - macOS: `open -a <app> <file>` (문서를 해당 앱으로).
+/// - Windows/Linux: `<app> <file>` (앱 실행 파일에 파일을 인자로).
+pub fn open_with(app: &Path, file: &Path) -> Result<(), DuetError> {
+    use std::process::{Command, Stdio};
+    #[cfg(target_os = "macos")]
+    let mut cmd = {
+        let mut c = Command::new("/usr/bin/open");
+        c.arg("-a").arg(app).arg(file);
+        c
+    };
+    #[cfg(not(target_os = "macos"))]
+    let mut cmd = {
+        let mut c = Command::new(app);
+        c.arg(file);
+        c
+    };
+    if let Some(dir) = file.parent() {
+        cmd.current_dir(dir);
+    }
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    cmd.spawn()
+        .map(|_child| ())
+        .map_err(|e| DuetError::Io(format!("open-with failed: {e}")))
+}
+
 #[cfg(windows)]
 fn win_shell_open(path: &Path) -> Result<(), DuetError> {
     use std::os::windows::ffi::OsStrExt;

@@ -1131,6 +1131,11 @@ function App() {
           useAppSettings
             .getState()
             .setShowThumbnails(r.data.show_thumbnails ?? true);
+          useAppSettings
+            .getState()
+            .setExtIconOverrides(
+              (r.data.ext_icon_overrides ?? {}) as Record<string, string>,
+            );
         }
       });
       // 탭 레이아웃 영속 구독 시작 — 복원 navigate 가 끝난 뒤라야 churn 없음.

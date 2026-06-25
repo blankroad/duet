@@ -17,6 +17,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { Entry } from "@/types/bindings";
+import { paletteIcon } from "@/lib/iconPalette";
+import { useAppSettings } from "@/stores/settings";
 
 /**
  * 파일 종류별 아이콘 + 색 매핑 — EntryRow / EntryGrid / 미리보기 헤더 공유.
@@ -238,18 +240,32 @@ function extOf(name: string): string {
   return name.slice(dot + 1).toLowerCase();
 }
 
-/** entry 종류에 맞는 lucide 아이콘 컴포넌트 + 색 토큰 클래스. */
-export function iconForEntry(entry: Entry): IconDesc {
+/**
+ * entry 종류에 맞는 lucide 아이콘 컴포넌트 + 색 토큰 클래스.
+ *
+ * 우선순위: 디렉토리/심볼릭 → 유저 지정 override(설정) → 내장 확장자 매핑 → 기본 File.
+ * `overrides` 는 확장자(소문자, 점 없음) → 팔레트 아이콘 이름.
+ */
+export function iconForEntry(
+  entry: Entry,
+  overrides?: Record<string, string>,
+): IconDesc {
   if (entry.kind === "dir") return { Icon: Folder, className: "text-accent" };
   if (entry.kind === "symlink")
     return { Icon: LinkIcon, className: "text-fg-muted" };
-  return (
-    EXT_ICON[extOf(entry.name)] ?? { Icon: File, className: "text-fg-muted" }
-  );
+  const ext = extOf(entry.name);
+  const overrideName = overrides?.[ext];
+  if (overrideName) {
+    const desc = paletteIcon(overrideName);
+    if (desc) return desc;
+  }
+  return EXT_ICON[ext] ?? { Icon: File, className: "text-fg-muted" };
 }
 
 /** 바로 렌더 가능한 아이콘 엘리먼트. flex 안에서 긴 파일명이 밀어 줄어들지 않게 shrink-0. */
 export function EntryIcon({ entry, size }: { entry: Entry; size: number }) {
-  const { Icon, className } = iconForEntry(entry);
+  // 유저 지정 확장자 아이콘은 설정 캐시에서 — 변경 시 가상 스크롤의 보이는 행만 리렌더.
+  const overrides = useAppSettings((s) => s.extIconOverrides);
+  const { Icon, className } = iconForEntry(entry, overrides);
   return <Icon size={size} className={`shrink-0 ${className}`} />;
 }

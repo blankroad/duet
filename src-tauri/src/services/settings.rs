@@ -5,6 +5,7 @@
 use crate::types::DuetError;
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -48,6 +49,13 @@ pub struct Settings {
     /// 그리드/타일 뷰에서 이미지 썸네일 표시. 디폴트 true.
     #[serde(default = "default_true")]
     pub show_thumbnails: bool,
+    // ── 아래 맵 필드들은 항상 struct 마지막에 (TOML 은 table 뒤에 scalar 못 옴) ──
+    /// 확장자(소문자, 점 없음) → 아이콘 팔레트 이름. 유저가 설정에서 지정. 내장 매핑보다 우선.
+    #[serde(default)]
+    pub ext_icon_overrides: HashMap<String, String>,
+    /// 확장자(소문자, 점 없음) → 연결 프로그램 경로. 열기 시 OS 기본 대신 이 앱 사용.
+    #[serde(default)]
+    pub ext_app_overrides: HashMap<String, String>,
 }
 
 fn default_true() -> bool {
@@ -66,6 +74,8 @@ impl Default for Settings {
             show_hidden_default: false,
             single_click_open: false,
             show_thumbnails: true,
+            ext_icon_overrides: HashMap::new(),
+            ext_app_overrides: HashMap::new(),
         }
     }
 }
@@ -81,6 +91,8 @@ pub struct SettingsPatch {
     pub show_hidden_default: Option<bool>,
     pub single_click_open: Option<bool>,
     pub show_thumbnails: Option<bool>,
+    pub ext_icon_overrides: Option<HashMap<String, String>>,
+    pub ext_app_overrides: Option<HashMap<String, String>>,
 }
 
 /// In-memory cache + on-disk TOML. 동시 접근은 RwLock.
@@ -144,6 +156,12 @@ impl SettingsStore {
         }
         if let Some(v) = patch.show_thumbnails {
             s.show_thumbnails = v;
+        }
+        if let Some(v) = patch.ext_icon_overrides {
+            s.ext_icon_overrides = v;
+        }
+        if let Some(v) = patch.ext_app_overrides {
+            s.ext_app_overrides = v;
         }
         let snapshot = s.clone();
         // 디스크 동기화 — write lock 잡은 채로 (race 방지)

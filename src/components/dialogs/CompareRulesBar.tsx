@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Filter, RefreshCw } from "lucide-react";
 import { commands, type CompareRules } from "@/types/bindings";
+import { buildSettingsPatch } from "@/lib/settingsPatch";
 
 /**
  * 비교 규칙 바 — 무시 패턴(glob) + mtime 허용오차 입력 후 Re-compare.
@@ -34,17 +35,12 @@ export function CompareRulesBar({
       .filter(Boolean);
     onRecompare({ ignore_globs: globs, mtime_tolerance_ms: tol });
     // 다음 비교 기본값으로 영속.
-    void commands.settingsSet({
-      permanent_delete_enabled: null,
-      compare_ignore_globs: globs,
-      compare_mtime_tolerance_ms: tol,
-      theme: null,
-      default_sort: null,
-      default_view: null,
-      show_hidden_default: null,
-      single_click_open: null,
-      show_thumbnails: null,
-    });
+    void commands.settingsSet(
+      buildSettingsPatch({
+        compare_ignore_globs: globs,
+        compare_mtime_tolerance_ms: tol,
+      }),
+    );
   };
 
   return (
