@@ -6,6 +6,9 @@ import {
   parentPath,
   dropDestination,
   normalizePath,
+  canonPath,
+  sameLocationDir,
+  eventAffectsDir,
 } from "./entryDnd";
 import type { Location, SourceId } from "@/types/bindings";
 
@@ -94,6 +97,71 @@ describe("entryDnd — normalizePath", () => {
     expect(normalizePath("/")).toBe("/");
     expect(normalizePath("/home/x")).toBe("/home/x");
   });
+});
+
+describe("entryDnd — canonPath (분리자 무관 비교용)", () => {
+  it("Windows 백슬래시를 슬래시로 통일", () => {
+    expect(canonPath("D:\\test\\a")).toBe("D:/test/a");
+    expect(canonPath("D:/test/a")).toBe("D:/test/a"); // 둘이 같은 값으로
+  });
+  it("중복/끝 슬래시 정리, 루트 보존", () => {
+    expect(canonPath("/home//x/")).toBe("/home/x");
+    expect(canonPath("/")).toBe("/");
+    expect(canonPath("C:\\")).toBe("C:"); // 비교 전용 — 표시용 아님
+  });
+});
+
+describe("entryDnd — sameLocationDir (정규화 디렉토리 비교)", () => {
+  it("Windows 분리자만 다른 같은 경로 = 일치 (자동 새로고침 핵심 버그)", () => {
+    // 백엔드 affected 는 forward-slash, 프론트 패널 경로는 backslash 인 상황.
+    expect(
+      sameLocationDir(
+        { source: local, path: "D:/test/a" },
+        { source: local, path: "D:\\test\\a" },
+      ),
+    ).toBe(true);
+  });
+  it("트레일링 슬래시 차이 = 일치", () =>
+    expect(
+      sameLocationDir(
+        { source: local, path: "/home/x/" },
+        { source: local, path: "/home/x" },
+      ),
+    ).toBe(true));
+  it("다른 경로 = 불일치", () =>
+    expect(
+      sameLocationDir(
+        { source: local, path: "/home/x" },
+        { source: local, path: "/home/y" },
+      ),
+    ).toBe(false));
+  it("다른 source = 불일치", () =>
+    expect(
+      sameLocationDir(
+        { source: local, path: "/home/x" },
+        { source: ssh1, path: "/home/x" },
+      ),
+    ).toBe(false));
+});
+
+describe("entryDnd — eventAffectsDir (fs:changed → 패널 매칭)", () => {
+  const pane: Location = { source: local, path: "/home/x" };
+  it("디렉토리 자체 변경 = 영향 (finalize dir-level emit)", () =>
+    expect(eventAffectsDir(local, "/home/x", pane)).toBe(true));
+  it("직속 자식 생성/삭제 = 영향 (notify 파일 경로)", () =>
+    expect(eventAffectsDir(local, "/home/x/new.txt", pane)).toBe(true));
+  it("분리자만 다른 자식 = 영향 (Windows)", () =>
+    expect(
+      eventAffectsDir(local, "D:/x/new.txt", { source: local, path: "D:\\x" }),
+    ).toBe(true));
+  it("더 깊은 하위 = 영향 없음 (NonRecursive)", () =>
+    expect(eventAffectsDir(local, "/home/x/sub/f.txt", pane)).toBe(false));
+  it("무관한 경로 = 영향 없음", () =>
+    expect(eventAffectsDir(local, "/home/y/f.txt", pane)).toBe(false));
+  it("prefix 만 겹치는 형제 = 영향 없음", () =>
+    expect(eventAffectsDir(local, "/home/xyz/f.txt", pane)).toBe(false));
+  it("다른 source = 영향 없음", () =>
+    expect(eventAffectsDir(ssh1, "/home/x/new.txt", pane)).toBe(false));
 });
 
 describe("entryDnd — dropDestination", () => {

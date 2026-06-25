@@ -14,6 +14,7 @@
 //! `cancel(task_id)`: token.cancel() + (큐 안이면) status → Cancelled + emit.
 //! Worker 가 나중에 받았을 때 token check 로 silent skip.
 
+use crate::services::fs_events::FsChangedEvent;
 use crate::services::journal::JournalId;
 use crate::services::task_events::{
     HostKey, ProgressInfo, TaskChange, TaskDto, TaskEvent, TaskId, TaskKind, TaskStatus,
@@ -182,9 +183,15 @@ impl TaskQueue {
     /// 내부용 — worker 가 호출. status update + 종결 시 record 제거.
     async fn finalize(&self, task_id: &TaskId, status: TaskStatus) {
         let mut inner = self.state.lock().await;
-        if let Some(record) = inner.tasks.get_mut(task_id) {
-            record.dto.status = status.clone();
-        }
+        // 완료 시 영향받은 디렉토리에 fs:changed 를 쏘기 위해 affected 를 미리 확보.
+        let affected = inner
+            .tasks
+            .get_mut(task_id)
+            .map(|record| {
+                record.dto.status = status.clone();
+                record.dto.affected_locations.clone()
+            })
+            .unwrap_or_default();
         let change = match &status {
             TaskStatus::Completed { journal_id } => TaskChange::Completed {
                 journal_id: *journal_id,
@@ -200,6 +207,18 @@ impl TaskQueue {
             change,
         }
         .emit(&self.app);
+        // 작업 성공 시 영향받은 디렉토리로 fs:changed emit — OS watcher 와 무관하게
+        // in-app 작업(복사/이동/삭제/압축 풀기 등) 직후 해당 패널이 자동 새로고침되게.
+        // (외부 변경은 FsWatcher 가, in-app 변경은 여기서 — 둘 다 같은 이벤트로 일원화.)
+        if matches!(status, TaskStatus::Completed { .. }) {
+            for loc in &affected {
+                let _ = FsChangedEvent {
+                    source: loc.source.clone(),
+                    path: loc.path.to_string_lossy().into_owned(),
+                }
+                .emit(&self.app);
+            }
+        }
         // 종결 후 제거 — frontend 는 이미 event 받음
         inner.tasks.remove(task_id);
     }

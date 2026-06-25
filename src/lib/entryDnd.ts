@@ -35,6 +35,48 @@ export function sameLocation(a: Location, b: Location): boolean {
   return sameSource(a.source, b.source) && a.path === b.path;
 }
 
+/**
+ * 비교 전용 정규화 — OS 분리자 종류와 무관하게 같은 디렉토리를 같은 문자열로.
+ * 모든 `\`·`/` 를 `/` 로 통일하고 중복 슬래시 합친 뒤 끝 슬래시 제거(루트 제외).
+ *
+ * 표시용 `normalizePath` 와 달리 네이티브 분리자에 의존하지 않음 — 백엔드가 보내는
+ * 이벤트/affected 경로(forward-slash)와 프론트 표시 경로(Windows 는 backslash)를
+ * 안전하게 비교하려는 용도. 예: `D:\a` 와 `D:/a` 가 같은 값이 됨.
+ */
+export function canonPath(p: string): string {
+  let s = p.replace(/\\/g, "/").replace(/\/+/g, "/");
+  if (s.length > 1) s = s.replace(/\/$/, "");
+  return s;
+}
+
+/** 두 Location 이 같은 디렉토리를 가리키나 (분리자 무관 비교). */
+export function sameLocationDir(a: Location, b: Location): boolean {
+  return (
+    sameSource(a.source, b.source) && canonPath(a.path) === canonPath(b.path)
+  );
+}
+
+/**
+ * fs:changed 이벤트(`eventSource`/`eventPath`)가 `pane` 디렉토리에 영향을 주나.
+ * 같은 source + (경로가 같거나 그 직속 자식). notify 가 디렉토리 자체를 보내는
+ * 경우와 그 안의 항목 경로를 보내는 경우를 모두 커버. 분리자 무관 비교.
+ */
+export function eventAffectsDir(
+  eventSource: SourceId,
+  eventPath: string,
+  pane: Location,
+): boolean {
+  if (!sameSource(eventSource, pane.source)) return false;
+  const dir = canonPath(pane.path);
+  const ev = canonPath(eventPath);
+  if (ev === dir) return true;
+  const prefix = dir === "/" ? "/" : dir + "/";
+  if (!ev.startsWith(prefix)) return false;
+  // NonRecursive watch — 한 단계 자식만 (더 깊은 하위는 어차피 이벤트 안 옴).
+  const rest = ev.slice(prefix.length);
+  return rest.length > 0 && !rest.includes("/");
+}
+
 /** 소스 식별 키 — 로컬은 "local", SSH 는 connection 별. dedup/그룹화용 안정 문자열. */
 export function sourceKey(s: SourceId): string {
   return s.kind === "local" ? "local" : `ssh:${s.connection_id}`;

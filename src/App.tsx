@@ -32,7 +32,12 @@ import { ContextMenu } from "@/components/ContextMenu";
 import { useContextMenu, type MenuEntry } from "@/stores/contextMenu";
 import { openShellMenu, onShellMenuClose } from "@/lib/shellMenu";
 import { buildEntryMenu, buildEmptyMenu, folderName } from "@/lib/entryMenu";
-import { childLocation, parentPath, parentLocation } from "@/lib/entryDnd";
+import {
+  childLocation,
+  parentPath,
+  parentLocation,
+  sameLocationDir,
+} from "@/lib/entryDnd";
 import { isArchiveName } from "@/lib/archive";
 import {
   resolveActiveTargets,
@@ -343,7 +348,8 @@ function App() {
   const onRefresh = useCallback(
     (id: PaneId) => {
       const tab = activeTab(usePanes.getState(), id);
-      navigate(id, tab.location.path);
+      // 새로고침은 같은 위치 재로드 — 히스토리(뒤로가기) 에 중복 push 하지 않음.
+      navigate(id, tab.location.path, { pushHistory: false });
     },
     [navigate],
   );
@@ -541,28 +547,23 @@ function App() {
   const closeDialog = useUIDialogs((s) => s.close);
   const openDialog = useUIDialogs((s) => s.open);
 
-  /** 영향받은 location 들이 현재 패널과 매칭되면 refresh. */
+  /**
+   * 영향받은 location 들이 현재 패널과 같은 디렉토리면 refresh.
+   * 동기 command (mkdir/rename/새 파일 등) 직후 호출. task 기반 작업은 백엔드
+   * fs:changed 로 새로고침되므로 여기서 다루지 않음. 비교는 분리자 무관 정규화.
+   */
   const refreshAffected = useCallback(
     (locations: Location[]) => {
       const state = usePanes.getState();
       for (const id of ["left", "right"] as const) {
         const loc = activeTab(state, id).location;
-        const matches = locations.some(
-          (l) =>
-            l.source.kind === loc.source.kind &&
-            (l.source.kind === "local" ||
-              ("connection_id" in l.source &&
-                "connection_id" in loc.source &&
-                l.source.connection_id === loc.source.connection_id)) &&
-            l.path === loc.path,
-        );
-        if (matches) onRefresh(id);
+        if (locations.some((l) => sameLocationDir(l, loc))) onRefresh(id);
       }
     },
     [onRefresh],
   );
 
-  useTaskEvents(refreshAffected);
+  useTaskEvents();
 
   const setBuiltins = useCommands((s) => s.setBuiltins);
   const openPalette = usePalette((s) => s.open);
