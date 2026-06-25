@@ -28,6 +28,10 @@ pub enum DuetError {
     NotSupported(String),
     #[error("io: {0}")]
     Io(String),
+    /// rename 이 서로 다른 볼륨/드라이브 사이라 거부됨 (로컬 C:↔D: 등, EXDEV /
+    /// ERROR_NOT_SAME_DEVICE). move 는 이 경우 copy + 휴지통으로 폴백한다.
+    #[error("cross-device: {0}")]
+    CrossDevice(String),
     #[error("ssh: {0}")]
     Ssh(String),
     /// 서버 호스트키가 `~/.ssh/known_hosts` 와 불일치 — 미지(TOFU 필요) 또는 변경(MITM 경고).
@@ -51,10 +55,49 @@ pub struct HostKeyInfo {
 
 impl From<std::io::Error> for DuetError {
     fn from(e: std::io::Error) -> Self {
+        if is_cross_device(&e) {
+            return DuetError::CrossDevice(e.to_string());
+        }
         match e.kind() {
             std::io::ErrorKind::NotFound => DuetError::NotFound(e.to_string()),
             std::io::ErrorKind::PermissionDenied => DuetError::PermissionDenied(e.to_string()),
             _ => DuetError::Io(e.to_string()),
         }
+    }
+}
+
+/// rename 이 서로 다른 볼륨/드라이브 사이라 거부됐는지 (EXDEV / ERROR_NOT_SAME_DEVICE).
+/// raw OS errno 는 플랫폼별: Windows ERROR_NOT_SAME_DEVICE=17, 그 외(unix) EXDEV=18.
+fn is_cross_device(e: &std::io::Error) -> bool {
+    #[cfg(windows)]
+    let code = 17;
+    #[cfg(not(windows))]
+    let code = 18;
+    e.raw_os_error() == Some(code)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cross_device_errno_maps_to_cross_device() {
+        // 해당 플랫폼의 cross-device errno 로 만든 io::Error 는 CrossDevice 로.
+        #[cfg(windows)]
+        let e = std::io::Error::from_raw_os_error(17);
+        #[cfg(not(windows))]
+        let e = std::io::Error::from_raw_os_error(18);
+        assert!(matches!(DuetError::from(e), DuetError::CrossDevice(_)));
+    }
+
+    #[test]
+    fn other_io_errors_unaffected() {
+        let nf = std::io::Error::new(std::io::ErrorKind::NotFound, "x");
+        assert!(matches!(DuetError::from(nf), DuetError::NotFound(_)));
+        let pd = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "x");
+        assert!(matches!(
+            DuetError::from(pd),
+            DuetError::PermissionDenied(_)
+        ));
     }
 }

@@ -636,10 +636,19 @@ pub async fn move_execute(
                 }
             }
 
-            if plan.is_same_fs {
-                // 같은 fs: 단순 rename — 빠르고 atomic
-                src_fs.rename(&src_path, &dst_path).await?;
+            // same-fs 면 rename(빠르고 atomic). 단 같은 SourceId(둘 다 로컬)라도 물리
+            // 드라이브가 다르면(C:↔D: 등) rename 이 cross-device 로 거부되므로, 그땐
+            // copy + 휴지통으로 폴백한다 (cross-fs 이동과 동일 처리).
+            let needs_copy = if plan.is_same_fs {
+                match src_fs.rename(&src_path, &dst_path).await {
+                    Ok(()) => false,
+                    Err(DuetError::CrossDevice(_)) => true,
+                    Err(e) => return Err(e),
+                }
             } else {
+                true
+            };
+            if needs_copy {
                 // copy 본체(스트리밍 — 바이트 진행률 emit) — connection loss 면 1회 retry(재개).
                 match crate::fs::copy_relay_streaming(
                     src_fs,
