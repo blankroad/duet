@@ -1,5 +1,6 @@
 import { useEffect, useCallback, useState, useRef } from "react";
 import { Pane } from "@/components/pane/Pane";
+import { SwapPanesButton } from "@/components/pane/SwapPanesButton";
 import { Sidebar } from "@/components/Sidebar";
 import { StatusBar } from "@/components/StatusBar";
 import { TasksBar } from "@/components/TasksBar";
@@ -1167,6 +1168,7 @@ function App() {
           onEmptyContextMenu={onEmptyContextMenu}
           onUpdateArchive={onUpdateArchive}
         />
+        <SwapPanesButton />
         <Pane
           id="right"
           onNavigate={navigate}

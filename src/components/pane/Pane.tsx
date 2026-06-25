@@ -41,6 +41,7 @@ export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward,
   const clearSelection = usePanes((s) => s.clearSelection);
   const toggleSortKey = usePanes((s) => s.toggleSortKey);
   const setGridCols = usePanes((s) => s.setGridCols);
+  const openTab = usePanes((s) => s.openTab);
   const tab = usePanes((s) => activeTab(s, id));
   const singleClickOpen = useAppSettings((s) => s.singleClickOpen);
   const editPathNonce = useUI((s) => s.editPathNonce);
@@ -108,6 +109,7 @@ export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward,
         onUpdateArchive={tab.archive ? () => onUpdateArchive(id) : undefined}
         editNonce={editPathNonce}
         editActive={editPathPane === id}
+        onNewTab={() => openTab(id)}
       />
       <PaneToolbar id={id} />
       <PaneFilterBar id={id} />

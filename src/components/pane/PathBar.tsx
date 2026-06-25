@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, ArrowUp, RotateCw, Star, FileArchive, Pencil, Monitor, Server, BookMarked, Folder } from "lucide-react";
+import { ArrowLeft, ArrowRight, ArrowUp, RotateCw, Star, FileArchive, Pencil, Monitor, Server, BookMarked, Folder, Plus } from "lucide-react";
 import { platform } from "@tauri-apps/plugin-os";
 import type { Location } from "@/types/bindings";
 
@@ -58,6 +58,8 @@ interface PathBarProps {
   /** Ctrl+L 신호 — nonce 증가 시 editActive 인 PathBar 가 경로 입력 모드로. */
   editNonce?: number;
   editActive?: boolean;
+  /** 새 탭 열기 (Ctrl+T 와 동일). 탭이 1개여도 보이게 — 탭 기능 발견성용. */
+  onNewTab?: () => void;
 }
 
 /**
@@ -66,7 +68,7 @@ interface PathBarProps {
  *
  * MVP-0: breadcrumb 표시 + 새로고침. 직접 입력 모드(Ctrl+L)는 추후.
  */
-export function PathBar({ location, archive, canBack, canForward, onBack, onForward, onUp, onRefresh, onSegmentClick, onUpdateArchive, editNonce, editActive }: PathBarProps) {
+export function PathBar({ location, archive, canBack, canForward, onBack, onForward, onUp, onRefresh, onSegmentClick, onUpdateArchive, editNonce, editActive, onNewTab }: PathBarProps) {
   const isLocal = location.source.kind === "local";
   const sourceTitle = useHostLabel(location.source);
   const winLocal = isLocal && platform() === "windows";
@@ -263,6 +265,16 @@ export function PathBar({ location, archive, canBack, canForward, onBack, onForw
         </>
       )}
       <div className="ml-auto flex items-center">
+        {onNewTab && (
+          <button
+            onClick={onNewTab}
+            className="rounded p-1 hover:bg-border"
+            aria-label="New tab"
+            title="New tab (Ctrl+T)"
+          >
+            <Plus size={14} className="text-fg-muted" />
+          </button>
+        )}
         {!archive && !editing && (
           <button
             onClick={startEdit}
