@@ -290,15 +290,27 @@ export async function planTransferTo(
   open: OpenFn,
   showToast: ToastFn,
 ): Promise<void> {
-  if (targets.length === 0) return;
-  if (mode === "move") {
-    const r = await commands.fsMovePlan(targets, dst);
-    if (r.status === "ok") open({ kind: "move-confirm", plan: r.data });
-    else showToast(`Move plan failed: ${formatErr(r.error)}`);
-  } else {
-    const r = await commands.fsCopyPlan(targets, dst);
-    if (r.status === "ok") open({ kind: "copy-confirm", plan: r.data });
-    else showToast(`Copy plan failed: ${formatErr(r.error)}`);
+  const verb = mode === "move" ? "Move" : "Copy";
+  // 선택/커서 대상이 없으면 조용히 끝나던 것 → 이유를 알린다 ("아무 일 없음" 방지).
+  if (targets.length === 0) {
+    showToast(`${verb}: nothing selected`);
+    return;
+  }
+  try {
+    if (mode === "move") {
+      const r = await commands.fsMovePlan(targets, dst);
+      if (r.status === "ok") open({ kind: "move-confirm", plan: r.data });
+      else showToast(`Move plan failed: ${formatErr(r.error)}`);
+    } else {
+      const r = await commands.fsCopyPlan(targets, dst);
+      if (r.status === "ok") open({ kind: "copy-confirm", plan: r.data });
+      else showToast(`Copy plan failed: ${formatErr(r.error)}`);
+    }
+  } catch (e) {
+    // commands.* 가 구조화된 DuetError 대신 예외를 throw 한 경우(명령 미등록·직렬화
+    // 실패 등). 호출부가 `void` 라 잡지 않으면 unhandled rejection 으로 조용히 사라짐
+    // — 토스트로 노출해 진짜 원인을 보이게 한다.
+    showToast(`${verb} failed: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 
