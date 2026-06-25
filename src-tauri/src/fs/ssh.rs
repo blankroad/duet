@@ -215,11 +215,13 @@ impl FileSystem for SshFs {
         let home = remote_home(&sftp).await?;
         let trash_base = crate::services::trash::remote_trash_base(&home);
 
-        // 절대경로 보장 — 상대경로면 home 기준으로 정규화 (사용자 입력 방어)
-        let abs_path = if path.is_absolute() {
+        // 절대경로 보장 — 상대경로면 home 기준으로 정규화. 원격은 POSIX 라 `/` 시작이
+        // 곧 절대경로 (Windows 클라이언트에서 Path::is_absolute 는 드라이브를 요구해
+        // 원격 절대경로를 상대로 오판 → home.join 으로 경로가 깨지던 버그).
+        let abs_path = if path.to_string_lossy().starts_with('/') {
             path.to_path_buf()
         } else {
-            home.join(path)
+            crate::fs::posix_join(&home, &path.to_string_lossy())
         };
 
         let target =
