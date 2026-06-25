@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import type { EntryRef } from "@/types/bindings";
@@ -13,16 +13,6 @@ export function RenameDialog({ target, onClose, onSubmit }: RenameDialogProps) {
   const [name, setName] = useState(target.name);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    // 확장자 앞까지만 select (basename)
-    const t = inputRef.current;
-    if (!t) return;
-    t.focus();
-    const dot = target.name.lastIndexOf(".");
-    if (dot > 0) t.setSelectionRange(0, dot);
-    else t.select();
-  }, [target.name]);
-
   const submit = () => {
     const trimmed = name.trim();
     if (!trimmed || trimmed === target.name) {
@@ -36,7 +26,19 @@ export function RenameDialog({ target, onClose, onSubmit }: RenameDialogProps) {
     <Dialog.Root open onOpenChange={(o) => !o && onClose()}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none">
+        <Dialog.Content
+          onOpenAutoFocus={(e) => {
+            // 입력창 포커스 + basename(확장자 앞)만 선택. Radix 기본(닫기 버튼) 대체.
+            e.preventDefault();
+            const t = inputRef.current;
+            if (!t) return;
+            t.focus();
+            const dot = target.name.lastIndexOf(".");
+            if (dot > 0) t.setSelectionRange(0, dot);
+            else t.select();
+          }}
+          className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none"
+        >
           <div className="mb-3 flex items-start justify-between">
             <Dialog.Title className="text-title font-medium">Rename</Dialog.Title>
             <Dialog.Close

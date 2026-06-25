@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { X, AlertTriangle } from "lucide-react";
 import { commands } from "@/types/bindings";
@@ -24,6 +24,7 @@ const CASE_OPTS: { value: "" | CaseOp; label: string }[] = [
  */
 export function BatchRenameDialog({ targets, onClose, onSubmit }: BatchRenameDialogProps) {
   const [find, setFind] = useState("");
+  const findRef = useRef<HTMLInputElement>(null);
   const [replace, setReplace] = useState("");
   const [replaceAll, setReplaceAll] = useState(true);
   const [base, setBase] = useState("");
@@ -82,6 +83,11 @@ export function BatchRenameDialog({ targets, onClose, onSubmit }: BatchRenameDia
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit();
             else if (e.key === "Escape") onClose();
           }}
+          onOpenAutoFocus={(e) => {
+            // 첫 입력창(Find)으로 포커스. Radix 기본(닫기 버튼) 대체.
+            e.preventDefault();
+            findRef.current?.focus();
+          }}
           className="fixed left-1/2 top-1/2 z-50 flex max-h-[80vh] w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 flex-col rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none"
         >
           <div className="mb-3 flex items-start justify-between">
@@ -95,7 +101,12 @@ export function BatchRenameDialog({ targets, onClose, onSubmit }: BatchRenameDia
 
           <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-base">
             <Field label="Find">
-              <input className={inputCls} value={find} onChange={(e) => setFind(e.target.value)} />
+              <input
+                ref={findRef}
+                className={inputCls}
+                value={find}
+                onChange={(e) => setFind(e.target.value)}
+              />
             </Field>
             <Field label="Replace with">
               <input className={inputCls} value={replace} onChange={(e) => setReplace(e.target.value)} />

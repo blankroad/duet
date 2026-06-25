@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { X, AlertTriangle } from "lucide-react";
 import type { ReactNode } from "react";
@@ -22,15 +22,19 @@ export function DangerConfirmDialog({
   const [typed, setTyped] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const enabled = typed === requiredWord;
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
 
   return (
     <Dialog.Root open onOpenChange={(o) => !o && onCancel()}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-md border-2 border-danger bg-base p-4 shadow-lg focus:outline-none">
+        <Dialog.Content
+          onOpenAutoFocus={(e) => {
+            // 확인 단어 입력창으로 포커스. Radix 기본(닫기 버튼) 대체.
+            e.preventDefault();
+            inputRef.current?.focus();
+          }}
+          className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-md border-2 border-danger bg-base p-4 shadow-lg focus:outline-none"
+        >
           <div className="mb-3 flex items-start justify-between">
             <Dialog.Title className="flex items-center gap-2 text-title font-medium text-danger">
               <AlertTriangle size={16} />

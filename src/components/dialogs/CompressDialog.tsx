@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import type { CompressFormat } from "@/types/bindings";
@@ -21,10 +21,6 @@ export function CompressDialog({ itemCount, defaultName, onClose, onSubmit }: Co
   const [name, setName] = useState(defaultName);
   const [format, setFormat] = useState<CompressFormat>("zip");
   const inputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    inputRef.current?.focus();
-    inputRef.current?.select();
-  }, []);
 
   const submit = () => {
     const trimmed = name.trim();
@@ -36,7 +32,15 @@ export function CompressDialog({ itemCount, defaultName, onClose, onSubmit }: Co
     <Dialog.Root open onOpenChange={(o) => !o && onClose()}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none">
+        <Dialog.Content
+          onOpenAutoFocus={(e) => {
+            // 입력창 포커스 + 전체 선택. Radix 기본(닫기 버튼) 대체.
+            e.preventDefault();
+            inputRef.current?.focus();
+            inputRef.current?.select();
+          }}
+          className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none"
+        >
           <div className="mb-3 flex items-start justify-between">
             <Dialog.Title className="text-title font-medium">Compress</Dialog.Title>
             <Dialog.Close className="rounded p-1 text-fg-muted hover:bg-border" aria-label="Close">
