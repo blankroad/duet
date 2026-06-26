@@ -2912,12 +2912,14 @@ pub(crate) async fn pick_backup_path(
     original_name: &str,
 ) -> Result<PathBuf, DuetError> {
     let base = backup_name(original_name);
-    let mut candidate = parent.join(&base);
+    // fs 의 구분자 규칙으로 결합(원격=POSIX) — parent.join 은 Windows 클라이언트에서 원격
+    // 백업 경로에 `\` 를 섞어 SFTP rename 이 깨진다(§7). apply/archive/copy 백업 공통 chokepoint.
+    let mut candidate = fs.join(parent, &base);
     if fs.metadata(&candidate).await.is_err() {
         return Ok(candidate);
     }
     for n in 2..=6 {
-        candidate = parent.join(format!("{base}.{n}"));
+        candidate = fs.join(parent, &format!("{base}.{n}"));
         if fs.metadata(&candidate).await.is_err() {
             return Ok(candidate);
         }
