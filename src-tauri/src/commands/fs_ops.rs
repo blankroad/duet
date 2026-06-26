@@ -903,6 +903,9 @@ pub async fn fs_extract_plan(
 #[specta::specta]
 pub async fn fs_extract_execute(
     plan: ExtractPlan,
+    // 암호 zip 용 — 프론트가 NeedPassword 응답을 받으면 암호를 받아 재호출한다.
+    // 컴포넌트 local state 에서만 오가고 호출 직후 clear (CLAUDE.md §5).
+    password: Option<String>,
     pool: tauri::State<'_, Arc<ConnectionPool>>,
     settings: tauri::State<'_, Arc<SettingsStore>>,
     journal: tauri::State<'_, Arc<Journal>>,
@@ -918,6 +921,7 @@ pub async fn fs_extract_execute(
     let journal_inner = journal.inner().clone();
     let app_for_run = app.clone();
     let plan_for_run = plan;
+    let password_for_run = password;
 
     let task_id = queue
         .inner()
@@ -936,8 +940,14 @@ pub async fn fs_extract_execute(
                         pool: Some(pool_inner.clone()),
                         app: Some(app_for_run.clone()),
                     };
-                    let entry =
-                        archive::extract_execute(&*fs, plan_for_run, &ctx, cancel_token).await?;
+                    let entry = archive::extract_execute(
+                        &*fs,
+                        plan_for_run,
+                        password_for_run,
+                        &ctx,
+                        cancel_token,
+                    )
+                    .await?;
                     Ok(emit_pushed(&app_for_run, entry))
                 })
             }),

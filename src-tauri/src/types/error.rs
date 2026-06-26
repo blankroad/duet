@@ -26,6 +26,9 @@ pub enum DuetError {
     Cancelled,
     #[error("not supported: {0}")]
     NotSupported(String),
+    /// 암호화된 아카이브 — 암호가 필요하거나 틀림. 프론트가 암호 입력 후 재시도한다.
+    #[error("password required")]
+    NeedPassword,
     #[error("io: {0}")]
     Io(String),
     /// rename 이 서로 다른 볼륨/드라이브 사이라 거부됨 (로컬 C:↔D: 등, EXDEV /

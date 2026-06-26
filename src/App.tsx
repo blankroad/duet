@@ -14,6 +14,7 @@ import { ThreeWayDialog } from "@/components/dialogs/ThreeWayDialog";
 import { SyncDialog } from "@/components/dialogs/SyncDialog";
 import { MkdirDialog } from "@/components/dialogs/MkdirDialog";
 import { CompressDialog } from "@/components/dialogs/CompressDialog";
+import { ExtractPasswordDialog } from "@/components/dialogs/ExtractPasswordDialog";
 import { ArgsDialog } from "@/components/dialogs/ArgsDialog";
 import { ConfirmDialog } from "@/components/dialogs/ConfirmDialog";
 import { CopyMoveConfirmDialog } from "@/components/dialogs/CopyMoveConfirmDialog";
@@ -1234,6 +1235,13 @@ function App() {
           defaultName={dialog.defaultName}
           onClose={closeDialog}
           onSubmit={onCompressSubmit}
+        />
+      )}
+      {dialog.kind === "extract-password" && (
+        <ExtractPasswordDialog
+          plan={dialog.plan}
+          onClose={closeDialog}
+          showToast={showToast}
         />
       )}
       {dialog.kind === "app-args" && (

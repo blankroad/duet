@@ -384,8 +384,12 @@ export async function triggerMove(
   await planTransferTo(targets, dst, "move", open, showToast);
 }
 
-/** 단일 아카이브 압축 해제 — plan 후 바로 task 로 실행 (진행은 TasksBar). */
-export async function triggerExtract(showToast: ToastFn): Promise<void> {
+/** 단일 아카이브 압축 해제 — plan 후 바로 task 로 실행 (진행은 TasksBar).
+ * 암호 걸린 zip 이면 백엔드가 NeedPassword → 암호 입력 다이얼로그를 띄워 재시도. */
+export async function triggerExtract(
+  open: OpenFn,
+  showToast: ToastFn,
+): Promise<void> {
   const { targets } = resolveActiveTargets();
   if (targets.length !== 1) {
     showToast("Extract: select one archive");
@@ -396,9 +400,14 @@ export async function triggerExtract(showToast: ToastFn): Promise<void> {
     showToast(`Extract failed: ${formatErr(plan.error)}`);
     return;
   }
-  const exec = await commands.fsExtractExecute(plan.data);
-  if (exec.status === "error")
-    showToast(`Extract failed: ${formatErr(exec.error)}`);
+  // 1차 시도는 암호 없이 — 암호 zip 이면 NeedPassword 로 떨어진다.
+  const exec = await commands.fsExtractExecute(plan.data, null);
+  if (exec.status === "ok") return;
+  if (exec.error.kind === "NeedPassword") {
+    open({ kind: "extract-password", plan: plan.data });
+    return;
+  }
+  showToast(`Extract failed: ${formatErr(exec.error)}`);
 }
 
 /** 선택 항목들을 압축 — 이름/포맷 선택 다이얼로그 오픈. */

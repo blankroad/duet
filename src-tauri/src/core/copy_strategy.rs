@@ -62,6 +62,16 @@ pub fn shell_escape_path(p: &Path) -> Result<String, DuetError> {
     Ok(format!("'{escaped}'"))
 }
 
+/// 쉘 single-quote escape — **경로가 아닌** 일반 문자열(암호 등)용. `shell_escape_path`
+/// 는 원격 경로라 `\`→`/` 정규화하지만, 암호엔 그러면 안 되므로 backslash 를 보존한다.
+pub fn shell_escape_str(s: &str) -> Result<String, DuetError> {
+    if s.contains('\0') {
+        return Err(DuetError::Io("string contains NUL byte".into()));
+    }
+    let escaped = s.replace('\'', "'\\''");
+    Ok(format!("'{escaped}'"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

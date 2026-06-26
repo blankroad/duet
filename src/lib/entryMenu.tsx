@@ -223,7 +223,7 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
         id: "extract",
         label: "Extract here",
         icon: <FileArchive size={ICON} />,
-        onSelect: () => void triggerExtract(showToast),
+        onSelect: () => void triggerExtract(open, showToast),
       },
       sep(),
     );

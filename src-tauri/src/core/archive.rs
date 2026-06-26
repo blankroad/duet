@@ -7,7 +7,7 @@
 //! plan/execute 두 단계 (CLAUDE.md §3/§4). execute 는 journal 에 기록하여
 //! Ctrl+Z 되돌리기 가능 — 생성물(해제 디렉토리 / 압축 파일)을 제거하는 형태.
 
-use crate::core::copy_strategy::shell_escape_path;
+use crate::core::copy_strategy::{shell_escape_path, shell_escape_str};
 use crate::core::ops::{self, OpCtx};
 use crate::fs::{FileSystem, SshFs};
 use crate::services::connection_pool::ConnectionPool;
@@ -125,6 +125,7 @@ pub async fn extract_plan(
 pub async fn extract_execute(
     fs: &dyn FileSystem,
     plan: ExtractPlan,
+    password: Option<String>,
     ctx: &OpCtx,
     cancel_token: CancellationToken,
 ) -> Result<JournalEntry, DuetError> {
@@ -156,7 +157,9 @@ pub async fn extract_execute(
     }
 
     match &plan.source {
-        SourceId::Local => extract_local(&archive_path, &plan.dest_dir, plan.format).await?,
+        SourceId::Local => {
+            extract_local(&archive_path, &plan.dest_dir, plan.format, password).await?
+        }
         SourceId::Ssh { connection_id, .. } => {
             let pool = ctx
                 .pool
@@ -168,6 +171,7 @@ pub async fn extract_execute(
                 &archive_path,
                 &plan.dest_dir,
                 plan.format,
+                password.as_deref(),
             )
             .await?
         }
@@ -192,19 +196,27 @@ pub async fn extract_execute(
     ctx.journal.push(op, undo).await
 }
 
-/// 로컬 아카이브 해제 — blocking IO 라 spawn_blocking.
-async fn extract_local(archive: &Path, dest: &Path, fmt: ArchiveFormat) -> Result<(), DuetError> {
+/// 로컬 아카이브 해제 — blocking IO 라 spawn_blocking. `password` 는 암호 zip 용(없으면 None).
+async fn extract_local(
+    archive: &Path,
+    dest: &Path,
+    fmt: ArchiveFormat,
+    password: Option<String>,
+) -> Result<(), DuetError> {
     let archive = archive.to_path_buf();
     let dest = dest.to_path_buf();
-    tokio::task::spawn_blocking(move || extract_local_blocking(&archive, &dest, fmt))
-        .await
-        .map_err(|e| DuetError::Io(format!("extract task join: {e}")))?
+    tokio::task::spawn_blocking(move || {
+        extract_local_blocking(&archive, &dest, fmt, password.as_deref())
+    })
+    .await
+    .map_err(|e| DuetError::Io(format!("extract task join: {e}")))?
 }
 
 fn extract_local_blocking(
     archive: &Path,
     dest: &Path,
     fmt: ArchiveFormat,
+    password: Option<&str>,
 ) -> Result<(), DuetError> {
     let file =
         std::fs::File::open(archive).map_err(|e| DuetError::Io(format!("open archive: {e}")))?;
@@ -212,9 +224,17 @@ fn extract_local_blocking(
         ArchiveFormat::Zip => {
             let mut zip =
                 zip::ZipArchive::new(file).map_err(|e| DuetError::Io(format!("zip open: {e}")))?;
-            // zip crate 의 extract 는 enclosed_name 으로 zip-slip 방지.
-            zip.extract(dest)
-                .map_err(|e| DuetError::Io(format!("zip extract: {e}")))?;
+            // 암호화 항목이 하나라도 있으면(by_index_raw=복호화 안 함) 암호 경로로.
+            let encrypted = (0..zip.len())
+                .any(|i| zip.by_index_raw(i).map(|e| e.encrypted()).unwrap_or(false));
+            if encrypted {
+                let pw = password.ok_or(DuetError::NeedPassword)?;
+                extract_zip_with_password(&mut zip, dest, pw)?;
+            } else {
+                // zip crate 의 extract 는 enclosed_name 으로 zip-slip 방지.
+                zip.extract(dest)
+                    .map_err(|e| DuetError::Io(format!("zip extract: {e}")))?;
+            }
         }
         ArchiveFormat::Tar => {
             let mut tar = tar::Archive::new(file);
@@ -244,16 +264,54 @@ fn extract_local_blocking(
     Ok(())
 }
 
+/// 암호 zip 해제 — 각 항목을 by_index_decrypt 로 복호화해 zip-slip 안전하게 dest 에 쓴다.
+/// (zip crate 의 extract() 는 암호를 못 받으므로 수동.) 암호 틀림은 NeedPassword.
+fn extract_zip_with_password(
+    zip: &mut zip::ZipArchive<std::fs::File>,
+    dest: &Path,
+    password: &str,
+) -> Result<(), DuetError> {
+    for i in 0..zip.len() {
+        let mut entry = match zip.by_index_decrypt(i, password.as_bytes()) {
+            Ok(e) => e,
+            Err(zip::result::ZipError::InvalidPassword) => return Err(DuetError::NeedPassword),
+            Err(e) => return Err(DuetError::Io(format!("zip decrypt: {e}"))),
+        };
+        // enclosed_name = zip-slip 안전 상대경로(.. 탈출 시 None → 건너뜀).
+        let out = match entry.enclosed_name() {
+            Some(rel) => dest.join(rel),
+            None => continue,
+        };
+        if entry.is_dir() {
+            std::fs::create_dir_all(&out).map_err(|e| DuetError::Io(format!("mkdir: {e}")))?;
+        } else {
+            if let Some(p) = out.parent() {
+                std::fs::create_dir_all(p).map_err(|e| DuetError::Io(format!("mkdir: {e}")))?;
+            }
+            let mut f =
+                std::fs::File::create(&out).map_err(|e| DuetError::Io(format!("create: {e}")))?;
+            std::io::copy(&mut entry, &mut f).map_err(|e| DuetError::Io(format!("write: {e}")))?;
+        }
+    }
+    Ok(())
+}
+
 /// 호스트의 unzip/tar 해제 명령 문자열 (인자 shell-escape). Gz 는 미지원.
+/// `password` 가 있으면 zip 은 `unzip -P`. 암호 zip 인데 password 없으면 `-P ""` 로
+/// (대화형 프롬프트 hang 방지 — 틀린 암호로 즉시 실패해 caller 가 NeedPassword 판정).
 fn remote_extract_command(
     archive: &Path,
     dest: &Path,
     fmt: ArchiveFormat,
+    password: Option<&str>,
 ) -> Result<String, DuetError> {
     let a = shell_escape_path(archive)?;
     let d = shell_escape_path(dest)?;
     Ok(match fmt {
-        ArchiveFormat::Zip => format!("unzip -o {a} -d {d}"),
+        ArchiveFormat::Zip => {
+            let p = shell_escape_str(password.unwrap_or(""))?;
+            format!("unzip -P {p} -o {a} -d {d}")
+        }
         ArchiveFormat::Tar => format!("tar -xf {a} -C {d}"),
         ArchiveFormat::TarGz => format!("tar -xzf {a} -C {d}"),
         ArchiveFormat::Gz => {
@@ -371,9 +429,10 @@ async fn extract_remote(
     archive: &Path,
     dest: &Path,
     fmt: ArchiveFormat,
+    password: Option<&str>,
 ) -> Result<(), DuetError> {
     validate_remote_archive(pool, connection_id, archive, fmt).await?;
-    let cmd = remote_extract_command(archive, dest, fmt)?;
+    let cmd = remote_extract_command(archive, dest, fmt, password)?;
     run_host_command(pool, connection_id, &cmd).await
 }
 
@@ -406,7 +465,8 @@ pub async fn open_for_browse(
             tokio::fs::create_dir_all(&dest)
                 .await
                 .map_err(|e| DuetError::Io(format!("create temp dir: {e}")))?;
-            extract_local(&archive_path, &dest, format).await?;
+            // browse 시 암호 입력 UI 는 아직 미지원 — 암호 zip 이면 NeedPassword 로 떨어진다.
+            extract_local(&archive_path, &dest, format, None).await?;
             Ok(Location {
                 source: SourceId::Local,
                 path: dest,
@@ -426,7 +486,7 @@ pub async fn open_for_browse(
             let cmd = format!(
                 "mkdir -p {} && {}",
                 shell_escape_path(&dest)?,
-                remote_extract_command(&archive_path, &dest, format)?,
+                remote_extract_command(&archive_path, &dest, format, None)?,
             );
             run_host_command(pool, connection_id, &cmd).await?;
             Ok(Location {
@@ -890,12 +950,50 @@ mod tests {
         }
         let dest = dir.path().join("out");
         std::fs::create_dir(&dest).unwrap();
-        extract_local_blocking(&zip_path, &dest, ArchiveFormat::Zip).unwrap();
+        extract_local_blocking(&zip_path, &dest, ArchiveFormat::Zip, None).unwrap();
         assert_eq!(std::fs::read(dest.join("hello.txt")).unwrap(), b"hi there");
         assert_eq!(
             std::fs::read(dest.join("sub/nested.txt")).unwrap(),
             b"nested"
         );
+    }
+
+    /// 암호(AES) zip → 올바른 암호로 해제 성공 / 없거나 틀린 암호는 NeedPassword.
+    #[test]
+    fn encrypted_zip_password_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let zip_path = dir.path().join("secret.zip");
+        {
+            let f = std::fs::File::create(&zip_path).unwrap();
+            let mut w = zip::ZipWriter::new(f);
+            let opts: zip::write::FileOptions<()> = zip::write::FileOptions::default()
+                .with_aes_encryption(zip::AesMode::Aes256, "s3cret");
+            w.start_file("msg.txt", opts).unwrap();
+            w.write_all(b"top secret").unwrap();
+            w.finish().unwrap();
+        }
+
+        // 올바른 암호 → 성공.
+        let ok = dir.path().join("ok");
+        std::fs::create_dir(&ok).unwrap();
+        extract_local_blocking(&zip_path, &ok, ArchiveFormat::Zip, Some("s3cret")).unwrap();
+        assert_eq!(std::fs::read(ok.join("msg.txt")).unwrap(), b"top secret");
+
+        // 암호 없음 → NeedPassword (프론트가 암호 입력 UI 를 띄움).
+        let nopw = dir.path().join("nopw");
+        std::fs::create_dir(&nopw).unwrap();
+        assert!(matches!(
+            extract_local_blocking(&zip_path, &nopw, ArchiveFormat::Zip, None),
+            Err(DuetError::NeedPassword)
+        ));
+
+        // 틀린 암호 → NeedPassword (재입력).
+        let wrong = dir.path().join("wrong");
+        std::fs::create_dir(&wrong).unwrap();
+        assert!(matches!(
+            extract_local_blocking(&zip_path, &wrong, ArchiveFormat::Zip, Some("nope")),
+            Err(DuetError::NeedPassword)
+        ));
     }
 
     /// tar.gz 압축 → 해제 round-trip — compress_local_blocking + extract 검증.
@@ -920,7 +1018,7 @@ mod tests {
 
         let dest = dir.path().join("unpacked");
         std::fs::create_dir(&dest).unwrap();
-        extract_local_blocking(&archive, &dest, ArchiveFormat::TarGz).unwrap();
+        extract_local_blocking(&archive, &dest, ArchiveFormat::TarGz, None).unwrap();
         assert_eq!(std::fs::read(dest.join("a.txt")).unwrap(), b"alpha");
         assert_eq!(std::fs::read(dest.join("d/b.txt")).unwrap(), b"beta");
     }
@@ -980,7 +1078,7 @@ mod tests {
 
         let dest = dir.path().join("unpacked");
         std::fs::create_dir(&dest).unwrap();
-        extract_local_blocking(&archive, &dest, ArchiveFormat::Zip).unwrap();
+        extract_local_blocking(&archive, &dest, ArchiveFormat::Zip, None).unwrap();
         assert_eq!(std::fs::read(dest.join("top.txt")).unwrap(), b"top");
         assert_eq!(std::fs::read(dest.join("inner/leaf.txt")).unwrap(), b"leaf");
     }
