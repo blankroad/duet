@@ -102,13 +102,15 @@ pub async fn extract_plan(
 ) -> Result<ExtractPlan, DuetError> {
     let format = detect_format(&archive.name)
         .ok_or_else(|| DuetError::Io(format!("unsupported archive: {}", archive.name)))?;
-    let archive_path = archive.location.path.join(&archive.name);
+    // fs.join — 원격은 POSIX, 로컬은 네이티브. PathBuf::join 은 Windows 클라이언트에서
+    // 원격 경로에 `\` 를 섞는다(§7).
+    let archive_path = fs.join(&archive.location.path, &archive.name);
     let meta = fs.metadata(&archive_path).await?;
     if meta.kind != EntryKind::File {
         return Err(DuetError::Io("not a regular file".into()));
     }
     let stem = archive_stem(&archive.name);
-    let dest_dir = archive.location.path.join(&stem);
+    let dest_dir = fs.join(&archive.location.path, &stem);
     let conflict = fs.metadata(&dest_dir).await.is_ok();
     Ok(ExtractPlan {
         source: archive.location.source.clone(),
@@ -126,7 +128,7 @@ pub async fn extract_execute(
     ctx: &OpCtx,
     cancel_token: CancellationToken,
 ) -> Result<JournalEntry, DuetError> {
-    let archive_path = plan.archive_dir.path.join(&plan.archive_name);
+    let archive_path = fs.join(&plan.archive_dir.path, &plan.archive_name);
 
     // dest 충돌 → backup 으로 mv (undo 시 복원).
     let mut backups = Vec::new();
@@ -416,10 +418,10 @@ pub async fn open_for_browse(
             // 호스트 home 아래 임시 디렉토리 — 절대경로로 만들어 shell-escape.
             let conn = pool.get(connection_id).await?;
             let home = SshFs::new(conn).home().await?;
-            let dest = home
-                .join(".duet-tmp")
-                .join(format!("browse-{token}"))
-                .join(&stem);
+            // posix_join — 반환되어 reap·표시에 쓰이므로 Windows 클라이언트의 `\` 회피(§7).
+            let mut dest = crate::fs::posix_join(&home, ".duet-tmp");
+            dest = crate::fs::posix_join(&dest, &format!("browse-{token}"));
+            let dest = crate::fs::posix_join(&dest, &stem);
             // mkdir -p + 추출을 한 호스트 명령으로 (PC 경유 0).
             let cmd = format!(
                 "mkdir -p {} && {}",
@@ -528,7 +530,8 @@ pub async fn compress_plan(
     } else {
         format!("{archive_name}{ext}")
     };
-    let dest_path = src_dir.path.join(&file_name);
+    // fs.join — 원격은 POSIX(Windows 클라이언트의 `\` 회피, §7).
+    let dest_path = fs.join(&src_dir.path, &file_name);
     let conflict = fs.metadata(&dest_path).await.is_ok();
     let item_names = items.into_iter().map(|i| i.name).collect();
     Ok(CompressPlan {

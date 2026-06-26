@@ -1060,7 +1060,10 @@ async fn sync_execute_same_host(
         .home()
         .await?;
     let batch = crate::services::trash::new_batch_id();
-    let backup_dir = home.join(".duet-trash").join(format!("sync-{batch}"));
+    let backup_dir = crate::fs::posix_join(
+        &crate::fs::posix_join(&home, ".duet-trash"),
+        &format!("sync-{batch}"),
+    );
 
     let src_arg = shell_escape_path(&plan.src.path)?;
     let dst_arg = shell_escape_path(&plan.dst.path)?;
@@ -1182,14 +1185,24 @@ async fn collect_backup_files(
 ) {
     let entries = fs.list(dir).await.unwrap_or_default();
     for e in entries {
-        let p = dir.join(&e.name);
+        // 원격(same-host)일 수 있으니 POSIX 결합 — PathBuf::join 의 Windows `\` 회피(§7).
+        let p = fs.join(dir, &e.name);
         if e.kind == crate::types::EntryKind::Dir {
             Box::pin(collect_backup_files(fs, &p, backup_root, dst_root, out)).await;
-        } else if let Ok(rel) = p.strip_prefix(backup_root) {
-            out.push(BackupRestore {
-                backup_path: p.clone(),
-                original_path: dst_root.join(rel),
-            });
+        } else {
+            // backup_root prefix 제거한 POSIX 상대경로를 dst_root 아래로 매핑(undo 복원용).
+            let p_s = p.to_string_lossy();
+            let root_s = backup_root.to_string_lossy();
+            if let Some(rel) = p_s.strip_prefix(root_s.as_ref()) {
+                let mut original = dst_root.to_path_buf();
+                for seg in rel.split('/').filter(|s| !s.is_empty()) {
+                    original = crate::fs::posix_join(&original, seg);
+                }
+                out.push(BackupRestore {
+                    backup_path: p.clone(),
+                    original_path: original,
+                });
+            }
         }
     }
 }
@@ -1213,8 +1226,16 @@ fn rel_join(rel: &str, name: &str) -> String {
     if rel.is_empty() {
         name.to_string()
     } else {
-        format!("{rel}/{name}") // 표시용 상대경로(실경로는 PathBuf::join, §7)
+        format!("{rel}/{name}") // 표시용 상대경로(실경로는 remote_join, §7)
     }
+}
+
+/// 원격(same-host SSH) base 경로에 상대경로 `rel` 을 결합 — 항상 POSIX(`/`).
+///
+/// `PathBuf::join` 은 Windows 클라이언트에서 `\` 를 끼워넣어 원격 경로를 깨뜨린다(§7).
+/// same-host 코드의 모든 `X.path.join(rel)` 은 이걸로 — `rel` 은 `/` 로 구성된 상대 Path.
+fn remote_join(base: &std::path::Path, rel: impl AsRef<std::path::Path>) -> PathBuf {
+    crate::fs::posix_join(base, &rel.as_ref().to_string_lossy())
 }
 
 /// 단방향 미러 dry-run — 복사/prune 목록. local/relay 는 in-Rust 워크(entry_differs
@@ -1563,8 +1584,8 @@ async fn merge_relay(
         let rel = std::path::Path::new(rel);
         let res = match status {
             CompareStatus::LeftOnly => {
-                let s = left.path.join(rel);
-                let d = right.path.join(rel);
+                let s = remote_join(&left.path, rel);
+                let d = remote_join(&right.path, rel);
                 // 추가 전용 불변식 강제: race 로 dst 가 생겼으면 덮어쓰지 않고 skip.
                 if right_fs.metadata(&d).await.is_ok() {
                     tracing::warn!("merge skip (dst exists): {}", d.display());
@@ -1577,8 +1598,8 @@ async fn merge_relay(
                 }
             }
             CompareStatus::RightOnly => {
-                let s = right.path.join(rel);
-                let d = left.path.join(rel);
+                let s = remote_join(&right.path, rel);
+                let d = remote_join(&left.path, rel);
                 if left_fs.metadata(&d).await.is_ok() {
                     tracing::warn!("merge skip (dst exists): {}", d.display());
                     Ok(())
@@ -1650,8 +1671,8 @@ async fn merge_same_host(
         let rel = std::path::Path::new(rel);
         let res = match status {
             CompareStatus::LeftOnly => {
-                let s = left.path.join(rel);
-                let d = right.path.join(rel);
+                let s = remote_join(&left.path, rel);
+                let d = remote_join(&right.path, rel);
                 match host_side_copy_one(pool, left_conn, &s, &d).await {
                     Ok(true) => {
                         right_created.push(d);
@@ -1668,8 +1689,8 @@ async fn merge_same_host(
                 }
             }
             CompareStatus::RightOnly => {
-                let s = right.path.join(rel);
-                let d = left.path.join(rel);
+                let s = remote_join(&right.path, rel);
+                let d = remote_join(&left.path, rel);
                 match host_side_copy_one(pool, right_conn, &s, &d).await {
                     Ok(true) => {
                         left_created.push(d);
@@ -1882,16 +1903,16 @@ async fn apply_one_relay(
     let (src_fs, src_path, dst_fs, dst_path, dst_is_left) = match direction {
         ApplyDirection::ToRight => (
             left_fs,
-            left.path.join(rel),
+            remote_join(&left.path, rel),
             right_fs,
-            right.path.join(rel),
+            remote_join(&right.path, rel),
             false,
         ),
         ApplyDirection::ToLeft => (
             right_fs,
-            right.path.join(rel),
+            remote_join(&right.path, rel),
             left_fs,
-            left.path.join(rel),
+            remote_join(&left.path, rel),
             true,
         ),
         ApplyDirection::Skip => return Ok(()),
@@ -2029,16 +2050,16 @@ async fn apply_one_same_host(
 ) -> Result<(), DuetError> {
     let (src_path, src_conn, dst_path, dst_conn, dst_is_left) = match direction {
         ApplyDirection::ToRight => (
-            left.path.join(rel),
+            remote_join(&left.path, rel),
             left_conn,
-            right.path.join(rel),
+            remote_join(&right.path, rel),
             right_conn,
             false,
         ),
         ApplyDirection::ToLeft => (
-            right.path.join(rel),
+            remote_join(&right.path, rel),
             right_conn,
-            left.path.join(rel),
+            remote_join(&left.path, rel),
             left_conn,
             true,
         ),
@@ -2085,7 +2106,7 @@ async fn trash_rel(
     batch: &str,
     out: &mut Vec<TrashItem>,
 ) -> Result<(), DuetError> {
-    let p = root.path.join(rel);
+    let p = remote_join(&root.path, rel);
     let loc = fs.trash(&p, batch).await?;
     let trash_path = match &loc {
         TrashLocation::Local { trash_id } => trash_id.clone(),
@@ -2257,8 +2278,8 @@ async fn verify_relay(
     let mut out = Vec::with_capacity(rels.len());
     for rel in rels {
         let rel_path = std::path::Path::new(&rel);
-        let lp = left.path.join(rel_path);
-        let rp = right.path.join(rel_path);
+        let lp = remote_join(&left.path, rel_path);
+        let rp = remote_join(&right.path, rel_path);
         let equal = match (left_fs.metadata(&lp).await, right_fs.metadata(&rp).await) {
             (Ok(lm), Ok(rm)) => {
                 if lm.size != rm.size {
@@ -2304,8 +2325,8 @@ async fn verify_same_host(
     let mut out = Vec::with_capacity(rels.len());
     for rel in rels {
         let rel_path = std::path::Path::new(&rel);
-        let lp = shell_escape_path(&left.path.join(rel_path))?;
-        let rp = shell_escape_path(&right.path.join(rel_path))?;
+        let lp = shell_escape_path(&remote_join(&left.path, rel_path))?;
+        let rp = shell_escape_path(&remote_join(&right.path, rel_path))?;
         // 두 파일을 한 exec 로 해시 → 정확히 2개 해시 라인이면 비교, 아니면 None.
         let cmd = format!(
             "if command -v sha256sum >/dev/null 2>&1; then sha256sum -- {lp} {rp}; \
@@ -2499,7 +2520,7 @@ async fn compute_sigs(
             let sig = if *size > RENAME_SIG_CAP {
                 format!("__big__{rel}") // 고유 — 매칭 안 됨
             } else {
-                match fs.read_full(&root.path.join(rel)).await {
+                match fs.read_full(&remote_join(&root.path, rel)).await {
                     Ok(bytes) => {
                         use std::hash::{Hash, Hasher};
                         let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -2535,7 +2556,7 @@ async fn sigs_same_host(
     let mut args = String::new();
     for (rel, _) in cands {
         args.push(' ');
-        args.push_str(&shell_escape_path(&root.path.join(rel))?);
+        args.push_str(&shell_escape_path(&remote_join(&root.path, rel))?);
     }
     let cmd = format!(
         "if command -v sha256sum >/dev/null 2>&1; then sha256sum --{args}; else shasum -a 256 --{args}; fi"
