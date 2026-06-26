@@ -454,22 +454,24 @@ function App() {
       ) {
         const child = childLocation(tab.location, entry.name);
         const scope: ShellScope = entry.kind === "dir" ? "directory" : "file";
-        let shellToken: number | null = null;
+        // 우클릭 즉시 백그라운드로 셸 메뉴 빌드 시작(prefetch) — "More options" 펼칠 때
+        // COM 열거를 새로 안 기다려 지연 최소화. 미선택 시 onClose 가 세션 정리.
+        const shellPromise = openShellMenu(String(child.path), scope);
         items.push(
           { kind: "separator" },
           {
             id: "win-more",
             label: "More options",
             loadChildren: async () => {
-              const shell = await openShellMenu(String(child.path), scope);
-              if (!shell) return [];
-              shellToken = shell.token;
-              return shell.entries;
+              const shell = await shellPromise;
+              return shell ? shell.entries : [];
             },
           },
         );
         onClose = () => {
-          if (shellToken != null) onShellMenuClose(shellToken);
+          void shellPromise.then((shell) => {
+            if (shell) onShellMenuClose(shell.token);
+          });
         };
       }
       useContextMenu.getState().openAt(cx, cy, items, onClose);
@@ -496,22 +498,23 @@ function App() {
       let onClose: (() => void) | undefined;
       if (platform() === "windows" && tab.location.source.kind === "local") {
         const bgPath = String(tab.location.path);
-        let shellToken: number | null = null;
+        // 우클릭 즉시 백그라운드로 빌드(prefetch). 미선택 시 onClose 가 세션 정리.
+        const shellPromise = openShellMenu(bgPath, "background");
         items.push(
           { kind: "separator" },
           {
             id: "win-more",
             label: "More options",
             loadChildren: async () => {
-              const shell = await openShellMenu(bgPath, "background");
-              if (!shell) return [];
-              shellToken = shell.token;
-              return shell.entries;
+              const shell = await shellPromise;
+              return shell ? shell.entries : [];
             },
           },
         );
         onClose = () => {
-          if (shellToken != null) onShellMenuClose(shellToken);
+          void shellPromise.then((shell) => {
+            if (shell) onShellMenuClose(shell.token);
+          });
         };
       }
       useContextMenu.getState().openAt(cx, cy, items, onClose);
