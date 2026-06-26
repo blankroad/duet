@@ -123,30 +123,23 @@ pub async fn trash_location(
 
 /// 원격 `.duet-trash` 경로에서 원본 절대경로 도출.
 /// `<home>/.duet-trash/<batch>/etc/foo/bar` → `/etc/foo/bar`. 마커 없으면 None.
+///
+/// **POSIX 문자열 기준** — `Path::components()`/`PathBuf::push` 는 Windows 클라이언트에서
+/// `\` 를 섞어(원격 경로 깨짐) "Put back" 이 실패하던 버그(§7). `/` 로만 분해·결합한다.
 fn derive_original_from_trash(full: &Path) -> Option<PathBuf> {
-    use std::path::Component;
-    let mut comps = full.components();
-    // ".duet-trash" 까지 소비
-    let mut found = false;
-    for c in comps.by_ref() {
-        if matches!(c, Component::Normal(s) if s == ".duet-trash") {
-            found = true;
-            break;
-        }
-    }
-    if !found {
+    let s = full.to_string_lossy();
+    let segs: Vec<&str> = s.split('/').filter(|seg| !seg.is_empty()).collect();
+    // `.duet-trash` 다음 세그먼트가 batch, 그 뒤부터가 원본 경로(루트 기준).
+    let idx = segs.iter().position(|&seg| seg == ".duet-trash")?;
+    let rest = segs.get(idx + 2..)?;
+    if rest.is_empty() {
         return None;
     }
-    comps.next()?; // batch 디렉토리 소비
     let mut out = PathBuf::from("/");
-    let mut any = false;
-    for c in comps {
-        if let Component::Normal(s) = c {
-            out.push(s);
-            any = true;
-        }
+    for seg in rest {
+        out = crate::fs::posix_join(&out, seg);
     }
-    any.then_some(out)
+    Some(out)
 }
 
 /// 휴지통 항목을 원래 위치로 복원 ("Put back") — 원격 `.duet-trash` 전용.
@@ -166,14 +159,20 @@ pub async fn trash_restore(
                 .into(),
         ));
     };
-    let full = item.location.path.join(&item.name);
+    // 원격 경로는 POSIX 결합 (Windows 클라이언트에서 PathBuf::join 의 `\` 회피).
+    let full = crate::fs::posix_join(&item.location.path, &item.name);
     let original = derive_original_from_trash(&full)
         .ok_or_else(|| DuetError::Io("not inside .duet-trash".into()))?;
     let conn = pool.inner().get(connection_id).await?;
     let fs = SshFs::new(conn);
     fs.restore_from_trash(&TrashLocation::Remote { trash_path: full }, &original)
         .await?;
-    let parent = original.parent().map(Path::to_path_buf).unwrap_or(original);
+    // 부모 Location (갱신용) — POSIX 로 마지막 `/` 앞까지. Path::parent 의 OS 의존 회피.
+    let orig_s = original.to_string_lossy();
+    let parent = match orig_s.rsplit_once('/') {
+        Some(("", _)) | None => PathBuf::from("/"),
+        Some((p, _)) => PathBuf::from(p),
+    };
     Ok(Location {
         source: item.location.source,
         path: parent,

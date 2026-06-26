@@ -210,11 +210,13 @@ async fn walk(
             // 내용 비교를 위해 재귀(없는 쪽은 빈 목록).
             Box::pin(walk(
                 base_fs,
-                &bpath.join(name),
+                // 각 fs 의 구분자 규칙(원격=POSIX)으로 결합 — PathBuf::join 은 Windows
+                // 클라이언트에서 `\` 를 섞어 SFTP list 가 깨진다(§7).
+                &base_fs.join(bpath, name),
                 left_fs,
-                &lpath.join(name),
+                &left_fs.join(lpath, name),
                 right_fs,
-                &rpath.join(name),
+                &right_fs.join(rpath, name),
                 &rel_name,
                 out,
                 truncated,

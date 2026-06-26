@@ -370,9 +370,11 @@ async fn compare_into(
                     // 양쪽 디렉토리 — 내부로 재귀(디렉토리 자체는 항목으로 안 냄).
                     Box::pin(compare_into(
                         left_fs,
-                        &lpath.join(name),
+                        // 각 fs 의 구분자 규칙으로 결합 — 원격은 POSIX. PathBuf::join 은
+                        // Windows 클라이언트에서 `\` 를 섞어 SFTP list 가 깨진다(§7).
+                        &left_fs.join(lpath, name),
                         right_fs,
-                        &rpath.join(name),
+                        &right_fs.join(rpath, name),
                         &rel_name,
                         out,
                         truncated,
