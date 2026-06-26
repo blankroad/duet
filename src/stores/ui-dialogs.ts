@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { CopyPlan, DeletePlan, MovePlan, EntryRef, Location, Volume, CompressPlan, SyncPlan, ComparePlan, ThreeWayPlan, ExtractPlan } from "@/types/bindings";
+import type { PaneId } from "@/stores/panes";
 
 export type DialogState =
   | { kind: "none" }
@@ -12,6 +13,7 @@ export type DialogState =
   | { kind: "move-confirm"; plan: MovePlan }
   | { kind: "compress"; items: EntryRef[]; defaultName: string }
   | { kind: "extract-password"; plan: ExtractPlan }
+  | { kind: "browse-password"; paneId: PaneId; archive: EntryRef }
   | { kind: "repack-confirm"; plan: CompressPlan; label: string }
   | { kind: "sync-confirm"; plan: SyncPlan; srcLabel: string; dstLabel: string }
   | { kind: "compare"; plan: ComparePlan }

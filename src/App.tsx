@@ -14,7 +14,7 @@ import { ThreeWayDialog } from "@/components/dialogs/ThreeWayDialog";
 import { SyncDialog } from "@/components/dialogs/SyncDialog";
 import { MkdirDialog } from "@/components/dialogs/MkdirDialog";
 import { CompressDialog } from "@/components/dialogs/CompressDialog";
-import { ExtractPasswordDialog } from "@/components/dialogs/ExtractPasswordDialog";
+import { PasswordPromptDialog } from "@/components/dialogs/PasswordPromptDialog";
 import { ArgsDialog } from "@/components/dialogs/ArgsDialog";
 import { ConfirmDialog } from "@/components/dialogs/ConfirmDialog";
 import { CopyMoveConfirmDialog } from "@/components/dialogs/CopyMoveConfirmDialog";
@@ -317,12 +317,17 @@ function App() {
       }
       // 아카이브 파일 — 임시 추출 후 그 폴더로 진입(탐색기처럼 내부 열람).
       if (isArchiveName(entry.name)) {
+        const archive = { location: tab.location, name: entry.name };
         void (async () => {
-          const r = await commands.fsArchiveOpenForBrowse({
-            location: tab.location,
-            name: entry.name,
-          });
+          // 1차는 암호 없이 — 암호 zip 이면 NeedPassword → 암호 입력 다이얼로그.
+          const r = await commands.fsArchiveOpenForBrowse(archive, null);
           if (r.status === "error") {
+            if (r.error.kind === "NeedPassword") {
+              useUIDialogs
+                .getState()
+                .open({ kind: "browse-password", paneId: id, archive });
+              return;
+            }
             showToast(`Cannot open ${entry.name} — ${formatErr(r.error)}`);
             return;
           }
@@ -1238,10 +1243,39 @@ function App() {
         />
       )}
       {dialog.kind === "extract-password" && (
-        <ExtractPasswordDialog
-          plan={dialog.plan}
+        <PasswordPromptDialog
+          archiveName={dialog.plan.archive_name}
           onClose={closeDialog}
-          showToast={showToast}
+          submit={async (pw) => {
+            const r = await commands.fsExtractExecute(dialog.plan, pw);
+            if (r.status === "ok") return "ok";
+            if (r.error.kind === "NeedPassword") return "retry";
+            showToast(`Extract failed: ${formatErr(r.error)}`);
+            return "ok";
+          }}
+        />
+      )}
+      {dialog.kind === "browse-password" && (
+        <PasswordPromptDialog
+          archiveName={dialog.archive.name}
+          onClose={closeDialog}
+          submit={async (pw) => {
+            const r = await commands.fsArchiveOpenForBrowse(dialog.archive, pw);
+            if (r.status === "ok") {
+              await navigateTo(dialog.paneId, r.data);
+              usePanes.getState().setArchiveContext(dialog.paneId, {
+                label: dialog.archive.name,
+                root: r.data.path,
+                exitTo: dialog.archive.location,
+              });
+              return "ok";
+            }
+            if (r.error.kind === "NeedPassword") return "retry";
+            showToast(
+              `Cannot open ${dialog.archive.name} — ${formatErr(r.error)}`,
+            );
+            return "ok";
+          }}
         />
       )}
       {dialog.kind === "app-args" && (

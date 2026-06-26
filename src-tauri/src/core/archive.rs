@@ -345,6 +345,34 @@ async fn run_host_command(
     Ok(())
 }
 
+/// zip 추출용 호스트 명령 실행 — Info-ZIP `unzip` 의 exit 82(="bad decryption
+/// password") 를 `NeedPassword` 로 매핑해 프론트가 암호를 받아 재시도하게 한다.
+/// 다른 unzip 구현이 82 를 안 쓰면 그냥 일반 Ssh 에러로 폴백(best-effort).
+async fn run_unzip_command(
+    pool: &Arc<ConnectionPool>,
+    connection_id: &ConnectionId,
+    cmd: &str,
+) -> Result<(), DuetError> {
+    let conn = pool.get(connection_id).await?;
+    let session_mutex = conn
+        .session
+        .as_ref()
+        .ok_or_else(|| DuetError::ConnectionFailed("no live session".into()))?;
+    let handle = session_mutex.lock().await;
+    let out = exec(&handle, cmd).await?;
+    if out.exit_status != 0 {
+        if out.exit_status == 82 {
+            return Err(DuetError::NeedPassword);
+        }
+        return Err(DuetError::Ssh(format!(
+            "host command failed (exit {}): {}",
+            out.exit_status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+    Ok(())
+}
+
 /// 아카이브 엔트리가 추출 dest 밖으로 탈출하는지 — 절대경로(`/`·`\\`·드라이브)거나
 /// `..` 컴포넌트 포함. zip-slip / 절대경로 덮어쓰기 차단용.
 fn entry_escapes(entry: &str) -> bool {
@@ -433,7 +461,11 @@ async fn extract_remote(
 ) -> Result<(), DuetError> {
     validate_remote_archive(pool, connection_id, archive, fmt).await?;
     let cmd = remote_extract_command(archive, dest, fmt, password)?;
-    run_host_command(pool, connection_id, &cmd).await
+    // zip 은 암호 실패(unzip exit 82)를 NeedPassword 로 — 프론트 재시도.
+    match fmt {
+        ArchiveFormat::Zip => run_unzip_command(pool, connection_id, &cmd).await,
+        _ => run_host_command(pool, connection_id, &cmd).await,
+    }
 }
 
 // === Browse (투명 임시추출 — 탐색기처럼 내부 열람) ===
@@ -449,8 +481,12 @@ async fn extract_remote(
 ///   반환 Location 은 같은 `Ssh{}` source 라 패널이 그대로 원격을 탐색.
 ///
 /// browse-only(비파괴) 라 journal 기록 없음.
+///
+/// `password` 는 암호 zip 용 — 없거나 틀리면 `NeedPassword` 를 반환하고, 프론트가
+/// 암호를 받아 같은 아카이브로 재호출한다(extract 와 동일한 재시도 흐름).
 pub async fn open_for_browse(
     archive: EntryRef,
+    password: Option<String>,
     pool: &Arc<ConnectionPool>,
 ) -> Result<Location, DuetError> {
     let format = detect_format(&archive.name)
@@ -461,12 +497,17 @@ pub async fn open_for_browse(
 
     match &archive.location.source {
         SourceId::Local => {
-            let dest = local_browse_root().join(&token).join(&stem);
+            // token 디렉토리째 만들고, 추출 실패(예: NeedPassword) 시 통째로 정리해
+            // 빈 temp 가 새지 않게 한다(재시도는 새 token 으로 들어온다).
+            let token_dir = local_browse_root().join(&token);
+            let dest = token_dir.join(&stem);
             tokio::fs::create_dir_all(&dest)
                 .await
                 .map_err(|e| DuetError::Io(format!("create temp dir: {e}")))?;
-            // browse 시 암호 입력 UI 는 아직 미지원 — 암호 zip 이면 NeedPassword 로 떨어진다.
-            extract_local(&archive_path, &dest, format, None).await?;
+            if let Err(e) = extract_local(&archive_path, &dest, format, password).await {
+                let _ = tokio::fs::remove_dir_all(&token_dir).await;
+                return Err(e);
+            }
             Ok(Location {
                 source: SourceId::Local,
                 path: dest,
@@ -486,9 +527,13 @@ pub async fn open_for_browse(
             let cmd = format!(
                 "mkdir -p {} && {}",
                 shell_escape_path(&dest)?,
-                remote_extract_command(&archive_path, &dest, format, None)?,
+                remote_extract_command(&archive_path, &dest, format, password.as_deref())?,
             );
-            run_host_command(pool, connection_id, &cmd).await?;
+            // zip 은 암호 실패(unzip exit 82)를 NeedPassword 로 — 프론트 재시도.
+            match format {
+                ArchiveFormat::Zip => run_unzip_command(pool, connection_id, &cmd).await?,
+                _ => run_host_command(pool, connection_id, &cmd).await?,
+            }
             Ok(Location {
                 source: archive.location.source.clone(),
                 path: dest,
@@ -1044,7 +1089,7 @@ mod tests {
             name: "pkg.zip".into(),
         };
         let pool = crate::services::connection_pool::ConnectionPool::new();
-        let loc = open_for_browse(archive, &pool).await.unwrap();
+        let loc = open_for_browse(archive, None, &pool).await.unwrap();
 
         assert_eq!(loc.source, SourceId::Local);
         // 반환 경로 leaf 는 stem("pkg"), 내부에 a.txt 존재.

@@ -876,9 +876,11 @@ pub async fn fs_mkdir(
 #[specta::specta]
 pub async fn fs_archive_open_for_browse(
     archive: EntryRef,
+    // 암호 zip browse 용 — NeedPassword 시 프론트가 암호를 받아 재호출 (§5).
+    password: Option<String>,
     pool: tauri::State<'_, Arc<ConnectionPool>>,
 ) -> Result<Location, DuetError> {
-    let loc = archive::open_for_browse(archive, pool.inner()).await?;
+    let loc = archive::open_for_browse(archive, password, pool.inner()).await?;
     // 원격 browse 면 임시 루트(`~/.duet-tmp/browse-<token>` = stem 의 부모)를 연결에
     // 등록 — 연결 종료 시 reap (Phase 2). 등록 실패는 비치명적(reap 만 누락).
     if let SourceId::Ssh { connection_id, .. } = &loc.source {

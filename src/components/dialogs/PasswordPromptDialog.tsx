@@ -1,54 +1,51 @@
 import { useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Lock, X } from "lucide-react";
-import { commands } from "@/types/bindings";
-import type { ExtractPlan } from "@/types/bindings";
-import { formatErr } from "@/lib/error";
 
-export interface ExtractPasswordDialogProps {
-  plan: ExtractPlan;
+/** submit 결과: "ok" = 닫기(성공 또는 caller 가 이미 처리), "retry" = 암호 틀림 → 재입력. */
+export type PwSubmitResult = "ok" | "retry";
+
+export interface PasswordPromptDialogProps {
+  /** 표시용 아카이브 이름. */
+  archiveName: string;
+  /**
+   * 입력 암호로 실제 작업을 시도. 성공/치명적 오류는 caller 가 처리하고 "ok"(닫기),
+   * 암호가 틀린 경우(NeedPassword)만 "retry" 를 반환 — 그러면 다이얼로그가 열린 채
+   * "wrong password" 를 보여주고 재입력을 받는다.
+   */
+  submit: (password: string) => Promise<PwSubmitResult>;
   onClose: () => void;
-  showToast: (msg: string) => void;
 }
 
 /**
- * 암호 걸린 zip 해제용 암호 프롬프트.
- *
- * 백엔드가 NeedPassword 를 반환하면 열리고, 입력한 암호로 fs_extract_execute 를 재호출.
- * 또 틀리면(NeedPassword 재반환) 그대로 열린 채 "wrong password" 표시하고 재입력 받음.
- * 성공(task enqueue)하면 닫힘 — 진행은 TasksBar 가 보여준다.
+ * 암호 걸린 아카이브(zip)용 암호 프롬프트 — 해제(extract)와 열람(browse) 공용.
  *
  * CLAUDE.md §5 — input type=password(DOM 마스킹), 컴포넌트 local state 에만,
- * command 호출 직후 즉시 clear. store/localStorage 등 영구화 안 함.
+ * submit 호출 직후 즉시 clear. store/localStorage 등 영구화 안 함.
  */
-export function ExtractPasswordDialog({
-  plan,
+export function PasswordPromptDialog({
+  archiveName,
+  submit,
   onClose,
-  showToast,
-}: ExtractPasswordDialogProps) {
+}: PasswordPromptDialogProps) {
   const [pw, setPw] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const submit = async () => {
+  const run = async () => {
     if (!pw || busy) return;
     setBusy(true);
     setError(null);
-    const r = await commands.fsExtractExecute(plan, pw);
+    const r = await submit(pw);
     setPw(""); // §5: 호출 직후 즉시 clear
     setBusy(false);
-    if (r.status === "ok") {
+    if (r === "ok") {
       onClose();
       return;
     }
-    if (r.error.kind === "NeedPassword") {
-      setError("Wrong password — try again");
-      inputRef.current?.focus();
-      return;
-    }
-    showToast(`Extract failed: ${formatErr(r.error)}`);
-    onClose();
+    setError("Wrong password — try again");
+    inputRef.current?.focus();
   };
 
   return (
@@ -78,9 +75,9 @@ export function ExtractPasswordDialog({
 
           <p
             className="mb-3 truncate text-meta text-fg-muted"
-            title={plan.archive_name}
+            title={archiveName}
           >
-            {plan.archive_name} is encrypted. Enter its password to extract.
+            {archiveName} is encrypted. Enter its password to continue.
           </p>
 
           <input
@@ -90,7 +87,7 @@ export function ExtractPasswordDialog({
             value={pw}
             onChange={(e) => setPw(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") void submit();
+              if (e.key === "Enter") void run();
               else if (e.key === "Escape") onClose();
             }}
             placeholder="Archive password"
@@ -113,16 +110,16 @@ export function ExtractPasswordDialog({
             </button>
             <button
               type="button"
-              onClick={() => void submit()}
+              onClick={() => void run()}
               disabled={busy || !pw}
               className="rounded bg-accent px-3 py-1 text-base text-white disabled:opacity-50"
             >
-              {busy ? "…" : "Extract"}
+              {busy ? "…" : "Continue"}
             </button>
           </div>
 
           <Dialog.Description className="sr-only">
-            Enter the password for the encrypted archive {plan.archive_name}.
+            Enter the password for the encrypted archive {archiveName}.
           </Dialog.Description>
         </Dialog.Content>
       </Dialog.Portal>
