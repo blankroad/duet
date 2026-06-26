@@ -18,6 +18,7 @@ use std::sync::mpsc;
 
 use windows::core::{PCSTR, PCWSTR};
 use windows::Win32::Foundation::HWND;
+use windows::Win32::Graphics::Gdi::HBITMAP;
 use windows::Win32::System::Com::{CoInitializeEx, CoTaskMemFree, COINIT_APARTMENTTHREADED};
 use windows::Win32::UI::Shell::Common::ITEMIDLIST;
 use windows::Win32::UI::Shell::{
@@ -26,8 +27,8 @@ use windows::Win32::UI::Shell::{
 use windows::Win32::UI::WindowsAndMessaging::HMENU;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreatePopupMenu, DestroyMenu, GetMenuItemCount, GetMenuItemInfoW, MENUITEMINFOW, MFS_DISABLED,
-    MFS_GRAYED, MFT_SEPARATOR, MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING, MIIM_SUBMENU,
-    SW_SHOWNORMAL,
+    MFS_GRAYED, MFT_SEPARATOR, MIIM_BITMAP, MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING,
+    MIIM_SUBMENU, SW_SHOWNORMAL,
 };
 
 use crate::platform::{ShellMenuItem, ShellScope};
@@ -236,7 +237,7 @@ unsafe fn enumerate(hmenu: HMENU, depth: u32) -> Vec<ShellMenuItem> {
         let mut buf = [0u16; 260];
         let mut mii = MENUITEMINFOW {
             cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
-            fMask: MIIM_STRING | MIIM_ID | MIIM_SUBMENU | MIIM_FTYPE | MIIM_STATE,
+            fMask: MIIM_STRING | MIIM_ID | MIIM_SUBMENU | MIIM_FTYPE | MIIM_STATE | MIIM_BITMAP,
             dwTypeData: windows::core::PWSTR(buf.as_mut_ptr()),
             cch: buf.len() as u32,
             ..Default::default()
@@ -252,6 +253,7 @@ unsafe fn enumerate(hmenu: HMENU, depth: u32) -> Vec<ShellMenuItem> {
                 separator: true,
                 disabled: false,
                 children: Vec::new(),
+                icon: None,
             });
             continue;
         }
@@ -265,15 +267,110 @@ unsafe fn enumerate(hmenu: HMENU, depth: u32) -> Vec<ShellMenuItem> {
         } else {
             Vec::new()
         };
+        // 항목 아이콘 — hbmpItem 이 실제 HBITMAP 이면(HBMMENU_* 센티넬 1..=13 / CALLBACK(-1) /
+        // null 제외) PNG 로. 셸 확장이 set 한 16px 비트맵.
+        let addr = mii.hbmpItem.0 as usize;
+        let icon = if addr > 13 && addr != usize::MAX {
+            hbitmap_to_png(mii.hbmpItem)
+        } else {
+            None
+        };
         out.push(ShellMenuItem {
             id: mii.wID,
             label,
             separator: false,
             disabled,
             children,
+            icon,
         });
     }
     out
+}
+
+/// 메뉴 항목 HBITMAP(보통 16px, 셸 확장 set) → PNG 바이트. 알파 보존(없으면 불투명).
+///
+/// SAFETY: `hbitmap` 은 유효한 GDI 비트맵 핸들이어야 한다.
+unsafe fn hbitmap_to_png(hbitmap: HBITMAP) -> Option<Vec<u8>> {
+    use std::ffi::c_void;
+    use windows::Win32::Graphics::Gdi::{
+        GetDC, GetDIBits, GetObjectW, ReleaseDC, BITMAP, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
+        DIB_RGB_COLORS, HGDIOBJ,
+    };
+
+    let mut bmp = BITMAP::default();
+    let got = GetObjectW(
+        HGDIOBJ(hbitmap.0),
+        std::mem::size_of::<BITMAP>() as i32,
+        Some(&mut bmp as *mut _ as *mut c_void),
+    );
+    // 메뉴 아이콘은 작음 — 비정상/거대 비트맵은 스킵.
+    if got == 0 || bmp.bmWidth <= 0 || bmp.bmHeight <= 0 || bmp.bmWidth > 256 || bmp.bmHeight > 256
+    {
+        return None;
+    }
+    let w = bmp.bmWidth;
+    let h = bmp.bmHeight;
+
+    let mut info = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: w,
+            biHeight: -h, // top-down
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut buf = vec![0u8; (w as usize) * (h as usize) * 4];
+    let hdc = GetDC(None);
+    let scan = GetDIBits(
+        hdc,
+        hbitmap,
+        0,
+        h as u32,
+        Some(buf.as_mut_ptr() as *mut c_void),
+        &mut info,
+        DIB_RGB_COLORS,
+    );
+    ReleaseDC(None, hdc);
+    if scan == 0 {
+        return None;
+    }
+
+    // BGRA → RGBA. 알파 채널이 전부 0(24bpp 비트맵 등)이면 불투명 처리, 있으면
+    // premultiplied 로 보고 straight 로 환산.
+    let has_alpha = buf.chunks_exact(4).any(|p| p[3] != 0);
+    let mut rgba = Vec::with_capacity(buf.len());
+    for p in buf.chunks_exact(4) {
+        let (b, g, r, a) = (p[0], p[1], p[2], p[3]);
+        if has_alpha {
+            let a = a as u32;
+            let un = |c: u8| {
+                if a > 0 {
+                    ((c as u32 * 255 / a).min(255)) as u8
+                } else {
+                    0
+                }
+            };
+            rgba.push(un(r));
+            rgba.push(un(g));
+            rgba.push(un(b));
+            rgba.push(a as u8);
+        } else {
+            rgba.push(r);
+            rgba.push(g);
+            rgba.push(b);
+            rgba.push(255);
+        }
+    }
+    let img = image::RgbaImage::from_raw(w as u32, h as u32, rgba)?;
+    let mut out = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(img)
+        .write_to(&mut out, image::ImageFormat::Png)
+        .ok()?;
+    Some(out.into_inner())
 }
 
 /// 선택한 명령 실행. cmd_id 는 절대 id → InvokeCommand 는 offset(id-ID_FIRST) 필요.

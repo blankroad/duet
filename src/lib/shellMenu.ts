@@ -1,6 +1,21 @@
+import { createElement } from "react";
 import { commands } from "@/types/bindings";
 import type { ShellMenuItem, ShellScope } from "@/types/bindings";
 import type { MenuEntry } from "@/stores/contextMenu";
+
+/** 셸 항목 아이콘 PNG 바이트 → data URL (.ts 라 JSX 없이 createElement). */
+function iconEl(it: ShellMenuItem) {
+  const bytes = it.icon;
+  if (!bytes || bytes.length === 0) return undefined;
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]!);
+  return createElement("img", {
+    src: `data:image/png;base64,${btoa(bin)}`,
+    alt: "",
+    draggable: false,
+    className: "h-4 w-4 object-contain",
+  });
+}
 
 /**
  * Tier 2 셸 컨텍스트 메뉴(IContextMenu) 프론트 통합 — 백엔드가 호스팅한 실제 셸 메뉴
@@ -24,6 +39,7 @@ function toEntries(items: ShellMenuItem[], token: number): MenuEntry[] {
         id: `shx:${token}:${it.id}:${i}`,
         label: it.label,
         disabled: it.disabled,
+        icon: iconEl(it),
         children: toEntries(it.children, token),
       };
     }
@@ -31,6 +47,7 @@ function toEntries(items: ShellMenuItem[], token: number): MenuEntry[] {
       id: `shi:${token}:${it.id}:${i}`,
       label: it.label,
       disabled: it.disabled,
+      icon: iconEl(it),
       onSelect: () => {
         invoked = true;
         void commands.shellMenuInvoke(token, it.id);

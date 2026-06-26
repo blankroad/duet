@@ -24,6 +24,8 @@ pub struct ShellMenuItem {
     pub separator: bool,
     pub disabled: bool,
     pub children: Vec<ShellMenuItem>,
+    /// 항목 아이콘(셸 확장의 hbmpItem) PNG 바이트. 없으면 None. (Windows 만 채움.)
+    pub icon: Option<Vec<u8>>,
 }
 
 /// 열린 셸 메뉴 — `token` 으로 invoke/close. items 는 프론트가 렌더.
