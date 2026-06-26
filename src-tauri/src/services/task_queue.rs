@@ -207,17 +207,15 @@ impl TaskQueue {
             change,
         }
         .emit(&self.app);
-        // 작업 성공 시 영향받은 디렉토리로 fs:changed emit — OS watcher 와 무관하게
-        // in-app 작업(복사/이동/삭제/압축 풀기 등) 직후 해당 패널이 자동 새로고침되게.
-        // (외부 변경은 FsWatcher 가, in-app 변경은 여기서 — 둘 다 같은 이벤트로 일원화.)
-        if matches!(status, TaskStatus::Completed { .. }) {
-            for loc in &affected {
-                let _ = FsChangedEvent {
-                    source: loc.source.clone(),
-                    path: loc.path.to_string_lossy().into_owned(),
-                }
-                .emit(&self.app);
+        // 영향받은 디렉토리로 fs:changed emit — OS watcher 와 무관하게 패널 자동 새로고침.
+        // Completed 뿐 아니라 Cancelled/Failed 에서도 emit — §4 부분 진행분(반쯤 옮겨진
+        // 폴더 등)이 있을 수 있어 패널이 stale 하지 않게. (여기는 종결 상태에서만 도달.)
+        for loc in &affected {
+            let _ = FsChangedEvent {
+                source: loc.source.clone(),
+                path: loc.path.to_string_lossy().into_owned(),
             }
+            .emit(&self.app);
         }
         // 종결 후 제거 — frontend 는 이미 event 받음
         inner.tasks.remove(task_id);

@@ -1,5 +1,7 @@
 import { create } from "zustand";
 import { commands } from "@/types/bindings";
+import { useToast } from "@/stores/toast";
+import { formatErr } from "@/lib/error";
 import type { KeymapBinding } from "@/types/bindings";
 
 interface State {
@@ -42,9 +44,11 @@ export async function setKeymap(
 export async function unsetKeymap(key: string): Promise<void> {
   const r = await commands.keymapUnset(key);
   if (r.status === "ok") useKeymap.getState().setAll(r.data);
+  else useToast.getState().show(`Unbind key: ${formatErr(r.error)}`);
 }
 
 export async function resetKeymap(): Promise<void> {
   const r = await commands.keymapReset();
   if (r.status === "ok") useKeymap.getState().setAll(r.data);
+  else useToast.getState().show(`Reset keymap: ${formatErr(r.error)}`);
 }

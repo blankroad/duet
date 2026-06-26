@@ -1,5 +1,7 @@
 import { create } from "zustand";
 import { commands } from "@/types/bindings";
+import { useToast } from "@/stores/toast";
+import { formatErr } from "@/lib/error";
 import type { HostFavorite } from "@/types/bindings";
 
 interface State {
@@ -33,6 +35,7 @@ export async function addHostFavorite(
 export async function removeHostFavorite(id: string): Promise<void> {
   const r = await commands.hostFavoritesRemove(id);
   if (r.status === "ok") useHostFavorites.getState().setAll(r.data);
+  else useToast.getState().show(`Remove favorite: ${formatErr(r.error)}`);
 }
 
 /**

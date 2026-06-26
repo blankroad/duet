@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useKeymap } from "@/stores/keymap";
 import { useAllCommands } from "@/stores/commands";
 import { formatKeyEvent } from "@/lib/keyEvent";
+import { useContextMenu } from "@/stores/contextMenu";
 
 /**
  * 단축키 처리 — keymap binding 우선, 없으면 command.defaultKey 매칭.
@@ -22,6 +23,8 @@ export function useGlobalShortcuts() {
 
       const keystr = formatKeyEvent(e);
       if (!keystr) return;
+      // 우클릭 메뉴가 열려 있으면 그 메뉴가 키를 처리 — 전역 단축키는 보류.
+      if (useContextMenu.getState().open) return;
 
       // override 우선
       const binding = bindings.find((b) => b.key === keystr);

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { commands } from "@/types/bindings";
+import { formatErr } from "@/lib/error";
 import type { Bookmark, Location } from "@/types/bindings";
 import { useHostFavorites, addHostFavorite } from "@/stores/hostFavorites";
 import { useToast } from "@/stores/toast";
@@ -60,6 +61,7 @@ export async function addBookmark(
 export async function removeBookmark(id: string): Promise<void> {
   const r = await commands.bookmarksRemove(id);
   if (r.status === "ok") useBookmarks.getState().setAll(r.data);
+  else useToast.getState().show(`Remove bookmark: ${formatErr(r.error)}`);
 }
 
 /** 드래그 재정렬 — id 순서대로. 낙관적 갱신 후 백엔드 반환값으로 정합. */

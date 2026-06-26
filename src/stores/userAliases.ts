@@ -1,5 +1,7 @@
 import { create } from "zustand";
 import { commands } from "@/types/bindings";
+import { useToast } from "@/stores/toast";
+import { formatErr } from "@/lib/error";
 import type { AliasKind, UserAlias } from "@/types/bindings";
 
 interface State {
@@ -29,4 +31,5 @@ export async function addUserAlias(name: string, kind: AliasKind): Promise<boole
 export async function removeUserAlias(id: string): Promise<void> {
   const r = await commands.userAliasesRemove(id);
   if (r.status === "ok") useUserAliases.getState().setAll(r.data);
+  else useToast.getState().show(`Remove alias: ${formatErr(r.error)}`);
 }

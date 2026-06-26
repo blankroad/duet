@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { usePanes, activeTab, computeDisplayed, isParentEntry } from "@/stores/panes";
 import type { PaneId } from "@/stores/panes";
+import { useContextMenu } from "@/stores/contextMenu";
 
 /**
  * 글로벌 키보드 네비게이션 (활성 패널 대상).
@@ -25,6 +26,8 @@ export function useKeyboardNav(
       ) {
         return;
       }
+      // 우클릭 메뉴가 열려 있으면 메뉴가 키(↑↓/Enter/Esc)를 처리 — 뒤 파일 목록은 안 건드림.
+      if (useContextMenu.getState().open) return;
 
       const state = usePanes.getState();
       const id = state.activePane;
