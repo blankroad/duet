@@ -35,6 +35,37 @@ function childrenOf(item: MenuItem, loaded: Loaded): MenuEntry[] | "loading" | "
   return null;
 }
 
+/**
+ * 서브메뉴 플라이아웃 — 부모 항목 옆(좌/우)으로 펼치되, 화면 아래로 넘치면 그만큼 위로
+ * 끌어올려(clamp) 항상 보이게. 화면보다 긴 메뉴(셸 More Actions 등)는 스크롤.
+ */
+function Flyout({
+  flipLeft,
+  children,
+}: {
+  flipLeft: boolean;
+  children: React.ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [shiftY, setShiftY] = useState(0);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const over = r.bottom - (window.innerHeight - 4);
+    if (over > 0) setShiftY((y) => y - over);
+  }, [children]);
+  return (
+    <div
+      ref={ref}
+      className={clsx("absolute", flipLeft ? "right-full" : "left-full")}
+      style={{ top: shiftY, maxHeight: "calc(100vh - 8px)", overflowY: "auto" }}
+    >
+      {children}
+    </div>
+  );
+}
+
 export function ContextMenu() {
   const { open, x, y, items, close } = useContextMenu();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -187,13 +218,13 @@ export function ContextMenu() {
               onClick={() => run(level, entry)}
             >
               {path[level] === entry.id && (
-                <div className={clsx("absolute top-0", flipLeft ? "right-full" : "left-full")}>
+                <Flyout flipLeft={flipLeft}>
                   {level + 1 < levels.length ? (
                     renderPanel(level + 1, levels[level + 1]!)
                   ) : pendingStatus ? (
                     <StatusPanel status={pendingStatus} />
                   ) : null}
-                </div>
+                </Flyout>
               )}
             </Row>
           ),
