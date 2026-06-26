@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { PanelLeft, PanelRight, Search, Command, Settings, FolderGit2 } from "lucide-react";
+import { PanelLeft, PanelRight, Search, Command, Settings, FolderGit2, Undo2 } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import clsx from "clsx";
 import { useUI } from "@/stores/ui";
@@ -8,7 +8,7 @@ import { usePalette } from "@/stores/palette";
 import { useSearch } from "@/stores/search";
 import { useUIDialogs } from "@/stores/ui-dialogs";
 import { useToast } from "@/stores/toast";
-import { triggerCompare } from "@/lib/fileActions";
+import { triggerCompare, triggerUndo } from "@/lib/fileActions";
 import { AppLauncherStrip } from "@/components/AppLauncherStrip";
 
 /**
@@ -67,6 +67,12 @@ export function TopBar() {
         onClick={() => void triggerCompare(useUIDialogs.getState().open, useToast.getState().show)}
       >
         <FolderGit2 size={15} />
+      </IconBtn>
+      <IconBtn
+        label="Undo last action (Ctrl+Z)"
+        onClick={() => void triggerUndo(useToast.getState().show)}
+      >
+        <Undo2 size={15} />
       </IconBtn>
 
       <div

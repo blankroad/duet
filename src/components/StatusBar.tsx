@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import {
   usePanes,
   activeTab,
@@ -29,16 +30,24 @@ export function StatusBar() {
   const src = tab.location.source;
   const sourceLabel = useHostLabel(src);
 
-  // 왼쪽: 파일/폴더 수 + 총 용량(파일만) + 선택.
-  const { files, folders, totalSize } = summarizeEntries(tab.entries);
+  // 왼쪽: 파일/폴더 수 + 총 용량(파일만) + 선택. 커서 이동마다 재계산 안 하게 메모이즈
+  // (집계는 entries, 선택 용량은 entries+selected 에만 의존).
+  const { files, folders, totalSize } = useMemo(
+    () => summarizeEntries(tab.entries),
+    [tab.entries],
+  );
   const counts = countLabel(files, folders);
   const selectedCount = tab.selected.size;
-  const selectedSize = tab.entries
-    .filter((e: Entry) => tab.selected.has(e.name) && e.size != null)
-    .reduce((sum: number, e: Entry) => sum + (e.size ?? 0), 0);
+  const selectedSize = useMemo(
+    () =>
+      tab.entries
+        .filter((e: Entry) => tab.selected.has(e.name) && e.size != null)
+        .reduce((sum: number, e: Entry) => sum + (e.size ?? 0), 0),
+    [tab.entries, tab.selected],
+  );
 
   // 가운데: 커서가 올라간 단일 항목(".." 제외)의 상세.
-  const displayed = computeDisplayed(tab);
+  const displayed = useMemo(() => computeDisplayed(tab), [tab]);
   const focused = tab.cursorIndex >= 0 ? displayed[tab.cursorIndex] : undefined;
   const focusedMeta =
     focused && !isParentEntry(focused)
