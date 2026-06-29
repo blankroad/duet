@@ -1471,8 +1471,11 @@ function CopyOrMovePlanBody({
   return (
     <div className="space-y-1">
       <div>
-        {count} item(s), {formatSize(totalSize)} →{" "}
-        <span className="font-mono">{dstPath}</span>
+        {count} item(s), {formatSize(totalSize)} →
+      </div>
+      {/* 긴 목적지 경로가 모달 밖으로 넘치지 않게 — 한 줄 truncate + 전체경로 tooltip. */}
+      <div className="truncate font-mono" title={dstPath}>
+        {dstPath}
       </div>
       <div className="text-meta text-fg-muted">
         Strategy: {strategyLabel(strategy)}
