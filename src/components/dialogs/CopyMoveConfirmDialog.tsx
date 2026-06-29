@@ -52,7 +52,7 @@ export function CopyMoveConfirmDialog({
                 <ChoiceButton
                   icon={<Copy size={14} />}
                   label="Replace"
-                  hint="Overwrite (existing kept as .bak — undoable)"
+                  hint="Overwrite existing (permanent — cannot be undone)"
                   onClick={() => onConfirm("replace")}
                 />
                 <ChoiceButton

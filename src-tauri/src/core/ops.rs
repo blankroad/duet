@@ -398,7 +398,6 @@ async fn copy_execute_relay(
     };
 
     let mut copied = Vec::new();
-    let mut backups = Vec::new();
     let mut skipped = 0u32;
     let mut outcome: Result<(), DuetError> = Ok(());
     for (idx, it) in plan.items.iter().enumerate() {
@@ -416,7 +415,9 @@ async fn copy_execute_relay(
             let src_path = src_fs.join(&it.location.path, &it.name);
             let mut dst_path = dst_fs.join(&plan.dst.path, &it.name);
 
-            // 충돌 시 policy 분기: Replace=백업후교체, Skip=건너뜀, KeepBoth=새이름.
+            // 충돌 시 policy 분기: Replace=영구덮어쓰기, Skip=건너뜀, KeepBoth=새이름.
+            // Replace 는 기존 대상을 임시 백업으로 옮겨 경로를 비운다(복사 실패 시 롤백용).
+            let mut replaced_backup: Option<std::path::PathBuf> = None;
             if dst_fs.metadata(&dst_path).await.is_ok() {
                 match policy {
                     ConflictPolicy::Skip => return Ok(true), // skip = 복사 안 함
@@ -426,17 +427,14 @@ async fn copy_execute_relay(
                     ConflictPolicy::Replace => {
                         let backup = pick_backup_path(dst_fs, &plan.dst.path, &it.name).await?;
                         dst_fs.rename(&dst_path, &backup).await?;
-                        backups.push(BackupRestore {
-                            backup_path: backup,
-                            original_path: dst_path.clone(),
-                        });
+                        replaced_backup = Some(backup);
                     }
                 }
             }
 
             // copy 본체 — chunk 스트리밍(메모리 bounded, mid-file cancel). connection loss 면
             // 1회 retry 하되 resume=true 로 중단된 .part 부터 이어받음(전송 재개).
-            match crate::fs::copy_relay_streaming(
+            let copy_result: Result<(), DuetError> = match crate::fs::copy_relay_streaming(
                 src_fs,
                 &src_path,
                 dst_fs,
@@ -448,25 +446,41 @@ async fn copy_execute_relay(
             )
             .await
             {
-                Ok(()) => {}
+                Ok(()) => Ok(()),
                 Err(e) if crate::services::retry::is_retryable_error(&e) => {
                     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                     if cancel_token.is_cancelled() {
-                        return Err(DuetError::Cancelled);
+                        Err(DuetError::Cancelled)
+                    } else {
+                        crate::fs::copy_relay_streaming(
+                            src_fs,
+                            &src_path,
+                            dst_fs,
+                            &dst_path,
+                            true, // 재개 — 이미 쓴 .part 이어받기
+                            &cancel_token,
+                            &on_bytes,
+                            &on_file,
+                        )
+                        .await
                     }
-                    crate::fs::copy_relay_streaming(
-                        src_fs,
-                        &src_path,
-                        dst_fs,
-                        &dst_path,
-                        true, // 재개 — 이미 쓴 .part 이어받기
-                        &cancel_token,
-                        &on_bytes,
-                        &on_file,
-                    )
-                    .await?;
                 }
-                Err(e) => return Err(e),
+                Err(e) => Err(e),
+            };
+            // Replace 백업 정리: 성공이면 영구 삭제(.bak 안 남김·undo 없음 — §4 예외,
+            // 사용자 승인 2026-06), 실패면 원위치로 롤백(원본 보존).
+            match copy_result {
+                Ok(()) => {
+                    if let Some(b) = replaced_backup.take() {
+                        dst_fs.remove(&b).await?;
+                    }
+                }
+                Err(e) => {
+                    if let Some(b) = replaced_backup.take() {
+                        let _ = dst_fs.rename(&b, &dst_path).await;
+                    }
+                    return Err(e);
+                }
             }
             copied.push(dst_path);
             Ok(false) // false = 실제 복사함(skip 아님)
@@ -482,8 +496,8 @@ async fn copy_execute_relay(
         }
     }
 
-    // §4: 부분 진행분(복사 완료 + 충돌 백업)이라도 journal 에 기록한 뒤 에러 전파.
-    if copied.is_empty() && backups.is_empty() {
+    // §4: 부분 진행분(복사 완료분)이라도 journal 에 기록한 뒤 에러 전파.
+    if copied.is_empty() {
         if outcome.is_err() {
             return Err(outcome.err().unwrap());
         }
@@ -496,7 +510,8 @@ async fn copy_execute_relay(
     let undo = UndoAction::UndoCopy {
         target_source: plan.dst.source.clone(),
         copied,
-        backups_to_restore: backups,
+        // Replace 덮어쓰기는 복원하지 않음(사용자 승인 §4 예외) — 항상 비어 있음.
+        backups_to_restore: Vec::new(),
     };
     let op = OpKind::Copy {
         count,
@@ -600,7 +615,6 @@ pub async fn move_execute(
     };
 
     let mut moved = Vec::new();
-    let mut backups = Vec::new();
     let mut skipped = 0u32;
     let mut outcome: Result<(), DuetError> = Ok(());
     for (idx, it) in plan.items.iter().enumerate() {
@@ -618,7 +632,9 @@ pub async fn move_execute(
             let src_path = src_fs.join(&it.location.path, &it.name);
             let mut dst_path = dst_fs.join(&plan.dst.path, &it.name);
 
-            // 충돌 policy 분기 (copy 와 동일): Replace=백업, Skip=건너뜀, KeepBoth=새이름.
+            // 충돌 policy 분기 (copy 와 동일): Replace=영구덮어쓰기, Skip=건너뜀, KeepBoth=새이름.
+            // Replace 는 기존 대상을 임시 백업으로 옮겨 경로를 비운다(이동 실패 시 롤백용).
+            let mut replaced_backup: Option<std::path::PathBuf> = None;
             if dst_fs.metadata(&dst_path).await.is_ok() {
                 match policy {
                     ConflictPolicy::Skip => return Ok(true),
@@ -628,63 +644,79 @@ pub async fn move_execute(
                     ConflictPolicy::Replace => {
                         let backup = pick_backup_path(dst_fs, &plan.dst.path, &it.name).await?;
                         dst_fs.rename(&dst_path, &backup).await?;
-                        backups.push(BackupRestore {
-                            backup_path: backup,
-                            original_path: dst_path.clone(),
-                        });
+                        replaced_backup = Some(backup);
                     }
                 }
             }
 
-            // same-fs 면 rename(빠르고 atomic). 단 같은 SourceId(둘 다 로컬)라도 물리
-            // 드라이브가 다르면(C:↔D: 등) rename 이 cross-device 로 거부되므로, 그땐
-            // copy + 휴지통으로 폴백한다 (cross-fs 이동과 동일 처리).
-            let needs_copy = if plan.is_same_fs {
-                match src_fs.rename(&src_path, &dst_path).await {
-                    Ok(()) => false,
-                    Err(DuetError::CrossDevice(_)) => true,
-                    Err(e) => return Err(e),
-                }
-            } else {
-                true
-            };
-            if needs_copy {
-                // copy 본체(스트리밍 — 바이트 진행률 emit) — connection loss 면 1회 retry(재개).
-                match crate::fs::copy_relay_streaming(
-                    src_fs,
-                    &src_path,
-                    dst_fs,
-                    &dst_path,
-                    false,
-                    &cancel_token,
-                    &on_bytes,
-                    &on_file,
-                )
-                .await
-                {
-                    Ok(()) => {}
-                    Err(e) if crate::services::retry::is_retryable_error(&e) => {
-                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                        if cancel_token.is_cancelled() {
-                            return Err(DuetError::Cancelled);
-                        }
-                        crate::fs::copy_relay_streaming(
-                            src_fs,
-                            &src_path,
-                            dst_fs,
-                            &dst_path,
-                            true,
-                            &cancel_token,
-                            &on_bytes,
-                            &on_file,
-                        )
-                        .await?;
+            let move_result: Result<(), DuetError> = async {
+                // same-fs 면 rename(빠르고 atomic). 단 같은 SourceId(둘 다 로컬)라도 물리
+                // 드라이브가 다르면(C:↔D: 등) rename 이 cross-device 로 거부되므로, 그땐
+                // copy + 휴지통으로 폴백한다 (cross-fs 이동과 동일 처리).
+                let needs_copy = if plan.is_same_fs {
+                    match src_fs.rename(&src_path, &dst_path).await {
+                        Ok(()) => false,
+                        Err(DuetError::CrossDevice(_)) => true,
+                        Err(e) => return Err(e),
                     }
-                    Err(e) => return Err(e),
+                } else {
+                    true
+                };
+                if needs_copy {
+                    // copy 본체(스트리밍 — 바이트 진행률 emit) — connection loss 면 1회 retry(재개).
+                    match crate::fs::copy_relay_streaming(
+                        src_fs,
+                        &src_path,
+                        dst_fs,
+                        &dst_path,
+                        false,
+                        &cancel_token,
+                        &on_bytes,
+                        &on_file,
+                    )
+                    .await
+                    {
+                        Ok(()) => {}
+                        Err(e) if crate::services::retry::is_retryable_error(&e) => {
+                            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                            if cancel_token.is_cancelled() {
+                                return Err(DuetError::Cancelled);
+                            }
+                            crate::fs::copy_relay_streaming(
+                                src_fs,
+                                &src_path,
+                                dst_fs,
+                                &dst_path,
+                                true,
+                                &cancel_token,
+                                &on_bytes,
+                                &on_file,
+                            )
+                            .await?;
+                        }
+                        Err(e) => return Err(e),
+                    }
+                    // src 는 휴지통으로 (영구삭제 아님)
+                    let batch_id = crate::services::trash::new_batch_id();
+                    src_fs.trash(&src_path, &batch_id).await?;
                 }
-                // src 는 휴지통으로 (영구삭제 아님)
-                let batch_id = crate::services::trash::new_batch_id();
-                src_fs.trash(&src_path, &batch_id).await?;
+                Ok(())
+            }
+            .await;
+            // Replace 백업 정리: 성공이면 영구 삭제(.bak 안 남김·undo 없음 — §4 예외,
+            // 사용자 승인 2026-06), 실패면 원위치로 롤백(원본 보존).
+            match move_result {
+                Ok(()) => {
+                    if let Some(b) = replaced_backup.take() {
+                        dst_fs.remove(&b).await?;
+                    }
+                }
+                Err(e) => {
+                    if let Some(b) = replaced_backup.take() {
+                        let _ = dst_fs.rename(&b, &dst_path).await;
+                    }
+                    return Err(e);
+                }
             }
             moved.push(MoveItem {
                 src_original: src_path,
@@ -703,8 +735,8 @@ pub async fn move_execute(
         }
     }
 
-    // §4: 부분 진행분(이동 완료 + 충돌 백업)이라도 journal 에 기록한 뒤 에러 전파.
-    if moved.is_empty() && backups.is_empty() {
+    // §4: 부분 진행분(이동 완료분)이라도 journal 에 기록한 뒤 에러 전파.
+    if moved.is_empty() {
         if outcome.is_err() {
             return Err(outcome.err().unwrap());
         }
@@ -718,7 +750,8 @@ pub async fn move_execute(
         src_source: plan.src_source.clone(),
         dst_source: plan.dst.source.clone(),
         moved,
-        backups_to_restore: backups,
+        // Replace 덮어쓰기는 복원하지 않음(사용자 승인 §4 예외) — 항상 비어 있음.
+        backups_to_restore: Vec::new(),
     };
     let op = OpKind::Move {
         count,
@@ -3451,18 +3484,84 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn conflict_replace_backs_up_and_overwrites() {
+    async fn conflict_replace_overwrites_without_bak() {
         let (dst, _dir, _ctx, _cd) = run_conflict_copy(ConflictPolicy::Replace).await;
-        // dst/a 는 새 내용, 기존은 .bak 으로 보존.
+        // dst/a 는 새 내용으로 영구 덮어쓰기 — .bak 백업을 남기지 않는다(undo 없음, §4 예외).
         assert_eq!(tokio::fs::read(dst.join("a")).await.unwrap(), b"NEW");
         let mut rd = tokio::fs::read_dir(&dst).await.unwrap();
+        let mut count = 0;
         let mut has_bak = false;
         while let Some(e) = rd.next_entry().await.unwrap() {
+            count += 1;
             if e.file_name().to_string_lossy().contains(".bak.") {
                 has_bak = true;
             }
         }
-        assert!(has_bak, "기존 파일이 .bak 으로 백업됐어야 함");
+        assert!(
+            !has_bak,
+            "Replace 는 .bak 을 남기지 않아야 함(영구 덮어쓰기)"
+        );
+        assert_eq!(count, 1, "dst 에는 덮어쓴 항목 1개만 남아야 함");
+    }
+
+    #[tokio::test]
+    async fn move_conflict_replace_overwrites_without_bak() {
+        use crate::core::copy_strategy::CopyStrategy;
+        let dir = TempDir::new().unwrap();
+        let src = dir.path().join("src");
+        let dst = dir.path().join("dst");
+        tokio::fs::create_dir_all(&src).await.unwrap();
+        tokio::fs::create_dir_all(&dst).await.unwrap();
+        tokio::fs::write(src.join("a"), b"NEW").await.unwrap();
+        tokio::fs::write(dst.join("a"), b"OLD").await.unwrap(); // 충돌
+
+        let items = vec![EntryRef {
+            location: Location {
+                source: SourceId::Local,
+                path: src.clone(),
+            },
+            name: "a".into(),
+        }];
+        let plan = MovePlan {
+            src_source: SourceId::Local,
+            dst: Location {
+                source: SourceId::Local,
+                path: dst.clone(),
+            },
+            items,
+            conflicts: vec![],
+            is_same_fs: true,
+            total_size_bytes: 3,
+            strategy: CopyStrategy::LocalToLocal,
+        };
+        let (ctx, _cd) = mk_ctx().await;
+        let local = LocalFs::new();
+        move_execute(
+            &local,
+            &local,
+            plan,
+            ConflictPolicy::Replace,
+            &ctx,
+            tokio_util::sync::CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+
+        // dst/a 영구 덮어쓰기, src/a 는 사라짐(이동), .bak 없음.
+        assert_eq!(tokio::fs::read(dst.join("a")).await.unwrap(), b"NEW");
+        assert!(!src.join("a").exists(), "이동이므로 src 에서 사라져야 함");
+        let mut rd = tokio::fs::read_dir(&dst).await.unwrap();
+        let mut count = 0;
+        let mut has_bak = false;
+        while let Some(e) = rd.next_entry().await.unwrap() {
+            count += 1;
+            if e.file_name().to_string_lossy().contains(".bak.") {
+                has_bak = true;
+            }
+        }
+        assert!(!has_bak, "move Replace 도 .bak 을 남기지 않아야 함");
+        assert_eq!(count, 1, "dst 에는 덮어쓴 항목 1개만 남아야 함");
     }
 
     #[tokio::test]

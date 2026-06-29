@@ -38,6 +38,12 @@ commands → services → core → fs → platform
 - 마지막 N개 작업은 `Ctrl+Z` 로 되돌릴 수 있어야 함
 - "되돌릴 수 없는 작업"은 그 자체로 디자인 실패. 사용자 승인 후에만 허용
 
+**복사/이동 Replace 덮어쓰기 (2026-06 예외, 사용자 승인):** 충돌 시 Replace 는 기존
+파일을 `.bak` 으로 남기지 않고 **영구 덮어쓰기**한다 — 이 덮어쓰기는 undo 불가.
+구현은 실패 안전을 위해 "기존을 임시 백업으로 옮김 → 복사/이동 → 성공 시 백업 영구삭제
+(journal 미기록=undo 없음) / 실패 시 롤백(원본 복원)". Skip/KeepBoth 는 비파괴라 영향 없음.
+(sync/repack 의 덮어쓰기는 여전히 .bak 보존 + undo 가능 — 이 예외는 copy/move 한정.)
+
 ### 5. SSH 자격증명은 메모리/로그에 노출 금지
 
 - SSH agent (`SSH_AUTH_SOCK`) 또는 `~/.ssh/config` IdentityFile 우선 — 가능한 비밀번호 사용 자체를 회피
