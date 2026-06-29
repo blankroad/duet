@@ -14,6 +14,7 @@ import {
 } from "@/types/bindings";
 import { DIFF_STATUSES, strategyBadge, defaultDirection, isCreate } from "./compareView";
 import { CompareList } from "./CompareList";
+import { basename } from "@/lib/paths";
 import { CompareTree } from "./CompareTree";
 import { CompareRulesBar } from "./CompareRulesBar";
 import { CompareFilterBar } from "./CompareFilterBar";
@@ -145,7 +146,7 @@ export function CompareDialog({
 
   const mergeable = plan.left_only + plan.right_only;
   const badge = strategyBadge(plan.strategy);
-  const base = (loc: { path: string }) => String(loc.path).split("/").filter(Boolean).pop() ?? "/";
+  const base = (loc: { path: string }) => basename(String(loc.path));
 
   const toggle = (s: CompareStatus) =>
     setActive((prev) => {

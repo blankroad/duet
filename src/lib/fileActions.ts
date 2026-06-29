@@ -11,6 +11,7 @@ import {
 import type { DialogState } from "@/stores/ui-dialogs";
 import { childLocation, sameLocation, sourceKey } from "@/lib/entryDnd";
 import { formatErr } from "@/lib/error";
+import { basename } from "@/lib/paths";
 import { useClipboard } from "@/stores/clipboard";
 import { useShelf } from "@/stores/shelf";
 
@@ -266,8 +267,7 @@ export async function triggerSync(
     showToast(`Sync: ${formatErr(r.error)}`);
     return;
   }
-  const label = (loc: Location) =>
-    String(loc.path).split("/").filter(Boolean).pop() ?? "/";
+  const label = (loc: Location) => basename(String(loc.path));
   open({
     kind: "sync-confirm",
     plan: r.data,
@@ -418,11 +418,12 @@ export function triggerCompress(open: OpenFn, showToast: ToastFn): void {
     return;
   }
   // 단일 항목이면 그 이름, 여러 개면 부모 폴더 이름을 기본 아카이브 이름으로.
+  // basename 은 '/'·'\' 둘 다 인식 — Windows 역슬래시 경로에서 전체 경로가
+  // 기본 이름으로 새던 버그 방지(§7: 표시용 default 한정).
   const defaultName =
     targets.length === 1
       ? targets[0]!.name
-      : (String(targets[0]!.location.path).split("/").filter(Boolean).pop() ??
-        "archive");
+      : basename(String(targets[0]!.location.path), "archive");
   open({ kind: "compress", items: targets, defaultName });
 }
 

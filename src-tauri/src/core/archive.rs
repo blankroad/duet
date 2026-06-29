@@ -625,7 +625,10 @@ pub async fn compress_plan(
             return Err(DuetError::Io("items must share directory".into()));
         }
     }
-    if archive_name.contains('/') || archive_name.is_empty() {
+    // 파일명만 허용 — 경로 구분자('/' 또는 Windows '\')가 섞이면 거부.
+    // FE 가 잘못된 basename(예: Windows 전체경로)을 보내도 join 이 대상 폴더 밖/
+    // 드라이브 절대경로로 새지 않게 하는 방어선.
+    if archive_name.is_empty() || archive_name.contains('/') || archive_name.contains('\\') {
         return Err(DuetError::Io(format!("invalid name: {archive_name}")));
     }
     // 확장자 자동 부여 (이미 있으면 중복 안 함).
@@ -1126,6 +1129,30 @@ mod tests {
         extract_local_blocking(&archive, &dest, ArchiveFormat::Zip, None).unwrap();
         assert_eq!(std::fs::read(dest.join("top.txt")).unwrap(), b"top");
         assert_eq!(std::fs::read(dest.join("inner/leaf.txt")).unwrap(), b"leaf");
+    }
+
+    /// compress_plan 은 파일명만 받아야 한다 — 경로 구분자('/'·Windows '\')가 섞인
+    /// 이름은 거부(FE 가 전체경로를 basename 으로 잘못 보낸 경우의 방어선).
+    #[tokio::test]
+    async fn compress_plan_rejects_path_separator_names() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), b"a").unwrap();
+        let fs = crate::fs::LocalFs::new();
+        let items = vec![EntryRef {
+            location: Location {
+                source: SourceId::Local,
+                path: dir.path().to_path_buf(),
+            },
+            name: "a.txt".into(),
+        }];
+        // Windows 전체경로/하위경로/빈 이름은 모두 거부.
+        for bad in ["D:\\test\\test1\\test2", "sub/name", "a\\b", ""] {
+            let r = compress_plan(&fs, items.clone(), bad.to_string(), CompressFormat::Zip).await;
+            assert!(r.is_err(), "name {bad:?} should be rejected");
+        }
+        // 정상 이름은 통과.
+        let ok = compress_plan(&fs, items.clone(), "archive".into(), CompressFormat::Zip).await;
+        assert!(ok.is_ok(), "plain name should be accepted");
     }
 
     #[tokio::test]

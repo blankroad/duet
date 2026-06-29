@@ -14,7 +14,7 @@ type Crumb = { label: string; path: string };
  * 화면상 구분자는 시각적 `/` 로 통일하고, 실제 path 만 올바른 구분자를 쓴다.
  */
 function buildCrumbs(path: string, winLocal: boolean): Crumb[] {
-  const parts = path.split(/[/\\]/).filter(Boolean);
+  const parts = pathSegments(path);
   const crumbs: Crumb[] = [];
   let acc = "";
   for (let i = 0; i < parts.length; i++) {
@@ -37,6 +37,7 @@ import {
   sameBookmarkLocation,
 } from "@/stores/bookmarks";
 import { folderName } from "@/lib/entryMenu";
+import { pathSegments } from "@/lib/paths";
 import { useHostLabel } from "@/lib/hostLabel";
 import { bookmarkLocation } from "@/lib/bookmarkActions";
 import { useHostFavorites } from "@/stores/hostFavorites";

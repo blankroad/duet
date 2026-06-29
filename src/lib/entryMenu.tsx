@@ -31,6 +31,7 @@ import {
 import { commands } from "@/types/bindings";
 import type { Entry, Location } from "@/types/bindings";
 import { formatErr } from "@/lib/error";
+import { basename } from "@/lib/paths";
 import { isArchiveName } from "@/lib/archive";
 import {
   usePanes,
@@ -494,5 +495,5 @@ export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
 
 /** location 경로의 basename (북마크 기본 이름). */
 export function folderName(location: Location): string {
-  return String(location.path).split("/").filter(Boolean).pop() ?? "/";
+  return basename(String(location.path));
 }

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { Location } from "@/types/bindings";
+import { basename } from "@/lib/paths";
 import { useConnections } from "@/stores/connections";
 
 /**
@@ -58,7 +59,7 @@ export const useRecents = create<State>((set) => ({
 export function recordRecent(location: Location): void {
   const path = String(location.path);
   if (path === "/" || path.length === 0) return;
-  const label = path.split("/").filter(Boolean).pop() ?? path;
+  const label = basename(path, path);
   if (location.source.kind === "local") {
     useRecents.getState().add({ source: "local", path, label });
     return;

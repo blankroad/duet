@@ -1,5 +1,6 @@
 import { X, Plus } from "lucide-react";
 import { usePanes, type PaneId } from "@/stores/panes";
+import { basename } from "@/lib/paths";
 import clsx from "clsx";
 
 /**
@@ -61,7 +62,5 @@ export function TabBar({ id }: { id: PaneId }) {
 }
 
 function labelOf(path: string): string {
-  if (path === "/" || path === "") return "/";
-  const segs = path.split("/").filter(Boolean);
-  return segs[segs.length - 1] ?? "/";
+  return basename(path, "/");
 }

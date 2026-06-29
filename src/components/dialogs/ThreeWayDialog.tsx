@@ -3,6 +3,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { X, GitMerge, AlertTriangle } from "lucide-react";
 import clsx from "clsx";
 import type { ThreeWayPlan, ThreeWayStatus } from "@/types/bindings";
+import { basename } from "@/lib/paths";
 
 const LABEL: Record<ThreeWayStatus, string> = {
   unchanged: "",
@@ -47,7 +48,7 @@ export function ThreeWayDialog({
   onApply: () => void;
 }) {
   const [onlyConflicts, setOnlyConflicts] = useState(false);
-  const base = (loc: { path: string }) => String(loc.path).split("/").filter(Boolean).pop() ?? "/";
+  const base = (loc: { path: string }) => basename(String(loc.path));
   const rows = plan.entries.filter((e) => !onlyConflicts || CONFLICT_SET.has(e.status));
 
   return (
