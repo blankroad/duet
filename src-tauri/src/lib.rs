@@ -102,6 +102,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::fs_ops::fs_copy_plan,
             commands::fs_ops::fs_copy_execute,
             commands::fs_ops::fs_copy_execute_elevated,
+            commands::fs_ops::fs_copy_execute_sudo,
             commands::fs_ops::fs_move_plan,
             commands::fs_ops::fs_move_execute,
             commands::fs_ops::fs_compare_dirs,

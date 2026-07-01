@@ -63,6 +63,55 @@ pub async fn exec(handle: &Handle<HostKeyVerifier>, cmd: &str) -> Result<ExecOut
     })
 }
 
+/// exec + **stdin 주입** — `sudo -S` 에 비밀번호를 stdin 으로 넣기 위한 헬퍼.
+///
+/// 비번을 커맨드라인에 넣으면 `ps` 로 노출되므로 stdin 전용(§5). `stdin` 을 채널에
+/// 쓰고 EOF 후 출력/exit 수집. `stdin` 은 사용 직후 호출부가 zeroize.
+pub async fn exec_with_stdin(
+    handle: &Handle<HostKeyVerifier>,
+    cmd: &str,
+    stdin: &[u8],
+) -> Result<ExecOutput, DuetError> {
+    let channel = handle
+        .channel_open_session()
+        .await
+        .map_err(|e| DuetError::Ssh(format!("open session: {e}")))?;
+    channel
+        .exec(true, cmd)
+        .await
+        .map_err(|e| DuetError::Ssh(format!("exec: {e}")))?;
+    // stdin 주입 후 EOF. (`&[u8]` 은 tokio AsyncRead 구현.)
+    channel
+        .data(stdin)
+        .await
+        .map_err(|e| DuetError::Ssh(format!("stdin write: {e}")))?;
+    channel
+        .eof()
+        .await
+        .map_err(|e| DuetError::Ssh(format!("stdin eof: {e}")))?;
+
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let mut exit_status: Option<u32> = None;
+    let mut channel = channel;
+    while let Some(msg) = channel.wait().await {
+        match msg {
+            ChannelMsg::Data { data } => stdout.extend_from_slice(&data),
+            ChannelMsg::ExtendedData { data, ext: 1 } => stderr.extend_from_slice(&data),
+            ChannelMsg::ExitStatus { exit_status: code } => exit_status = Some(code),
+            _ => {}
+        }
+    }
+    let exit_status = exit_status.ok_or_else(|| {
+        DuetError::Ssh("channel closed without ExitStatus — connection may have dropped".into())
+    })?;
+    Ok(ExecOutput {
+        exit_status,
+        stdout,
+        stderr,
+    })
+}
+
 /// Streaming exec — stdout 라인 단위 콜백, stderr 전체 수집, exit_status 반환.
 ///
 /// `ExitStatus` 미수신 시 `DuetError::Ssh` (exec 와 동일).

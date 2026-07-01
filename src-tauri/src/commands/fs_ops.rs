@@ -321,6 +321,87 @@ pub async fn fs_copy_execute_elevated(
     Ok(outcome)
 }
 
+/// 원격(SSH) 보호 경로 복사가 PermissionDenied 로 실패했을 때 **sudo** 로 재시도.
+/// dst 는 SSH, src 는 로컬 또는 same-host 원격. `password` None = passwordless(`sudo -n`)
+/// 시도 → 필요하면 `NeedPassword` 반환(FE 가 비번 받아 재호출). §5: 비번 사용 직후 zeroize.
+/// 설계 docs/specs/2026-07-01-remote-sudo-copy.md. v1: 복사만, undo 없음(audit journal).
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_copy_execute_sudo(
+    plan: CopyPlan,
+    policy: ops::ConflictPolicy,
+    password: Option<String>,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+    journal: tauri::State<'_, Arc<Journal>>,
+    app: tauri::AppHandle,
+) -> Result<crate::core::sudo::SudoOutcome, DuetError> {
+    // dst 는 반드시 SSH.
+    let SourceId::Ssh { connection_id, .. } = &plan.dst.source else {
+        return Err(DuetError::NotSupported(
+            "sudo copy requires a remote (SSH) destination".into(),
+        ));
+    };
+    let same_host = matches!(
+        decide_strategy(&plan.src_source, &plan.dst.source),
+        CopyStrategy::SshSameHost
+    );
+    if !matches!(plan.src_source, SourceId::Local) && !same_host {
+        return Err(DuetError::NotSupported(
+            "sudo copy: source must be local or the same remote host".into(),
+        ));
+    }
+
+    let src_fs = fs_for(&plan.src_source, pool.inner()).await?;
+    let dst_conn = pool.inner().get(connection_id).await?;
+    let dst_ssh = SshFs::new(dst_conn);
+
+    let items: Vec<(std::path::PathBuf, String)> = plan
+        .items
+        .iter()
+        .map(|it| (src_fs.join(&it.location.path, &it.name), it.name.clone()))
+        .collect();
+    let src_loc = plan.items.first().map(|i| i.location.clone());
+    let dst_dir = plan.dst.path.clone();
+    let dst_loc = plan.dst.clone();
+
+    let outcome = crate::core::sudo::copy_execute_sudo(
+        &*src_fs,
+        &dst_ssh,
+        same_host,
+        items,
+        &dst_dir,
+        password.as_deref(),
+        policy,
+    )
+    .await;
+    // §5: 평문 비번 즉시 zeroize.
+    if let Some(mut pw) = password {
+        crate::services::secret_vault::zeroize_string(&mut pw);
+    }
+    let outcome = outcome?;
+
+    // §4 audit journal — 성공분만 (undo Irreversible: 되돌리려면 재-sudo 필요).
+    if let crate::core::sudo::SudoOutcome::Ok { count, .. } = &outcome {
+        if *count > 0 {
+            if let Some(src) = src_loc {
+                let op = crate::services::journal::OpKind::Copy {
+                    count: *count,
+                    src,
+                    dst: dst_loc,
+                };
+                if let Ok(entry) = journal
+                    .inner()
+                    .push(op, crate::services::journal::UndoAction::Irreversible)
+                    .await
+                {
+                    let _ = emit_pushed(&app, entry);
+                }
+            }
+        }
+    }
+    Ok(outcome)
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn fs_move_plan(

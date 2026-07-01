@@ -73,10 +73,17 @@ export function useTaskEvents() {
           // 보호 폴더 복사가 권한으로 실패했으면(Windows) 관리자 승격 재시도 다이얼로그.
           // 그 외엔 조용한 실패 방지용 토스트.
           const retry = takeElevatable(id);
-          if (retry && isWindows && PERM_DENIED.test(msg)) {
-            useUIDialogs
-              .getState()
-              .open({ kind: "elevate-copy", plan: retry.plan, policy: retry.policy });
+          if (retry && PERM_DENIED.test(msg)) {
+            const dialogs = useUIDialogs.getState();
+            if (retry.plan.dst.source.kind === "ssh") {
+              // 원격 보호 경로 → sudo 재시도.
+              dialogs.open({ kind: "sudo-copy", plan: retry.plan, policy: retry.policy });
+            } else if (isWindows) {
+              // 로컬 Windows 보호 폴더 → UAC 승격.
+              dialogs.open({ kind: "elevate-copy", plan: retry.plan, policy: retry.policy });
+            } else {
+              useToast.getState().show(`Operation failed — ${msg}`);
+            }
           } else {
             useToast.getState().show(`Operation failed — ${msg}`);
           }

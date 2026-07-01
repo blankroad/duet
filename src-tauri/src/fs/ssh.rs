@@ -116,6 +116,58 @@ impl SshFs {
             )))
         }
     }
+
+    /// raw exec (non-sudo) — handle 획득 + 실행. sudo 오케스트레이션(staging 정리 등)용.
+    pub async fn exec_raw(
+        &self,
+        cmd: &str,
+    ) -> Result<crate::ssh::remote_exec::ExecOutput, DuetError> {
+        let session =
+            self.conn.session.as_ref().ok_or_else(|| {
+                DuetError::ConnectionFailed("connection has no live session".into())
+            })?;
+        let handle = session.lock().await;
+        crate::ssh::remote_exec::exec(&handle, cmd).await
+    }
+
+    /// sudo 가 비밀번호 없이(캐시된 타임스탬프/NOPASSWD) 실행 가능한지 — `sudo -n true`.
+    pub async fn sudo_probe(&self) -> Result<bool, DuetError> {
+        Ok(self.exec_raw("sudo -n true 2>/dev/null").await?.exit_status == 0)
+    }
+
+    /// sudo 로 `/bin/sh -c <script>` 실행. `password` Some 이면 `sudo -S` stdin 으로 비번
+    /// 주입(§5: cmdline 노출 X — `ps` 방지, 사용 직후 버퍼 zero-fill), None 이면 `sudo -n`.
+    /// 반환: (exit_status, stderr). 비번 오류는 호출부가 stderr 로 판정.
+    pub async fn sudo_run(
+        &self,
+        script: &str,
+        password: Option<&str>,
+    ) -> Result<crate::ssh::remote_exec::ExecOutput, DuetError> {
+        let session =
+            self.conn.session.as_ref().ok_or_else(|| {
+                DuetError::ConnectionFailed("connection has no live session".into())
+            })?;
+        let handle = session.lock().await;
+        let quoted = posix_shell_quote(script)?;
+        match password {
+            Some(pw) => {
+                // -S: stdin 에서 비번, -p '': 프롬프트 텍스트 억제.
+                let cmd = format!("sudo -S -p '' -- /bin/sh -c {quoted}");
+                let mut stdin = Vec::with_capacity(pw.len() + 1);
+                stdin.extend_from_slice(pw.as_bytes());
+                stdin.push(b'\n');
+                let out = crate::ssh::remote_exec::exec_with_stdin(&handle, &cmd, &stdin).await;
+                for b in stdin.iter_mut() {
+                    *b = 0; // §5: 비번 바이트 zero-fill
+                }
+                out
+            }
+            None => {
+                let cmd = format!("sudo -n -- /bin/sh -c {quoted}");
+                crate::ssh::remote_exec::exec(&handle, &cmd).await
+            }
+        }
+    }
 }
 
 #[async_trait]

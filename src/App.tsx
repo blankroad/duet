@@ -19,6 +19,7 @@ import { ArgsDialog } from "@/components/dialogs/ArgsDialog";
 import { ConfirmDialog } from "@/components/dialogs/ConfirmDialog";
 import { CopyMoveConfirmDialog } from "@/components/dialogs/CopyMoveConfirmDialog";
 import { DangerConfirmDialog } from "@/components/dialogs/DangerConfirmDialog";
+import { SudoPasswordDialog } from "@/components/dialogs/SudoPasswordDialog";
 import { rememberElevatable } from "@/lib/elevatePending";
 import { ProgressModal } from "@/components/dialogs/ProgressModal";
 import { SettingsDialog } from "@/components/SettingsDialog";
@@ -119,6 +120,7 @@ import { commands } from "@/types/bindings";
 import type {
   CompressFormat,
   ConnectionDto,
+  CopyPlan,
   CopyStrategy,
   DuetError,
   Entry,
@@ -926,6 +928,58 @@ function App() {
     onRefresh("right");
   }, [dialog, closeDialog, showToast, onRefresh]);
 
+  /** 원격 sudo 복사 결과 처리 — 비번 필요/오류면 비번 다이얼로그, 성공이면 토스트+새로고침. */
+  const handleSudoResult = useCallback(
+    (
+      r: Awaited<ReturnType<typeof commands.fsCopyExecuteSudo>>,
+      plan: CopyPlan,
+      policy: ConflictPolicy,
+    ) => {
+      if (r.status === "error") {
+        showToast(`sudo copy failed: ${formatErr(r.error)}`);
+        return;
+      }
+      const o = r.data;
+      if (o.status === "needPassword") {
+        openDialog({ kind: "sudo-password", plan, policy });
+        return;
+      }
+      if (o.status === "wrongPassword") {
+        openDialog({ kind: "sudo-password", plan, policy, error: true });
+        return;
+      }
+      if (o.failed.length > 0) {
+        showToast(`Copied ${o.count}, ${o.failed.length} failed — ${o.failed[0]}`);
+      } else {
+        showToast(`Copied ${o.count} item(s) with sudo`);
+      }
+      onRefresh("left");
+      onRefresh("right");
+    },
+    [openDialog, showToast, onRefresh],
+  );
+
+  /** sudo 재시도 (확인 → passwordless 먼저). */
+  const onSudoRetry = useCallback(async () => {
+    if (dialog.kind !== "sudo-copy") return;
+    const { plan, policy } = dialog;
+    closeDialog();
+    const r = await commands.fsCopyExecuteSudo(plan, policy, null);
+    handleSudoResult(r, plan, policy);
+  }, [dialog, closeDialog, handleSudoResult]);
+
+  /** sudo 비번 입력 후 재시도. */
+  const onSudoPasswordConfirm = useCallback(
+    async (password: string) => {
+      if (dialog.kind !== "sudo-password") return;
+      const { plan, policy } = dialog;
+      closeDialog();
+      const r = await commands.fsCopyExecuteSudo(plan, policy, password);
+      handleSudoResult(r, plan, policy);
+    },
+    [dialog, closeDialog, handleSudoResult],
+  );
+
   const onSyncConfirm = useCallback(
     async (prune: boolean) => {
       if (dialog.kind !== "sync-confirm") return;
@@ -1462,6 +1516,29 @@ function App() {
           ctaTone="neutral"
           onCancel={closeDialog}
           onConfirm={() => void onElevateConfirm()}
+        />
+      )}
+      {dialog.kind === "sudo-copy" && (
+        <ConfirmDialog
+          title="Root permission required"
+          body={
+            <div>
+              Copying to <span className="break-all font-mono">{dialog.plan.dst.path}</span> on
+              the remote needs root. Retry with <span className="font-mono">sudo</span>?
+            </div>
+          }
+          ctaLabel="Retry with sudo"
+          ctaTone="neutral"
+          onCancel={closeDialog}
+          onConfirm={() => void onSudoRetry()}
+        />
+      )}
+      {dialog.kind === "sudo-password" && (
+        <SudoPasswordDialog
+          dest={dialog.plan.dst.path}
+          error={dialog.error ?? false}
+          onCancel={closeDialog}
+          onConfirm={(pw) => void onSudoPasswordConfirm(pw)}
         />
       )}
       {dialog.kind === "move-confirm" && (
