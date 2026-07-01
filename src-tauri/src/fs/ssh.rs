@@ -558,7 +558,10 @@ async fn remove_recursive(
             if name == "." || name == ".." {
                 continue;
             }
-            let child_path = path.join(&name);
+            // 원격 경로는 항상 POSIX(`/`) 결합. native `Path::join` 은 Windows 클라이언트
+            // 에서 `\` 를 끼워(예: `/remote/dir\child`) 서버가 못 찾아 NotFound → 폴더
+            // 삭제만 실패하던 버그(파일은 자식 순회가 없어 무사). §7.
+            let child_path = crate::fs::posix_join(path, &name);
             Box::pin(remove_recursive(sftp, &child_path)).await?;
         }
         sftp.remove_dir(path_str.to_string())
