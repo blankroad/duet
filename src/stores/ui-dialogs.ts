@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { CopyPlan, DeletePlan, MovePlan, EntryRef, Location, Volume, CompressPlan, SyncPlan, ComparePlan, ThreeWayPlan, ExtractPlan } from "@/types/bindings";
+import type { CopyPlan, DeletePlan, MovePlan, EntryRef, Location, Volume, CompressPlan, SyncPlan, ComparePlan, ThreeWayPlan, ExtractPlan, ConflictPolicy } from "@/types/bindings";
 import type { PaneId } from "@/stores/panes";
 
 export type DialogState =
@@ -10,6 +10,8 @@ export type DialogState =
   | { kind: "delete-confirm"; plan: DeletePlan }
   | { kind: "delete-danger"; plan: DeletePlan }
   | { kind: "copy-confirm"; plan: CopyPlan }
+  // 보호 폴더 복사가 PermissionDenied 로 실패 → 관리자 승격 재시도 확인.
+  | { kind: "elevate-copy"; plan: CopyPlan; policy: ConflictPolicy }
   | { kind: "move-confirm"; plan: MovePlan }
   | { kind: "compress"; items: EntryRef[]; defaultName: string }
   | { kind: "extract-password"; plan: ExtractPlan }

@@ -19,6 +19,7 @@ import { ArgsDialog } from "@/components/dialogs/ArgsDialog";
 import { ConfirmDialog } from "@/components/dialogs/ConfirmDialog";
 import { CopyMoveConfirmDialog } from "@/components/dialogs/CopyMoveConfirmDialog";
 import { DangerConfirmDialog } from "@/components/dialogs/DangerConfirmDialog";
+import { rememberElevatable } from "@/lib/elevatePending";
 import { ProgressModal } from "@/components/dialogs/ProgressModal";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { Toast } from "@/components/Toast";
@@ -890,6 +891,8 @@ function App() {
       const plan = dialog.plan;
       const r = await commands.fsCopyExecute(plan, policy);
       if (r.status === "ok") {
+        // 실패 시(보호 폴더 권한 등) 관리자 승격 재시도를 위해 plan+policy 를 기억.
+        rememberElevatable(r.data, plan, policy);
         openDialog({ kind: "progress", title: "Copying…", taskId: r.data });
       } else {
         closeDialog();
@@ -898,6 +901,30 @@ function App() {
     },
     [dialog, openDialog, closeDialog, showToast],
   );
+
+  /** 보호 폴더 복사 권한 실패 → 관리자 승격(UAC)으로 재시도. */
+  const onElevateConfirm = useCallback(async () => {
+    if (dialog.kind !== "elevate-copy") return;
+    const { plan, policy } = dialog;
+    closeDialog();
+    const r = await commands.fsCopyExecuteElevated(plan, policy);
+    if (r.status === "error") {
+      showToast(`Elevated copy failed: ${formatErr(r.error)}`);
+      return;
+    }
+    const o = r.data;
+    if (o.cancelled) {
+      showToast("Elevation cancelled");
+      return;
+    }
+    if (o.failed.length > 0) {
+      showToast(`Copied ${o.ok}, ${o.failed.length} failed — ${o.failed[0]}`);
+    } else {
+      showToast(`Copied ${o.ok} item(s) as administrator`);
+    }
+    onRefresh("left");
+    onRefresh("right");
+  }, [dialog, closeDialog, showToast, onRefresh]);
 
   const onSyncConfirm = useCallback(
     async (prune: boolean) => {
@@ -1419,6 +1446,22 @@ function App() {
           conflicts={dialog.plan.conflicts.length}
           onCancel={closeDialog}
           onConfirm={onCopyConfirm}
+        />
+      )}
+      {dialog.kind === "elevate-copy" && (
+        <ConfirmDialog
+          title="Administrator permission required"
+          body={
+            <div>
+              Copying to{" "}
+              <span className="break-all font-mono">{dialog.plan.dst.path}</span> needs
+              administrator rights. Retry with elevation? Windows will show a UAC prompt.
+            </div>
+          }
+          ctaLabel="Retry as administrator"
+          ctaTone="neutral"
+          onCancel={closeDialog}
+          onConfirm={() => void onElevateConfirm()}
         />
       )}
       {dialog.kind === "move-confirm" && (

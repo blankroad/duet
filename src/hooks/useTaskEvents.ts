@@ -1,7 +1,14 @@
 import { useEffect } from "react";
+import { platform } from "@tauri-apps/plugin-os";
 import { events, commands } from "@/types/bindings";
 import { useTasks } from "@/stores/tasks";
 import { useToast } from "@/stores/toast";
+import { useUIDialogs } from "@/stores/ui-dialogs";
+import { takeElevatable } from "@/lib/elevatePending";
+
+const isWindows = platform() === "windows";
+/** DuetError Display 가 로컬 access-denied 를 나타내는지 (승격 재시도 후보). */
+const PERM_DENIED = /permission denied|os error 5|access is denied/i;
 
 /**
  * 백엔드 task-event 구독 + 부트스트랩.
@@ -51,22 +58,31 @@ export function useTaskEvents() {
             kind: "completed",
             journal_id: payload.change.journal_id,
           });
+          takeElevatable(id); // 성공 → 승격 후보 정리
           remove(id);
           break;
         case "cancelled":
           setStatus(id, { kind: "cancelled" });
+          takeElevatable(id);
           remove(id);
           break;
-        case "failed":
-          setError(id, payload.change.message);
-          setStatus(id, { kind: "failed", message: payload.change.message });
-          // 백그라운드 task(복사/이동/삭제 등) 실패는 지금까지 store 에서 즉시 remove
-          // 돼 UI 에 전혀 안 보였다 — 파괴적 작업의 조용한 실패는 위험. 토스트로 표면화.
-          useToast
-            .getState()
-            .show(`Operation failed — ${payload.change.message}`);
+        case "failed": {
+          const msg = payload.change.message;
+          setError(id, msg);
+          setStatus(id, { kind: "failed", message: msg });
+          // 보호 폴더 복사가 권한으로 실패했으면(Windows) 관리자 승격 재시도 다이얼로그.
+          // 그 외엔 조용한 실패 방지용 토스트.
+          const retry = takeElevatable(id);
+          if (retry && isWindows && PERM_DENIED.test(msg)) {
+            useUIDialogs
+              .getState()
+              .open({ kind: "elevate-copy", plan: retry.plan, policy: retry.policy });
+          } else {
+            useToast.getState().show(`Operation failed — ${msg}`);
+          }
           remove(id);
           break;
+        }
       }
     });
     return () => {

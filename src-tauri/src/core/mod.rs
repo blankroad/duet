@@ -4,6 +4,7 @@ pub mod archive;
 pub mod compare;
 pub mod copy_progress;
 pub mod copy_strategy;
+pub mod elevate;
 pub mod ops;
 pub mod search;
 pub mod three_way;

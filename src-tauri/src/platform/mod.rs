@@ -172,6 +172,63 @@ fn win_shell_open(path: &Path) -> Result<(), DuetError> {
     }
 }
 
+/// duet.exe 를 `runas`(UAC 승격)로 재실행하고 자식이 끝날 때까지 대기해 종료코드를
+/// 돌려준다. 사용자가 UAC 를 거부하면 `Ok(None)`(취소). Windows 전용.
+///
+/// `args` 는 자식에게 넘길 파라미터 문자열(호출부가 경로 인용 포함해 완성). 승격 우회가
+/// 아니라 **정식 UAC 동의 창**을 띄우는 경로다(멀웨어식 IFileOperation 자동승격 아님).
+#[cfg(windows)]
+pub fn spawn_runas(exe: &Path, args: &str) -> Result<Option<u32>, DuetError> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject, INFINITE};
+    use windows::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW};
+    use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
+
+    let to_wide =
+        |s: &std::ffi::OsStr| -> Vec<u16> { s.encode_wide().chain(std::iter::once(0)).collect() };
+    let verb = to_wide(std::ffi::OsStr::new("runas"));
+    let file = to_wide(exe.as_os_str());
+    let params = to_wide(std::ffi::OsStr::new(args));
+
+    // SAFETY: 아래에서 필수 필드를 모두 채운다. 나머지(hwnd 등)는 0/null 허용.
+    let mut info: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
+    info.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
+    info.fMask = SEE_MASK_NOCLOSEPROCESS; // hProcess 를 받아 대기하려면 필요
+    info.lpVerb = PCWSTR(verb.as_ptr());
+    info.lpFile = PCWSTR(file.as_ptr());
+    info.lpParameters = PCWSTR(params.as_ptr());
+    info.nShow = SW_HIDE.0;
+
+    // SAFETY: info 의 포인터 필드는 모두 위 널종단 UTF-16 버퍼(스코프 유효).
+    if let Err(e) = unsafe { ShellExecuteExW(&mut info) } {
+        // UAC 거부 → ERROR_CANCELLED(1223 = 0x800704C7 HRESULT).
+        if e.code().0 as u32 == 0x8007_04C7 {
+            return Ok(None);
+        }
+        return Err(DuetError::Io(format!("elevation failed: {e}")));
+    }
+    let handle = info.hProcess;
+    if handle.is_invalid() {
+        return Err(DuetError::Io("elevation: no process handle".into()));
+    }
+    // SAFETY: SEE_MASK_NOCLOSEPROCESS 로 받은 유효 핸들. 대기 후 종료코드 조회, 반드시 close.
+    unsafe {
+        WaitForSingleObject(handle, INFINITE);
+        let mut code: u32 = 0;
+        let _ = GetExitCodeProcess(handle, &mut code);
+        let _ = CloseHandle(handle);
+        Ok(Some(code))
+    }
+}
+
+/// 비-Windows: 승격 미지원.
+#[cfg(not(windows))]
+pub fn spawn_runas(_exe: &Path, _args: &str) -> Result<Option<u32>, DuetError> {
+    Err(DuetError::NotSupported("elevation is Windows-only".into()))
+}
+
 /// OS 셸 썸네일러로 파일 썸네일(영상 프레임 등)을 만들 수 있는 플랫폼인가 (현재 Windows 만).
 #[cfg(windows)]
 pub fn supports_shell_thumbnail() -> bool {

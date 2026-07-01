@@ -64,6 +64,13 @@ unicode-normalization = "0.1"
 unicode-width = "0.2"
 mime_guess = "2"
 
+# === UAC 승격 복사 무결성 (Windows) ===
+# 승격 헬퍼로 넘기는 manifest 의 SHA-256 을 커맨드라인으로 전달해 launch 후 변조(TOCTOU)
+# 탐지. §6: sha2·hex 모두 이미 의존성 트리에 존재(전이) → 추가 다운로드 0. sha2 = RustCrypto
+# 표준(수천만 dl), hex = de-facto 표준. 크로스플랫폼(무결성 로직 유닛테스트 위해 일반 deps).
+sha2 = "0.10"
+hex = "0.4"
+
 # === Config & state ===
 dirs = "5"
 serde = { version = "1", features = ["derive"] }
@@ -119,6 +126,10 @@ windows = { version = "0.58", features = [
     "Win32_UI_WindowsAndMessaging",
     # OS 셸 썸네일(IShellItemImageFactory) 의 HBITMAP→픽셀 변환(GetDIBits 등).
     "Win32_Graphics_Gdi",
+    # UAC 승격 복사: ShellExecuteExW(runas) 로 띄운 자식 프로세스 대기/종료코드.
+    "Win32_System_Threading",
+    # SHELLEXECUTEINFOW 는 hkeyClass(HKEY) 필드 때문에 Registry feature 게이트 뒤에 있음.
+    "Win32_System_Registry",
 ] }
 
 [features]

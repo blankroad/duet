@@ -258,6 +258,69 @@ pub async fn fs_copy_execute(
     Ok(task_id)
 }
 
+/// 보호 폴더(Program Files 등) 복사가 `PermissionDenied` 로 실패했을 때, **관리자 권한
+/// 승격(UAC)** 으로 재시도. Windows·로컬→로컬 전용. 정식 UAC 창을 띄우는 `runas` 경로만
+/// 사용(멀웨어식 자동승격 아님 — 설계 `docs/specs/2026-07-01-uac-elevated-copy.md`).
+/// v1: 복사만, undo 없음(§4 (나) audit journal). 이미 충돌 해소가 끝난 CopyPlan 재사용.
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_copy_execute_elevated(
+    plan: CopyPlan,
+    policy: ops::ConflictPolicy,
+    journal: tauri::State<'_, Arc<Journal>>,
+    app: tauri::AppHandle,
+) -> Result<crate::core::elevate::ElevatedOutcome, DuetError> {
+    use crate::core::elevate::{ElevatedConflict, ElevatedItem};
+    // 로컬→로컬만 (승격은 로컬 보호 폴더 한정 — 리모트는 자체 권한 체계, 해당 없음).
+    if !matches!(plan.src_source, SourceId::Local) || !matches!(plan.dst.source, SourceId::Local) {
+        return Err(DuetError::NotSupported(
+            "elevation is for local copies only".into(),
+        ));
+    }
+    // 경로 결합은 backend(§7) — 로컬 native join. 절대경로 src/dst 쌍.
+    let items: Vec<ElevatedItem> = plan
+        .items
+        .iter()
+        .map(|it| ElevatedItem {
+            src: it.location.path.join(&it.name),
+            dst: plan.dst.path.join(&it.name),
+        })
+        .collect();
+    let src_loc = plan.items.first().map(|i| i.location.clone());
+    let dst_loc = plan.dst.clone();
+    let conflict = match policy {
+        ops::ConflictPolicy::Skip => ElevatedConflict::Skip,
+        ops::ConflictPolicy::KeepBoth => ElevatedConflict::KeepBoth,
+        ops::ConflictPolicy::Replace => ElevatedConflict::Overwrite,
+    };
+
+    // 프로세스 spawn+대기(blocking)라 spawn_blocking.
+    let outcome = tokio::task::spawn_blocking(move || {
+        crate::core::elevate::run_elevated_copy(items, conflict)
+    })
+    .await
+    .map_err(|e| DuetError::Io(format!("elevated task join: {e}")))??;
+
+    // §4 (나): 성공분을 audit 로 journal (undo 는 Irreversible — 되돌리려면 재승격 필요).
+    if outcome.ok > 0 && !outcome.cancelled {
+        if let Some(src) = src_loc {
+            let op = crate::services::journal::OpKind::Copy {
+                count: outcome.ok,
+                src,
+                dst: dst_loc,
+            };
+            if let Ok(entry) = journal
+                .inner()
+                .push(op, crate::services::journal::UndoAction::Irreversible)
+                .await
+            {
+                let _ = emit_pushed(&app, entry);
+            }
+        }
+    }
+    Ok(outcome)
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn fs_move_plan(

@@ -101,6 +101,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::fs_ops::fs_delete_execute,
             commands::fs_ops::fs_copy_plan,
             commands::fs_ops::fs_copy_execute,
+            commands::fs_ops::fs_copy_execute_elevated,
             commands::fs_ops::fs_move_plan,
             commands::fs_ops::fs_move_execute,
             commands::fs_ops::fs_compare_dirs,
@@ -192,6 +193,24 @@ pub fn export_bindings(specta_builder: &Builder<tauri::Wry>) -> Result<(), Strin
 /// `main.rs` 에서 호출. 이 함수가 main에 있으면 `cdylib` 빌드 시 실행 안 됨.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // UAC 승격 자식 모드(`--elevated-op <manifest> --manifest-sha256 <hex>`): GUI 를
+    // 띄우지 않고 manifest 의 복사만 수행 후 종료. runas 로 재실행된 승격 인스턴스.
+    // (single-instance 등 어떤 초기화보다도 먼저.)
+    {
+        let argv: Vec<String> = std::env::args().collect();
+        if let Some(i) = argv.iter().position(|a| a == "--elevated-op") {
+            let manifest = argv.get(i + 1).map(String::as_str).unwrap_or("");
+            let hash = argv
+                .iter()
+                .position(|a| a == "--manifest-sha256")
+                .and_then(|j| argv.get(j + 1))
+                .map(String::as_str)
+                .unwrap_or("");
+            let code = core::elevate::execute_child(std::path::Path::new(manifest), hash);
+            std::process::exit(code);
+        }
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
