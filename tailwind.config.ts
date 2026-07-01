@@ -53,6 +53,8 @@ const config: Config = {
       },
       boxShadow: {
         panel: "var(--shadow)",
+        // 활성 패널 elevation — 살짝 떠 보이게.
+        raised: "var(--shadow-raised)",
       },
       fontSize: {
         // 13px 베이스, 11px 메타, 15px 타이틀 (DESIGN.md 참조)

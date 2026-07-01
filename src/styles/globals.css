@@ -38,6 +38,8 @@
   /* Fluent 절제형: 모양/elevation 토큰 (색 토큰 아님 — 강조색 ≤4 규칙 유지) */
   --radius: 6px;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 1px 3px rgb(0 0 0 / 0.05);
+  /* 활성 패널 elevation — 기본 그림자보다 살짝 강해 "떠 있는" 느낌(색 아님). */
+  --shadow-raised: 0 2px 5px rgb(0 0 0 / 0.1), 0 8px 16px rgb(0 0 0 / 0.06);
   /* 구문 강조(highlight.js) 팔레트 — light. 코드 미리보기 전용 색역. */
   --syntax-comment: 0 0% 50%;
   --syntax-keyword: 270 55% 48%;
@@ -71,6 +73,7 @@
   --border: 220 10% 20%;
   --radius: 6px;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 2px 6px rgb(0 0 0 / 0.25);
+  --shadow-raised: 0 2px 8px rgb(0 0 0 / 0.45), 0 10px 20px rgb(0 0 0 / 0.3);
   /* 구문 강조 팔레트 — dark (밝게). */
   --syntax-comment: 0 0% 50%;
   --syntax-keyword: 280 65% 72%;
@@ -105,6 +108,7 @@
     --border: 220 10% 20%;
     --radius: 6px;
     --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 2px 6px rgb(0 0 0 / 0.25);
+    --shadow-raised: 0 2px 8px rgb(0 0 0 / 0.45), 0 10px 20px rgb(0 0 0 / 0.3);
     --syntax-comment: 0 0% 50%;
     --syntax-keyword: 280 65% 72%;
     --syntax-string: 130 45% 62%;
