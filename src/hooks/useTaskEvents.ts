@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { events, commands } from "@/types/bindings";
 import { useTasks } from "@/stores/tasks";
+import { useToast } from "@/stores/toast";
 
 /**
  * 백엔드 task-event 구독 + 부트스트랩.
@@ -59,6 +60,11 @@ export function useTaskEvents() {
         case "failed":
           setError(id, payload.change.message);
           setStatus(id, { kind: "failed", message: payload.change.message });
+          // 백그라운드 task(복사/이동/삭제 등) 실패는 지금까지 store 에서 즉시 remove
+          // 돼 UI 에 전혀 안 보였다 — 파괴적 작업의 조용한 실패는 위험. 토스트로 표면화.
+          useToast
+            .getState()
+            .show(`Operation failed — ${payload.change.message}`);
           remove(id);
           break;
       }
