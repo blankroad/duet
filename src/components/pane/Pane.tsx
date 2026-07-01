@@ -90,11 +90,21 @@ export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward,
   return (
     <div
       className={clsx(
-        "flex flex-1 flex-col min-h-0 overflow-hidden rounded-panel border border-border",
-        isActive && "border-accent",
+        "flex flex-1 flex-col min-h-0 overflow-hidden rounded-panel border transition-colors",
+        // 활성: 강조색 프레임(border + inset ring = 2px, 레이아웃 시프트 없음).
+        // 비활성: 은은한 기본 테두리. 색만 바뀌므로 두 패널 정렬 불변.
+        isActive
+          ? "border-accent ring-1 ring-inset ring-accent"
+          : "border-border",
       )}
       onMouseDown={() => setActivePane(id)}
     >
+      {/* 상단 강조 바 — 어느 패널이 포커스인지 한눈에. 항상 존재하고 색만 바뀌어(bg-accent
+          ↔ 투명) 높이 변화 없음 → 레이아웃 안정. */}
+      <div
+        className={clsx("h-[3px] shrink-0 transition-colors", isActive ? "bg-accent" : "bg-transparent")}
+        aria-hidden
+      />
       <TabBar id={id} />
       <PathBar
         location={tab.location}
