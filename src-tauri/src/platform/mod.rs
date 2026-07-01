@@ -59,6 +59,33 @@ impl ShellMenuRegistry {
     }
 }
 
+/// 로컬 절대경로 보정 — Windows 에서 드라이브 접두(`C:`)가 없는 경로(`\Users\x` 등)를
+/// 현재 드라이브 기준 절대경로로 만든다. 이미 절대(드라이브 포함)면 no-op, 비-Windows 도 그대로.
+///
+/// 이유: Windows 는 드라이브-상대 경로(`\Users\x`)를 조용히 현재 드라이브로 해석해
+/// 디렉토리 리스트는 되지만, breadcrumb 표시와 터미널 cwd 가 드라이브 없이 깨진다.
+/// (§7: 경로/드라이브 분기는 이 platform 레이어에서만. 리모트 POSIX 경로엔 애초에 무관.)
+pub fn local_abs(p: std::path::PathBuf) -> std::path::PathBuf {
+    #[cfg(windows)]
+    {
+        if !p.is_absolute() {
+            if let Ok(abs) = std::fs::canonicalize(&p) {
+                // canonicalize 는 `\\?\C:\...` verbatim 접두를 붙이므로 제거해 일반 경로로.
+                let s = abs.to_string_lossy();
+                if let Some(rest) = s.strip_prefix(r"\\?\") {
+                    return std::path::PathBuf::from(rest);
+                }
+                return abs;
+            }
+        }
+        p
+    }
+    #[cfg(not(windows))]
+    {
+        p
+    }
+}
+
 /// 파일을 OS 기본 앱으로 연다 — **작업 디렉토리를 파일의 부모 폴더로** 설정(탐색기와 동일).
 ///
 /// 이게 중요: `.bat`/스크립트/exe 는 CWD 가 자기 폴더여야 상대경로가 맞는다. `opener::open`

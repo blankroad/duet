@@ -32,7 +32,9 @@ async fn fs_for(
 #[tauri::command]
 #[specta::specta]
 pub async fn home_directory() -> Result<PathBuf, DuetError> {
-    dirs::home_dir().ok_or_else(|| DuetError::Io("home directory not found".into()))
+    let home = dirs::home_dir().ok_or_else(|| DuetError::Io("home directory not found".into()))?;
+    // Windows 에서 드라이브 없는 홈(`\Users\x`)이 오면 절대경로로 보정 (§7). 정상이면 no-op.
+    Ok(crate::platform::local_abs(home))
 }
 
 /// 원격 SSH 호스트의 사용자 home 디렉토리 절대경로 (SFTP canonicalize ".").
@@ -425,7 +427,8 @@ pub async fn places() -> Result<Vec<Place>, DuetError> {
             if p.is_dir() {
                 out.push(Place {
                     label: label.into(),
-                    path: p,
+                    // 홈과 동일하게 드라이브 없는 로컬 경로 보정 (Windows). 정상이면 no-op.
+                    path: crate::platform::local_abs(p),
                 });
             }
         }
