@@ -20,7 +20,7 @@ import { ConfirmDialog } from "@/components/dialogs/ConfirmDialog";
 import { CopyMoveConfirmDialog } from "@/components/dialogs/CopyMoveConfirmDialog";
 import { DangerConfirmDialog } from "@/components/dialogs/DangerConfirmDialog";
 import { SudoPasswordDialog } from "@/components/dialogs/SudoPasswordDialog";
-import { rememberElevatable } from "@/lib/elevatePending";
+import { rememberElevatable, elevatableDestPath, type ElevatablePlan } from "@/lib/elevatePending";
 import { ProgressModal } from "@/components/dialogs/ProgressModal";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { Toast } from "@/components/Toast";
@@ -120,7 +120,6 @@ import { commands } from "@/types/bindings";
 import type {
   CompressFormat,
   ConnectionDto,
-  CopyPlan,
   CopyStrategy,
   DuetError,
   Entry,
@@ -862,8 +861,8 @@ function App() {
       // 삭제는 이제 백그라운드 task — 완료 시 useTaskEvents 가 affected_locations 로
       // refresh. 여기선 enqueue 결과만 확인(즉시 refresh 하면 아직 삭제 전이라 stale).
       const r = await commands.fsDeleteExecute(plan, word);
-      if (r.status === "error")
-        showToast(`Delete failed: ${formatErr(r.error)}`);
+      if (r.status === "ok") rememberElevatable(r.data, { op: "delete", plan });
+      else showToast(`Delete failed: ${formatErr(r.error)}`);
     },
     [dialog, closeDialog, showToast],
   );
@@ -893,8 +892,8 @@ function App() {
       const plan = dialog.plan;
       const r = await commands.fsCopyExecute(plan, policy);
       if (r.status === "ok") {
-        // 실패 시(보호 폴더 권한 등) 관리자 승격 재시도를 위해 plan+policy 를 기억.
-        rememberElevatable(r.data, plan, policy);
+        // 실패 시(보호 경로 권한 등) 승격 재시도를 위해 plan 을 기억.
+        rememberElevatable(r.data, { op: "copy", plan, policy });
         openDialog({ kind: "progress", title: "Copying…", taskId: r.data });
       } else {
         closeDialog();
@@ -904,14 +903,21 @@ function App() {
     [dialog, openDialog, closeDialog, showToast],
   );
 
-  /** 보호 폴더 복사 권한 실패 → 관리자 승격(UAC)으로 재시도. */
+  // 로컬 UAC 승격 실행 — op 로 커맨드 선택(결과 타입은 셋 다 ElevatedOutcome 동일).
+  const runElevated = useCallback((p: ElevatablePlan) => {
+    if (p.op === "copy") return commands.fsCopyExecuteElevated(p.plan, p.policy);
+    if (p.op === "move") return commands.fsMoveExecuteElevated(p.plan, p.policy);
+    return commands.fsDeleteExecuteElevated(p.plan);
+  }, []);
+
+  /** 보호 경로 copy/move/delete 권한 실패 → 로컬 UAC 승격 재시도. */
   const onElevateConfirm = useCallback(async () => {
-    if (dialog.kind !== "elevate-copy") return;
-    const { plan, policy } = dialog;
+    if (dialog.kind !== "elevate-op") return;
+    const p = dialog.pending;
     closeDialog();
-    const r = await commands.fsCopyExecuteElevated(plan, policy);
+    const r = await runElevated(p);
     if (r.status === "error") {
-      showToast(`Elevated copy failed: ${formatErr(r.error)}`);
+      showToast(`Elevated ${p.op} failed: ${formatErr(r.error)}`);
       return;
     }
     const o = r.data;
@@ -920,38 +926,41 @@ function App() {
       return;
     }
     if (o.failed.length > 0) {
-      showToast(`Copied ${o.ok}, ${o.failed.length} failed — ${o.failed[0]}`);
+      showToast(`${o.ok} ok, ${o.failed.length} failed — ${o.failed[0]}`);
     } else {
-      showToast(`Copied ${o.ok} item(s) as administrator`);
+      showToast(`${o.ok} item(s) — done as administrator`);
     }
     onRefresh("left");
     onRefresh("right");
-  }, [dialog, closeDialog, showToast, onRefresh]);
+  }, [dialog, closeDialog, showToast, onRefresh, runElevated]);
 
-  /** 원격 sudo 복사 결과 처리 — 비번 필요/오류면 비번 다이얼로그, 성공이면 토스트+새로고침. */
+  // 원격 sudo 실행 — op 로 커맨드 선택(결과 타입 셋 다 SudoOutcome 동일).
+  const runSudo = useCallback((p: ElevatablePlan, password: string | null) => {
+    if (p.op === "copy") return commands.fsCopyExecuteSudo(p.plan, p.policy, password);
+    if (p.op === "move") return commands.fsMoveExecuteSudo(p.plan, p.policy, password);
+    return commands.fsDeleteExecuteSudo(p.plan, password);
+  }, []);
+
+  /** 원격 sudo 결과 처리 — 비번 필요/오류면 비번 다이얼로그, 성공이면 토스트+새로고침. */
   const handleSudoResult = useCallback(
-    (
-      r: Awaited<ReturnType<typeof commands.fsCopyExecuteSudo>>,
-      plan: CopyPlan,
-      policy: ConflictPolicy,
-    ) => {
+    (r: Awaited<ReturnType<typeof commands.fsCopyExecuteSudo>>, p: ElevatablePlan) => {
       if (r.status === "error") {
-        showToast(`sudo copy failed: ${formatErr(r.error)}`);
+        showToast(`sudo ${p.op} failed: ${formatErr(r.error)}`);
         return;
       }
       const o = r.data;
       if (o.status === "needPassword") {
-        openDialog({ kind: "sudo-password", plan, policy });
+        openDialog({ kind: "sudo-password", pending: p });
         return;
       }
       if (o.status === "wrongPassword") {
-        openDialog({ kind: "sudo-password", plan, policy, error: true });
+        openDialog({ kind: "sudo-password", pending: p, error: true });
         return;
       }
       if (o.failed.length > 0) {
-        showToast(`Copied ${o.count}, ${o.failed.length} failed — ${o.failed[0]}`);
+        showToast(`${o.count} ok, ${o.failed.length} failed — ${o.failed[0]}`);
       } else {
-        showToast(`Copied ${o.count} item(s) with sudo`);
+        showToast(`${o.count} item(s) — done with sudo`);
       }
       onRefresh("left");
       onRefresh("right");
@@ -961,23 +970,23 @@ function App() {
 
   /** sudo 재시도 (확인 → passwordless 먼저). */
   const onSudoRetry = useCallback(async () => {
-    if (dialog.kind !== "sudo-copy") return;
-    const { plan, policy } = dialog;
+    if (dialog.kind !== "sudo-op") return;
+    const p = dialog.pending;
     closeDialog();
-    const r = await commands.fsCopyExecuteSudo(plan, policy, null);
-    handleSudoResult(r, plan, policy);
-  }, [dialog, closeDialog, handleSudoResult]);
+    const r = await runSudo(p, null);
+    handleSudoResult(r, p);
+  }, [dialog, closeDialog, handleSudoResult, runSudo]);
 
   /** sudo 비번 입력 후 재시도. */
   const onSudoPasswordConfirm = useCallback(
     async (password: string) => {
       if (dialog.kind !== "sudo-password") return;
-      const { plan, policy } = dialog;
+      const p = dialog.pending;
       closeDialog();
-      const r = await commands.fsCopyExecuteSudo(plan, policy, password);
-      handleSudoResult(r, plan, policy);
+      const r = await runSudo(p, password);
+      handleSudoResult(r, p);
     },
-    [dialog, closeDialog, handleSudoResult],
+    [dialog, closeDialog, handleSudoResult, runSudo],
   );
 
   const onSyncConfirm = useCallback(
@@ -1001,6 +1010,7 @@ function App() {
       const plan = dialog.plan;
       const r = await commands.fsMoveExecute(plan, policy);
       if (r.status === "ok") {
+        rememberElevatable(r.data, { op: "move", plan, policy });
         openDialog({ kind: "progress", title: "Moving…", taskId: r.data });
       } else {
         closeDialog();
@@ -1502,14 +1512,16 @@ function App() {
           onConfirm={onCopyConfirm}
         />
       )}
-      {dialog.kind === "elevate-copy" && (
+      {dialog.kind === "elevate-op" && (
         <ConfirmDialog
           title="Administrator permission required"
           body={
             <div>
-              Copying to{" "}
-              <span className="break-all font-mono">{dialog.plan.dst.path}</span> needs
-              administrator rights. Retry with elevation? Windows will show a UAC prompt.
+              {dialog.pending.op === "delete" ? "Deleting at" : "Writing to"}{" "}
+              <span className="break-all font-mono">
+                {elevatableDestPath(dialog.pending)}
+              </span>{" "}
+              needs administrator rights. Retry with elevation? Windows will show a UAC prompt.
             </div>
           }
           ctaLabel="Retry as administrator"
@@ -1518,13 +1530,16 @@ function App() {
           onConfirm={() => void onElevateConfirm()}
         />
       )}
-      {dialog.kind === "sudo-copy" && (
+      {dialog.kind === "sudo-op" && (
         <ConfirmDialog
           title="Root permission required"
           body={
             <div>
-              Copying to <span className="break-all font-mono">{dialog.plan.dst.path}</span> on
-              the remote needs root. Retry with <span className="font-mono">sudo</span>?
+              {dialog.pending.op === "delete" ? "Deleting at" : "Writing to"}{" "}
+              <span className="break-all font-mono">
+                {elevatableDestPath(dialog.pending)}
+              </span>{" "}
+              on the remote needs root. Retry with <span className="font-mono">sudo</span>?
             </div>
           }
           ctaLabel="Retry with sudo"
@@ -1535,7 +1550,7 @@ function App() {
       )}
       {dialog.kind === "sudo-password" && (
         <SudoPasswordDialog
-          dest={dialog.plan.dst.path}
+          dest={elevatableDestPath(dialog.pending)}
           error={dialog.error ?? false}
           onCancel={closeDialog}
           onConfirm={(pw) => void onSudoPasswordConfirm(pw)}

@@ -4,7 +4,7 @@ import { events, commands } from "@/types/bindings";
 import { useTasks } from "@/stores/tasks";
 import { useToast } from "@/stores/toast";
 import { useUIDialogs } from "@/stores/ui-dialogs";
-import { takeElevatable } from "@/lib/elevatePending";
+import { takeElevatable, elevatableDestKind } from "@/lib/elevatePending";
 
 const isWindows = platform() === "windows";
 /** DuetError Display 가 로컬 access-denied 를 나타내는지 (승격 재시도 후보). */
@@ -75,12 +75,12 @@ export function useTaskEvents() {
           const retry = takeElevatable(id);
           if (retry && PERM_DENIED.test(msg)) {
             const dialogs = useUIDialogs.getState();
-            if (retry.plan.dst.source.kind === "ssh") {
+            if (elevatableDestKind(retry) === "ssh") {
               // 원격 보호 경로 → sudo 재시도.
-              dialogs.open({ kind: "sudo-copy", plan: retry.plan, policy: retry.policy });
+              dialogs.open({ kind: "sudo-op", pending: retry });
             } else if (isWindows) {
-              // 로컬 Windows 보호 폴더 → UAC 승격.
-              dialogs.open({ kind: "elevate-copy", plan: retry.plan, policy: retry.policy });
+              // 로컬 Windows 보호 경로 → UAC 승격.
+              dialogs.open({ kind: "elevate-op", pending: retry });
             } else {
               useToast.getState().show(`Operation failed — ${msg}`);
             }

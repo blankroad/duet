@@ -258,6 +258,16 @@ pub async fn fs_copy_execute(
     Ok(task_id)
 }
 
+/// `ConflictPolicy` → 승격 op 의 `ElevatedConflict`.
+fn elevated_conflict(policy: ops::ConflictPolicy) -> crate::core::elevate::ElevatedConflict {
+    use crate::core::elevate::ElevatedConflict;
+    match policy {
+        ops::ConflictPolicy::Skip => ElevatedConflict::Skip,
+        ops::ConflictPolicy::KeepBoth => ElevatedConflict::KeepBoth,
+        ops::ConflictPolicy::Replace => ElevatedConflict::Overwrite,
+    }
+}
+
 /// 보호 폴더(Program Files 등) 복사가 `PermissionDenied` 로 실패했을 때, **관리자 권한
 /// 승격(UAC)** 으로 재시도. Windows·로컬→로컬 전용. 정식 UAC 창을 띄우는 `runas` 경로만
 /// 사용(멀웨어식 자동승격 아님 — 설계 `docs/specs/2026-07-01-uac-elevated-copy.md`).
@@ -270,7 +280,7 @@ pub async fn fs_copy_execute_elevated(
     journal: tauri::State<'_, Arc<Journal>>,
     app: tauri::AppHandle,
 ) -> Result<crate::core::elevate::ElevatedOutcome, DuetError> {
-    use crate::core::elevate::{ElevatedConflict, ElevatedItem};
+    use crate::core::elevate::ElevatedItem;
     // 로컬→로컬만 (승격은 로컬 보호 폴더 한정 — 리모트는 자체 권한 체계, 해당 없음).
     if !matches!(plan.src_source, SourceId::Local) || !matches!(plan.dst.source, SourceId::Local) {
         return Err(DuetError::NotSupported(
@@ -283,20 +293,20 @@ pub async fn fs_copy_execute_elevated(
         .iter()
         .map(|it| ElevatedItem {
             src: it.location.path.join(&it.name),
-            dst: plan.dst.path.join(&it.name),
+            dst: Some(plan.dst.path.join(&it.name)),
         })
         .collect();
     let src_loc = plan.items.first().map(|i| i.location.clone());
     let dst_loc = plan.dst.clone();
-    let conflict = match policy {
-        ops::ConflictPolicy::Skip => ElevatedConflict::Skip,
-        ops::ConflictPolicy::KeepBoth => ElevatedConflict::KeepBoth,
-        ops::ConflictPolicy::Replace => ElevatedConflict::Overwrite,
-    };
+    let conflict = elevated_conflict(policy);
 
     // 프로세스 spawn+대기(blocking)라 spawn_blocking.
     let outcome = tokio::task::spawn_blocking(move || {
-        crate::core::elevate::run_elevated_copy(items, conflict)
+        crate::core::elevate::run_elevated_op(
+            crate::core::elevate::ElevatedOp::Copy,
+            items,
+            conflict,
+        )
     })
     .await
     .map_err(|e| DuetError::Io(format!("elevated task join: {e}")))??;
@@ -355,21 +365,24 @@ pub async fn fs_copy_execute_sudo(
     let dst_conn = pool.inner().get(connection_id).await?;
     let dst_ssh = SshFs::new(dst_conn);
 
-    let items: Vec<(std::path::PathBuf, String)> = plan
+    let items: Vec<(std::path::PathBuf, Option<std::path::PathBuf>)> = plan
         .items
         .iter()
-        .map(|it| (src_fs.join(&it.location.path, &it.name), it.name.clone()))
+        .map(|it| {
+            let src = src_fs.join(&it.location.path, &it.name);
+            let dst = dst_ssh.join(&plan.dst.path, &it.name);
+            (src, Some(dst))
+        })
         .collect();
     let src_loc = plan.items.first().map(|i| i.location.clone());
-    let dst_dir = plan.dst.path.clone();
     let dst_loc = plan.dst.clone();
 
-    let outcome = crate::core::sudo::copy_execute_sudo(
+    let outcome = crate::core::sudo::execute_sudo(
+        crate::core::elevate::ElevatedOp::Copy,
         &*src_fs,
         &dst_ssh,
-        same_host,
+        !same_host, // stage: Local→Remote 는 staging 업로드 필요
         items,
-        &dst_dir,
         password.as_deref(),
         policy,
     )
@@ -396,6 +409,305 @@ pub async fn fs_copy_execute_sudo(
                 {
                     let _ = emit_pushed(&app, entry);
                 }
+            }
+        }
+    }
+    Ok(outcome)
+}
+
+/// 로컬 보호 폴더로 **이동**이 PermissionDenied 로 실패 → UAC 승격 이동. 로컬→로컬 전용.
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_move_execute_elevated(
+    plan: MovePlan,
+    policy: ops::ConflictPolicy,
+    journal: tauri::State<'_, Arc<Journal>>,
+    app: tauri::AppHandle,
+) -> Result<crate::core::elevate::ElevatedOutcome, DuetError> {
+    use crate::core::elevate::{ElevatedItem, ElevatedOp};
+    if !matches!(plan.src_source, SourceId::Local) || !matches!(plan.dst.source, SourceId::Local) {
+        return Err(DuetError::NotSupported(
+            "elevation is for local moves only".into(),
+        ));
+    }
+    let items: Vec<ElevatedItem> = plan
+        .items
+        .iter()
+        .map(|it| ElevatedItem {
+            src: it.location.path.join(&it.name),
+            dst: Some(plan.dst.path.join(&it.name)),
+        })
+        .collect();
+    let src_loc = plan.items.first().map(|i| i.location.clone());
+    let dst_loc = plan.dst.clone();
+    let conflict = elevated_conflict(policy);
+    let outcome = tokio::task::spawn_blocking(move || {
+        crate::core::elevate::run_elevated_op(ElevatedOp::Move, items, conflict)
+    })
+    .await
+    .map_err(|e| DuetError::Io(format!("elevated task join: {e}")))??;
+    if outcome.ok > 0 && !outcome.cancelled {
+        if let Some(src) = src_loc {
+            let jop = crate::services::journal::OpKind::Move {
+                count: outcome.ok,
+                src,
+                dst: dst_loc,
+            };
+            if let Ok(entry) = journal
+                .inner()
+                .push(jop, crate::services::journal::UndoAction::Irreversible)
+                .await
+            {
+                let _ = emit_pushed(&app, entry);
+            }
+        }
+    }
+    Ok(outcome)
+}
+
+/// 로컬 보호 경로 **삭제** 실패 → UAC 승격 삭제 (모드 따름: Trash→OS 휴지통, Permanent→rm).
+/// Permanent 는 영구삭제 게이트(§3)를 재확인.
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_delete_execute_elevated(
+    plan: DeletePlan,
+    settings: tauri::State<'_, Arc<SettingsStore>>,
+    journal: tauri::State<'_, Arc<Journal>>,
+    app: tauri::AppHandle,
+) -> Result<crate::core::elevate::ElevatedOutcome, DuetError> {
+    use crate::core::elevate::{ElevatedConflict, ElevatedItem, ElevatedOp};
+    if !matches!(plan.source, SourceId::Local) {
+        return Err(DuetError::NotSupported(
+            "elevation is for local deletes only".into(),
+        ));
+    }
+    let op = match plan.mode {
+        DeleteMode::Trash => ElevatedOp::Trash,
+        DeleteMode::Permanent => {
+            if !settings.get().await.permanent_delete_enabled {
+                return Err(DuetError::NotPermitted);
+            }
+            ElevatedOp::Delete
+        }
+    };
+    let items: Vec<ElevatedItem> = plan
+        .targets
+        .iter()
+        .map(|t| ElevatedItem {
+            src: t.location.path.join(&t.name),
+            dst: None,
+        })
+        .collect();
+    let loc = plan.source_location.clone();
+    let mode = plan.mode;
+    let outcome = tokio::task::spawn_blocking(move || {
+        crate::core::elevate::run_elevated_op(op, items, ElevatedConflict::Overwrite)
+    })
+    .await
+    .map_err(|e| DuetError::Io(format!("elevated task join: {e}")))??;
+    if outcome.ok > 0 && !outcome.cancelled {
+        let jop = match mode {
+            DeleteMode::Trash => crate::services::journal::OpKind::Trash {
+                count: outcome.ok,
+                location: loc,
+            },
+            DeleteMode::Permanent => crate::services::journal::OpKind::PermanentDelete {
+                count: outcome.ok,
+                location: loc,
+            },
+        };
+        if let Ok(entry) = journal
+            .inner()
+            .push(jop, crate::services::journal::UndoAction::Irreversible)
+            .await
+        {
+            let _ = emit_pushed(&app, entry);
+        }
+    }
+    Ok(outcome)
+}
+
+/// 원격 보호 경로로 **이동** 실패 → sudo 이동. same-host 는 `sudo mv`, Local→Remote 는
+/// sudo cp(staging) 후 로컬 원본 휴지통 이동(비승격, §3 복구 가능).
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_move_execute_sudo(
+    plan: MovePlan,
+    policy: ops::ConflictPolicy,
+    password: Option<String>,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+    journal: tauri::State<'_, Arc<Journal>>,
+    app: tauri::AppHandle,
+) -> Result<crate::core::sudo::SudoOutcome, DuetError> {
+    use crate::core::elevate::ElevatedOp;
+    let SourceId::Ssh { connection_id, .. } = &plan.dst.source else {
+        return Err(DuetError::NotSupported(
+            "sudo move requires a remote (SSH) destination".into(),
+        ));
+    };
+    let same_host = matches!(
+        decide_strategy(&plan.src_source, &plan.dst.source),
+        CopyStrategy::SshSameHost
+    );
+    let src_is_local = matches!(plan.src_source, SourceId::Local);
+    if !src_is_local && !same_host {
+        return Err(DuetError::NotSupported(
+            "sudo move: source must be local or the same remote host".into(),
+        ));
+    }
+    let src_fs = fs_for(&plan.src_source, pool.inner()).await?;
+    let dst_conn = pool.inner().get(connection_id).await?;
+    let dst_ssh = SshFs::new(dst_conn);
+    let items: Vec<(std::path::PathBuf, Option<std::path::PathBuf>)> = plan
+        .items
+        .iter()
+        .map(|it| {
+            (
+                src_fs.join(&it.location.path, &it.name),
+                Some(dst_ssh.join(&plan.dst.path, &it.name)),
+            )
+        })
+        .collect();
+    // same-host: 서버측 sudo mv. Local→Remote: sudo cp(staging) + 로컬 원본 정리.
+    let (op, stage) = if same_host {
+        (ElevatedOp::Move, false)
+    } else {
+        (ElevatedOp::Copy, true)
+    };
+    let local_srcs: Vec<std::path::PathBuf> = if src_is_local {
+        plan.items
+            .iter()
+            .map(|it| it.location.path.join(&it.name))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let src_loc = plan.items.first().map(|i| i.location.clone());
+    let dst_loc = plan.dst.clone();
+    let outcome = crate::core::sudo::execute_sudo(
+        op,
+        &*src_fs,
+        &dst_ssh,
+        stage,
+        items,
+        password.as_deref(),
+        policy,
+    )
+    .await;
+    if let Some(mut pw) = password {
+        crate::services::secret_vault::zeroize_string(&mut pw);
+    }
+    let outcome = outcome?;
+    // Local→Remote 이동: 원격 성공 시 로컬 원본을 휴지통으로(복구 가능, 비승격).
+    if src_is_local && !same_host {
+        if let crate::core::sudo::SudoOutcome::Ok { count, .. } = &outcome {
+            if *count > 0 {
+                for p in &local_srcs {
+                    let _ = trash::delete(p);
+                }
+            }
+        }
+    }
+    if let crate::core::sudo::SudoOutcome::Ok { count, .. } = &outcome {
+        if *count > 0 {
+            if let Some(src) = src_loc {
+                let jop = crate::services::journal::OpKind::Move {
+                    count: *count,
+                    src,
+                    dst: dst_loc,
+                };
+                if let Ok(entry) = journal
+                    .inner()
+                    .push(jop, crate::services::journal::UndoAction::Irreversible)
+                    .await
+                {
+                    let _ = emit_pushed(&app, entry);
+                }
+            }
+        }
+    }
+    Ok(outcome)
+}
+
+/// 원격 보호 경로 **삭제** 실패 → sudo 삭제. Trash→`sudo mv` 휴지통(~/.duet-trash),
+/// Permanent→`sudo rm`(게이트 재확인 §3).
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_delete_execute_sudo(
+    plan: DeletePlan,
+    password: Option<String>,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+    settings: tauri::State<'_, Arc<SettingsStore>>,
+    journal: tauri::State<'_, Arc<Journal>>,
+    app: tauri::AppHandle,
+) -> Result<crate::core::sudo::SudoOutcome, DuetError> {
+    use crate::core::elevate::ElevatedOp;
+    let SourceId::Ssh { connection_id, .. } = &plan.source else {
+        return Err(DuetError::NotSupported(
+            "sudo delete requires a remote (SSH) target".into(),
+        ));
+    };
+    let (op, permanent) = match plan.mode {
+        DeleteMode::Trash => (ElevatedOp::Move, false),
+        DeleteMode::Permanent => {
+            if !settings.get().await.permanent_delete_enabled {
+                return Err(DuetError::NotPermitted);
+            }
+            (ElevatedOp::Delete, true)
+        }
+    };
+    let dst_conn = pool.inner().get(connection_id).await?;
+    let dst_ssh = SshFs::new(dst_conn);
+    let mut items: Vec<(std::path::PathBuf, Option<std::path::PathBuf>)> = Vec::new();
+    if permanent {
+        for t in &plan.targets {
+            items.push((dst_ssh.join(&t.location.path, &t.name), None));
+        }
+    } else {
+        // 휴지통 경로: ~/.duet-trash/<batch>/<원본 절대경로> (services::trash 재사용).
+        let home = dst_ssh.home().await?;
+        let base = crate::services::trash::remote_trash_base(&home);
+        let batch = crate::services::trash::new_batch_id();
+        for t in &plan.targets {
+            let abs = dst_ssh.join(&t.location.path, &t.name);
+            let trash = crate::services::trash::remote_trash_path_for(&base, &batch, &abs);
+            items.push((abs, Some(trash)));
+        }
+    }
+    let loc = plan.source_location.clone();
+    let mode = plan.mode;
+    let outcome = crate::core::sudo::execute_sudo(
+        op,
+        &dst_ssh,
+        &dst_ssh,
+        false,
+        items,
+        password.as_deref(),
+        ops::ConflictPolicy::Replace,
+    )
+    .await;
+    if let Some(mut pw) = password {
+        crate::services::secret_vault::zeroize_string(&mut pw);
+    }
+    let outcome = outcome?;
+    if let crate::core::sudo::SudoOutcome::Ok { count, .. } = &outcome {
+        if *count > 0 {
+            let jop = match mode {
+                DeleteMode::Trash => crate::services::journal::OpKind::Trash {
+                    count: *count,
+                    location: loc,
+                },
+                DeleteMode::Permanent => crate::services::journal::OpKind::PermanentDelete {
+                    count: *count,
+                    location: loc,
+                },
+            };
+            if let Ok(entry) = journal
+                .inner()
+                .push(jop, crate::services::journal::UndoAction::Irreversible)
+                .await
+            {
+                let _ = emit_pushed(&app, entry);
             }
         }
     }

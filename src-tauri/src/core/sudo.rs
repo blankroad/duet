@@ -9,6 +9,7 @@
 //! `SshFs::sudo_run`). §9: russh exec, 시스템 ssh 바이너리 X. v1: 복사만, undo 없음.
 
 use crate::core::copy_strategy::shell_escape_path;
+use crate::core::elevate::ElevatedOp;
 use crate::core::ops::ConflictPolicy;
 use crate::fs::{FileSystem, SshFs};
 use crate::types::{DuetError, EntryKind};
@@ -39,23 +40,36 @@ fn is_auth_failure(stderr: &str) -> bool {
         || s.contains("sorry, try")
 }
 
-/// `/bin/sh -c` 로 실행할 복사 스크립트 — 경로는 shell-escape, 비번은 **포함 안 함**(stdin).
-/// Overwrite=`cp -a`, Skip=`[ -e dst ] ||`. KeepBoth 는 v1 에서 Overwrite 로 취급.
-fn build_copy_script(
-    pairs: &[(PathBuf, PathBuf)],
+/// `/bin/sh -c` 로 실행할 op 스크립트 — 경로 shell-escape, 비번은 **포함 안 함**(stdin).
+/// Copy=`cp -a`, Move/Trash=`mv`(Trash 는 dst=휴지통경로), Delete=`rm -rf`.
+/// Skip=`[ -e dst ] ||`. KeepBoth 는 v1 에서 Overwrite 로 취급.
+fn build_script(
+    op: ElevatedOp,
+    items: &[(PathBuf, Option<PathBuf>)],
     conflict: ConflictPolicy,
 ) -> Result<String, DuetError> {
     let mut s = String::from("set -e\n");
-    for (src, dst) in pairs {
+    for (src, dst) in items {
         let sq = shell_escape_path(src)?;
+        if matches!(op, ElevatedOp::Delete) {
+            s.push_str(&format!("rm -rf -- {sq}\n"));
+            continue;
+        }
+        let dst = dst
+            .as_ref()
+            .ok_or_else(|| DuetError::Io("copy/move needs dst".into()))?;
         let dq = shell_escape_path(dst)?;
         if let Some(parent) = dst.parent() {
             s.push_str(&format!("mkdir -p {}\n", shell_escape_path(parent)?));
         }
+        let verb = if matches!(op, ElevatedOp::Copy) {
+            "cp -a"
+        } else {
+            "mv" // Move | Trash
+        };
         match conflict {
-            ConflictPolicy::Skip => s.push_str(&format!("[ -e {dq} ] || cp -a -- {sq} {dq}\n")),
-            // Replace/KeepBoth → 덮어쓰기 (system 배포는 대개 replace; KeepBoth 는 v1 미지원).
-            _ => s.push_str(&format!("cp -a -- {sq} {dq}\n")),
+            ConflictPolicy::Skip => s.push_str(&format!("[ -e {dq} ] || {verb} -- {sq} {dq}\n")),
+            _ => s.push_str(&format!("{verb} -- {sq} {dq}\n")),
         }
     }
     Ok(s)
@@ -87,21 +101,21 @@ async fn upload_tree(
     }
 }
 
-/// 원격 sudo 복사 실행. `items` = (src 절대경로, 이름), 최종 = `dst_dir/이름`.
-/// `same_host`=true 면 src 가 dst 와 같은 원격(직접 sudo cp), false 면 Local→Remote(staging).
-pub async fn copy_execute_sudo(
+/// 원격 sudo op 실행 (copy/move/trash/delete). `items` = (src 절대경로, dst 절대경로 or
+/// None). `stage`=true 면 각 src(로컬)를 원격 홈 staging 으로 업로드 후 src 를 staged 로
+/// 치환(Local→Remote copy/move). trash/delete 는 dst_none / dst=휴지통경로를 커맨드가 구성.
+pub async fn execute_sudo(
+    op: ElevatedOp,
     src_fs: &dyn FileSystem,
     dst_ssh: &SshFs,
-    same_host: bool,
-    items: Vec<(PathBuf, String)>,
-    dst_dir: &Path,
+    stage: bool,
+    mut items: Vec<(PathBuf, Option<PathBuf>)>,
     password: Option<&str>,
     conflict: ConflictPolicy,
 ) -> Result<SudoOutcome, DuetError> {
     if items.is_empty() {
         return Err(DuetError::Io("no items".into()));
     }
-    // staging 업로드용 취소 토큰 — 이 경로는 취소 미지원(v1)이라 내부 생성.
     let cancel = CancellationToken::new();
     // passwordless(캐시된 sudo 타임스탬프/NOPASSWD) 먼저 시도.
     let passwordless = dst_ssh.sudo_probe().await.unwrap_or(false);
@@ -109,15 +123,8 @@ pub async fn copy_execute_sudo(
         return Ok(SudoOutcome::NeedPassword);
     }
 
-    // 최종 (src, dst) 쌍 — same-host 는 직접, 아니면 staging 경유.
-    let (pairs, staging): (Vec<(PathBuf, PathBuf)>, Option<PathBuf>) = if same_host {
-        let p = items
-            .iter()
-            .map(|(src, name)| (src.clone(), dst_ssh.join(dst_dir, name)))
-            .collect();
-        (p, None)
-    } else {
-        // 사용자 홈 아래 랜덤 staging (사용자 소유 → SFTP 업로드 OK).
+    // staging: 로컬 src 를 원격 홈 staging 으로 업로드 후 src 를 staged 경로로 치환.
+    let staging = if stage {
         let home = dst_ssh.home().await?;
         let root = dst_ssh.join(
             &dst_ssh.join(&home, ".duet-sudo"),
@@ -125,17 +132,21 @@ pub async fn copy_execute_sudo(
         );
         let dst_dyn: &dyn FileSystem = dst_ssh;
         let _ = dst_dyn.mkdir(&root).await;
-        let mut p = Vec::new();
-        for (src, name) in &items {
-            let staged = dst_ssh.join(&root, name);
+        for (src, _dst) in items.iter_mut() {
+            let name = src
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let staged = dst_ssh.join(&root, &name);
             upload_tree(src_fs, src, dst_dyn, &staged, &cancel).await?;
-            p.push((staged, dst_ssh.join(dst_dir, name)));
+            *src = staged;
         }
-        (p, Some(root))
+        Some(root)
+    } else {
+        None
     };
 
-    let script = build_copy_script(&pairs, conflict)?;
-    // passwordless 면 sudo -n, 아니면 -S 로 stdin 비번.
+    let script = build_script(op, &items, conflict)?;
     let pw = if passwordless { None } else { password };
     let out = dst_ssh.sudo_run(&script, pw).await;
 
@@ -161,7 +172,7 @@ pub async fn copy_execute_sudo(
     }
     Ok(SudoOutcome::Ok {
         count: 0,
-        failed: vec![format!("sudo cp failed: {}", stderr.trim())],
+        failed: vec![format!("sudo op failed: {}", stderr.trim())],
     })
 }
 
@@ -171,11 +182,11 @@ mod tests {
 
     #[test]
     fn script_escapes_and_no_password() {
-        let pairs = vec![(
+        let items = vec![(
             PathBuf::from("/home/u/.duet-sudo/x/app.conf"),
-            PathBuf::from("/etc/app/app.conf"),
+            Some(PathBuf::from("/etc/app/app.conf")),
         )];
-        let s = build_copy_script(&pairs, ConflictPolicy::Replace).unwrap();
+        let s = build_script(ElevatedOp::Copy, &items, ConflictPolicy::Replace).unwrap();
         assert!(s.contains("cp -a -- '/home/u/.duet-sudo/x/app.conf' '/etc/app/app.conf'"));
         assert!(s.contains("mkdir -p '/etc/app'"));
         // 스크립트에 비번이 절대 안 들어감(§5 — 비번은 stdin).
@@ -184,9 +195,27 @@ mod tests {
 
     #[test]
     fn skip_guards_existence() {
-        let pairs = vec![(PathBuf::from("/a/x"), PathBuf::from("/etc/x"))];
-        let s = build_copy_script(&pairs, ConflictPolicy::Skip).unwrap();
+        let items = vec![(PathBuf::from("/a/x"), Some(PathBuf::from("/etc/x")))];
+        let s = build_script(ElevatedOp::Copy, &items, ConflictPolicy::Skip).unwrap();
         assert!(s.contains("[ -e '/etc/x' ] || cp -a -- '/a/x' '/etc/x'"));
+    }
+
+    #[test]
+    fn move_uses_mv_delete_uses_rm() {
+        let mv = build_script(
+            ElevatedOp::Move,
+            &[(PathBuf::from("/a/x"), Some(PathBuf::from("/etc/x")))],
+            ConflictPolicy::Replace,
+        )
+        .unwrap();
+        assert!(mv.contains("mv -- '/a/x' '/etc/x'"));
+        let rm = build_script(
+            ElevatedOp::Delete,
+            &[(PathBuf::from("/etc/x"), None)],
+            ConflictPolicy::Replace,
+        )
+        .unwrap();
+        assert!(rm.contains("rm -rf -- '/etc/x'"));
     }
 
     #[test]

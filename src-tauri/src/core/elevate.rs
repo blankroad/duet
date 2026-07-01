@@ -3,8 +3,8 @@
 //! 설계: `docs/specs/2026-07-01-uac-elevated-copy.md`. **정식 UAC 경로만** 사용
 //! (멀웨어식 IFileOperation 자동승격 아님). 부모(비승격)가 manifest(작업 명세)를 파일로
 //! 쓰고 그 SHA-256 을 커맨드라인으로 넘겨 `platform::spawn_runas` 로 duet.exe 재실행.
-//! 승격된 자식(`--elevated-op`)이 해시를 검증(launch 후 변조 차단)하고 복사 수행 후
-//! 결과 파일 기록. v1: 복사만, 로컬→로컬, undo 없음(§4 (나) audit journal 만).
+//! 승격된 자식(`--elevated-op`)이 해시를 검증(launch 후 변조 차단)하고 op(copy/move/
+//! trash/delete) 수행 후 결과 파일 기록. 로컬→로컬, undo 없음(§4 audit journal 만).
 
 use crate::types::DuetError;
 use serde::{Deserialize, Serialize};
@@ -19,19 +19,30 @@ pub enum ElevatedConflict {
     KeepBoth,
 }
 
-/// 복사 한 쌍 (절대경로).
+/// 승격 작업 종류 (화이트리스트). Trash=OS 휴지통, Delete=영구 rm(사용자 영구삭제
+/// 게이트 통과분만).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ElevatedOp {
+    Copy,
+    Move,
+    Trash,
+    Delete,
+}
+
+/// 작업 한 항목 (절대경로). `dst` 는 copy/move 만 사용, trash/delete 는 None.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ElevatedItem {
     pub src: PathBuf,
-    pub dst: PathBuf,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dst: Option<PathBuf>,
 }
 
 /// 승격 자식에게 넘기는 작업 명세.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ElevatedManifest {
     pub version: u32,
-    /// 화이트리스트 — v1 은 "copy" 만 허용.
-    pub op: String,
+    pub op: ElevatedOp,
     pub conflict: ElevatedConflict,
     pub items: Vec<ElevatedItem>,
 }
@@ -76,14 +87,15 @@ fn elevated_dir() -> Result<PathBuf, DuetError> {
     Ok(dir)
 }
 
-/// **부모(비승격)**: 승격 복사 실행. UAC 창 → 자식 복사 → 결과 요약.
+/// **부모(비승격)**: 승격 op(copy/move/trash/delete) 실행. UAC 창 → 자식 실행 → 결과 요약.
 /// blocking(프로세스 대기) 이므로 `spawn_blocking` 안에서 호출할 것.
-pub fn run_elevated_copy(
+pub fn run_elevated_op(
+    op: ElevatedOp,
     items: Vec<ElevatedItem>,
     conflict: ElevatedConflict,
 ) -> Result<ElevatedOutcome, DuetError> {
     if items.is_empty() {
-        return Err(DuetError::Io("no items to copy".into()));
+        return Err(DuetError::Io("no items".into()));
     }
     let exe = std::env::current_exe().map_err(|e| DuetError::Io(format!("current_exe: {e}")))?;
     let dir = elevated_dir()?;
@@ -93,7 +105,7 @@ pub fn run_elevated_copy(
 
     let manifest = ElevatedManifest {
         version: 1,
-        op: "copy".into(),
+        op,
         conflict,
         items,
     };
@@ -152,7 +164,7 @@ pub fn run_elevated_copy(
         }
         Err(_) => {
             return Err(DuetError::Io(format!(
-                "elevated copy failed (exit {exit}, no result)"
+                "elevated op failed (exit {exit}, no result)"
             )));
         }
     };
@@ -185,23 +197,33 @@ pub fn execute_child(manifest_path: &Path, expected_hash: &str) -> i32 {
         Ok(m) => m,
         Err(_) => return 3,
     };
-    if manifest.op != "copy" {
-        return 3; // 화이트리스트 밖
-    }
-
+    // op 화이트리스트는 enum 역직렬화가 강제(알 수 없는 op → from_slice 실패 → return 3).
     let mut items_res = Vec::new();
     let mut all_ok = true;
     for it in &manifest.items {
-        match copy_one(&it.src, &it.dst, manifest.conflict) {
+        // 결과 보고용 대상 경로 — copy/move 는 dst, trash/delete 는 src.
+        let target = it.dst.clone().unwrap_or_else(|| it.src.clone());
+        let need_dst = |label: &str| it.dst.as_ref().ok_or_else(|| format!("{label} needs dst"));
+        let r = match manifest.op {
+            ElevatedOp::Copy => {
+                need_dst("copy").and_then(|d| copy_one(&it.src, d, manifest.conflict))
+            }
+            ElevatedOp::Move => {
+                need_dst("move").and_then(|d| move_one(&it.src, d, manifest.conflict))
+            }
+            ElevatedOp::Trash => trash_one(&it.src),
+            ElevatedOp::Delete => delete_one(&it.src),
+        };
+        match r {
             Ok(()) => items_res.push(ElevatedResultItem {
-                dst: it.dst.clone(),
+                dst: target,
                 ok: true,
                 error: None,
             }),
             Err(e) => {
                 all_ok = false;
                 items_res.push(ElevatedResultItem {
-                    dst: it.dst.clone(),
+                    dst: target,
                     ok: false,
                     error: Some(e),
                 });
@@ -250,6 +272,25 @@ fn copy_one(src: &Path, dst: &Path, conflict: ElevatedConflict) -> Result<(), St
         }
     }
     do_copy(src, dst).map_err(|e| e.to_string())
+}
+
+/// 이동 = 복사(충돌 정책 적용) 후 원본 제거. Skip 이면 원본 유지(둘 다 남김).
+fn move_one(src: &Path, dst: &Path, conflict: ElevatedConflict) -> Result<(), String> {
+    if matches!(conflict, ElevatedConflict::Skip) && dst.exists() {
+        return Ok(()); // skip — 원본 유지
+    }
+    copy_one(src, dst, conflict)?;
+    remove_path(src).map_err(|e| e.to_string())
+}
+
+/// OS 휴지통으로 이동 (복구 가능). 승격 프로세스라 보호 경로 파일도 가능.
+fn trash_one(src: &Path) -> Result<(), String> {
+    trash::delete(src).map_err(|e| e.to_string())
+}
+
+/// 영구 삭제 (rm) — 커맨드에서 영구삭제 게이트(모드+단어타이핑)를 이미 통과한 항목만.
+fn delete_one(src: &Path) -> Result<(), String> {
+    remove_path(src).map_err(|e| e.to_string())
 }
 
 /// 파일/디렉토리 복사(부모 디렉토리 보장). dst 는 미존재(또는 Overwrite 로 비워진) 상태.
@@ -331,11 +372,11 @@ mod tests {
     fn manifest_hash_roundtrip_and_tamper_detect() {
         let m = ElevatedManifest {
             version: 1,
-            op: "copy".into(),
+            op: ElevatedOp::Copy,
             conflict: ElevatedConflict::Overwrite,
             items: vec![ElevatedItem {
                 src: PathBuf::from("/a/x.txt"),
-                dst: PathBuf::from("/b/x.txt"),
+                dst: Some(PathBuf::from("/b/x.txt")),
             }],
         };
         let bytes = serde_json::to_vec(&m).unwrap();
@@ -347,7 +388,7 @@ mod tests {
         assert_ne!(sha256_hex(&tampered), h);
         // 라운드트립.
         let back: ElevatedManifest = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(back.op, "copy");
+        assert_eq!(back.op, ElevatedOp::Copy);
         assert_eq!(back.conflict, ElevatedConflict::Overwrite);
     }
 

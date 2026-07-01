@@ -1,32 +1,44 @@
-import type { CopyPlan, ConflictPolicy } from "@/types/bindings";
+import type {
+  CopyPlan,
+  MovePlan,
+  DeletePlan,
+  ConflictPolicy,
+} from "@/types/bindings";
 
 /**
- * 복사 task 가 `PermissionDenied` 로 실패했을 때 **관리자 승격 재시도**를 하려면 원본
- * CopyPlan+policy 가 필요한데, 복사는 백그라운드 task 라 실패 이벤트에는 메시지만 온다.
- * 그래서 enqueue 시점에 taskId 로 기억해 뒀다가, 실패 이벤트에서 꺼내 재시도한다.
+ * 복사/이동/삭제 task 가 `PermissionDenied` 로 실패했을 때 **승격 재시도**(로컬 UAC /
+ * 원격 sudo)를 하려면 원본 plan 이 필요한데, 이들은 백그라운드 task 라 실패 이벤트엔
+ * 메시지만 온다. 그래서 enqueue 시점에 taskId 로 기억해 뒀다가 꺼내 재시도한다.
  *
- * 리액티브 불필요 — `useTaskEvents` 가 imperatively 조회. 완료/취소/실패 시 반드시 take
- * 해 정리(누수 방지 + 캡).
+ * 리액티브 불필요 — `useTaskEvents` 가 imperatively 조회. 완료/취소/실패 시 반드시 take.
  */
-const pending = new Map<string, { plan: CopyPlan; policy: ConflictPolicy }>();
+export type ElevatablePlan =
+  | { op: "copy"; plan: CopyPlan; policy: ConflictPolicy }
+  | { op: "move"; plan: MovePlan; policy: ConflictPolicy }
+  | { op: "delete"; plan: DeletePlan };
 
-export function rememberElevatable(
-  taskId: string,
-  plan: CopyPlan,
-  policy: ConflictPolicy,
-): void {
-  pending.set(taskId, { plan, policy });
-  // 누수 방지 캡 — 오래된 것부터 버림.
+const pending = new Map<string, ElevatablePlan>();
+
+export function rememberElevatable(taskId: string, item: ElevatablePlan): void {
+  pending.set(taskId, item);
   if (pending.size > 50) {
     const first = pending.keys().next().value;
     if (first !== undefined) pending.delete(first);
   }
 }
 
-export function takeElevatable(
-  taskId: string,
-): { plan: CopyPlan; policy: ConflictPolicy } | null {
+export function takeElevatable(taskId: string): ElevatablePlan | null {
   const v = pending.get(taskId) ?? null;
   pending.delete(taskId);
   return v;
+}
+
+/** 승격 대상 목적지의 소스 종류 (SSH→sudo, local→UAC 라우팅용). */
+export function elevatableDestKind(e: ElevatablePlan): "local" | "ssh" {
+  return e.op === "delete" ? e.plan.source.kind : e.plan.dst.source.kind;
+}
+
+/** 다이얼로그에 표시할 대상 경로 (copy/move=dst, delete=원본 위치). */
+export function elevatableDestPath(e: ElevatablePlan): string {
+  return e.op === "delete" ? e.plan.source_location.path : e.plan.dst.path;
 }
