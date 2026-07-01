@@ -220,6 +220,36 @@ mod trash_tests {
     }
 }
 
+#[cfg(test)]
+mod resolve_path_tests {
+    use super::resolve_open_path;
+
+    #[test]
+    fn dir_resolves_to_itself() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().to_str().unwrap();
+        assert_eq!(resolve_open_path(p).as_deref(), Some(p));
+    }
+
+    #[test]
+    fn file_resolves_to_parent_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("x.txt");
+        std::fs::write(&file, b"hi").unwrap();
+        assert_eq!(
+            resolve_open_path(file.to_str().unwrap()).as_deref(),
+            dir.path().to_str()
+        );
+    }
+
+    #[test]
+    fn nonexistent_resolves_to_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("nope-does-not-exist");
+        assert_eq!(resolve_open_path(missing.to_str().unwrap()), None);
+    }
+}
+
 /// 파일을 연다 — 확장자별 연결 프로그램이 지정돼 있으면 그 앱으로, 아니면 OS 기본.
 ///
 /// 로컬: 경로를 그대로. 원격(SSH): SFTP 로 임시 디렉토리에 다운로드한 뒤 그 사본을 연다
@@ -720,23 +750,57 @@ pub async fn open_in_duet_set(enabled: bool) -> Result<bool, DuetError> {
     .map_err(|e| DuetError::Io(format!("registry task join: {e}")))?
 }
 
-/// 실행 인자(argv[1])로 받은 폴더 경로 — 탐색기 "Open in duet" → 시작 시 그 폴더 열기.
-/// 디렉토리면 그 경로, 파일이면 부모, 아니면 None. (어느 OS 든 무해)
+/// argv 로 받은 경로를 "열 디렉토리"로 정규화 — 디렉토리면 그대로, 파일이면 부모,
+/// 존재하지 않으면 None. cold start(`startup_open_path`)와 single-instance forward
+/// (`lib.rs` 의 플러그인 콜백)가 공유한다.
+pub(crate) fn resolve_open_path(arg: &str) -> Option<String> {
+    let p = PathBuf::from(arg);
+    let meta = std::fs::metadata(&p).ok()?;
+    if meta.is_dir() {
+        Some(arg.to_string())
+    } else {
+        p.parent().and_then(|x| x.to_str()).map(str::to_owned)
+    }
+}
+
+/// 실행 인자(argv[1])로 받은 폴더 경로 — 탐색기 "Open in duet" / 기본 핸들러 → 시작 시
+/// 그 폴더 열기. 디렉토리면 그 경로, 파일이면 부모, 아니면 None. (어느 OS 든 무해)
 #[tauri::command]
 #[specta::specta]
 pub async fn startup_open_path() -> Result<Option<String>, DuetError> {
     let Some(arg) = std::env::args().nth(1) else {
         return Ok(None);
     };
-    let p = PathBuf::from(&arg);
-    let Ok(meta) = std::fs::metadata(&p) else {
-        return Ok(None);
-    };
-    if meta.is_dir() {
-        Ok(Some(arg))
-    } else {
-        Ok(p.parent().and_then(|x| x.to_str()).map(str::to_owned))
-    }
+    Ok(resolve_open_path(&arg))
+}
+
+/// 폴더/드라이브 더블클릭 기본 동작이 duet 으로 설정돼 있는지 (Windows; 그 외 false).
+#[tauri::command]
+#[specta::specta]
+pub async fn default_folder_handler_get() -> Result<bool, DuetError> {
+    tokio::task::spawn_blocking(crate::platform::default_folder_handler_status)
+        .await
+        .map_err(|e| DuetError::Io(format!("registry task join: {e}")))?
+}
+
+/// 폴더 더블클릭 기본 동작을 duet 으로 설정/해제. 켜면 "Open in duet" verb 도 함께
+/// 등록한다(기본 동작이 가리킬 대상). current_exe() 경로 사용·HKCU·가역. 새 상태 반환.
+#[tauri::command]
+#[specta::specta]
+pub async fn default_folder_handler_set(enabled: bool) -> Result<bool, DuetError> {
+    tokio::task::spawn_blocking(move || {
+        if enabled {
+            let exe =
+                std::env::current_exe().map_err(|e| DuetError::Io(format!("current_exe: {e}")))?;
+            crate::platform::set_default_folder_handler(true, &exe)?;
+        } else {
+            // 끌 때 exe 는 안 쓰임 — 빈 경로.
+            crate::platform::set_default_folder_handler(false, &PathBuf::new())?;
+        }
+        crate::platform::default_folder_handler_status()
+    })
+    .await
+    .map_err(|e| DuetError::Io(format!("registry task join: {e}")))?
 }
 
 /// 로컬 항목들의 절대경로 — OS 드래그-아웃(파일 export)용. 경로 결합은 `Path`(§7).

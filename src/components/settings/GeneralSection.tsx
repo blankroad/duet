@@ -16,9 +16,11 @@ const selectClass =
 export function GeneralSection() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
-  // 탐색기 "Open in duet" 우클릭 등록 상태 (Windows 전용, 레지스트리가 SoT).
+  // 탐색기 통합 상태 (Windows 전용, 레지스트리가 SoT). 두 토글이 같은 키군을 만지므로
+  // busy 플래그 하나로 직렬화한다.
   const [openInDuet, setOpenInDuet] = useState(false);
-  const [openInDuetBusy, setOpenInDuetBusy] = useState(false);
+  const [defaultHandler, setDefaultHandler] = useState(false);
+  const [shellBusy, setShellBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -28,8 +30,13 @@ export function GeneralSection() {
       setLoading(false);
     });
     if (isWindows) {
-      commands.openInDuetGet().then((r) => {
-        if (!cancelled && r.status === "ok") setOpenInDuet(r.data);
+      void Promise.all([
+        commands.openInDuetGet(),
+        commands.defaultFolderHandlerGet(),
+      ]).then(([a, b]) => {
+        if (cancelled) return;
+        if (a.status === "ok") setOpenInDuet(a.data);
+        if (b.status === "ok") setDefaultHandler(b.data);
       });
     }
     return () => {
@@ -37,11 +44,29 @@ export function GeneralSection() {
     };
   }, []);
 
+  // 두 토글은 같은 레지스트리 키군을 공유한다(기본 핸들러를 켜면 우클릭 verb 도 등록되고,
+  // 우클릭을 끄면 기본 핸들러 포인터도 함께 풀린다). 그래서 어느 쪽을 만지든 둘 다 다시 읽는다.
+  const refreshShellStatus = async () => {
+    const [a, b] = await Promise.all([
+      commands.openInDuetGet(),
+      commands.defaultFolderHandlerGet(),
+    ]);
+    if (a.status === "ok") setOpenInDuet(a.data);
+    if (b.status === "ok") setDefaultHandler(b.data);
+  };
+
   const toggleOpenInDuet = async (enabled: boolean) => {
-    setOpenInDuetBusy(true);
-    const r = await commands.openInDuetSet(enabled);
-    setOpenInDuetBusy(false);
-    if (r.status === "ok") setOpenInDuet(r.data);
+    setShellBusy(true);
+    await commands.openInDuetSet(enabled);
+    await refreshShellStatus();
+    setShellBusy(false);
+  };
+
+  const toggleDefaultHandler = async (enabled: boolean) => {
+    setShellBusy(true);
+    await commands.defaultFolderHandlerSet(enabled);
+    await refreshShellStatus();
+    setShellBusy(false);
   };
 
   // 저장 후 즉시 적용 (테마 + 새 탭 기본값) — 죽은 토글 방지.
@@ -177,23 +202,44 @@ export function GeneralSection() {
 
       {/* Windows 탐색기 통합 (Windows 전용) */}
       {isWindows && (
-        <label className="flex items-start gap-2 border-t border-border pt-3">
-          <input
-            type="checkbox"
-            checked={openInDuet}
-            disabled={openInDuetBusy}
-            onChange={(e) => void toggleOpenInDuet(e.target.checked)}
-            className="mt-0.5"
-          />
-          <div className="flex-1">
-            <div className="text-base">Add &ldquo;Open in duet&rdquo; to the folder right-click menu</div>
-            <div className="text-meta text-fg-muted">
-              Windows only. Adds a per-user registry entry (no admin) so right-clicking a
-              folder or drive can open it in duet. Fully reversible — turning this off removes
-              the entry. Tip: turn it off before uninstalling.
+        <div className="space-y-2 border-t border-border pt-3">
+          <label className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              checked={openInDuet}
+              disabled={shellBusy}
+              onChange={(e) => void toggleOpenInDuet(e.target.checked)}
+              className="mt-0.5"
+            />
+            <div className="flex-1">
+              <div className="text-base">Add &ldquo;Open in duet&rdquo; to the folder right-click menu</div>
+              <div className="text-meta text-fg-muted">
+                Windows only. Adds a per-user registry entry (no admin) so right-clicking a
+                folder or drive can open it in duet. Fully reversible — turning this off removes
+                the entry. Tip: turn it off before uninstalling.
+              </div>
             </div>
-          </div>
-        </label>
+          </label>
+
+          <label className="ml-6 flex items-start gap-2">
+            <input
+              type="checkbox"
+              checked={defaultHandler}
+              disabled={shellBusy}
+              onChange={(e) => void toggleDefaultHandler(e.target.checked)}
+              className="mt-0.5"
+            />
+            <div className="flex-1">
+              <div className="text-base">Open folders in duet by default (double-click)</div>
+              <div className="text-meta text-fg-muted">
+                Makes duet the default action when you double-click a folder or drive, instead of
+                File Explorer. Enabling this also adds the right-click entry above. Reversible —
+                turning it off restores Explorer. While duet is already running, opened folders
+                appear as a new tab.
+              </div>
+            </div>
+          </label>
+        </div>
       )}
     </div>
   );

@@ -104,6 +104,7 @@ import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
 import { useSshHosts } from "@/hooks/useSshHosts";
 import { useConnectionEvents } from "@/hooks/useConnectionEvents";
 import { useFsChangedEvents } from "@/hooks/useFsChangedEvents";
+import { useOpenPathEvents } from "@/hooks/useOpenPathEvents";
 import { useOsFileDrop } from "@/hooks/useOsFileDrop";
 import { useJournalEvents } from "@/hooks/useJournalEvents";
 import { useKeymapEvents } from "@/hooks/useKeymapEvents";
@@ -548,6 +549,7 @@ function App() {
   useSshHosts();
   useConnectionEvents();
   useFsChangedEvents(onRefresh);
+  useOpenPathEvents(navigate);
   useOsFileDrop();
   useJournalEvents();
   useKeymapEvents();

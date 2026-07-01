@@ -55,6 +55,8 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::system::open_in_duet_get,
             commands::system::open_in_duet_set,
             commands::system::startup_open_path,
+            commands::system::default_folder_handler_get,
+            commands::system::default_folder_handler_set,
             commands::system::local_abs_paths,
             commands::connection::ssh_config_hosts,
             commands::connection::connection_open,
@@ -157,6 +159,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             services::keymap_events::KeymapChangedEvent,
             services::task_events::TaskEvent,
             services::index_events::IndexProgressEvent,
+            services::open_path_events::OpenPathEvent,
         ])
 }
 
@@ -253,7 +256,27 @@ pub fn run() {
         tauri::async_runtime::block_on(async { services::tags::TagsStore::load_default().await })
             .expect("tags load");
 
-    tauri::Builder::default()
+    // single-instance 는 "가장 먼저" 등록돼야 한다(공식 문서). Windows 에서 duet 이
+    // 기본 폴더 핸들러일 때 폴더를 열면 새 인스턴스가 뜨는데, 이를 기존 창으로 forward
+    // 해 활성 패널의 새 탭으로 연다(OpenPathEvent). macOS/Linux 는 폴더 핸들러로 등록되지
+    // 않으므로 미적용 — 의존성·플러그인 모두 cfg(windows).
+    let builder = tauri::Builder::default();
+    #[cfg(windows)]
+    let builder = {
+        use tauri_specta::Event as _;
+        builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_focus();
+            }
+            // argv[1] = 더블클릭/"Open in duet" 으로 들어온 폴더. cold start 와 같은 해석 로직.
+            if let Some(arg) = args.get(1) {
+                if let Some(path) = commands::system::resolve_open_path(arg) {
+                    let _ = services::open_path_events::OpenPathEvent { path }.emit(app);
+                }
+            }
+        }))
+    };
+    builder
         // duet-preview:// 스트리밍 프로토콜 (Range 지원, 로컬+SSH) — 미디어/PDF 미리보기.
         .register_asynchronous_uri_scheme_protocol("duet-preview", |ctx, request, responder| {
             let app = ctx.app_handle().clone();

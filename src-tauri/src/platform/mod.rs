@@ -624,12 +624,117 @@ pub fn open_in_duet_unregister() -> Result<(), DuetError> {
         ] {
             let _ = hkcu.delete_subkey_all(base); // 없으면 Err — 무시(가역·멱등)
         }
+        // verb 키를 지웠으니 기본 동작 포인터(아래)가 사라진 verb 를 가리키지 않게 함께 정리.
+        let _ = clear_default_folder_pointer(&hkcu);
         Ok(())
     }
     #[cfg(not(windows))]
     {
         Ok(())
     }
+}
+
+// === Windows: 폴더/드라이브 더블클릭 기본 동작을 duet 으로 ===
+//
+// 위 "Open in duet" verb(`Directory\shell\duet` 등)를 부모 `...\shell` 의 (Default)
+// 값으로 가리키면, 폴더/드라이브의 *기본 동작*(더블클릭)이 그 verb 를 타게 된다.
+// OpenSSH 의 `open` verb 자체는 건드리지 않으므로 가역 — 끄면 (Default) 값만 원복/삭제.
+// 우리가 덮기 전 기존 기본 verb 가 있었다면 `duet_prev_default` 로 백업했다가 복원한다.
+// 더블클릭 대상이 아닌 `Directory\Background`(빈 공간 우클릭)는 제외.
+
+/// 폴더 더블클릭 기본 동작이 duet 으로 설정돼 있는지. 비-Windows 는 항상 false.
+pub fn default_folder_handler_status() -> Result<bool, DuetError> {
+    #[cfg(windows)]
+    {
+        use winreg::enums::HKEY_CURRENT_USER;
+        use winreg::RegKey;
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        Ok(hkcu
+            .open_subkey(r"Software\Classes\Directory\shell")
+            .ok()
+            .and_then(|k| k.get_value::<String, _>("").ok())
+            .map(|v| v == "duet")
+            .unwrap_or(false))
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(false)
+    }
+}
+
+/// 폴더/드라이브 더블클릭 기본 동작을 duet 으로 설정(`true`)/해제(`false`).
+///
+/// 켤 때는 "Open in duet" verb(3개 키)를 먼저 보장한 뒤 `Directory`/`Drive` 의 shell
+/// (Default) 를 `"duet"` 으로. 끌 때는 우리가 설정한 경우에 한해 원복/삭제. HKCU·가역.
+pub fn set_default_folder_handler(enable: bool, exe: &Path) -> Result<(), DuetError> {
+    #[cfg(windows)]
+    {
+        use winreg::enums::HKEY_CURRENT_USER;
+        use winreg::RegKey;
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        if enable {
+            // 기본 동작이 가리킬 verb 키가 있어야 동작 — 멱등 등록.
+            open_in_duet_register(exe)?;
+            for base in [
+                r"Software\Classes\Directory\shell",
+                r"Software\Classes\Drive\shell",
+            ] {
+                let (key, _) = hkcu.create_subkey(base)?;
+                // 우리가 덮기 전의 기존 기본 verb 백업(있고, 우리 값이 아니고, 백업 전일 때만).
+                if let Ok(prev) = key.get_value::<String, _>("") {
+                    if !prev.is_empty()
+                        && prev != "duet"
+                        && key.get_value::<String, _>("duet_prev_default").is_err()
+                    {
+                        let _ = key.set_value("duet_prev_default", &prev);
+                    }
+                }
+                key.set_value("", &"duet")?;
+            }
+            Ok(())
+        } else {
+            let _ = exe;
+            clear_default_folder_pointer(&hkcu)
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (enable, exe);
+        Err(DuetError::NotSupported(
+            "shell integration is only supported on Windows".into(),
+        ))
+    }
+}
+
+/// `Directory`/`Drive` 의 shell (Default) 가 우리(`duet`)면 백업 복원 또는 삭제.
+/// 남이 설정한 값은 건드리지 않는다.
+#[cfg(windows)]
+fn clear_default_folder_pointer(hkcu: &winreg::RegKey) -> Result<(), DuetError> {
+    use winreg::enums::{KEY_QUERY_VALUE, KEY_SET_VALUE};
+    for base in [
+        r"Software\Classes\Directory\shell",
+        r"Software\Classes\Drive\shell",
+    ] {
+        let Ok(key) = hkcu.open_subkey_with_flags(base, KEY_QUERY_VALUE | KEY_SET_VALUE) else {
+            continue; // 키 자체가 없으면 정리할 것 없음
+        };
+        let ours = key
+            .get_value::<String, _>("")
+            .map(|v| v == "duet")
+            .unwrap_or(false);
+        if ours {
+            match key.get_value::<String, _>("duet_prev_default") {
+                Ok(prev) => {
+                    let _ = key.set_value("", &prev);
+                }
+                Err(_) => {
+                    let _ = key.delete_value("");
+                }
+            }
+        }
+        let _ = key.delete_value("duet_prev_default");
+    }
+    Ok(())
 }
 
 #[cfg(test)]

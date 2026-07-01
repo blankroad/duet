@@ -101,6 +101,11 @@ systemicons = "0.9"
 # total 178M dl). 대안 windows-registry(MS 공식, 24M)·registry(29k) 검토 — winreg
 # API 가 가장 단순. 토글 off = 우리가 만든 3개 키만 재귀 삭제(완전 가역).
 winreg = "0.55"
+# 기본 폴더 핸들러일 때 폴더 더블클릭마다 새 창이 뜨는 것 방지 — 기존 창에 새 탭으로 forward.
+# §6 승인(2026-07): tauri-plugin-single-instance = tauri-apps 공식 1st-party 플러그인
+# (누적 3.9M / recent 90d 1.79M dl). 대안(named pipe/lock 직접 구현)은 OS별 IPC 재발명이라
+# 비현실적. Windows 전용 기능이라 target.windows 에만 — 플러그인 등록도 cfg(windows).
+tauri-plugin-single-instance = "2"
 # 우클릭 셸 컨텍스트 메뉴 호스팅 (Tier 2: IContextMenu COM) — Explorer/TC 와 동일하게
 # 이름·필터·COM 핸들러(7-Zip 등)·서브메뉴를 셸에 위임해 정확히 가져온다.
 # §6 승인(2026-06): windows = MS 공식 Win32/COM 바인딩, 사실상 표준(수천만 dl). 버전
