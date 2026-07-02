@@ -136,83 +136,109 @@ fn worker_loop(rx: mpsc::Receiver<Req>) {
         }
     };
 
-    while let Ok(req) = rx.recv() {
-        match req {
-            Req::Build {
-                token,
-                hwnd,
-                path,
-                scope,
-                reply,
-                queued_at,
-            } => {
-                let wait_ms = queued_at.elapsed().as_millis() as u64;
-                let t_build = Instant::now();
-                // SAFETY: 셸 객체 생성/열거는 이 스레드에서만.
-                let items = match unsafe { build_menu(HWND(hwnd as *mut _), &path, scope) } {
-                    Ok((cm, hmenu, phases)) => {
-                        let build_ms = t_build.elapsed().as_millis() as u64;
-                        let mut stats = EnumStats::default();
-                        let t_enum = Instant::now();
-                        let items = unsafe { enumerate(hmenu, 0, &mut stats) };
-                        tracing::info!(
-                            token,
-                            wait_ms,
-                            build_ms,
-                            parse_ms = phases.parse_ms,
-                            query_ms = phases.query_ms,
-                            enum_ms = t_enum.elapsed().as_millis() as u64,
-                            items = stats.items,
-                            icons = stats.icons,
-                            icon_ms = stats.icon_time.as_millis() as u64,
-                            "shell menu build"
-                        );
-                        open.insert(token, (cm, hmenu, hwnd));
-                        order.push_back(token);
-                        while order.len() > MAX_OPEN {
-                            if let Some(old) = order.pop_front() {
-                                destroy(&mut open, old);
+    loop {
+        let first = match rx.recv() {
+            Ok(r) => r,
+            Err(_) => break,
+        };
+        // 밀린 요청을 한 번에 끌어와 정리 — QueryContextMenu 가 느린 머신(수 초)에서
+        // 직렬 큐가 증폭되는 걸 막는다. 컨텍스트 메뉴는 UI 에 하나뿐이므로:
+        // - Build 는 마지막 것만 실제 빌드(앞선 것들은 이미 닫힌 메뉴용 — 빈 응답으로 skip)
+        // - Prewarm 은 배치 끝으로(실제 우클릭이 예열보다 우선)
+        let mut batch = vec![first];
+        while let Ok(r) = rx.try_recv() {
+            batch.push(r);
+        }
+        let (mut work, prewarms): (Vec<Req>, Vec<Req>) = batch
+            .into_iter()
+            .partition(|r| !matches!(r, Req::Prewarm { .. }));
+        work.extend(prewarms);
+        let last_build = work.iter().rposition(|r| matches!(r, Req::Build { .. }));
+        for (i, req) in work.into_iter().enumerate() {
+            match req {
+                Req::Build {
+                    token,
+                    hwnd,
+                    path,
+                    scope,
+                    reply,
+                    queued_at,
+                } => {
+                    if Some(i) != last_build {
+                        // 더 새 Build 가 대기 중 — 이 메뉴는 이미 닫혔다. FE 는 빈 items 를
+                        // null 처리(openShellMenu)하므로 세션 정리도 자연히 no-op.
+                        tracing::info!(token, "shell menu build skipped (superseded)");
+                        let _ = reply.send(Vec::new());
+                        continue;
+                    }
+                    let wait_ms = queued_at.elapsed().as_millis() as u64;
+                    let t_build = Instant::now();
+                    // SAFETY: 셸 객체 생성/열거는 이 스레드에서만.
+                    let items = match unsafe { build_menu(HWND(hwnd as *mut _), &path, scope) } {
+                        Ok((cm, hmenu, phases)) => {
+                            let build_ms = t_build.elapsed().as_millis() as u64;
+                            let mut stats = EnumStats::default();
+                            let t_enum = Instant::now();
+                            let items = unsafe { enumerate(hmenu, 0, &mut stats) };
+                            tracing::info!(
+                                token,
+                                wait_ms,
+                                build_ms,
+                                parse_ms = phases.parse_ms,
+                                query_ms = phases.query_ms,
+                                enum_ms = t_enum.elapsed().as_millis() as u64,
+                                items = stats.items,
+                                icons = stats.icons,
+                                icon_ms = stats.icon_time.as_millis() as u64,
+                                "shell menu build"
+                            );
+                            open.insert(token, (cm, hmenu, hwnd));
+                            order.push_back(token);
+                            while order.len() > MAX_OPEN {
+                                if let Some(old) = order.pop_front() {
+                                    destroy(&mut open, old);
+                                }
                             }
+                            items
                         }
-                        items
-                    }
-                    Err(e) => {
-                        tracing::warn!(token, wait_ms, error = %e, "shell menu build failed");
-                        Vec::new()
-                    }
-                };
-                let _ = reply.send(items);
-            }
-            Req::Invoke { token, cmd_id } => {
-                if let Some((cm, _, hwnd)) = open.get(&token) {
-                    if (ID_FIRST..=ID_LAST).contains(&cmd_id) {
-                        // SAFETY: cm 은 이 스레드에서 만든 살아있는 IContextMenu.
-                        let _ = unsafe { invoke(cm, HWND(*hwnd as *mut _), cmd_id) };
-                    }
+                        Err(e) => {
+                            tracing::warn!(token, wait_ms, error = %e, "shell menu build failed");
+                            Vec::new()
+                        }
+                    };
+                    let _ = reply.send(items);
                 }
-                order.retain(|t| *t != token);
-                destroy(&mut open, token);
-            }
-            Req::Close { token } => {
-                order.retain(|t| *t != token);
-                destroy(&mut open, token);
-            }
-            Req::Prewarm { hwnd, path } => {
-                let t = Instant::now();
-                // 메뉴를 만들었다 즉시 버린다 — 핸들러 COM 만 메모리에 로드(warm).
-                // SAFETY: 셸 객체 생성/파기 전부 이 스레드에서.
-                if let Ok((_cm, hmenu, _)) =
-                    unsafe { build_menu(HWND(hwnd as *mut _), &path, scope_dir()) }
-                {
-                    unsafe {
-                        let _ = DestroyMenu(hmenu);
+                Req::Invoke { token, cmd_id } => {
+                    if let Some((cm, _, hwnd)) = open.get(&token) {
+                        if (ID_FIRST..=ID_LAST).contains(&cmd_id) {
+                            // SAFETY: cm 은 이 스레드에서 만든 살아있는 IContextMenu.
+                            let _ = unsafe { invoke(cm, HWND(*hwnd as *mut _), cmd_id) };
+                        }
                     }
+                    order.retain(|t| *t != token);
+                    destroy(&mut open, token);
                 }
-                tracing::info!(
-                    elapsed_ms = t.elapsed().as_millis() as u64,
-                    path = %path.display(),
-                    "shell menu prewarm"
-                );
+                Req::Close { token } => {
+                    order.retain(|t| *t != token);
+                    destroy(&mut open, token);
+                }
+                Req::Prewarm { hwnd, path } => {
+                    let t = Instant::now();
+                    // 메뉴를 만들었다 즉시 버린다 — 핸들러 COM 만 메모리에 로드(warm).
+                    // SAFETY: 셸 객체 생성/파기 전부 이 스레드에서.
+                    if let Ok((_cm, hmenu, _)) =
+                        unsafe { build_menu(HWND(hwnd as *mut _), &path, scope_dir()) }
+                    {
+                        unsafe {
+                            let _ = DestroyMenu(hmenu);
+                        }
+                    }
+                    tracing::info!(
+                        elapsed_ms = t.elapsed().as_millis() as u64,
+                        path = %path.display(),
+                        "shell menu prewarm"
+                    );
+                }
             }
         }
     }
