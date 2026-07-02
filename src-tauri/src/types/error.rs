@@ -3,12 +3,15 @@
 //! `Serialize` 필수 — Tauri command가 `Result<T, DuetError>` 반환 시 자동 직렬화.
 //! `anyhow::Error` 는 `commands/` 진입에서 `DuetError`로 변환.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use specta::Type;
 use thiserror::Error;
 
 /// Tauri command에서 반환되는 최상위 에러 타입.
-#[derive(Debug, Error, Serialize, Type)]
+///
+/// `Clone`/`Deserialize` 는 `TaskChange::Failed` 가 구조화된 실패 원인으로 이 타입을
+/// 이벤트에 실어 보내기 위해 필요 (task 이벤트 타입들이 Clone+Deserialize derive).
+#[derive(Debug, Clone, Error, Serialize, Deserialize, Type)]
 #[serde(tag = "kind", content = "message")]
 #[non_exhaustive]
 pub enum DuetError {
@@ -44,7 +47,7 @@ pub enum DuetError {
 }
 
 /// 호스트키 검증 실패 상세 — IPC 로 frontend 에 전달해 신뢰 다이얼로그를 띄운다.
-#[derive(Debug, Clone, Serialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct HostKeyInfo {
     /// 검증 대상 호스트명.
     pub host: String,

@@ -15,6 +15,11 @@ export interface PasswordPromptDialogProps {
    */
   submit: (password: string) => Promise<PwSubmitResult>;
   onClose: () => void;
+  /**
+   * true = 직전 시도가 틀린 암호로 실패해서 다시 열림 — 처음부터 오류 메시지 표시.
+   * (extract 처럼 결과가 task 이벤트로 오는 흐름은 "retry" 대신 재오픈으로 재시도.)
+   */
+  wrongPassword?: boolean | undefined;
 }
 
 /**
@@ -27,9 +32,12 @@ export function PasswordPromptDialog({
   archiveName,
   submit,
   onClose,
+  wrongPassword,
 }: PasswordPromptDialogProps) {
   const [pw, setPw] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(
+    wrongPassword ? "Wrong password — try again" : null,
+  );
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 

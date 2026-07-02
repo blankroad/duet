@@ -150,31 +150,45 @@ pub async fn extract_execute(
             original_path: plan.dest_dir.clone(),
         });
     }
-    fs.mkdir(&plan.dest_dir).await?;
 
-    if cancel_token.is_cancelled() {
-        return Err(DuetError::Cancelled);
+    // mkdir 이후의 실패(암호 zip 의 NeedPassword, 취소 등)는 아래에서 롤백 — 안 하면
+    // 빈/부분 dest 폴더가 남고, 충돌로 옮겨둔 기존 폴더도 backup 이름에 갇힌다.
+    let extracted: Result<(), DuetError> = async {
+        fs.mkdir(&plan.dest_dir).await?;
+
+        if cancel_token.is_cancelled() {
+            return Err(DuetError::Cancelled);
+        }
+
+        match &plan.source {
+            SourceId::Local => {
+                extract_local(&archive_path, &plan.dest_dir, plan.format, password).await
+            }
+            SourceId::Ssh { connection_id, .. } => {
+                let pool = ctx.pool.as_ref().ok_or_else(|| {
+                    DuetError::Io("OpCtx.pool required for remote extract".into())
+                })?;
+                extract_remote(
+                    pool,
+                    connection_id,
+                    &archive_path,
+                    &plan.dest_dir,
+                    plan.format,
+                    password.as_deref(),
+                )
+                .await
+            }
+        }
     }
-
-    match &plan.source {
-        SourceId::Local => {
-            extract_local(&archive_path, &plan.dest_dir, plan.format, password).await?
+    .await;
+    if let Err(e) = extracted {
+        // 이 op 가 방금 만든 dest 만 제거 — Replace 백업 정리와 동일한 내부 rollback
+        // 경로(fs.remove). 롤백 자체의 실패는 원인 에러를 가리지 않도록 무시.
+        let _ = fs.remove(&plan.dest_dir).await;
+        for b in &backups {
+            let _ = fs.rename(&b.backup_path, &b.original_path).await;
         }
-        SourceId::Ssh { connection_id, .. } => {
-            let pool = ctx
-                .pool
-                .as_ref()
-                .ok_or_else(|| DuetError::Io("OpCtx.pool required for remote extract".into()))?;
-            extract_remote(
-                pool,
-                connection_id,
-                &archive_path,
-                &plan.dest_dir,
-                plan.format,
-                password.as_deref(),
-            )
-            .await?
-        }
+        return Err(e);
     }
 
     // undo = 생성된 dest_dir 제거 + backup 복원 (UndoCopy 재사용).
@@ -225,8 +239,8 @@ fn extract_local_blocking(
             let mut zip =
                 zip::ZipArchive::new(file).map_err(|e| DuetError::Io(format!("zip open: {e}")))?;
             // 암호화 항목이 하나라도 있으면(by_index_raw=복호화 안 함) 암호 경로로.
-            let encrypted = (0..zip.len())
-                .any(|i| zip.by_index_raw(i).map(|e| e.encrypted()).unwrap_or(false));
+            let encrypted =
+                (0..zip.len()).any(|i| zip.by_index_raw(i).map(|e| e.encrypted()).unwrap_or(false));
             if encrypted {
                 let pw = password.ok_or(DuetError::NeedPassword)?;
                 extract_zip_with_password(&mut zip, dest, pw)?;
@@ -1042,6 +1056,79 @@ mod tests {
             extract_local_blocking(&zip_path, &wrong, ArchiveFormat::Zip, Some("nope")),
             Err(DuetError::NeedPassword)
         ));
+    }
+
+    /// extract_execute 가 NeedPassword 로 실패하면 잔재를 남기지 않는지 —
+    /// ① 새로 만든 dest 폴더 제거, ② 충돌로 backup 에 옮겨둔 기존 폴더 원위치 복원.
+    #[tokio::test]
+    async fn extract_execute_need_password_rolls_back_dest() {
+        use crate::fs::LocalFs;
+
+        let root = tempfile::tempdir().unwrap();
+        // ctx 파일(s.toml/j.jsonl)과 섞이지 않게 작업 폴더 분리 — 잔재 검사 정확성.
+        let work = root.path().join("work");
+        std::fs::create_dir(&work).unwrap();
+        let zip_path = work.join("secret.zip");
+        {
+            let f = std::fs::File::create(&zip_path).unwrap();
+            let mut w = zip::ZipWriter::new(f);
+            let opts: zip::write::FileOptions<()> = zip::write::FileOptions::default()
+                .with_aes_encryption(zip::AesMode::Aes256, "s3cret");
+            w.start_file("msg.txt", opts).unwrap();
+            w.write_all(b"top secret").unwrap();
+            w.finish().unwrap();
+        }
+
+        let settings =
+            crate::services::settings::SettingsStore::load_from(&root.path().join("s.toml"))
+                .await
+                .unwrap();
+        let journal = crate::services::journal::Journal::load_from(&root.path().join("j.jsonl"))
+            .await
+            .unwrap();
+        let ctx = OpCtx {
+            settings,
+            journal,
+            pool: None,
+            app: None,
+        };
+        let local = LocalFs::new();
+        let entry = EntryRef {
+            location: Location {
+                source: SourceId::Local,
+                path: work.clone(),
+            },
+            name: "secret.zip".into(),
+        };
+        let work_entries = || {
+            let mut names: Vec<String> = std::fs::read_dir(&work)
+                .unwrap()
+                .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+                .collect();
+            names.sort();
+            names
+        };
+
+        // ① 충돌 없음 — 실패 후 dest 폴더가 아예 없어야 한다 ("빈 폴더만 생김" 방지).
+        let plan = extract_plan(&local, entry.clone()).await.unwrap();
+        let dest = plan.dest_dir.clone();
+        let err = extract_execute(&local, plan, None, &ctx, CancellationToken::new())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DuetError::NeedPassword));
+        assert!(!dest.exists());
+        assert_eq!(work_entries(), vec!["secret.zip"]);
+
+        // ② dest 와 같은 이름의 기존 폴더 — 실패 후 내용 그대로 복원, backup 잔재 없음.
+        std::fs::create_dir(&dest).unwrap();
+        std::fs::write(dest.join("keep.txt"), b"keep").unwrap();
+        let plan = extract_plan(&local, entry).await.unwrap();
+        let err = extract_execute(&local, plan, None, &ctx, CancellationToken::new())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DuetError::NeedPassword));
+        assert_eq!(std::fs::read(dest.join("keep.txt")).unwrap(), b"keep");
+        assert_eq!(work_entries(), vec!["secret", "secret.zip"]);
     }
 
     /// tar.gz 압축 → 해제 round-trip — compress_local_blocking + extract 검증.

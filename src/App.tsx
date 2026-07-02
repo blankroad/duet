@@ -21,6 +21,7 @@ import { CopyMoveConfirmDialog } from "@/components/dialogs/CopyMoveConfirmDialo
 import { DangerConfirmDialog } from "@/components/dialogs/DangerConfirmDialog";
 import { SudoPasswordDialog } from "@/components/dialogs/SudoPasswordDialog";
 import { rememberElevatable, elevatableDestPath, type ElevatablePlan } from "@/lib/elevatePending";
+import { rememberExtract } from "@/lib/extractPending";
 import { ProgressModal } from "@/components/dialogs/ProgressModal";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { Toast } from "@/components/Toast";
@@ -1338,12 +1339,17 @@ function App() {
       {dialog.kind === "extract-password" && (
         <PasswordPromptDialog
           archiveName={dialog.plan.archive_name}
+          wrongPassword={dialog.wrong}
           onClose={closeDialog}
           submit={async (pw) => {
+            // 커맨드는 task enqueue 후 TaskId 를 즉시 반환 — 암호가 틀리면 task 가
+            // NeedPassword 로 실패하고 useTaskEvents 가 이 다이얼로그를 다시 연다.
             const r = await commands.fsExtractExecute(dialog.plan, pw);
-            if (r.status === "ok") return "ok";
-            if (r.error.kind === "NeedPassword") return "retry";
-            showToast(`Extract failed: ${formatErr(r.error)}`);
+            if (r.status === "error") {
+              showToast(`Extract failed: ${formatErr(r.error)}`);
+              return "ok";
+            }
+            rememberExtract(r.data, { plan: dialog.plan, attempted: true });
             return "ok";
           }}
         />

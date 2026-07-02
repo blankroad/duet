@@ -92,10 +92,21 @@ pub struct TaskEvent {
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TaskChange {
-    Enqueued { task: TaskDto },
+    Enqueued {
+        task: TaskDto,
+    },
     Started,
-    Progress { progress: ProgressInfo },
-    Completed { journal_id: JournalId },
+    Progress {
+        progress: ProgressInfo,
+    },
+    Completed {
+        journal_id: JournalId,
+    },
     Cancelled,
-    Failed { message: String },
+    Failed {
+        message: String,
+        /// 구조화된 실패 원인 — frontend 가 kind 로 분기한다
+        /// (예: 암호 zip 해제의 `NeedPassword` → 암호 다이얼로그 재시도).
+        error: crate::types::DuetError,
+    },
 }

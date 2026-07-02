@@ -181,7 +181,13 @@ impl TaskQueue {
     }
 
     /// 내부용 — worker 가 호출. status update + 종결 시 record 제거.
-    async fn finalize(&self, task_id: &TaskId, status: TaskStatus) {
+    /// `error` 는 Failed 일 때의 구조화된 원인 — frontend 가 kind 로 분기 (NeedPassword 등).
+    async fn finalize(
+        &self,
+        task_id: &TaskId,
+        status: TaskStatus,
+        error: Option<crate::types::DuetError>,
+    ) {
         let mut inner = self.state.lock().await;
         // 완료 시 영향받은 디렉토리에 fs:changed 를 쏘기 위해 affected 를 미리 확보.
         let affected = inner
@@ -199,6 +205,9 @@ impl TaskQueue {
             TaskStatus::Cancelled => TaskChange::Cancelled,
             TaskStatus::Failed { message } => TaskChange::Failed {
                 message: message.clone(),
+                // finalize 를 Failed 로 부르는 곳은 worker 뿐이라 error 는 항상 Some —
+                // 방어적으로 없으면 message 를 Io 로 감싼다.
+                error: error.unwrap_or_else(|| crate::types::DuetError::Io(message.clone())),
             },
             _ => return, // Queued / Running 은 finalize 아님
         };
@@ -252,14 +261,17 @@ fn spawn_worker(queue: Arc<TaskQueue>) -> mpsc::UnboundedSender<WorkItem> {
                 task_id: task_id.clone(),
             };
             let result = (item.run)(item.cancel_token.clone(), emitter).await;
-            let status = match result {
-                Ok(journal_id) => TaskStatus::Completed { journal_id },
-                Err(crate::types::DuetError::Cancelled) => TaskStatus::Cancelled,
-                Err(e) => TaskStatus::Failed {
-                    message: format!("{e}"),
-                },
+            let (status, error) = match result {
+                Ok(journal_id) => (TaskStatus::Completed { journal_id }, None),
+                Err(crate::types::DuetError::Cancelled) => (TaskStatus::Cancelled, None),
+                Err(e) => (
+                    TaskStatus::Failed {
+                        message: format!("{e}"),
+                    },
+                    Some(e),
+                ),
             };
-            queue.finalize(&task_id, status).await;
+            queue.finalize(&task_id, status, error).await;
         }
     });
     tx

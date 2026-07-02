@@ -11,6 +11,7 @@ import {
 import type { DialogState } from "@/stores/ui-dialogs";
 import { childLocation, sameLocation, sourceKey } from "@/lib/entryDnd";
 import { formatErr } from "@/lib/error";
+import { rememberExtract } from "@/lib/extractPending";
 import { basename } from "@/lib/paths";
 import { useClipboard } from "@/stores/clipboard";
 import { useShelf } from "@/stores/shelf";
@@ -385,11 +386,10 @@ export async function triggerMove(
 }
 
 /** 단일 아카이브 압축 해제 — plan 후 바로 task 로 실행 (진행은 TasksBar).
- * 암호 걸린 zip 이면 백엔드가 NeedPassword → 암호 입력 다이얼로그를 띄워 재시도. */
-export async function triggerExtract(
-  open: OpenFn,
-  showToast: ToastFn,
-): Promise<void> {
+ * 커맨드는 TaskId 를 즉시 반환하므로 암호 zip 여부는 여기서 알 수 없다 —
+ * task 가 NeedPassword 로 실패하면 `useTaskEvents` 가 여기서 기억해 둔 plan 으로
+ * 암호 입력 다이얼로그를 열어 재시도한다. */
+export async function triggerExtract(showToast: ToastFn): Promise<void> {
   const { targets } = resolveActiveTargets();
   if (targets.length !== 1) {
     showToast("Extract: select one archive");
@@ -400,14 +400,13 @@ export async function triggerExtract(
     showToast(`Extract failed: ${formatErr(plan.error)}`);
     return;
   }
-  // 1차 시도는 암호 없이 — 암호 zip 이면 NeedPassword 로 떨어진다.
+  // 1차 시도는 암호 없이 — 암호 zip 이면 task 가 NeedPassword 로 실패한다.
   const exec = await commands.fsExtractExecute(plan.data, null);
-  if (exec.status === "ok") return;
-  if (exec.error.kind === "NeedPassword") {
-    open({ kind: "extract-password", plan: plan.data });
+  if (exec.status === "error") {
+    showToast(`Extract failed: ${formatErr(exec.error)}`);
     return;
   }
-  showToast(`Extract failed: ${formatErr(exec.error)}`);
+  rememberExtract(exec.data, { plan: plan.data, attempted: false });
 }
 
 /** 선택 항목들을 압축 — 이름/포맷 선택 다이얼로그 오픈. */
