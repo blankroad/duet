@@ -282,7 +282,17 @@ function Thumb({
   const show = useAppSettings((s) => s.showThumbnails);
   const [failed, setFailed] = useState(false);
   if (!show || failed || !isThumbable(entry, location)) {
-    return <EntryIcon entry={entry} size={size} />;
+    return (
+      <EntryIcon
+        entry={entry}
+        size={size}
+        localPath={
+          location.source.kind === "local"
+            ? childLocation(location, entry.name).path
+            : null
+        }
+      />
+    );
   }
   return (
     <img

@@ -659,6 +659,17 @@ pub async fn open_terminal(location: Location) -> Result<(), DuetError> {
     }
 }
 
+/// 파일의 OS 네이티브 아이콘 → PNG 바이트 (없거나 미지원 OS 면 Err).
+/// 파일 목록(확장자/경로별 캐시)과 앱 런처 타일 공용. 프론트는 1회 호출·캐시하고
+/// 실패 시 글리프/모노그램 fallback. OS API(GDI) 블로킹이라 `spawn_blocking` 격리.
+#[tauri::command]
+#[specta::specta]
+pub async fn file_icon(path: PathBuf, size: i32) -> Result<Vec<u8>, DuetError> {
+    tokio::task::spawn_blocking(move || crate::platform::os_file_icon(&path, size))
+        .await
+        .map_err(|e| DuetError::Io(format!("icon task join: {e}")))?
+}
+
 // ── 셸 컨텍스트 메뉴(IContextMenu) — Explorer/TC 와 동일 ──────────
 
 /// 우클릭 대상의 실제 셸 메뉴를 핫 COM 워커로 빌드해 항목 트리 반환(token 으로 보관). Windows 전용.

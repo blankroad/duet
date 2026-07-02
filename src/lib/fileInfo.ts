@@ -69,6 +69,13 @@ export function splitNameExt(
   return { stem: name.slice(0, dot), ext: name.slice(dot + 1) };
 }
 
+/** name 의 소문자 확장자 (점 없음). 없음/선두·말미 도트는 "". 표시 전용 — 경로 조작 아님. */
+export function extOf(name: string): string {
+  const dot = name.lastIndexOf(".");
+  if (dot <= 0 || dot === name.length - 1) return "";
+  return name.slice(dot + 1).toLowerCase();
+}
+
 /** entry 의 종류 라벨 (Folder / 확장자 기반 / Symlink 등). */
 export function kindLabel(entry: Entry): string {
   if (entry.kind === "dir") return "Folder";

@@ -49,6 +49,10 @@ pub struct Settings {
     /// 그리드/타일 뷰에서 이미지 썸네일 표시. 디폴트 true.
     #[serde(default = "default_true")]
     pub show_thumbnails: bool,
+    /// 파일 목록에 OS 네이티브 아이콘 표시(연결 프로그램 아이콘, 탐색기와 동일).
+    /// Windows 로컬 파일 전용 — 원격/폴더는 내장 글리프. 디폴트: Windows 만 켬.
+    #[serde(default = "default_os_file_icons")]
+    pub os_file_icons: bool,
     // ── 아래 맵 필드들은 항상 struct 마지막에 (TOML 은 table 뒤에 scalar 못 옴) ──
     /// 확장자(소문자, 점 없음) → 아이콘 팔레트 이름. 유저가 설정에서 지정. 내장 매핑보다 우선.
     #[serde(default)]
@@ -60,6 +64,10 @@ pub struct Settings {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_os_file_icons() -> bool {
+    cfg!(windows)
 }
 
 impl Default for Settings {
@@ -74,6 +82,7 @@ impl Default for Settings {
             show_hidden_default: false,
             single_click_open: false,
             show_thumbnails: true,
+            os_file_icons: default_os_file_icons(),
             ext_icon_overrides: HashMap::new(),
             ext_app_overrides: HashMap::new(),
         }
@@ -91,6 +100,7 @@ pub struct SettingsPatch {
     pub show_hidden_default: Option<bool>,
     pub single_click_open: Option<bool>,
     pub show_thumbnails: Option<bool>,
+    pub os_file_icons: Option<bool>,
     pub ext_icon_overrides: Option<HashMap<String, String>>,
     pub ext_app_overrides: Option<HashMap<String, String>>,
 }
@@ -156,6 +166,9 @@ impl SettingsStore {
         }
         if let Some(v) = patch.show_thumbnails {
             s.show_thumbnails = v;
+        }
+        if let Some(v) = patch.os_file_icons {
+            s.os_file_icons = v;
         }
         if let Some(v) = patch.ext_icon_overrides {
             s.ext_icon_overrides = v;

@@ -82,6 +82,7 @@ export function GeneralSection() {
     });
     useAppSettings.getState().setSingleClickOpen(r.data.single_click_open ?? false);
     useAppSettings.getState().setShowThumbnails(r.data.show_thumbnails ?? true);
+    useAppSettings.getState().setOsFileIcons(r.data.os_file_icons ?? isWindows);
   };
 
   if (loading || !settings) return <div className="text-base text-fg-muted">Loading…</div>;
@@ -178,6 +179,24 @@ export function GeneralSection() {
           </div>
         </div>
       </label>
+
+      {isWindows && (
+        <label className="flex items-start gap-2">
+          <input
+            type="checkbox"
+            checked={settings.os_file_icons}
+            onChange={(e) => void save({ os_file_icons: e.target.checked })}
+            className="mt-0.5"
+          />
+          <div className="flex-1">
+            <div className="text-base">Use Windows file icons</div>
+            <div className="text-meta text-fg-muted">
+              Show the same per-type icons as File Explorer for local files. Off = duet&rsquo;s
+              built-in colored glyphs. Remote (SSH) files always use glyphs.
+            </div>
+          </div>
+        </label>
+      )}
 
       {/* 안전 */}
       <label className="flex items-start gap-2 border-t border-border pt-3">

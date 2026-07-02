@@ -23,7 +23,14 @@ export function PreviewInspector({ entry, location }: { entry: Entry; location: 
   return (
     <div className="border-b border-border p-3">
       <div className="mb-2 flex items-center gap-2">
-        <EntryIcon entry={entry} size={28} />
+        <EntryIcon
+          entry={entry}
+          size={28}
+          localPath={
+            // 인스펙터의 location 은 엔트리 자신의 경로 (목록과 달리 join 불필요).
+            location.source.kind === "local" ? String(location.path) : null
+          }
+        />
         <span className="min-w-0 break-all font-mono text-base">{entry.name}</span>
       </div>
       <dl className="grid grid-cols-[5rem_1fr] gap-x-2 gap-y-1 text-meta">

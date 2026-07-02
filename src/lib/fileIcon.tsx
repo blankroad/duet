@@ -16,9 +16,12 @@ import {
   Link as LinkIcon,
   type LucideIcon,
 } from "lucide-react";
+import { platform } from "@tauri-apps/plugin-os";
 import type { Entry } from "@/types/bindings";
 import { paletteIcon } from "@/lib/iconPalette";
+import { extOf } from "@/lib/fileInfo";
 import { useAppSettings } from "@/stores/settings";
+import { useOsFileIcon } from "@/stores/fileIcons";
 
 /**
  * 파일 종류별 아이콘 + 색 매핑 — EntryRow / EntryGrid / 미리보기 헤더 공유.
@@ -348,13 +351,6 @@ registerName({ Icon: FileText, className: "text-icon-doc" }, [
   "maintainers",
 ]);
 
-/** name 에서 소문자 확장자 추출 (표시 전용 — 경로 조작 아님). */
-function extOf(name: string): string {
-  const dot = name.lastIndexOf(".");
-  if (dot <= 0 || dot === name.length - 1) return "";
-  return name.slice(dot + 1).toLowerCase();
-}
-
 /**
  * entry 종류에 맞는 lucide 아이콘 컴포넌트 + 색 토큰 클래스.
  *
@@ -380,10 +376,57 @@ export function iconForEntry(
   return EXT_ICON[ext] ?? { Icon: File, className: "text-fg-muted" };
 }
 
-/** 바로 렌더 가능한 아이콘 엘리먼트. flex 안에서 긴 파일명이 밀어 줄어들지 않게 shrink-0. */
-export function EntryIcon({ entry, size }: { entry: Entry; size: number }) {
+/** platform() 은 tauri 런타임 필요 — 1회 lazy 판정, 테스트/비-tauri 환경은 false. */
+let winCached: boolean | null = null;
+function isWindows(): boolean {
+  if (winCached === null) {
+    try {
+      winCached = platform() === "windows";
+    } catch {
+      winCached = false;
+    }
+  }
+  return winCached;
+}
+
+/**
+ * 바로 렌더 가능한 아이콘 엘리먼트. flex 안에서 긴 파일명이 밀어 줄어들지 않게 shrink-0.
+ *
+ * `localPath` (로컬 절대경로) 가 오고 설정(osFileIcons)이 켜져 있으면 Windows 로컬
+ * 파일은 OS 네이티브 아이콘(탐색기 동일)을 표시. 유저 확장자 override 는 명시 의도라
+ * OS 아이콘보다 우선. 원격/폴더/로딩 전/실패는 내장 글리프.
+ */
+export function EntryIcon({
+  entry,
+  size,
+  localPath,
+}: {
+  entry: Entry;
+  size: number;
+  /** OS 아이콘 조회용 로컬 절대경로 — 원격/미상이면 생략(글리프). */
+  localPath?: string | null;
+}) {
   // 유저 지정 확장자 아이콘은 설정 캐시에서 — 변경 시 가상 스크롤의 보이는 행만 리렌더.
   const overrides = useAppSettings((s) => s.extIconOverrides);
+  const osIcons = useAppSettings((s) => s.osFileIcons);
+  const wantOs =
+    osIcons &&
+    entry.kind === "file" &&
+    !!localPath &&
+    !overrides?.[extOf(entry.name)] &&
+    isWindows();
+  const osUrl = useOsFileIcon(wantOs ? (localPath ?? null) : null, entry.name);
+  if (osUrl) {
+    return (
+      <img
+        src={osUrl}
+        alt=""
+        draggable={false}
+        className="shrink-0 object-contain"
+        style={{ width: size, height: size }}
+      />
+    );
+  }
   const { Icon, className } = iconForEntry(entry, overrides);
   return <Icon size={size} className={`shrink-0 ${className}`} />;
 }

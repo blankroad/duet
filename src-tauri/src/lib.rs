@@ -155,7 +155,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::apps::apps_dissolve,
             commands::apps::apps_reorder_in_folder,
             commands::apps::app_launch,
-            commands::apps::apps_icon,
+            commands::system::file_icon,
         ])
         .events(collect_events![
             services::connection_events::ConnectionStateEvent,

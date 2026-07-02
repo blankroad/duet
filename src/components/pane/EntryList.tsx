@@ -4,11 +4,14 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 import clsx from "clsx";
 import type { Entry } from "@/types/bindings";
 import {
+  activeTab,
   isParentEntry,
+  usePanes,
   type PaneId,
   type SortKey,
   type SortOrder,
 } from "@/stores/panes";
+import { childLocation } from "@/lib/entryDnd";
 import { setHoverEntry, clearHover } from "@/stores/previewHover";
 import { useUI } from "@/stores/ui";
 import { useContextMenu } from "@/stores/contextMenu";
@@ -61,6 +64,8 @@ export function EntryList({
   const parentRef = useRef<HTMLDivElement>(null);
   const onEntryMouseDown = useEntryDrag(id);
   const splitExt = useUI((s) => s.splitExt);
+  // OS 아이콘(EntryIcon localPath)용 — 현재 패널 폴더 location. 원격이면 null 전달.
+  const location = usePanes((s) => activeTab(s, id).location);
   const dragActive = useDragState((s) => s.active);
   const overThisPane = useDragState((s) => s.overPane === id);
   const overFolder = useDragState((s) =>
@@ -212,6 +217,11 @@ export function EntryList({
                   isCursor={cursorIndex === vi.index}
                   isSelected={selected.has(entry.name)}
                   splitExt={splitExt}
+                  localPath={
+                    location.source.kind === "local"
+                      ? childLocation(location, entry.name).path
+                      : null
+                  }
                   onClick={(e) => onCursorMove(vi.index, e)}
                   onDoubleClick={() => onActivate(entry, vi.index)}
                 />

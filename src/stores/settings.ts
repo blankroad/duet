@@ -12,6 +12,9 @@ interface AppSettingsState {
   /** 그리드/타일 뷰 이미지 썸네일 표시 (디폴트 true). */
   showThumbnails: boolean;
   setShowThumbnails: (v: boolean) => void;
+  /** 파일 목록에 OS 네이티브 아이콘 표시 (Windows 로컬 전용, 디폴트 Windows 켬). */
+  osFileIcons: boolean;
+  setOsFileIcons: (v: boolean) => void;
   /** 확장자(소문자, 점 없음) → 아이콘 팔레트 이름. 유저 지정. EntryIcon 이 읽음. */
   extIconOverrides: Record<string, string>;
   setExtIconOverrides: (v: Record<string, string>) => void;
@@ -22,6 +25,9 @@ export const useAppSettings = create<AppSettingsState>((set) => ({
   setSingleClickOpen: (v) => set({ singleClickOpen: v }),
   showThumbnails: true,
   setShowThumbnails: (v) => set({ showThumbnails: v }),
+  // 부팅 sync(App.tsx) 전 초깃값 — backend 디폴트(Windows 켬)와 곧 동기화됨.
+  osFileIcons: false,
+  setOsFileIcons: (v) => set({ osFileIcons: v }),
   extIconOverrides: {},
   setExtIconOverrides: (v) => set({ extIconOverrides: v }),
 }));

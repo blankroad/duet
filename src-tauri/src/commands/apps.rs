@@ -128,17 +128,6 @@ pub async fn app_launch(path: PathBuf, args: Vec<String>) -> Result<(), DuetErro
         .map_err(|e| DuetError::Io(format!("launch failed: {e}")))
 }
 
-/// 앱 실행파일의 OS 네이티브 아이콘 → PNG 바이트 (없거나 미지원 OS 면 Err).
-/// 프론트는 path 별로 1회 호출·캐시하고, 실패 시 모노그램으로 fallback 한다.
-/// OS API(GDI 등) 블로킹 호출이라 `spawn_blocking` 으로 워커에 격리.
-#[tauri::command]
-#[specta::specta]
-pub async fn apps_icon(path: PathBuf, size: i32) -> Result<Vec<u8>, DuetError> {
-    tokio::task::spawn_blocking(move || crate::platform::app_icon(&path, size))
-        .await
-        .map_err(|e| DuetError::Io(format!("icon task join: {e}")))?
-}
-
 /// OS별 실행 Command 구성 (argv 벡터만, 셸 문자열 절대 X).
 fn build_launch_command(path: &Path, args: &[String]) -> Result<Command, DuetError> {
     #[cfg(target_os = "macos")]

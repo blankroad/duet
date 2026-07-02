@@ -1236,6 +1236,9 @@ function App() {
             .setShowThumbnails(r.data.show_thumbnails ?? true);
           useAppSettings
             .getState()
+            .setOsFileIcons(r.data.os_file_icons ?? platform() === "windows");
+          useAppSettings
+            .getState()
             .setExtIconOverrides(
               (r.data.ext_icon_overrides ?? {}) as Record<string, string>,
             );

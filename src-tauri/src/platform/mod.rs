@@ -388,12 +388,12 @@ pub enum ShellScope {
     Background,
 }
 
-/// 앱 실행파일(`.exe`)의 OS 네이티브 아이콘을 PNG 바이트로 추출.
+/// 파일의 OS 네이티브 아이콘을 PNG 바이트로 추출 — 앱 런처 타일·파일 목록 공용.
 ///
-/// Windows: `systemicons`(SHGetFileInfo+GDI). 절대경로 .exe 면 임베드 리소스
-/// 아이콘을 반환한다. 그 외 OS: `NotSupported` (프론트는 모노그램 fallback).
-/// `size` 는 px (16/32/64 권장).
-pub fn app_icon(path: &Path, size: i32) -> Result<Vec<u8>, DuetError> {
+/// Windows: `systemicons`(SHGetFileInfo+GDI). 임의 파일은 연결 프로그램의 타입
+/// 아이콘, `.exe`/`.lnk`/`.ico` 등은 임베드/자기 아이콘을 반환한다. 그 외 OS:
+/// `NotSupported` (프론트는 글리프/모노그램 fallback). `size` 는 px (16/32/64 권장).
+pub fn os_file_icon(path: &Path, size: i32) -> Result<Vec<u8>, DuetError> {
     #[cfg(windows)]
     {
         let p = path
@@ -406,7 +406,7 @@ pub fn app_icon(path: &Path, size: i32) -> Result<Vec<u8>, DuetError> {
     {
         let _ = (path, size);
         Err(DuetError::NotSupported(
-            "app icon extraction is only supported on Windows".into(),
+            "file icon extraction is only supported on Windows".into(),
         ))
     }
 }

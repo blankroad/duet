@@ -12,6 +12,8 @@ interface EntryRowProps {
   isSelected: boolean;
   /** 확장자를 별도 컬럼으로 분리 (TC 식). */
   splitExt: boolean;
+  /** OS 아이콘 조회용 로컬 절대경로 — 원격 패널이면 null(글리프). */
+  localPath: string | null;
   onClick: (e: React.MouseEvent) => void;
   onDoubleClick: () => void;
 }
@@ -28,6 +30,7 @@ export function EntryRow({
   isCursor,
   isSelected,
   splitExt,
+  localPath,
   onClick,
   onDoubleClick,
 }: EntryRowProps) {
@@ -69,7 +72,7 @@ export function EntryRow({
     >
       {/* 드래그 핸들 = 아이콘+이름 (항목 이동). 우측 메타 컬럼은 마키 시작 영역. */}
       <span data-drag-handle className="flex min-w-0 flex-1 items-center gap-2">
-        <EntryIcon entry={entry} size={14} />
+        <EntryIcon entry={entry} size={14} localPath={localPath} />
         <span
           className={clsx(
             "font-mono truncate",

@@ -18,6 +18,7 @@ export function buildSettingsPatch(
     show_hidden_default: null,
     single_click_open: null,
     show_thumbnails: null,
+    os_file_icons: null,
     ext_icon_overrides: null,
     ext_app_overrides: null,
     ...over,
