@@ -116,6 +116,6 @@ mod tests {
             .unwrap();
         s.set("bm:1".into(), vec!["x".into()]).await.unwrap();
         s.set("bm:1".into(), vec!["  ".into()]).await.unwrap();
-        assert!(s.list().await.get("bm:1").is_none());
+        assert!(!s.list().await.contains_key("bm:1"));
     }
 }

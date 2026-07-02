@@ -106,7 +106,7 @@ mod tests {
         );
         // 빈 문자열 = 제거
         s2.set("prod-1".into(), "  ".into()).await.unwrap();
-        assert!(s2.list().await.get("prod-1").is_none());
+        assert!(!s2.list().await.contains_key("prod-1"));
     }
 
     #[tokio::test]
