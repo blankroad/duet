@@ -15,6 +15,7 @@ use std::collections::{HashMap, VecDeque};
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 use windows::core::{PCSTR, PCWSTR};
 use windows::Win32::Foundation::HWND;
@@ -47,6 +48,8 @@ enum Req {
         path: PathBuf,
         scope: ShellScope,
         reply: tokio::sync::oneshot::Sender<Vec<ShellMenuItem>>,
+        /// enqueue 시각 — 워커 큐 대기시간 계측(직렬 워커라 앞선 빌드에 밀릴 수 있음).
+        queued_at: Instant,
     },
     Invoke {
         token: u64,
@@ -92,6 +95,7 @@ impl Worker {
                 path,
                 scope,
                 reply,
+                queued_at: Instant::now(),
             })
             .is_err()
         {
@@ -140,11 +144,29 @@ fn worker_loop(rx: mpsc::Receiver<Req>) {
                 path,
                 scope,
                 reply,
+                queued_at,
             } => {
+                let wait_ms = queued_at.elapsed().as_millis() as u64;
+                let t_build = Instant::now();
                 // SAFETY: 셸 객체 생성/열거는 이 스레드에서만.
                 let items = match unsafe { build_menu(HWND(hwnd as *mut _), &path, scope) } {
-                    Ok((cm, hmenu)) => {
-                        let items = unsafe { enumerate(hmenu, 0) };
+                    Ok((cm, hmenu, phases)) => {
+                        let build_ms = t_build.elapsed().as_millis() as u64;
+                        let mut stats = EnumStats::default();
+                        let t_enum = Instant::now();
+                        let items = unsafe { enumerate(hmenu, 0, &mut stats) };
+                        tracing::info!(
+                            token,
+                            wait_ms,
+                            build_ms,
+                            parse_ms = phases.parse_ms,
+                            query_ms = phases.query_ms,
+                            enum_ms = t_enum.elapsed().as_millis() as u64,
+                            items = stats.items,
+                            icons = stats.icons,
+                            icon_ms = stats.icon_time.as_millis() as u64,
+                            "shell menu build"
+                        );
                         open.insert(token, (cm, hmenu, hwnd));
                         order.push_back(token);
                         while order.len() > MAX_OPEN {
@@ -154,7 +176,10 @@ fn worker_loop(rx: mpsc::Receiver<Req>) {
                         }
                         items
                     }
-                    Err(_) => Vec::new(),
+                    Err(e) => {
+                        tracing::warn!(token, wait_ms, error = %e, "shell menu build failed");
+                        Vec::new()
+                    }
                 };
                 let _ = reply.send(items);
             }
@@ -173,15 +198,21 @@ fn worker_loop(rx: mpsc::Receiver<Req>) {
                 destroy(&mut open, token);
             }
             Req::Prewarm { hwnd, path } => {
+                let t = Instant::now();
                 // 메뉴를 만들었다 즉시 버린다 — 핸들러 COM 만 메모리에 로드(warm).
                 // SAFETY: 셸 객체 생성/파기 전부 이 스레드에서.
-                if let Ok((_cm, hmenu)) =
+                if let Ok((_cm, hmenu, _)) =
                     unsafe { build_menu(HWND(hwnd as *mut _), &path, scope_dir()) }
                 {
                     unsafe {
                         let _ = DestroyMenu(hmenu);
                     }
                 }
+                tracing::info!(
+                    elapsed_ms = t.elapsed().as_millis() as u64,
+                    path = %path.display(),
+                    "shell menu prewarm"
+                );
             }
         }
     }
@@ -192,12 +223,20 @@ fn scope_dir() -> ShellScope {
     ShellScope::Directory
 }
 
+/// build_menu 단계별 소요(ms) — 병목 진단용. parse=PIDL·IContextMenu 획득,
+/// query=QueryContextMenu(셸 확장 핸들러 전부 동기 호출 — 통상 지배적 비용).
+struct BuildPhases {
+    parse_ms: u64,
+    query_ms: u64,
+}
+
 /// 경로 → IContextMenu + 채워진 HMENU. (모든 호출 unsafe COM)
 unsafe fn build_menu(
     hwnd: HWND,
     path: &Path,
     _scope: ShellScope,
-) -> windows::core::Result<(IContextMenu, HMENU)> {
+) -> windows::core::Result<(IContextMenu, HMENU, BuildPhases)> {
+    let t = Instant::now();
     // 경로 → 절대 PIDL.
     let wide: Vec<u16> = path
         .as_os_str()
@@ -216,15 +255,26 @@ unsafe fn build_menu(
 
     // 절대 PIDL 해제(자식 PIDL 은 부모 소유라 해제 X).
     CoTaskMemFree(Some(pidl as *const _));
+    let parse_ms = t.elapsed().as_millis() as u64;
 
     // HMENU 구성.
     let hmenu = CreatePopupMenu()?;
+    let t = Instant::now();
     cm.QueryContextMenu(hmenu, 0, ID_FIRST, ID_LAST, CMF_NORMAL)?;
-    Ok((cm, hmenu))
+    let query_ms = t.elapsed().as_millis() as u64;
+    Ok((cm, hmenu, BuildPhases { parse_ms, query_ms }))
+}
+
+/// enumerate 계측 — 전체(서브메뉴 포함) 항목/아이콘 수와 아이콘 PNG 인코딩 누적 시간.
+#[derive(Default)]
+struct EnumStats {
+    items: u32,
+    icons: u32,
+    icon_time: Duration,
 }
 
 /// HMENU 를 재귀 열거 → ShellMenuItem 트리. (unsafe Win32)
-unsafe fn enumerate(hmenu: HMENU, depth: u32) -> Vec<ShellMenuItem> {
+unsafe fn enumerate(hmenu: HMENU, depth: u32, stats: &mut EnumStats) -> Vec<ShellMenuItem> {
     if depth > MAX_DEPTH {
         return Vec::new();
     }
@@ -263,7 +313,7 @@ unsafe fn enumerate(hmenu: HMENU, depth: u32) -> Vec<ShellMenuItem> {
         }
         let disabled = (mii.fState.0 & (MFS_DISABLED.0 | MFS_GRAYED.0)) != 0;
         let children = if !mii.hSubMenu.0.is_null() {
-            enumerate(mii.hSubMenu, depth + 1)
+            enumerate(mii.hSubMenu, depth + 1, stats)
         } else {
             Vec::new()
         };
@@ -271,10 +321,17 @@ unsafe fn enumerate(hmenu: HMENU, depth: u32) -> Vec<ShellMenuItem> {
         // null 제외) PNG 로. 셸 확장이 set 한 16px 비트맵.
         let addr = mii.hbmpItem.0 as usize;
         let icon = if addr > 13 && addr != usize::MAX {
-            hbitmap_to_png(mii.hbmpItem)
+            let t = Instant::now();
+            let png = hbitmap_to_png(mii.hbmpItem);
+            stats.icon_time += t.elapsed();
+            if png.is_some() {
+                stats.icons += 1;
+            }
+            png
         } else {
             None
         };
+        stats.items += 1;
         out.push(ShellMenuItem {
             id: mii.wID,
             label,
