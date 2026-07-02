@@ -216,9 +216,30 @@ pub fn run() {
         }
     }
 
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+    // 로그: stdout + `<config>/duet/logs/duet.log.<날짜>` 파일(일 단위 회전, ANSI 없음).
+    // RUST_LOG 미설정 시 `duet_lib=info` — 터미널/env 설정 없이 그냥 실행해도 계측 로그
+    // (셸 메뉴 타이밍 등)가 파일로 남는다. RUST_LOG 를 주면 그 필터가 우선.
+    {
+        use tracing_subscriber::layer::SubscriberExt;
+        use tracing_subscriber::util::SubscriberInitExt;
+        let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("duet_lib=info"));
+        let file_layer = services::settings::duet_config_dir().ok().and_then(|dir| {
+            let logs = dir.join("logs");
+            std::fs::create_dir_all(&logs).ok()?;
+            let appender = tracing_appender::rolling::daily(logs, "duet.log");
+            Some(
+                tracing_subscriber::fmt::layer()
+                    .with_writer(appender)
+                    .with_ansi(false),
+            )
+        });
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(tracing_subscriber::fmt::layer())
+            .with(file_layer)
+            .init();
+    }
 
     let specta_builder = make_specta_builder();
 
