@@ -46,6 +46,14 @@ opener = { version = "0.7", features = ["reveal"] }  # 기본 앱으로 열기 /
 zip = { version = "2", default-features = false, features = ["deflate", "aes-crypto"] }
 tar = "0.4"
 flate2 = "1"
+# === 7z/rar 읽기 전용 (§6 승인 2026-07, 사용자 선택) ===
+# sevenz-rust2: 순수 Rust 7z 해제(LZMA/LZMA2+AES256). total 551k / recent90d 266k dl,
+#   2026-07 활발 유지보수. 대안 sevenz-rust(1.09M dl)는 2024-07 이후 방치 — 후속작 채택.
+# unrar: 공식 unrar C++ 라이브러리 벤더링 래퍼(읽기 전용 — 라이선스는 '압축기 재구현
+#   금지'만 제한, 해제 허용). total 323k / recent90d 140k dl. 순수 Rust rar 디코더는
+#   성숙한 것 없음. 쓰기(생성)는 비대상 — CompressFormat 에 추가 안 함.
+sevenz-rust2 = "0.21"
+unrar = "0.5"
 
 # === 이미지 썸네일 (그리드/타일 뷰) ===
 # §6 승인(2026-06): image = Rust 이미지 처리 사실상 표준(total 142M / recent 90d 33M dl).

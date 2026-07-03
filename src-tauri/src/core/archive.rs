@@ -29,6 +29,11 @@ pub enum ArchiveFormat {
     TarGz,
     /// 단일 파일 gzip (`file.txt.gz`).
     Gz,
+    /// 7-Zip — 읽기 전용(browse/extract). 생성/repack 비대상. 로컬 전용(원격 호스트에
+    /// 7z 바이너리 보장 못 함).
+    SevenZ,
+    /// RAR — 읽기 전용(공식 unrar 라이브러리 라이선스상 생성 불가). 로컬 전용.
+    Rar,
 }
 
 /// 압축 생성 포맷 (UI 선택). `Gz` 는 단일 파일 전용이라 생성 대상에서 제외.
@@ -60,6 +65,10 @@ pub fn detect_format(name: &str) -> Option<ArchiveFormat> {
         Some(ArchiveFormat::Zip)
     } else if lower.ends_with(".gz") {
         Some(ArchiveFormat::Gz)
+    } else if lower.ends_with(".7z") {
+        Some(ArchiveFormat::SevenZ)
+    } else if lower.ends_with(".rar") {
+        Some(ArchiveFormat::Rar)
     } else {
         None
     }
@@ -69,7 +78,7 @@ pub fn detect_format(name: &str) -> Option<ArchiveFormat> {
 /// 알려진 확장자가 없거나 결과가 비면 `<name>.extracted`.
 pub fn archive_stem(name: &str) -> String {
     let lower = name.to_ascii_lowercase();
-    for suf in [".tar.gz", ".tgz", ".tar", ".zip", ".gz"] {
+    for suf in [".tar.gz", ".tgz", ".tar", ".zip", ".gz", ".7z", ".rar"] {
         if lower.ends_with(suf) {
             let stem = &name[..name.len() - suf.len()];
             if !stem.is_empty() {
@@ -274,8 +283,81 @@ fn extract_local_blocking(
             std::io::copy(&mut gz, &mut out)
                 .map_err(|e| DuetError::Io(format!("gz decompress: {e}")))?;
         }
+        // 경로 기반 API — 위에서 연 file 은 사용 안 함(존재/읽기 가능 검증만 겸함).
+        ArchiveFormat::SevenZ => extract_sevenz(archive, dest, password)?,
+        ArchiveFormat::Rar => extract_rar(archive, dest, password)?,
     }
     Ok(())
+}
+
+/// 7z 해제 — sevenz-rust2 (순수 Rust). 암호 아카이브인데 password 없으면 NeedPassword.
+fn extract_sevenz(archive: &Path, dest: &Path, password: Option<&str>) -> Result<(), DuetError> {
+    let result = match password {
+        Some(pw) => sevenz_rust2::decompress_file_with_password(archive, dest, pw.into()),
+        None => sevenz_rust2::decompress_file(archive, dest),
+    };
+    result.map_err(|e| {
+        let msg = e.to_string();
+        // 라이브러리가 암호 필요/오류를 별도 variant 로 항상 안 주므로 메시지로 판정.
+        if msg.to_ascii_lowercase().contains("password") {
+            DuetError::NeedPassword
+        } else {
+            DuetError::Io(format!("7z extract: {msg}"))
+        }
+    })
+}
+
+/// rar 해제 — 공식 unrar 라이브러리 래퍼(읽기 전용).
+///
+/// 1) 목록 패스로 항목 경로 검증(절대경로/`..` 탈출 거부 — C 라이브러리 추출을
+///    신뢰하기 전 자체 rar-slip 방어) 후 2) 처리 패스로 dest 아래 스트리밍 추출.
+fn extract_rar(archive: &Path, dest: &Path, password: Option<&str>) -> Result<(), DuetError> {
+    let listing = rar_archive(archive, password)?
+        .open_for_listing()
+        .map_err(map_rar_err)?;
+    for item in listing {
+        let header = item.map_err(map_rar_err)?;
+        let name = &header.filename;
+        let unsafe_path = name.is_absolute()
+            || name
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir));
+        if unsafe_path {
+            return Err(DuetError::Io(format!(
+                "unsafe path in rar: {}",
+                name.display()
+            )));
+        }
+    }
+    let mut arch = rar_archive(archive, password)?
+        .open_for_processing()
+        .map_err(map_rar_err)?;
+    while let Some(header) = arch.read_header().map_err(map_rar_err)? {
+        arch = if header.entry().is_file() {
+            header.extract_with_base(dest).map_err(map_rar_err)?
+        } else {
+            header.skip().map_err(map_rar_err)?
+        };
+    }
+    Ok(())
+}
+
+fn rar_archive<'a>(
+    archive: &'a Path,
+    password: Option<&'a str>,
+) -> Result<unrar::Archive<'a>, DuetError> {
+    Ok(match password {
+        Some(pw) => unrar::Archive::with_password(archive, pw),
+        None => unrar::Archive::new(archive),
+    })
+}
+
+fn map_rar_err(e: unrar::error::UnrarError) -> DuetError {
+    use unrar::error::Code;
+    match e.code {
+        Code::MissingPassword | Code::BadPassword => DuetError::NeedPassword,
+        _ => DuetError::Io(format!("rar: {e}")),
+    }
 }
 
 /// 암호 zip 해제 — 각 항목을 by_index_decrypt 로 복호화해 zip-slip 안전하게 dest 에 쓴다.
@@ -331,6 +413,12 @@ fn remote_extract_command(
         ArchiveFormat::Gz => {
             return Err(DuetError::NotSupported(
                 "remote single-file .gz extract".into(),
+            ))
+        }
+        // 원격 호스트에 7z/unrar 바이너리 보장 못 함 — 로컬 전용.
+        ArchiveFormat::SevenZ | ArchiveFormat::Rar => {
+            return Err(DuetError::NotSupported(
+                "remote 7z/rar extract is not supported (local only)".into(),
             ))
         }
     })
@@ -411,6 +499,11 @@ fn remote_list_command(archive: &Path, fmt: ArchiveFormat) -> Result<String, Due
         ArchiveFormat::Gz => {
             return Err(DuetError::NotSupported(
                 "remote single-file .gz extract".into(),
+            ))
+        }
+        ArchiveFormat::SevenZ | ArchiveFormat::Rar => {
+            return Err(DuetError::NotSupported(
+                "remote 7z/rar is not supported (local only)".into(),
             ))
         }
     })
@@ -769,6 +862,12 @@ pub async fn repack_plan(
                 "repack into .gz is not supported (only .zip / .tar.gz)".into(),
             ))
         }
+        // 읽기 전용 포맷 — 7z 생성 비대상, rar 는 라이선스상 생성 불가.
+        ArchiveFormat::SevenZ | ArchiveFormat::Rar => {
+            return Err(DuetError::NotSupported(
+                "repack into .7z/.rar is not supported (read-only formats)".into(),
+            ))
+        }
     };
     let entries = fs.list(&browse_root.path).await?;
     if entries.is_empty() {
@@ -980,6 +1079,8 @@ mod tests {
         assert_eq!(detect_format("a.tar.gz"), Some(ArchiveFormat::TarGz));
         assert_eq!(detect_format("a.TGZ"), Some(ArchiveFormat::TarGz));
         assert_eq!(detect_format("a.txt.gz"), Some(ArchiveFormat::Gz));
+        assert_eq!(detect_format("a.7z"), Some(ArchiveFormat::SevenZ));
+        assert_eq!(detect_format("A.RAR"), Some(ArchiveFormat::Rar));
         assert_eq!(detect_format("notes.txt"), None);
         assert_eq!(detect_format("noext"), None);
     }
@@ -990,8 +1091,43 @@ mod tests {
         assert_eq!(archive_stem("data.tar.gz"), "data");
         assert_eq!(archive_stem("data.tgz"), "data");
         assert_eq!(archive_stem("file.txt.gz"), "file.txt");
+        assert_eq!(archive_stem("data.7z"), "data");
+        assert_eq!(archive_stem("data.rar"), "data");
         assert_eq!(archive_stem(".zip"), ".zip.extracted");
         assert_eq!(archive_stem("plain"), "plain.extracted");
+    }
+
+    /// 7z 생성(sevenz-rust2 compress) → extract_local_blocking 해제 round-trip.
+    #[test]
+    fn sevenz_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src");
+        std::fs::create_dir_all(src.join("sub")).unwrap();
+        std::fs::write(src.join("a.txt"), b"hello 7z").unwrap();
+        std::fs::write(src.join("sub/b.bin"), vec![7u8; 1024]).unwrap();
+        let archive = dir.path().join("t.7z");
+        sevenz_rust2::compress_to_path(&src, &archive).unwrap();
+
+        let dest = dir.path().join("out");
+        extract_local_blocking(&archive, &dest, ArchiveFormat::SevenZ, None).unwrap();
+        assert_eq!(std::fs::read(dest.join("a.txt")).unwrap(), b"hello 7z");
+        assert_eq!(
+            std::fs::read(dest.join("sub/b.bin")).unwrap(),
+            vec![7u8; 1024]
+        );
+    }
+
+    /// rar 는 생성이 불가(라이선스)라 round-trip 불가 — 없는 파일 열기 에러 경로만.
+    #[test]
+    fn rar_open_missing_file_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = extract_local_blocking(
+            &dir.path().join("no.rar"),
+            &dir.path().join("out"),
+            ArchiveFormat::Rar,
+            None,
+        );
+        assert!(err.is_err());
     }
 
     /// zip 생성(crate writer) → 해제 round-trip — extract_local_blocking 검증.
