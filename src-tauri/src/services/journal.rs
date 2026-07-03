@@ -117,6 +117,25 @@ pub enum OpKind {
         applied: u32,
         conflicts: u32,
     },
+    /// 권한(chmod) 변경 — 비재귀는 undo 가능(이전 mode 기록), 재귀는 Irreversible.
+    Chmod {
+        count: u32,
+        mode: u32,
+        recursive: bool,
+        location: Location,
+    },
+    /// 소유자(chown) 변경 — 원격 전용. 이전 소유자 기록이 없어 Irreversible.
+    Chown {
+        count: u32,
+        spec: String,
+        recursive: bool,
+        location: Location,
+    },
+    /// 심볼릭 링크 생성.
+    Symlink {
+        path: PathBuf,
+        source: SourceId,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -187,6 +206,16 @@ pub enum UndoAction {
         trashed_left: Vec<TrashItem>,
         trashed_right: Vec<TrashItem>,
     },
+    /// chmod 되돌리기 — 항목별 이전 mode 재적용 (비재귀 chmod 만 기록됨).
+    UndoChmod {
+        source: SourceId,
+        items: Vec<ChmodItem>,
+    },
+    /// 심볼릭 링크 생성 되돌리기 — 링크 자체만 제거(대상 불변).
+    UndoSymlink {
+        source: SourceId,
+        path: PathBuf,
+    },
     Irreversible,
 }
 
@@ -214,6 +243,13 @@ pub struct MoveItem {
 pub struct RenamePair {
     pub current: PathBuf,
     pub original: PathBuf,
+}
+
+/// chmod undo 항목 — 적용 전 mode 로 되돌리기 위한 (경로, 이전 mode).
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct ChmodItem {
+    pub path: PathBuf,
+    pub old_mode: u32,
 }
 
 /// jsonl 한 줄. push 새 entry 또는 기존 entry undone 토글.

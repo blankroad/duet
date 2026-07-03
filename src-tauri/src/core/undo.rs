@@ -44,9 +44,58 @@ pub async fn execute_undo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
     match &entry.undo {
         UndoAction::Irreversible => UndoOutcome {
             kind: UndoKind::Irreversible,
-            message: Some("Cannot undo permanent delete".into()),
+            // 영구삭제·재귀 chmod·chown 등 — push 시점에 Irreversible 로 기록된 작업 공통.
+            message: Some("This operation cannot be undone".into()),
             refreshed_locations: vec![],
         },
+        UndoAction::UndoChmod { source, items } => {
+            let fs = match fs_for(source, pool).await {
+                Ok(f) => f,
+                Err(e) => return error("source unreachable", e),
+            };
+            let mut refresh = std::collections::HashSet::new();
+            for item in items {
+                if let Err(e) = fs.set_mode(&item.path, item.old_mode, false).await {
+                    return error("chmod restore", e);
+                }
+                if let Some(p) = item.path.parent() {
+                    refresh.insert(p.to_path_buf());
+                }
+            }
+            ok_with_locs(source, refresh)
+        }
+        UndoAction::UndoSymlink { source, path } => {
+            let fs = match fs_for(source, pool).await {
+                Ok(f) => f,
+                Err(e) => return error("source unreachable", e),
+            };
+            // 여전히 심볼릭 링크일 때만 제거 — 사용자가 그 자리에 딴 걸 만들었으면 스킵.
+            match fs.symlink_metadata(path).await {
+                Ok(m) if matches!(m.kind, crate::types::EntryKind::Symlink) => {}
+                Ok(_) => {
+                    return UndoOutcome {
+                        kind: UndoKind::Skipped,
+                        message: Some("Not a symlink anymore — undo skipped".into()),
+                        refreshed_locations: vec![],
+                    };
+                }
+                Err(_) => {
+                    return UndoOutcome {
+                        kind: UndoKind::Skipped,
+                        message: Some("Link already gone — undo skipped".into()),
+                        refreshed_locations: vec![],
+                    };
+                }
+            }
+            if let Err(e) = fs.remove(path).await {
+                return error("remove symlink", e);
+            }
+            let mut refresh = std::collections::HashSet::new();
+            if let Some(p) = path.parent() {
+                refresh.insert(p.to_path_buf());
+            }
+            ok_with_locs(source, refresh)
+        }
         UndoAction::RestoreFromTrash { source, items } => {
             let fs = match fs_for(source, pool).await {
                 Ok(f) => f,

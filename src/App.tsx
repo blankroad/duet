@@ -15,6 +15,8 @@ import { SyncDialog } from "@/components/dialogs/SyncDialog";
 import { MkdirDialog } from "@/components/dialogs/MkdirDialog";
 import { CompressDialog } from "@/components/dialogs/CompressDialog";
 import { ChecksumDialog } from "@/components/dialogs/ChecksumDialog";
+import { PermissionsDialog } from "@/components/dialogs/PermissionsDialog";
+import { SymlinkDialog } from "@/components/dialogs/SymlinkDialog";
 import { PasswordPromptDialog } from "@/components/dialogs/PasswordPromptDialog";
 import { ArgsDialog } from "@/components/dialogs/ArgsDialog";
 import { ConfirmDialog } from "@/components/dialogs/ConfirmDialog";
@@ -1344,6 +1346,36 @@ function App() {
       )}
       {dialog.kind === "checksum" && (
         <ChecksumDialog targets={dialog.targets} onClose={closeDialog} />
+      )}
+      {dialog.kind === "permissions" && (
+        <PermissionsDialog
+          targets={dialog.targets}
+          initialMode={dialog.initialMode}
+          remote={dialog.remote}
+          hasDir={dialog.hasDir}
+          onClose={closeDialog}
+          onApplied={() =>
+            // perms 는 목록/인스펙터의 permissions 값 갱신용 refresh.
+            refreshAffected([dialog.targets[0]!.location])
+          }
+        />
+      )}
+      {dialog.kind === "symlink" && (
+        <SymlinkDialog
+          parent={dialog.parent}
+          onClose={closeDialog}
+          onSubmit={(name, target) => {
+            void (async () => {
+              const r = await commands.fsMakeSymlink(dialog.parent, name, target);
+              if (r.status === "error") {
+                showToast(`Symlink failed: ${formatErr(r.error)}`);
+                return;
+              }
+              closeDialog();
+              refreshAffected([dialog.parent]);
+            })();
+          }}
+        />
       )}
       {dialog.kind === "extract-password" && (
         <PasswordPromptDialog

@@ -127,6 +127,38 @@ pub trait FileSystem: Send + Sync {
         Ok(full[start..end].to_vec())
     }
 
+    /// POSIX 권한(mode, 0o777 비트) 변경. `recursive` 는 하위 전체(심볼릭 링크는
+    /// 안 따라감). 기본 구현은 NotSupported — 로컬 unix / SSH 가 override.
+    async fn set_mode(&self, path: &Path, mode: u32, recursive: bool) -> Result<(), DuetError> {
+        let _ = (path, mode, recursive);
+        Err(DuetError::NotSupported(
+            "permissions are not supported on this filesystem".into(),
+        ))
+    }
+
+    /// 소유자/그룹 변경(chown). 원격(SSH) 전용 — 로컬은 보통 root 필요라 NotSupported.
+    async fn set_owner(
+        &self,
+        path: &Path,
+        owner: Option<&str>,
+        group: Option<&str>,
+        recursive: bool,
+    ) -> Result<(), DuetError> {
+        let _ = (path, owner, group, recursive);
+        Err(DuetError::NotSupported(
+            "ownership change is not supported on this filesystem".into(),
+        ))
+    }
+
+    /// 심볼릭 링크 생성 — `target` 문자열 그대로 사용(상대/절대 유지, 존재 검증 안 함
+    /// — 의도적 dangling 링크 허용). 기본 구현은 NotSupported.
+    async fn make_symlink(&self, link: &Path, target: &str) -> Result<(), DuetError> {
+        let _ = (link, target);
+        Err(DuetError::NotSupported(
+            "symlink creation is not supported on this filesystem".into(),
+        ))
+    }
+
     /// 파일 체크섬(소문자 hex) — 무결성 확인용. 기본 구현은 `open_read` 청크 스트리밍
     /// 해시(메모리 bounded). SSH 는 호스트측 `sha256sum` 오버라이드(다운로드 0) 권장.
     async fn checksum(
@@ -136,12 +168,8 @@ pub trait FileSystem: Send + Sync {
     ) -> Result<String, DuetError> {
         let reader = self.open_read(path, 0).await?;
         match algo {
-            crate::types::ChecksumAlgo::Sha256 => {
-                hash_stream::<sha2::Sha256>(reader).await
-            }
-            crate::types::ChecksumAlgo::Sha512 => {
-                hash_stream::<sha2::Sha512>(reader).await
-            }
+            crate::types::ChecksumAlgo::Sha256 => hash_stream::<sha2::Sha256>(reader).await,
+            crate::types::ChecksumAlgo::Sha512 => hash_stream::<sha2::Sha512>(reader).await,
         }
     }
 }

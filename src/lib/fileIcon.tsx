@@ -378,7 +378,7 @@ export function iconForEntry(
 
 /** platform() 은 tauri 런타임 필요 — 1회 lazy 판정, 테스트/비-tauri 환경은 false. */
 let winCached: boolean | null = null;
-function isWindows(): boolean {
+export function isWindows(): boolean {
   if (winCached === null) {
     try {
       winCached = platform() === "windows";

@@ -29,6 +29,8 @@ import {
   Layers,
   Sigma,
   Hash,
+  Lock,
+  Link2,
 } from "lucide-react";
 import { commands } from "@/types/bindings";
 import type { Entry, Location } from "@/types/bindings";
@@ -49,6 +51,7 @@ import { bookmarkLocation } from "@/lib/bookmarkActions";
 import { addHostFavorite } from "@/stores/hostFavorites";
 import { childLocation } from "@/lib/entryDnd";
 import { calcDirSizes } from "@/lib/dirSize";
+import { isWindows } from "@/lib/fileIcon";
 import {
   triggerCopy,
   triggerMove,
@@ -59,6 +62,8 @@ import {
   triggerExtract,
   triggerCompress,
   triggerChecksum,
+  triggerPermissions,
+  triggerNewSymlink,
   triggerSync,
   triggerCompare,
   copyPathsOf,
@@ -308,6 +313,17 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
           } as MenuEntry,
         ]
       : []),
+    // POSIX 권한 편집 — 원격 또는 로컬 unix (Windows 로컬은 POSIX 권한 없음).
+    ...(location.source.kind === "ssh" || !isWindows()
+      ? [
+          {
+            id: "permissions",
+            label: "Permissions…",
+            icon: <Lock size={ICON} />,
+            onSelect: () => triggerPermissions(open, showToast),
+          } as MenuEntry,
+        ]
+      : []),
     sep(),
     {
       id: "rename",
@@ -429,6 +445,17 @@ export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
       shortcut: "F7",
       onSelect: () => triggerMkdir(open),
     },
+    // 심볼릭 링크 — 원격 또는 로컬 unix (Windows 로컬은 권한 필요라 미지원).
+    ...(location.source.kind === "ssh" || !isWindows()
+      ? [
+          {
+            id: "symlink",
+            label: "New symlink…",
+            icon: <Link2 size={ICON} />,
+            onSelect: () => triggerNewSymlink(open),
+          } as MenuEntry,
+        ]
+      : []),
     {
       id: "refresh",
       label: "Refresh",

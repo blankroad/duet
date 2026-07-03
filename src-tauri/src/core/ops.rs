@@ -6,7 +6,8 @@
 use crate::core::copy_strategy::{decide as decide_strategy, CopyStrategy};
 use crate::fs::FileSystem;
 use crate::services::journal::{
-    BackupRestore, Journal, JournalEntry, MoveItem, OpKind, RenamePair, TrashItem, UndoAction,
+    BackupRestore, ChmodItem, Journal, JournalEntry, MoveItem, OpKind, RenamePair, TrashItem,
+    UndoAction,
 };
 use crate::services::settings::SettingsStore;
 use crate::types::{DeleteMode, DuetError, EntryRef, Location, SourceId, TrashLocation};
@@ -2957,6 +2958,147 @@ pub async fn mkdir(
         .await
 }
 
+/// 권한(chmod) 변경 — 비재귀는 항목별 이전 mode 를 기록해 undo 가능. 재귀는 하위
+/// 전체의 이전 mode 기록이 비현실적이라 Irreversible(§4 예외 — FE 가 경고를 표시하고
+/// 사용자가 재귀를 명시 선택한 경우에만 호출).
+pub async fn set_permissions(
+    fs: &dyn FileSystem,
+    targets: Vec<EntryRef>,
+    mode: u32,
+    recursive: bool,
+    ctx: &OpCtx,
+) -> Result<JournalEntry, DuetError> {
+    let first = targets
+        .first()
+        .ok_or_else(|| DuetError::Io("no targets".into()))?;
+    let source = first.location.source.clone();
+    let location = first.location.clone();
+    let mode = mode & 0o7777;
+
+    let mut items = Vec::with_capacity(targets.len());
+    for t in &targets {
+        let path = fs.join(&t.location.path, &t.name);
+        // 적용 전 mode 캡처(비재귀 undo 용). permissions 미상(None)이면 undo 에서 제외.
+        let old = fs.metadata(&path).await?.permissions;
+        fs.set_mode(&path, mode, recursive).await?;
+        if let Some(old_mode) = old {
+            items.push(ChmodItem { path, old_mode });
+        }
+    }
+
+    let undo = if recursive || items.is_empty() {
+        UndoAction::Irreversible
+    } else {
+        UndoAction::UndoChmod {
+            source: source.clone(),
+            items,
+        }
+    };
+    ctx.journal
+        .push(
+            OpKind::Chmod {
+                count: targets.len() as u32,
+                mode,
+                recursive,
+                location,
+            },
+            undo,
+        )
+        .await
+}
+
+/// owner/group 이름 검증 — 영숫자 + `._-`, 선두 `-` 금지(명령 옵션 오인 방지).
+/// (경로/spec 은 셸 quoting 되지만 chown 자체가 인자로 파싱하므로 별도 방어.)
+fn valid_owner_name(s: &str) -> bool {
+    !s.is_empty()
+        && !s.starts_with('-')
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+}
+
+/// 소유자/그룹(chown) 변경 — 원격 전용(로컬은 fs 가 NotSupported). 이전 소유자
+/// 미기록이라 Irreversible — FE 가 경고 표시 후 호출.
+pub async fn set_owner(
+    fs: &dyn FileSystem,
+    targets: Vec<EntryRef>,
+    owner: Option<String>,
+    group: Option<String>,
+    recursive: bool,
+    ctx: &OpCtx,
+) -> Result<JournalEntry, DuetError> {
+    let first = targets
+        .first()
+        .ok_or_else(|| DuetError::Io("no targets".into()))?;
+    let location = first.location.clone();
+    let owner = owner.filter(|s| !s.is_empty());
+    let group = group.filter(|s| !s.is_empty());
+    for name in owner.iter().chain(group.iter()) {
+        if !valid_owner_name(name) {
+            return Err(DuetError::Io(format!("invalid owner/group name: {name}")));
+        }
+    }
+    if owner.is_none() && group.is_none() {
+        return Err(DuetError::Io("owner or group required".into()));
+    }
+    let spec = match (&owner, &group) {
+        (Some(o), Some(g)) => format!("{o}:{g}"),
+        (Some(o), None) => o.clone(),
+        (None, Some(g)) => format!(":{g}"),
+        (None, None) => unreachable!(),
+    };
+
+    for t in &targets {
+        let path = fs.join(&t.location.path, &t.name);
+        fs.set_owner(&path, owner.as_deref(), group.as_deref(), recursive)
+            .await?;
+    }
+    ctx.journal
+        .push(
+            OpKind::Chown {
+                count: targets.len() as u32,
+                spec,
+                recursive,
+                location,
+            },
+            UndoAction::Irreversible,
+        )
+        .await
+}
+
+/// 심볼릭 링크 생성 — undo 는 링크 자체 제거(대상 불변).
+pub async fn make_symlink(
+    fs: &dyn FileSystem,
+    parent: Location,
+    name: String,
+    target: String,
+    ctx: &OpCtx,
+) -> Result<JournalEntry, DuetError> {
+    if name.is_empty() || name.contains('/') || name.contains('\\') {
+        return Err(DuetError::Io(format!("invalid link name: {name}")));
+    }
+    if target.is_empty() {
+        return Err(DuetError::Io("symlink target required".into()));
+    }
+    let path = fs.join(&parent.path, &name);
+    // 자리에 뭔가 있으면 명시 에러 (ln -s 도 실패하지만 메시지 통일).
+    if fs.symlink_metadata(&path).await.is_ok() {
+        return Err(DuetError::Io(format!("already exists: {name}")));
+    }
+    fs.make_symlink(&path, &target).await?;
+    ctx.journal
+        .push(
+            OpKind::Symlink {
+                path: path.clone(),
+                source: parent.source.clone(),
+            },
+            UndoAction::UndoSymlink {
+                source: parent.source,
+                path,
+            },
+        )
+        .await
+}
+
 // === Helpers ===
 
 /// backup 이름 선택 — 같은 timestamp 충돌 시 .<n> suffix retry.
@@ -3251,6 +3393,78 @@ mod tests {
             },
             dir,
         )
+    }
+
+    /// chmod — 비재귀는 UndoChmod(이전 mode 기록), 재귀는 Irreversible.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn set_permissions_journals_old_modes_nonrecursive_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let (ctx, _keep) = mk_ctx().await;
+        let dir = TempDir::new().unwrap();
+        let f = dir.path().join("a.txt");
+        tokio::fs::write(&f, b"x").await.unwrap();
+        tokio::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o644))
+            .await
+            .unwrap();
+        let fs = LocalFs::new();
+
+        let entry = set_permissions(
+            &fs,
+            vec![mk_target(dir.path(), "a.txt")],
+            0o600,
+            false,
+            &ctx,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            tokio::fs::metadata(&f).await.unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        match &entry.undo {
+            UndoAction::UndoChmod { items, .. } => {
+                assert_eq!(items.len(), 1);
+                assert_eq!(items[0].old_mode & 0o777, 0o644);
+            }
+            other => panic!("expected UndoChmod, got {other:?}"),
+        }
+
+        // 재귀 → Irreversible.
+        let sub = dir.path().join("d");
+        tokio::fs::create_dir(&sub).await.unwrap();
+        let entry2 = set_permissions(&fs, vec![mk_target(dir.path(), "d")], 0o755, true, &ctx)
+            .await
+            .unwrap();
+        assert!(matches!(entry2.undo, UndoAction::Irreversible));
+    }
+
+    /// 심볼릭 링크 — 생성 + UndoSymlink 기록, 기존 이름 충돌 거부.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn make_symlink_journals_undo_and_rejects_existing() {
+        let (ctx, _keep) = mk_ctx().await;
+        let dir = TempDir::new().unwrap();
+        tokio::fs::write(dir.path().join("t.txt"), b"x")
+            .await
+            .unwrap();
+        let fs = LocalFs::new();
+        let parent = Location {
+            source: SourceId::Local,
+            path: dir.path().to_path_buf(),
+        };
+        let entry = make_symlink(&fs, parent.clone(), "l".into(), "t.txt".into(), &ctx)
+            .await
+            .unwrap();
+        assert!(matches!(entry.undo, UndoAction::UndoSymlink { .. }));
+        let m = tokio::fs::symlink_metadata(dir.path().join("l"))
+            .await
+            .unwrap();
+        assert!(m.file_type().is_symlink());
+        // 같은 이름 재생성 → 명시 에러.
+        assert!(make_symlink(&fs, parent, "l".into(), "t.txt".into(), &ctx)
+            .await
+            .is_err());
     }
 
     #[tokio::test]

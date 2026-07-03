@@ -112,6 +112,39 @@ impl FileSystem for LocalFs {
             tokio::fs::remove_file(path).await.map_err(DuetError::from)
         }
     }
+
+    /// POSIX 권한 변경 — unix 전용. 재귀는 lstat walk(심볼릭 링크는 자신·대상 모두
+    /// 건드리지 않음 — chmod 는 링크를 따라가 *대상*이 바뀌므로).
+    async fn set_mode(&self, path: &Path, mode: u32, recursive: bool) -> Result<(), DuetError> {
+        #[cfg(unix)]
+        {
+            set_mode_unix(path, mode, recursive, true).await
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (path, mode, recursive);
+            Err(DuetError::NotSupported(
+                "POSIX permissions are not available on this OS".into(),
+            ))
+        }
+    }
+
+    /// 심볼릭 링크 생성 — unix 전용 (Windows 는 관리자/개발자모드 필요라 v1 미지원).
+    async fn make_symlink(&self, link: &Path, target: &str) -> Result<(), DuetError> {
+        #[cfg(unix)]
+        {
+            tokio::fs::symlink(target, link)
+                .await
+                .map_err(DuetError::from)
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (link, target);
+            Err(DuetError::NotSupported(
+                "symlink creation requires elevated rights on Windows".into(),
+            ))
+        }
+    }
     async fn read_full(&self, path: &Path) -> Result<Vec<u8>, DuetError> {
         tokio::fs::read(path).await.map_err(DuetError::from)
     }
@@ -367,6 +400,39 @@ fn trash_restore(_trash_id: &str, _original: &Path) -> Result<(), DuetError> {
     ))
 }
 
+/// mode 적용(unix). `top`=최초 호출 — 명시 대상이 심볼릭 링크면 거부(chmod 는 링크를
+/// 따라가 대상 권한을 바꿔 의도 밖 변경). 재귀 중 만나는 링크는 조용히 스킵.
+#[cfg(unix)]
+async fn set_mode_unix(
+    path: &Path,
+    mode: u32,
+    recursive: bool,
+    top: bool,
+) -> Result<(), DuetError> {
+    use std::os::unix::fs::PermissionsExt;
+    let lmeta = tokio::fs::symlink_metadata(path)
+        .await
+        .map_err(DuetError::from)?;
+    if lmeta.file_type().is_symlink() {
+        if top {
+            return Err(DuetError::NotSupported(
+                "chmod on a symlink is not supported (it would change the target)".into(),
+            ));
+        }
+        return Ok(());
+    }
+    tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+        .await
+        .map_err(DuetError::from)?;
+    if recursive && lmeta.is_dir() {
+        let mut rd = tokio::fs::read_dir(path).await.map_err(DuetError::from)?;
+        while let Some(ent) = rd.next_entry().await.map_err(DuetError::from)? {
+            Box::pin(set_mode_unix(&ent.path(), mode, recursive, false)).await?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -405,6 +471,57 @@ mod tests {
             local.checksum(&big, ChecksumAlgo::Sha256).await.unwrap(),
             expect
         );
+    }
+
+    /// chmod — 비재귀는 대상만, 재귀는 자식 적용 + 심볼릭 링크(및 그 대상) 불변,
+    /// 링크를 직접 대상으로 주면 거부.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn set_mode_recursive_skips_symlinks() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir(root.join("d")).await.unwrap();
+        fs::write(root.join("d/f"), b"x").await.unwrap();
+        fs::write(root.join("outside"), b"x").await.unwrap();
+        std::os::unix::fs::symlink(root.join("outside"), root.join("d/link")).unwrap();
+        let mode_of = |p: std::path::PathBuf| async move {
+            fs::metadata(p).await.unwrap().permissions().mode() & 0o777
+        };
+        let local = LocalFs::new();
+
+        // 비재귀 — 폴더 자체만 바뀌고 자식은 그대로.
+        let child_before = mode_of(root.join("d/f")).await;
+        local.set_mode(&root.join("d"), 0o700, false).await.unwrap();
+        assert_eq!(mode_of(root.join("d")).await, 0o700);
+        assert_eq!(mode_of(root.join("d/f")).await, child_before);
+
+        // 재귀 — 자식 적용, 링크 대상(outside)은 불변.
+        let outside_before = mode_of(root.join("outside")).await;
+        local.set_mode(&root.join("d"), 0o755, true).await.unwrap();
+        assert_eq!(mode_of(root.join("d/f")).await, 0o755);
+        assert_eq!(mode_of(root.join("outside")).await, outside_before);
+
+        // 링크를 직접 대상으로 → 거부 (대상 권한이 바뀌는 사고 방지).
+        assert!(local
+            .set_mode(&root.join("d/link"), 0o777, false)
+            .await
+            .is_err());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn make_symlink_creates_relative_link() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("t.txt"), b"x").await.unwrap();
+        let local = LocalFs::new();
+        local
+            .make_symlink(&dir.path().join("l"), "t.txt")
+            .await
+            .unwrap();
+        let m = fs::symlink_metadata(dir.path().join("l")).await.unwrap();
+        assert!(m.file_type().is_symlink());
+        assert_eq!(fs::read(dir.path().join("l")).await.unwrap(), b"x");
     }
 
     /// 심볼릭 링크: 폴더 링크는 Dir(진입 가능), 깨진 링크도 목록에 보임(Symlink).

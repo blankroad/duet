@@ -27,6 +27,15 @@ export type DialogState =
   | { kind: "compare-scanning" }
   | { kind: "three-way"; plan: ThreeWayPlan }
   | { kind: "checksum"; targets: EntryRef[] }
+  // remote=ssh(소유자 편집 노출), initialMode=선택 항목 공통 mode(다르면 null).
+  | {
+      kind: "permissions";
+      targets: EntryRef[];
+      initialMode: number | null;
+      remote: boolean;
+      hasDir: boolean;
+    }
+  | { kind: "symlink"; parent: Location }
   | { kind: "app-args"; appId: string; name: string; args: string[] }
   | { kind: "eject-confirm"; volume: Volume }
   | { kind: "progress"; title: string; taskId: string }

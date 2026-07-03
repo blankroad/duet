@@ -39,6 +39,28 @@ impl SshFs {
         remote_home(&sftp).await
     }
 
+    /// 원격 명령 실행 후 성공(exit 0) 요구 — 실패 시 stderr 를 에러 메시지로.
+    /// chmod/chown/ln 처럼 출력이 없는 단순 명령용.
+    async fn run_ok(&self, cmd: &str) -> Result<(), DuetError> {
+        let session = self
+            .conn
+            .session
+            .as_ref()
+            .ok_or_else(|| DuetError::Io("not connected".into()))?;
+        let out = {
+            let handle = session.lock().await;
+            crate::ssh::remote_exec::exec(&handle, cmd).await?
+        };
+        if out.exit_status != 0 {
+            let err = String::from_utf8_lossy(&out.stderr);
+            return Err(DuetError::Io(format!(
+                "remote command failed: {}",
+                err.trim()
+            )));
+        }
+        Ok(())
+    }
+
     /// 활성 connection 위에 SFTP 채널 새로 열고 SftpSession 반환.
     /// 매 호출마다 새 채널 — 캐시는 후속.
     async fn open_sftp(&self) -> Result<russh_sftp::client::SftpSession, DuetError> {
@@ -211,6 +233,37 @@ impl FileSystem for SshFs {
             .next()
             .and_then(|t| t.parse::<u64>().ok())
             .unwrap_or(0))
+    }
+
+    /// 원격 chmod — exec. 재귀는 `-R`(chmod 는 심볼릭 링크를 통해 내려가지 않음 —
+    /// GNU/BSD 공통으로 -R 중 만난 링크는 스킵).
+    async fn set_mode(&self, path: &Path, mode: u32, recursive: bool) -> Result<(), DuetError> {
+        let quoted = posix_shell_quote(&remote_path_str(path)?)?;
+        self.run_ok(&chmod_cmd(&quoted, mode, recursive)).await
+    }
+
+    /// 원격 chown — exec. owner/group 이름은 command 레이어에서 charset 검증 후 전달.
+    async fn set_owner(
+        &self,
+        path: &Path,
+        owner: Option<&str>,
+        group: Option<&str>,
+        recursive: bool,
+    ) -> Result<(), DuetError> {
+        let Some(spec) = chown_spec(owner, group) else {
+            return Ok(()); // 둘 다 비면 no-op
+        };
+        let quoted = posix_shell_quote(&remote_path_str(path)?)?;
+        let spec_q = posix_shell_quote(&spec)?;
+        self.run_ok(&chown_cmd(&spec_q, &quoted, recursive)).await
+    }
+
+    /// 원격 심볼릭 링크 — `ln -s` exec (SFTP symlink 는 서버/라이브러리별 인자 순서
+    /// 혼선이 있어 명령이 무해하고 명확).
+    async fn make_symlink(&self, link: &Path, target: &str) -> Result<(), DuetError> {
+        let link_q = posix_shell_quote(&remote_path_str(link)?)?;
+        let target_q = posix_shell_quote(target)?;
+        self.run_ok(&format!("ln -s -- {target_q} {link_q}")).await
     }
 
     /// 원격 체크섬 — 호스트측 해시 실행(다운로드 0). GNU(sha256sum) 우선,
@@ -595,6 +648,31 @@ fn posix_shell_quote(s: &str) -> Result<String, DuetError> {
     Ok(format!("'{}'", s.replace('\'', "'\\''")))
 }
 
+/// 원격 chmod 명령 — mode 는 0o7777 마스크 후 8진수 리터럴로.
+fn chmod_cmd(quoted_path: &str, mode: u32, recursive: bool) -> String {
+    let r = if recursive { "-R " } else { "" };
+    format!("chmod {r}{:04o} -- {quoted_path}", mode & 0o7777)
+}
+
+/// chown spec — `owner`, `owner:group`, `:group`. 둘 다 없으면 None(no-op).
+fn chown_spec(owner: Option<&str>, group: Option<&str>) -> Option<String> {
+    match (
+        owner.filter(|s| !s.is_empty()),
+        group.filter(|s| !s.is_empty()),
+    ) {
+        (Some(o), Some(g)) => Some(format!("{o}:{g}")),
+        (Some(o), None) => Some(o.to_string()),
+        (None, Some(g)) => Some(format!(":{g}")),
+        (None, None) => None,
+    }
+}
+
+/// 원격 chown 명령 — spec/경로 모두 quoting 완료본을 받는다.
+fn chown_cmd(quoted_spec: &str, quoted_path: &str, recursive: bool) -> String {
+    let r = if recursive { "-R " } else { "" };
+    format!("chown {r}{quoted_spec} -- {quoted_path}")
+}
+
 /// 원격 체크섬 명령 문자열 — GNU coreutils(shaNNNsum) 우선, 없으면 BSD/macOS 의
 /// perl `shasum` 폴백. `quoted` 는 posix_shell_quote 통과한 경로.
 fn checksum_cmd(quoted: &str, algo: crate::types::ChecksumAlgo) -> String {
@@ -726,6 +804,32 @@ mod tests {
             "sftp: failure".into()
         )));
         assert!(super::should_cp_fallback(&DuetError::Io("other".into())));
+    }
+
+    #[test]
+    fn chmod_chown_cmds_quote_and_flags() {
+        let p = super::posix_shell_quote("/srv/a b").unwrap();
+        assert_eq!(
+            super::chmod_cmd(&p, 0o755, false),
+            "chmod 0755 -- '/srv/a b'"
+        );
+        assert_eq!(
+            super::chmod_cmd(&p, 0o644, true),
+            "chmod -R 0644 -- '/srv/a b'"
+        );
+        // mode 는 0o7777 초과 비트 제거.
+        assert!(super::chmod_cmd(&p, 0o10_0644, false).contains(" 0644 "));
+
+        assert_eq!(super::chown_spec(Some("u"), Some("g")).unwrap(), "u:g");
+        assert_eq!(super::chown_spec(Some("u"), None).unwrap(), "u");
+        assert_eq!(super::chown_spec(None, Some("g")).unwrap(), ":g");
+        assert!(super::chown_spec(None, None).is_none());
+        assert!(super::chown_spec(Some(""), Some("")).is_none());
+        let spec_q = super::posix_shell_quote("u:g").unwrap();
+        assert_eq!(
+            super::chown_cmd(&spec_q, &p, true),
+            "chown -R 'u:g' -- '/srv/a b'"
+        );
     }
 
     #[test]

@@ -1351,6 +1351,106 @@ pub async fn fs_mkdir(
     Ok(emit_pushed(&app, entry))
 }
 
+/// 권한(chmod) 변경 — mode 는 POSIX 비트(0o7777 마스크). 비재귀는 undo 가능,
+/// 재귀는 Irreversible(프론트가 경고 표시 후 호출 — §4 승인 흐름).
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_set_permissions(
+    targets: Vec<EntryRef>,
+    mode: u32,
+    recursive: bool,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+    settings: tauri::State<'_, Arc<SettingsStore>>,
+    journal: tauri::State<'_, Arc<Journal>>,
+    app: tauri::AppHandle,
+) -> Result<JournalId, DuetError> {
+    let source = targets
+        .first()
+        .map(|t| t.location.source.clone())
+        .ok_or_else(|| DuetError::Io("no targets".into()))?;
+    let fs = fs_for(&source, pool.inner()).await?;
+    let entry = ops::set_permissions(
+        &*fs,
+        targets,
+        mode,
+        recursive,
+        &ctx(
+            settings.inner().clone(),
+            journal.inner().clone(),
+            pool.inner().clone(),
+            app.clone(),
+        ),
+    )
+    .await?;
+    Ok(emit_pushed(&app, entry))
+}
+
+/// 소유자/그룹(chown) 변경 — 원격(SSH) 전용, Irreversible(프론트 경고 후 호출).
+#[tauri::command]
+#[specta::specta]
+#[allow(clippy::too_many_arguments)] // tauri state 4개 + 실제 인자 4개 — 관례상 허용.
+pub async fn fs_set_owner(
+    targets: Vec<EntryRef>,
+    owner: Option<String>,
+    group: Option<String>,
+    recursive: bool,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+    settings: tauri::State<'_, Arc<SettingsStore>>,
+    journal: tauri::State<'_, Arc<Journal>>,
+    app: tauri::AppHandle,
+) -> Result<JournalId, DuetError> {
+    let source = targets
+        .first()
+        .map(|t| t.location.source.clone())
+        .ok_or_else(|| DuetError::Io("no targets".into()))?;
+    let fs = fs_for(&source, pool.inner()).await?;
+    let entry = ops::set_owner(
+        &*fs,
+        targets,
+        owner,
+        group,
+        recursive,
+        &ctx(
+            settings.inner().clone(),
+            journal.inner().clone(),
+            pool.inner().clone(),
+            app.clone(),
+        ),
+    )
+    .await?;
+    Ok(emit_pushed(&app, entry))
+}
+
+/// 심볼릭 링크 생성 — `parent/name` → `target`(문자열 그대로, 상대/절대 유지).
+/// undo = 링크 제거. 로컬 unix + 원격 지원(Windows 로컬은 NotSupported).
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_make_symlink(
+    parent: Location,
+    name: String,
+    target: String,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+    settings: tauri::State<'_, Arc<SettingsStore>>,
+    journal: tauri::State<'_, Arc<Journal>>,
+    app: tauri::AppHandle,
+) -> Result<JournalId, DuetError> {
+    let fs = fs_for(&parent.source, pool.inner()).await?;
+    let entry = ops::make_symlink(
+        &*fs,
+        parent,
+        name,
+        target,
+        &ctx(
+            settings.inner().clone(),
+            journal.inner().clone(),
+            pool.inner().clone(),
+            app.clone(),
+        ),
+    )
+    .await?;
+    Ok(emit_pushed(&app, entry))
+}
+
 // === Archive: Browse / Extract / Compress ===
 
 /// 아카이브를 임시 위치로 풀고 그 디렉토리 Location 반환 — 패널이 탐색기처럼 내부 열람.

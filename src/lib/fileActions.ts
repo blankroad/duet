@@ -283,6 +283,38 @@ export function triggerMkdir(open: OpenFn): void {
   open({ kind: "mkdir", parent: tab.location });
 }
 
+/** 활성 폴더에 심볼릭 링크 생성 다이얼로그. (로컬 Windows 는 호출부에서 미노출.) */
+export function triggerNewSymlink(open: OpenFn): void {
+  const { tab } = resolveActiveTargets();
+  open({ kind: "symlink", parent: tab.location });
+}
+
+/** 권한/소유자 편집 — 심볼릭 링크는 chmod 가 대상을 바꾸므로 제외. */
+export function triggerPermissions(open: OpenFn, showToast: ToastFn): void {
+  const { tab, targets } = resolveActiveTargets();
+  const entryOf = (name: string) => tab.entries.find((e) => e.name === name);
+  const eligible = targets.filter((t) => {
+    const kind = entryOf(t.name)?.kind;
+    return kind === "dir" || kind === "file";
+  });
+  if (eligible.length === 0) {
+    showToast("Permissions: select files or folders (not symlinks)");
+    return;
+  }
+  // 선택 항목들의 mode 가 전부 같으면 그 값으로 프리필, 섞였으면 null(mixed).
+  const modes = eligible.map((t) => entryOf(t.name)?.permissions ?? null);
+  const first = modes[0];
+  const common =
+    first != null && modes.every((m) => m != null && (m & 0o777) === (first & 0o777));
+  open({
+    kind: "permissions",
+    targets: eligible,
+    initialMode: common ? first & 0o777 : null,
+    remote: tab.location.source.kind === "ssh",
+    hasDir: eligible.some((t) => entryOf(t.name)?.kind === "dir"),
+  });
+}
+
 /** targets 를 dst 로 복사/이동 plan 호출 후 확인 다이얼로그. 키보드·툴바·DnD 공유. */
 export async function planTransferTo(
   targets: EntryRef[],
