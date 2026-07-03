@@ -370,10 +370,11 @@ unsafe fn enumerate(hmenu: HMENU, depth: u32, stats: &mut EnumStats) -> Vec<Shel
     out
 }
 
-/// 메뉴 항목 HBITMAP(보통 16px, 셸 확장 set) → PNG 바이트. 알파 보존(없으면 불투명).
+/// HBITMAP(32bpp, 알파 premultiplied 가능) → PNG 바이트. 알파 보존(없으면 불투명).
+/// 셸 메뉴 항목 아이콘과 파일 아이콘(`platform::win_file_icon`)이 공용.
 ///
 /// SAFETY: `hbitmap` 은 유효한 GDI 비트맵 핸들이어야 한다.
-unsafe fn hbitmap_to_png(hbitmap: HBITMAP) -> Option<Vec<u8>> {
+pub(super) unsafe fn hbitmap_to_png(hbitmap: HBITMAP) -> Option<Vec<u8>> {
     use std::ffi::c_void;
     use windows::Win32::Graphics::Gdi::{
         GetDC, GetDIBits, GetObjectW, ReleaseDC, BITMAP, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,

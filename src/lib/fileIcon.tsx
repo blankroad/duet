@@ -415,7 +415,11 @@ export function EntryIcon({
     !!localPath &&
     !overrides?.[extOf(entry.name)] &&
     isWindows();
-  const osUrl = useOsFileIcon(wantOs ? (localPath ?? null) : null, entry.name);
+  const osUrl = useOsFileIcon(
+    wantOs ? (localPath ?? null) : null,
+    entry.name,
+    size,
+  );
   if (osUrl) {
     return (
       <img

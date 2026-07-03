@@ -388,19 +388,15 @@ pub enum ShellScope {
     Background,
 }
 
-/// 파일의 OS 네이티브 아이콘을 PNG 바이트로 추출 — 앱 런처 타일·파일 목록 공용.
+/// 파일의 OS 네이티브 아이콘을 PNG 바이트로 추출 — 파일 목록·앱 런처 타일 공용.
 ///
-/// Windows: `systemicons`(SHGetFileInfo+GDI). 임의 파일은 연결 프로그램의 타입
-/// 아이콘, `.exe`/`.lnk`/`.ico` 등은 임베드/자기 아이콘을 반환한다. 그 외 OS:
-/// `NotSupported` (프론트는 글리프/모노그램 fallback). `size` 는 px (16/32/64 권장).
+/// Windows: 탐색기와 동일한 `IShellItemImageFactory::GetImage`(ICONONLY) — 연결
+/// 프로그램 타입 아이콘·`.exe`/`.lnk` 임베드 아이콘을 16~256px 임의 크기로(고해상도,
+/// hidpi 대응). 그 외 OS: `NotSupported` (프론트는 글리프/모노그램 fallback).
 pub fn os_file_icon(path: &Path, size: i32) -> Result<Vec<u8>, DuetError> {
     #[cfg(windows)]
     {
-        let p = path
-            .to_str()
-            .ok_or_else(|| DuetError::Io("icon: non-utf8 path".into()))?;
-        systemicons::get_icon(p, size)
-            .map_err(|e| DuetError::Io(format!("icon extract failed: {e:?}")))
+        win_file_icon(path, size)
     }
     #[cfg(not(windows))]
     {
@@ -409,6 +405,59 @@ pub fn os_file_icon(path: &Path, size: i32) -> Result<Vec<u8>, DuetError> {
             "file icon extraction is only supported on Windows".into(),
         ))
     }
+}
+
+#[cfg(windows)]
+fn win_file_icon(path: &Path, size: i32) -> Result<Vec<u8>, DuetError> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::SIZE;
+    use windows::Win32::Graphics::Gdi::{DeleteObject, HGDIOBJ};
+    use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
+    use windows::Win32::UI::Shell::{
+        IShellItemImageFactory, SHCreateItemFromParsingName, SIIGBF_BIGGERSIZEOK, SIIGBF_ICONONLY,
+    };
+
+    // 셸 아이콘 실제 상한(jumbo 256)과 hbitmap_to_png 의 가드(≤256)에 맞춰 클램프.
+    let px = size.clamp(16, 256);
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    // SAFETY: win_shell_thumbnail 과 동일 패턴 — blocking 워커 스레드에 COM init.
+    // S_OK/S_FALSE(이미 init) 면 ref 를 더한 것이니 끝에서 CoUninitialize 로 짝 맞춤.
+    let hr = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+    let need_uninit = hr.is_ok();
+
+    let result = (|| -> Result<Vec<u8>, DuetError> {
+        // SAFETY: wide 는 널종단 UTF-16. IShellItemImageFactory 로 QueryInterface.
+        let factory: IShellItemImageFactory =
+            unsafe { SHCreateItemFromParsingName(PCWSTR(wide.as_ptr()), None) }
+                .map_err(|e| DuetError::Io(format!("icon shell item: {e}")))?;
+        // SAFETY: factory 유효. ICONONLY = 썸네일 말고 아이콘(타입/임베드).
+        let hbitmap = unsafe {
+            factory.GetImage(
+                SIZE { cx: px, cy: px },
+                SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK,
+            )
+        }
+        .map_err(|e| DuetError::Io(format!("icon getimage: {e}")))?;
+        // SAFETY: hbitmap 은 유효한 32bpp DIB(알파 premultiplied). 변환 후 해제.
+        let png = unsafe { shell_menu::hbitmap_to_png(hbitmap) };
+        // SAFETY: GDI 객체 해제.
+        unsafe {
+            let _ = DeleteObject(HGDIOBJ(hbitmap.0));
+        }
+        png.ok_or_else(|| DuetError::Io("icon bitmap convert failed".into()))
+    })();
+
+    if need_uninit {
+        // SAFETY: CoInitializeEx 와 짝.
+        unsafe { CoUninitialize() };
+    }
+    result
 }
 
 /// 마운트된 볼륨/드라이브를 eject (언마운트 + 디바이스 분리).

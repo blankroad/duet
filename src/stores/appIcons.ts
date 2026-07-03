@@ -19,8 +19,8 @@ const useStore = create<State>(() => ({ icons: {} }));
 /** 동일 path 중복 호출 방지(in-flight). */
 const inflight = new Set<string>();
 
-/** 추출 소스 px — 16~20px 표시에 충분하고 hidpi 약간 여유. */
-const ICON_PX = 32;
+/** 추출 소스 px — 표시(16~20px) × hidpi(~200%) 커버. GetImage 라 실제 64px 아트. */
+const ICON_PX = 64;
 
 /** Vec<u8>(number[]) PNG → data URL. 아이콘은 수 KB 라 단순 루프로 충분. */
 export function bytesToPngDataUrl(bytes: number[]): string {
