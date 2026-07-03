@@ -82,6 +82,7 @@ export interface BuiltinDeps {
   deletePerm: () => void;
   copyPath: () => void;
   copyName: () => void;
+  calcDirSize: () => void;
   clipCopy: () => void;
   clipCut: () => void;
   clipPaste: () => void;
@@ -430,6 +431,13 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
       category: "File",
       defaultKey: "Ctrl+Alt+C",
       action: deps.copyName,
+    },
+    {
+      id: "file.calcSize",
+      label: "Calculate folder size",
+      category: "File",
+      defaultKey: "Shift+Space",
+      action: deps.calcDirSize,
     },
     {
       id: "edit.undo",

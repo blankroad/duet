@@ -45,6 +45,8 @@ export interface TabState {
   gridCols: number;
   filter: string;
   filterFocused: boolean;
+  /** "크기 계산"으로 구한 폴더 재귀 크기(name → bytes). 다른 폴더로 이동 시 리셋. */
+  dirSizes: Record<string, number>;
   history: { stack: Location[]; index: number };
   /** 아카이브 내부 탐색 중이면 set, 아니면 undefined. */
   archive?: ArchiveBrowse | undefined;
@@ -97,6 +99,9 @@ interface PanesState {
   setArchiveContext: (id: PaneId, ctx: ArchiveBrowse | null) => void;
   /** 휴지통 루트 설정/해제 (휴지통 이동 시 set). */
   setTrashRoot: (id: PaneId, root: string | null) => void;
+  /** "크기 계산" 결과 기록 — 크기 컬럼에 폴더 재귀 크기 표시. 계산이 비동기라
+   *  도착 시점에 탭이 바뀌었을 수 있어 tabId 로 대상 탭을 지정(없어졌으면 무시). */
+  setDirSize: (id: PaneId, tabId: string, name: string, bytes: number) => void;
   // NEW
   back: (id: PaneId) => Location | null;
   forward: (id: PaneId) => Location | null;
@@ -159,6 +164,7 @@ const initialTab = (location: Location = home()): TabState => ({
   gridCols: 1,
   filter: "",
   filterFocused: false,
+  dirSizes: {},
   history: { stack: [location], index: 0 },
 });
 
@@ -257,6 +263,8 @@ export const usePanes = create<PanesState>((set, get) => ({
         loadedAt: Date.now(),
         filter: navigated ? "" : cur.filter,
         filterFocused: navigated ? false : cur.filterFocused,
+        // 같은 폴더 새로고침이면 계산해둔 폴더 크기 유지(약간 낡을 수 있음 — TC 동일).
+        dirSizes: navigated ? {} : cur.dirSizes,
         history,
         archive,
         trashRoot,
@@ -482,6 +490,16 @@ export const usePanes = create<PanesState>((set, get) => ({
         })),
       },
     })),
+  setDirSize: (id, tabId, name, bytes) =>
+    set((s) => {
+      const p = s.panes[id];
+      const i = p.tabs.findIndex((t) => t.id === tabId);
+      const cur = p.tabs[i];
+      if (!cur) return s;
+      const tabs = p.tabs.slice();
+      tabs[i] = { ...cur, dirSizes: { ...cur.dirSizes, [name]: bytes } };
+      return { panes: { ...s.panes, [id]: { ...p, tabs } } };
+    }),
   setTrashRoot: (id, root) =>
     set((s) => ({
       panes: {

@@ -14,6 +14,8 @@ interface EntryRowProps {
   splitExt: boolean;
   /** OS 아이콘 조회용 로컬 절대경로 — 원격 패널이면 null(글리프). */
   localPath: string | null;
+  /** "크기 계산"으로 구한 폴더 재귀 크기(bytes) — 있으면 크기 컬럼에 표시. */
+  dirSize?: number | undefined;
   onClick: (e: React.MouseEvent) => void;
   onDoubleClick: () => void;
 }
@@ -31,6 +33,7 @@ export function EntryRow({
   isSelected,
   splitExt,
   localPath,
+  dirSize,
   onClick,
   onDoubleClick,
 }: EntryRowProps) {
@@ -88,7 +91,7 @@ export function EntryRow({
         </span>
       )}
       <span className="font-mono w-20 text-right text-meta text-fg-muted">
-        {formatSize(entry.size)}
+        {formatSize(dirSize ?? entry.size)}
       </span>
       <span className="font-mono w-20 text-right text-meta text-fg-muted">
         {formatTime(entry.modified_ms)}

@@ -37,6 +37,7 @@ import { ContextMenu } from "@/components/ContextMenu";
 import { useContextMenu, type MenuEntry } from "@/stores/contextMenu";
 import { openShellMenu, onShellMenuClose } from "@/lib/shellMenu";
 import { buildEntryMenu, buildEmptyMenu, folderName } from "@/lib/entryMenu";
+import { calcDirSizes } from "@/lib/dirSize";
 import {
   childLocation,
   parentPath,
@@ -710,6 +711,7 @@ function App() {
       deletePerm: () => void triggerDelete("permanent", openDialog, showToast),
       copyPath: () => void copySelectionPaths(showToast),
       copyName: () => void copySelectionNames(showToast),
+      calcDirSize: () => void calcDirSizes(usePanes.getState().activePane),
       clipCopy: () => clipCopy(showToast),
       clipCut: () => clipCut(showToast),
       clipPaste: () => void clipPaste(openDialog, showToast),

@@ -66,6 +66,8 @@ export function EntryList({
   const splitExt = useUI((s) => s.splitExt);
   // OS 아이콘(EntryIcon localPath)용 — 현재 패널 폴더 location. 원격이면 null 전달.
   const location = usePanes((s) => activeTab(s, id).location);
+  // "크기 계산" 결과(name → bytes) — 폴더 행의 크기 컬럼 표시.
+  const dirSizes = usePanes((s) => activeTab(s, id).dirSizes);
   const dragActive = useDragState((s) => s.active);
   const overThisPane = useDragState((s) => s.overPane === id);
   const overFolder = useDragState((s) =>
@@ -222,6 +224,7 @@ export function EntryList({
                       ? childLocation(location, entry.name).path
                       : null
                   }
+                  dirSize={dirSizes[entry.name]}
                   onClick={(e) => onCursorMove(vi.index, e)}
                   onDoubleClick={() => onActivate(entry, vi.index)}
                 />

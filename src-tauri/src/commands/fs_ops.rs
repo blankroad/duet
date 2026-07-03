@@ -62,6 +62,18 @@ fn emit_pushed(app: &tauri::AppHandle, entry: JournalEntry) -> JournalId {
     id
 }
 
+/// 항목의 재귀 총 바이트(폴더면 하위 전체 합) — 목록 "크기 계산"(Shift+Space)용.
+/// 읽기 전용. 로컬은 재귀 walk, SSH 는 SshFs 의 `du` 오버라이드(round-trip 없음).
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_dir_size(
+    location: Location,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+) -> Result<u64, DuetError> {
+    let fs = fs_for(&location.source, pool.inner()).await?;
+    fs.dir_size(&location.path).await
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn fs_delete_plan(

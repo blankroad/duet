@@ -27,6 +27,7 @@ import {
   Terminal,
   Columns3,
   Layers,
+  Sigma,
 } from "lucide-react";
 import { commands } from "@/types/bindings";
 import type { Entry, Location } from "@/types/bindings";
@@ -46,6 +47,7 @@ import { useConnections } from "@/stores/connections";
 import { bookmarkLocation } from "@/lib/bookmarkActions";
 import { addHostFavorite } from "@/stores/hostFavorites";
 import { childLocation } from "@/lib/entryDnd";
+import { calcDirSizes } from "@/lib/dirSize";
 import {
   triggerCopy,
   triggerMove,
@@ -281,6 +283,18 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
       icon: <Package size={ICON} />,
       onSelect: () => triggerCompress(open, showToast),
     },
+    // 폴더(또는 다중 선택에 폴더 포함 가능성) — 재귀 크기 계산해 크기 컬럼에 표시.
+    ...(isDir || multi
+      ? [
+          {
+            id: "calc-size",
+            label: "Calculate size",
+            icon: <Sigma size={ICON} />,
+            shortcut: "Shift+Space",
+            onSelect: () => void calcDirSizes(paneId),
+          } as MenuEntry,
+        ]
+      : []),
     sep(),
     {
       id: "rename",

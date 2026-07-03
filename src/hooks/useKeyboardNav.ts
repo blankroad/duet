@@ -69,6 +69,8 @@ export function useKeyboardNav(
           state.setActivePane(id === "left" ? "right" : "left");
           break;
         case " ":
+          // Shift+Space = 폴더 크기 계산(file.calcSize, 전역 단축키) — 여기선 무시.
+          if (e.shiftKey) break;
           e.preventDefault();
           // Finder 관례: Space = Quick Look, Ctrl/Cmd+Space = 선택 토글.
           if (e.ctrlKey || e.metaKey) {

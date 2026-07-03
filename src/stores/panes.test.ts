@@ -41,6 +41,7 @@ const mkTab = (path: string, entries: Entry[] = []): TabState => ({
   gridCols: 1,
   filter: "",
   filterFocused: false,
+  dirSizes: {},
   history: { stack: [], index: 0 },
 });
 
@@ -91,6 +92,7 @@ const reset = () => {
           gridCols: 1,
           filter: "",
           filterFocused: false,
+          dirSizes: {},
           history: { stack: [homeLocation], index: 0 },
         },
       ],
@@ -102,6 +104,32 @@ const reset = () => {
     };
   });
 };
+
+describe("panes — dirSizes (크기 계산 캐시)", () => {
+  beforeEach(reset);
+
+  it("setDirSize 는 tabId 로 대상 탭에 기록 — 활성 탭이 바뀌어도 안전", () => {
+    const s = usePanes.getState();
+    const tabId = s.panes.left.tabs[0]!.id;
+    s.setDirSize("left", tabId, "docs", 1234);
+    expect(usePanes.getState().panes.left.tabs[0]!.dirSizes["docs"]).toBe(1234);
+    // 없는 tabId 는 무시(탭 닫힘 후 늦게 도착한 결과).
+    s.setDirSize("left", "gone", "x", 1);
+    expect(usePanes.getState().panes.left.tabs[0]!.dirSizes["x"]).toBeUndefined();
+  });
+
+  it("같은 폴더 새로고침은 유지, 다른 폴더 이동은 리셋", () => {
+    const s = usePanes.getState();
+    const tabId = s.panes.left.tabs[0]!.id;
+    s.setDirSize("left", tabId, "docs", 55);
+    // 같은 경로 reload
+    s.setEntries("left", homeLocation, [mk("docs", "dir")]);
+    expect(usePanes.getState().panes.left.tabs[0]!.dirSizes["docs"]).toBe(55);
+    // 다른 경로 navigate
+    s.setEntries("left", { source: { kind: "local" }, path: "/tmp2" }, []);
+    expect(usePanes.getState().panes.left.tabs[0]!.dirSizes).toEqual({});
+  });
+});
 
 describe("panes — tab management", () => {
   beforeEach(reset);

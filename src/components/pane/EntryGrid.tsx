@@ -65,6 +65,8 @@ export function EntryGrid({
   const colsRef = useRef(1);
   // 썸네일 URL 빌드용 — 현재 패널 폴더 location.
   const location = usePanes((s) => activeTab(s, id).location);
+  // "크기 계산" 결과 — 타일 메타의 폴더 크기 표시.
+  const dirSizes = usePanes((s) => activeTab(s, id).dirSizes);
   const onEntryMouseDown = useEntryDrag(id);
   const dragActive = useDragState((s) => s.active);
   const overThisPane = useDragState((s) => s.overPane === id);
@@ -179,6 +181,7 @@ export function EntryGrid({
                   location,
                   isCursor,
                   isSelected,
+                  dirSize: dirSizes[entry.name],
                   highlight: dragActive && overFolder === entry.name,
                   onMouseEnter: () => setHoverEntry(id, entry),
                   onMouseDown: (e) => {
@@ -226,6 +229,8 @@ interface CellProps {
   location: Location;
   isCursor: boolean;
   isSelected: boolean;
+  /** "크기 계산" 결과(bytes) — 타일 메타의 크기 표시에 사용. */
+  dirSize?: number | undefined;
   highlight: boolean;
   onMouseEnter: () => void;
   onMouseDown: (e: React.MouseEvent) => void;
@@ -380,6 +385,7 @@ function TileRow({
   location,
   isCursor,
   isSelected,
+  dirSize,
   highlight,
   onMouseEnter,
   onMouseDown,
@@ -442,7 +448,7 @@ function TileRow({
             {entry.name}
           </span>
           <span className="text-meta text-fg-muted">
-            {formatSize(entry.size)} · {formatTime(entry.modified_ms)}
+            {formatSize(dirSize ?? entry.size)} · {formatTime(entry.modified_ms)}
           </span>
         </div>
       </span>

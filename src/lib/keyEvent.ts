@@ -20,6 +20,9 @@ export function formatKeyEvent(e: KeyboardEvent): string | null {
   let key = e.key;
   if (key.startsWith("Arrow")) {
     key = key.slice("Arrow".length);
+  } else if (key === " ") {
+    // 공백 문자 그대로면 바인딩 문자열("Shift+ ")이 안 읽힘 — 이름으로 정규화.
+    key = "Space";
   } else if (key.length === 1) {
     key = key.toUpperCase();
   }
