@@ -82,6 +82,14 @@ pub enum DeleteMode {
     Permanent,
 }
 
+/// 체크섬 알고리즘 — 파일 무결성 확인용 (fs_checksum).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "lowercase")]
+pub enum ChecksumAlgo {
+    Sha256,
+    Sha512,
+}
+
 /// 단일 항목의 stat — list 의 Entry 와 분리 (이름은 호출자가 알고 있음).
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct EntryMeta {

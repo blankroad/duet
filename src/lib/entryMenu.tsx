@@ -28,6 +28,7 @@ import {
   Columns3,
   Layers,
   Sigma,
+  Hash,
 } from "lucide-react";
 import { commands } from "@/types/bindings";
 import type { Entry, Location } from "@/types/bindings";
@@ -57,6 +58,7 @@ import {
   triggerDelete,
   triggerExtract,
   triggerCompress,
+  triggerChecksum,
   triggerSync,
   triggerCompare,
   copyPathsOf,
@@ -292,6 +294,17 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
             icon: <Sigma size={ICON} />,
             shortcut: "Shift+Space",
             onSelect: () => void calcDirSizes(paneId),
+          } as MenuEntry,
+        ]
+      : []),
+    // 파일(또는 다중 선택에 파일 포함 가능성) — 무결성 해시 다이얼로그.
+    ...(!isDir || multi
+      ? [
+          {
+            id: "checksum",
+            label: "Checksum…",
+            icon: <Hash size={ICON} />,
+            onSelect: () => triggerChecksum(open, showToast),
           } as MenuEntry,
         ]
       : []),

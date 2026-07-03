@@ -19,7 +19,8 @@ use crate::services::settings::SettingsStore;
 use crate::services::task_events::{HostKey, TaskId, TaskKind};
 use crate::services::task_queue::TaskQueue;
 use crate::types::{
-    DeleteMode, DuetError, EntryKind, EntryRef, Location, PreviewData, PreviewKind, SourceId,
+    ChecksumAlgo, DeleteMode, DuetError, EntryKind, EntryRef, Location, PreviewData, PreviewKind,
+    SourceId,
 };
 use tauri_specta::Event;
 
@@ -72,6 +73,20 @@ pub async fn fs_dir_size(
 ) -> Result<u64, DuetError> {
     let fs = fs_for(&location.source, pool.inner()).await?;
     fs.dir_size(&location.path).await
+}
+
+/// 파일 체크섬(소문자 hex) — 무결성 확인. 로컬은 스트리밍 해시(메모리 bounded),
+/// 원격은 호스트측 sha256sum/shasum(다운로드 0). 읽기 전용, 파일 하나씩 호출
+/// (프론트가 순차 루프 — 진행 표시·중단 용이).
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_checksum(
+    location: Location,
+    algo: ChecksumAlgo,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+) -> Result<String, DuetError> {
+    let fs = fs_for(&location.source, pool.inner()).await?;
+    fs.checksum(&location.path, algo).await
 }
 
 #[tauri::command]

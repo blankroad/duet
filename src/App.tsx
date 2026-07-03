@@ -14,6 +14,7 @@ import { ThreeWayDialog } from "@/components/dialogs/ThreeWayDialog";
 import { SyncDialog } from "@/components/dialogs/SyncDialog";
 import { MkdirDialog } from "@/components/dialogs/MkdirDialog";
 import { CompressDialog } from "@/components/dialogs/CompressDialog";
+import { ChecksumDialog } from "@/components/dialogs/ChecksumDialog";
 import { PasswordPromptDialog } from "@/components/dialogs/PasswordPromptDialog";
 import { ArgsDialog } from "@/components/dialogs/ArgsDialog";
 import { ConfirmDialog } from "@/components/dialogs/ConfirmDialog";
@@ -1340,6 +1341,9 @@ function App() {
           onClose={closeDialog}
           onSubmit={onCompressSubmit}
         />
+      )}
+      {dialog.kind === "checksum" && (
+        <ChecksumDialog targets={dialog.targets} onClose={closeDialog} />
       )}
       {dialog.kind === "extract-password" && (
         <PasswordPromptDialog

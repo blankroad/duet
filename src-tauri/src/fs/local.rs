@@ -374,6 +374,39 @@ mod tests {
     use tempfile::TempDir;
     use tokio::fs;
 
+    /// 체크섬 — 알려진 벡터("abc")와 일치 + 청크 경계(256KB 초과)에서도 정확.
+    #[tokio::test]
+    async fn checksum_known_vector_and_chunked() {
+        use crate::types::ChecksumAlgo;
+        let dir = TempDir::new().unwrap();
+        let small = dir.path().join("abc.txt");
+        fs::write(&small, b"abc").await.unwrap();
+        let local = LocalFs::new();
+        // NIST 표준 벡터.
+        assert_eq!(
+            local.checksum(&small, ChecksumAlgo::Sha256).await.unwrap(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert_eq!(
+            local
+                .checksum(&small, ChecksumAlgo::Sha512)
+                .await
+                .unwrap()
+                .len(),
+            128
+        );
+        // 스트리밍 경로 검증 — 버퍼(256KB)보다 큰 파일을 sha2 직접 계산과 대조.
+        let big = dir.path().join("big.bin");
+        let data: Vec<u8> = (0..600_000u32).map(|i| (i % 251) as u8).collect();
+        fs::write(&big, &data).await.unwrap();
+        use sha2::Digest;
+        let expect = hex::encode(sha2::Sha256::digest(&data));
+        assert_eq!(
+            local.checksum(&big, ChecksumAlgo::Sha256).await.unwrap(),
+            expect
+        );
+    }
+
     /// 심볼릭 링크: 폴더 링크는 Dir(진입 가능), 깨진 링크도 목록에 보임(Symlink).
     #[cfg(unix)]
     #[tokio::test]

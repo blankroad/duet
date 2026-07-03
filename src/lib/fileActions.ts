@@ -426,6 +426,19 @@ export function triggerCompress(open: OpenFn, showToast: ToastFn): void {
   open({ kind: "compress", items: targets, defaultName });
 }
 
+/** 선택 파일들의 체크섬 — 파일만 대상(폴더 제외), 결과 다이얼로그 오픈. */
+export function triggerChecksum(open: OpenFn, showToast: ToastFn): void {
+  const { tab, targets } = resolveActiveTargets();
+  const files = targets.filter(
+    (t) => tab.entries.find((e) => e.name === t.name)?.kind === "file",
+  );
+  if (files.length === 0) {
+    showToast("Checksum: select at least one file");
+    return;
+  }
+  open({ kind: "checksum", targets: files });
+}
+
 /** Delete(trash) / Shift+Delete(permanent). */
 export async function triggerDelete(
   mode: DeleteMode,

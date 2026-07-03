@@ -213,6 +213,44 @@ impl FileSystem for SshFs {
             .unwrap_or(0))
     }
 
+    /// 원격 체크섬 — 호스트측 해시 실행(다운로드 0). GNU(sha256sum) 우선,
+    /// BSD/macOS(shasum) 폴백. 출력 첫 토큰이 hex 다이제스트.
+    async fn checksum(
+        &self,
+        path: &Path,
+        algo: crate::types::ChecksumAlgo,
+    ) -> Result<String, DuetError> {
+        let session = self
+            .conn
+            .session
+            .as_ref()
+            .ok_or_else(|| DuetError::Io("checksum: not connected".into()))?;
+        let quoted = posix_shell_quote(&remote_path_str(path)?)?;
+        let cmd = checksum_cmd(&quoted, algo);
+        let out = {
+            let handle = session.lock().await;
+            crate::ssh::remote_exec::exec(&handle, &cmd).await?
+        };
+        if out.exit_status != 0 {
+            return Err(DuetError::Io(format!(
+                "remote checksum failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            )));
+        }
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let tok = stdout.split_whitespace().next().unwrap_or("");
+        let want = match algo {
+            crate::types::ChecksumAlgo::Sha256 => 64,
+            crate::types::ChecksumAlgo::Sha512 => 128,
+        };
+        if tok.len() != want || !tok.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(DuetError::Io(
+                "remote checksum: unexpected tool output".into(),
+            ));
+        }
+        Ok(tok.to_ascii_lowercase())
+    }
+
     async fn metadata(&self, path: &Path) -> Result<crate::types::EntryMeta, DuetError> {
         let sftp = self.open_sftp().await?;
         let owned = remote_path_str(path)?;
@@ -557,6 +595,16 @@ fn posix_shell_quote(s: &str) -> Result<String, DuetError> {
     Ok(format!("'{}'", s.replace('\'', "'\\''")))
 }
 
+/// 원격 체크섬 명령 문자열 — GNU coreutils(shaNNNsum) 우선, 없으면 BSD/macOS 의
+/// perl `shasum` 폴백. `quoted` 는 posix_shell_quote 통과한 경로.
+fn checksum_cmd(quoted: &str, algo: crate::types::ChecksumAlgo) -> String {
+    let (gnu, bsd) = match algo {
+        crate::types::ChecksumAlgo::Sha256 => ("sha256sum", "shasum -a 256"),
+        crate::types::ChecksumAlgo::Sha512 => ("sha512sum", "shasum -a 512"),
+    };
+    format!("LC_ALL=C {gnu} -- {quoted} 2>/dev/null || {bsd} -- {quoted}")
+}
+
 /// 원격 사용자의 home 디렉토리 절대경로. SFTP `canonicalize(".")` 결과.
 async fn remote_home(sftp: &russh_sftp::client::SftpSession) -> Result<PathBuf, DuetError> {
     let home = sftp
@@ -678,6 +726,19 @@ mod tests {
             "sftp: failure".into()
         )));
         assert!(super::should_cp_fallback(&DuetError::Io("other".into())));
+    }
+
+    #[test]
+    fn checksum_cmd_gnu_first_bsd_fallback_quoted() {
+        use crate::types::ChecksumAlgo;
+        let q = super::posix_shell_quote("/srv/a b's.bin").unwrap();
+        let cmd = super::checksum_cmd(&q, ChecksumAlgo::Sha256);
+        assert!(cmd.contains("sha256sum -- "));
+        assert!(cmd.contains("|| shasum -a 256 -- "));
+        // 인용된 경로가 두 곳 모두 그대로 들어감(따옴표 이스케이프 포함).
+        assert_eq!(cmd.matches(q.as_str()).count(), 2);
+        let cmd512 = super::checksum_cmd(&q, ChecksumAlgo::Sha512);
+        assert!(cmd512.contains("sha512sum") && cmd512.contains("shasum -a 512"));
     }
 
     #[test]

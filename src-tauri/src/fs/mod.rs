@@ -126,6 +126,42 @@ pub trait FileSystem: Send + Sync {
         let end = start.saturating_add(len).min(full.len());
         Ok(full[start..end].to_vec())
     }
+
+    /// 파일 체크섬(소문자 hex) — 무결성 확인용. 기본 구현은 `open_read` 청크 스트리밍
+    /// 해시(메모리 bounded). SSH 는 호스트측 `sha256sum` 오버라이드(다운로드 0) 권장.
+    async fn checksum(
+        &self,
+        path: &Path,
+        algo: crate::types::ChecksumAlgo,
+    ) -> Result<String, DuetError> {
+        let reader = self.open_read(path, 0).await?;
+        match algo {
+            crate::types::ChecksumAlgo::Sha256 => {
+                hash_stream::<sha2::Sha256>(reader).await
+            }
+            crate::types::ChecksumAlgo::Sha512 => {
+                hash_stream::<sha2::Sha512>(reader).await
+            }
+        }
+    }
+}
+
+/// AsyncRead 를 청크로 소진하며 Digest 해시 → 소문자 hex. (trait 기본 checksum 용)
+async fn hash_stream<D: sha2::Digest>(
+    mut reader: std::pin::Pin<Box<dyn tokio::io::AsyncRead + Send>>,
+) -> Result<String, DuetError> {
+    let mut hasher = D::new();
+    let mut buf = vec![0u8; 256 * 1024];
+    loop {
+        let n = read_upto(&mut reader, &mut buf)
+            .await
+            .map_err(|e| DuetError::Io(format!("checksum read: {e}")))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hex::encode(hasher.finalize()))
 }
 
 /// reader 에서 최대 `buf.len()` 바이트 채울 때까지 반복 read (짧은 read 대응).

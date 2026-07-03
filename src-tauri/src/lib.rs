@@ -98,6 +98,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::settings::settings_get,
             commands::settings::settings_set,
             commands::fs_ops::fs_dir_size,
+            commands::fs_ops::fs_checksum,
             commands::fs_ops::fs_delete_plan,
             commands::fs_ops::fs_delete_execute,
             commands::fs_ops::fs_copy_plan,

@@ -26,6 +26,7 @@ export type DialogState =
   | { kind: "compare"; plan: ComparePlan }
   | { kind: "compare-scanning" }
   | { kind: "three-way"; plan: ThreeWayPlan }
+  | { kind: "checksum"; targets: EntryRef[] }
   | { kind: "app-args"; appId: string; name: string; args: string[] }
   | { kind: "eject-confirm"; volume: Volume }
   | { kind: "progress"; title: string; taskId: string }
