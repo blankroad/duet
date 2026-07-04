@@ -39,7 +39,8 @@ export type DialogState =
   | { kind: "app-args"; appId: string; name: string; args: string[] }
   | { kind: "eject-confirm"; volume: Volume }
   | { kind: "progress"; title: string; taskId: string }
-  | { kind: "settings" };
+  | { kind: "settings" }
+  | { kind: "shortcuts" };
 
 interface State {
   dialog: DialogState;

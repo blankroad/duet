@@ -9,6 +9,7 @@ export type CommandCategory =
   | "File"
   | "Connection"
   | "Settings"
+  | "Help"
   | "User";
 
 export interface Command {
@@ -89,6 +90,8 @@ export interface BuiltinDeps {
   undo: () => void;
   /** 커서 항목(없으면 빈 영역) 컨텍스트 메뉴를 키보드로 오픈. */
   openContextMenu: () => void;
+  /** 단축키 치트시트 다이얼로그. */
+  openShortcuts: () => void;
   // ssh
   setupKeyAuth: () => void;
 }
@@ -454,6 +457,13 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
       category: "File",
       defaultKey: "Shift+F10",
       action: deps.openContextMenu,
+    },
+    {
+      id: "help.shortcuts",
+      label: "Keyboard shortcuts",
+      category: "Help",
+      defaultKey: "F1",
+      action: deps.openShortcuts,
     },
     {
       id: "ssh.setupKeyAuth",

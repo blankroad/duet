@@ -30,6 +30,7 @@ import {
 } from "@/lib/elevatePending";
 import { rememberExtract } from "@/lib/extractPending";
 import { ProgressModal } from "@/components/dialogs/ProgressModal";
+import { ShortcutCheatsheet } from "@/components/dialogs/ShortcutCheatsheet";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { Toast } from "@/components/Toast";
 import { SearchPanel } from "@/components/SearchPanel";
@@ -770,6 +771,7 @@ function App() {
       clipPaste: () => void clipPaste(openDialog, showToast),
       undo: () => void triggerUndo(showToast),
       openContextMenu: openContextMenuAtCursor,
+      openShortcuts: () => openDialog({ kind: "shortcuts" }),
       setupKeyAuth: () => {
         const src = activeTab(
           usePanes.getState(),
@@ -1734,6 +1736,9 @@ function App() {
         />
       )}
       {dialog.kind === "settings" && <SettingsDialog onClose={closeDialog} />}
+      {dialog.kind === "shortcuts" && (
+        <ShortcutCheatsheet onClose={closeDialog} />
+      )}
       {quickLookOpen && <QuickLook />}
       <Toast />
       <CommandPalette />
