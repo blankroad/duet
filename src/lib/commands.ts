@@ -87,6 +87,8 @@ export interface BuiltinDeps {
   clipCut: () => void;
   clipPaste: () => void;
   undo: () => void;
+  /** 커서 항목(없으면 빈 영역) 컨텍스트 메뉴를 키보드로 오픈. */
+  openContextMenu: () => void;
   // ssh
   setupKeyAuth: () => void;
 }
@@ -445,6 +447,13 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
       category: "File",
       defaultKey: "Ctrl+Z",
       action: deps.undo,
+    },
+    {
+      id: "file.contextMenu",
+      label: "Open context menu",
+      category: "File",
+      defaultKey: "Shift+F10",
+      action: deps.openContextMenu,
     },
     {
       id: "ssh.setupKeyAuth",

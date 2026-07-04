@@ -428,10 +428,9 @@ function App() {
     [navigate],
   );
 
-  /** 엔트리 우클릭 — 활성 패널/cursor/선택을 맞춘 뒤(Finder 관례) 컨텍스트 메뉴 오픈. */
-  const onEntryContextMenu = useCallback(
-    (id: PaneId, entry: Entry, index: number, e: React.MouseEvent) => {
-      e.preventDefault();
+  /** 엔트리 컨텍스트 메뉴를 (cx, cy) 좌표에 오픈 — 마우스 우클릭과 키보드가 공유. */
+  const openEntryMenuAt = useCallback(
+    (id: PaneId, entry: Entry, index: number, cx: number, cy: number) => {
       const s = usePanes.getState();
       s.setActivePane(id);
       s.setCursor(id, index);
@@ -454,11 +453,9 @@ function App() {
             },
           });
         }
-        useContextMenu.getState().openAt(e.clientX, e.clientY, parentItems);
+        useContextMenu.getState().openAt(cx, cy, parentItems);
         return;
       }
-      const cx = e.clientX;
-      const cy = e.clientY;
       const tab = activeTab(s, id);
       const wasSelected = tab.selected.has(entry.name);
       if (!wasSelected) s.setSelected(id, [entry.name]);
@@ -509,12 +506,18 @@ function App() {
     [onActivate, onOpenInOtherPane, onPutBack, onUp, showToast],
   );
 
-  /** 빈 영역 우클릭 — 패널 메뉴(새 폴더/보기/정렬/북마크). */
-  const onEmptyContextMenu = useCallback(
-    (id: PaneId, e: React.MouseEvent) => {
+  /** 엔트리 우클릭 — 활성 패널/cursor/선택을 맞춘 뒤(Finder 관례) 컨텍스트 메뉴 오픈. */
+  const onEntryContextMenu = useCallback(
+    (id: PaneId, entry: Entry, index: number, e: React.MouseEvent) => {
       e.preventDefault();
-      const cx = e.clientX;
-      const cy = e.clientY;
+      openEntryMenuAt(id, entry, index, e.clientX, e.clientY);
+    },
+    [openEntryMenuAt],
+  );
+
+  /** 빈 영역 컨텍스트 메뉴를 (cx, cy) 좌표에 오픈 — 마우스/키보드 공유. */
+  const openEmptyMenuAt = useCallback(
+    (id: PaneId, cx: number, cy: number) => {
       const s = usePanes.getState();
       s.setActivePane(id);
       const tab = activeTab(s, id);
@@ -551,6 +554,46 @@ function App() {
     },
     [onRefresh],
   );
+
+  /** 빈 영역 우클릭 — 패널 메뉴(새 폴더/보기/정렬/북마크). */
+  const onEmptyContextMenu = useCallback(
+    (id: PaneId, e: React.MouseEvent) => {
+      e.preventDefault();
+      openEmptyMenuAt(id, e.clientX, e.clientY);
+    },
+    [openEmptyMenuAt],
+  );
+
+  /**
+   * Shift+F10 (file.contextMenu) — 활성 패널 커서 항목의 컨텍스트 메뉴를 키보드로.
+   * 위치는 커서 행 DOM rect 에서 계산(가상 스크롤이 커서를 항상 뷰포트에 유지).
+   * 커서 항목이 없으면(빈 폴더) 패널 좌상단에 빈 영역 메뉴.
+   */
+  const openContextMenuAtCursor = useCallback(() => {
+    const s = usePanes.getState();
+    const id = s.activePane;
+    const tab = activeTab(s, id);
+    const entry = computeDisplayed(tab)[tab.cursorIndex];
+    const paneEl = document.querySelector(`[data-drop-pane="${id}"]`);
+    const paneRect = paneEl?.getBoundingClientRect();
+    const fallbackX = (paneRect?.left ?? 0) + 24;
+    const fallbackY = (paneRect?.top ?? 0) + 24;
+    if (entry) {
+      const rowEl = paneEl?.querySelector(
+        `[data-entry="${CSS.escape(entry.name)}"]`,
+      );
+      const r = rowEl?.getBoundingClientRect();
+      openEntryMenuAt(
+        id,
+        entry,
+        tab.cursorIndex,
+        r ? r.left + 16 : fallbackX,
+        r ? r.bottom : fallbackY,
+      );
+    } else {
+      openEmptyMenuAt(id, fallbackX, fallbackY);
+    }
+  }, [openEntryMenuAt, openEmptyMenuAt]);
 
   const onPickHit = useCallback(
     (hit: SearchHit) => {
@@ -735,6 +778,7 @@ function App() {
       clipCut: () => clipCut(showToast),
       clipPaste: () => void clipPaste(openDialog, showToast),
       undo: () => void triggerUndo(showToast),
+      openContextMenu: openContextMenuAtCursor,
       setupKeyAuth: () => {
         const src = activeTab(
           usePanes.getState(),
@@ -772,6 +816,7 @@ function App() {
     onRefresh,
     openDialog,
     showToast,
+    openContextMenuAtCursor,
   ]);
 
   const onRenameSubmit = useCallback(
