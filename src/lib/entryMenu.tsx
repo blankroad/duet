@@ -32,6 +32,7 @@ import {
   Lock,
   Link2,
 } from "lucide-react";
+import i18n from "@/i18n";
 import { commands } from "@/types/bindings";
 import type { Entry, Location } from "@/types/bindings";
 import { formatErr } from "@/lib/error";
@@ -165,7 +166,7 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
     items.push(
       {
         id: "put-back",
-        label: "Put back",
+        label: i18n.t("menu.putBack"),
         icon: <Undo2 size={ICON} />,
         onSelect: onPutBack,
       },
@@ -178,14 +179,14 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
       items.push(
         {
           id: "open",
-          label: "Open",
+          label: i18n.t("menu.open"),
           icon: <FolderOpen size={ICON} />,
           shortcut: "Enter",
           onSelect: () => onActivate(paneId, entry),
         },
         {
           id: "open-other",
-          label: "Open in other pane",
+          label: i18n.t("menu.openInOtherPane"),
           icon: <PanelRight size={ICON} />,
           onSelect: () => onOpenInOtherPane(paneId, entry),
         },
@@ -193,7 +194,7 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
     } else {
       items.push({
         id: "open",
-        label: "Open",
+        label: i18n.t("menu.open"),
         icon: <ExternalLink size={ICON} />,
         shortcut: "Enter",
         onSelect: () => onActivate(paneId, entry),
@@ -202,7 +203,7 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
       if (location.source.kind === "ssh") {
         items.push({
           id: "edit-remote",
-          label: "Edit & watch",
+          label: i18n.t("menu.editAndWatch"),
           icon: <FilePen size={ICON} />,
           onSelect: () => void editRemoteEntry(child, entry.name),
         });
@@ -211,14 +212,14 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
     if (location.source.kind === "local") {
       items.push({
         id: "reveal",
-        label: "Show in file manager",
+        label: i18n.t("menu.showInFileManager"),
         icon: <FolderSearch size={ICON} />,
         onSelect: () => void revealEntry(child),
       });
       if (isDir) {
         items.push({
           id: "open-terminal",
-          label: "Open terminal here",
+          label: i18n.t("menu.openTerminalHere"),
           icon: <Terminal size={ICON} />,
           onSelect: () => void openTerminalAt(child),
         });
@@ -231,7 +232,7 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
     items.push(
       {
         id: "extract",
-        label: "Extract here",
+        label: i18n.t("menu.extractHere"),
         icon: <FileArchive size={ICON} />,
         onSelect: () => void triggerExtract(showToast),
       },
@@ -242,21 +243,21 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
   items.push(
     {
       id: "clip-copy",
-      label: "Copy",
+      label: i18n.t("menu.copy"),
       icon: <Copy size={ICON} />,
       shortcut: "Ctrl+C",
       onSelect: () => clipCopy(showToast),
     },
     {
       id: "clip-cut",
-      label: "Cut",
+      label: i18n.t("menu.cut"),
       icon: <Scissors size={ICON} />,
       shortcut: "Ctrl+X",
       onSelect: () => clipCut(showToast),
     },
     {
       id: "clip-paste",
-      label: "Paste into folder",
+      label: i18n.t("menu.pasteIntoFolder"),
       icon: <ClipboardPaste size={ICON} />,
       shortcut: "Ctrl+V",
       disabled: !useClipboard.getState().entry,
@@ -265,28 +266,28 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
     sep(),
     {
       id: "copy",
-      label: "Copy to other pane",
+      label: i18n.t("menu.copyToOtherPane"),
       icon: <Copy size={ICON} />,
       shortcut: "F5",
       onSelect: () => void triggerCopy(open, showToast),
     },
     {
       id: "move",
-      label: "Move to other pane",
+      label: i18n.t("menu.moveToOtherPane"),
       icon: <FolderInput size={ICON} />,
       shortcut: "F6",
       onSelect: () => void triggerMove(open, showToast),
     },
     {
       id: "shelf-add",
-      label: "Add to shelf",
+      label: i18n.t("menu.addToShelf"),
       icon: <Layers size={ICON} />,
       shortcut: "Ctrl+Shift+A",
       onSelect: () => addSelectionToShelf(showToast),
     },
     {
       id: "compress",
-      label: "Compress…",
+      label: i18n.t("menu.compress"),
       icon: <Package size={ICON} />,
       onSelect: () => triggerCompress(open, showToast),
     },
@@ -295,7 +296,7 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
       ? [
           {
             id: "calc-size",
-            label: "Calculate size",
+            label: i18n.t("menu.calculateSize"),
             icon: <Sigma size={ICON} />,
             shortcut: "Shift+Space",
             onSelect: () => void calcDirSizes(paneId),
@@ -307,7 +308,7 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
       ? [
           {
             id: "checksum",
-            label: "Checksum…",
+            label: i18n.t("menu.checksum"),
             icon: <Hash size={ICON} />,
             onSelect: () => triggerChecksum(open, showToast),
           } as MenuEntry,
@@ -318,7 +319,7 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
       ? [
           {
             id: "permissions",
-            label: "Permissions…",
+            label: i18n.t("menu.permissions"),
             icon: <Lock size={ICON} />,
             onSelect: () => triggerPermissions(open, showToast),
           } as MenuEntry,
@@ -327,7 +328,7 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
     sep(),
     {
       id: "rename",
-      label: "Rename",
+      label: i18n.t("menu.rename"),
       icon: <Pencil size={ICON} />,
       shortcut: "F2",
       disabled: multi,
@@ -337,7 +338,7 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
       ? [
           {
             id: "batch-rename",
-            label: "Batch rename…",
+            label: i18n.t("menu.batchRename"),
             icon: <Pencil size={ICON} />,
             onSelect: () => triggerBatchRename(open, showToast),
           } as MenuEntry,
@@ -345,14 +346,14 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
       : []),
     {
       id: "mkdir",
-      label: "New folder",
+      label: i18n.t("menu.newFolder"),
       icon: <FolderPlus size={ICON} />,
       shortcut: "F7",
       onSelect: () => triggerMkdir(open),
     },
     {
       id: "bookmark",
-      label: "Add to bookmarks",
+      label: i18n.t("menu.addToBookmarks"),
       icon: <Star size={ICON} />,
       onSelect: () => void bookmarkLocation(child, entry.name),
     },
@@ -361,7 +362,7 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
   if (alias) {
     items.push({
       id: "host-fav",
-      label: "Add to host favorites",
+      label: i18n.t("menu.addToHostFavorites"),
       icon: <Heart size={ICON} />,
       onSelect: () =>
         void addHostFavorite(alias, entry.name, String(child.path)),
@@ -371,7 +372,7 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
   items.push(
     {
       id: "copy-path",
-      label: "Copy path",
+      label: i18n.t("menu.copyPath"),
       icon: <ClipboardCopy size={ICON} />,
       // 로컬은 백엔드 Path::join 으로 — Windows 드라이브문자·네이티브 구분자 보존(§7).
       onSelect: () =>
@@ -379,13 +380,13 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
     },
     {
       id: "copy-name",
-      label: "Copy name",
+      label: i18n.t("menu.copyName"),
       onSelect: () => void copyText(entry.name),
     },
     sep(),
     {
       id: "delete",
-      label: "Delete",
+      label: i18n.t("menu.delete"),
       icon: <Trash2 size={ICON} />,
       shortcut: "Del",
       danger: true,
@@ -393,7 +394,7 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
     },
     {
       id: "delete-perm",
-      label: "Delete permanently",
+      label: i18n.t("menu.deletePermanently"),
       icon: <Trash size={ICON} />,
       shortcut: "Shift+Del",
       danger: true,
@@ -411,16 +412,16 @@ export interface EmptyMenuDeps {
 }
 
 const SORTS: { key: SortKey; label: string }[] = [
-  { key: "name", label: "Name" },
-  { key: "size", label: "Size" },
-  { key: "mtime", label: "Modified" },
-  { key: "kind", label: "Kind" },
-  { key: "ext", label: "Extension" },
+  { key: "name", label: i18n.t("menu.sortName") },
+  { key: "size", label: i18n.t("menu.sortSize") },
+  { key: "mtime", label: i18n.t("menu.sortMtime") },
+  { key: "kind", label: i18n.t("menu.sortKind") },
+  { key: "ext", label: i18n.t("menu.sortExt") },
 ];
 const VIEWS: { mode: ViewMode; label: string }[] = [
-  { mode: "details", label: "Details" },
-  { mode: "grid", label: "Grid" },
-  { mode: "tiles", label: "Tiles" },
+  { mode: "details", label: i18n.t("menu.viewDetails") },
+  { mode: "grid", label: i18n.t("menu.viewGrid") },
+  { mode: "tiles", label: i18n.t("menu.viewTiles") },
 ];
 
 export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
@@ -432,7 +433,7 @@ export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
   const items: MenuEntry[] = [
     {
       id: "paste",
-      label: "Paste",
+      label: i18n.t("menu.paste"),
       icon: <ClipboardPaste size={ICON} />,
       shortcut: "Ctrl+V",
       disabled: !useClipboard.getState().entry,
@@ -440,7 +441,7 @@ export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
     },
     {
       id: "mkdir",
-      label: "New folder",
+      label: i18n.t("menu.newFolder"),
       icon: <FolderPlus size={ICON} />,
       shortcut: "F7",
       onSelect: () => triggerMkdir(open),
@@ -450,7 +451,7 @@ export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
       ? [
           {
             id: "symlink",
-            label: "New symlink…",
+            label: i18n.t("menu.newSymlink"),
             icon: <Link2 size={ICON} />,
             onSelect: () => triggerNewSymlink(open),
           } as MenuEntry,
@@ -458,7 +459,7 @@ export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
       : []),
     {
       id: "refresh",
-      label: "Refresh",
+      label: i18n.t("menu.refresh"),
       icon: <RotateCw size={ICON} />,
       shortcut: "Ctrl+R",
       onSelect: () => onRefresh(paneId),
@@ -467,7 +468,7 @@ export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
       ? [
           {
             id: "open-terminal",
-            label: "Open terminal here",
+            label: i18n.t("menu.openTerminalHere"),
             icon: <Terminal size={ICON} />,
             onSelect: () => void openTerminalAt(location),
           } as MenuEntry,
@@ -475,20 +476,20 @@ export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
       : []),
     {
       id: "sync",
-      label: "Sync to other pane",
+      label: i18n.t("menu.syncToOtherPane"),
       icon: <FolderSync size={ICON} />,
       onSelect: () => void triggerSync(open, useToast.getState().show),
     },
     {
       id: "compare",
-      label: "Compare folders",
+      label: i18n.t("menu.compareFolders"),
       icon: <FolderGit2 size={ICON} />,
       onSelect: () => void triggerCompare(open, useToast.getState().show),
     },
     sep(),
     {
       id: "view",
-      label: "View as",
+      label: i18n.t("menu.viewAs"),
       icon: <LayoutGrid size={ICON} />,
       children: VIEWS.map((v) => ({
         id: `view-${v.mode}`,
@@ -498,7 +499,7 @@ export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
     },
     {
       id: "sort",
-      label: "Sort by",
+      label: i18n.t("menu.sortBy"),
       icon: <ArrowDownUp size={ICON} />,
       children: SORTS.map((s) => ({
         id: `sort-${s.key}`,
@@ -508,7 +509,7 @@ export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
     },
     {
       id: "hidden",
-      label: "Toggle hidden files",
+      label: i18n.t("menu.toggleHidden"),
       icon: <Eye size={ICON} />,
       shortcut: "Ctrl+H",
       onSelect: () => p.toggleShowHidden(paneId),
@@ -524,7 +525,7 @@ export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
     sep(),
     {
       id: "bookmark",
-      label: "Add this folder to bookmarks",
+      label: i18n.t("menu.addFolderBookmarks"),
       icon: <Star size={ICON} />,
       onSelect: () => void bookmarkLocation(location, folderName(location)),
     },
@@ -533,7 +534,7 @@ export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
   if (alias) {
     items.push({
       id: "host-fav",
-      label: "Add this folder to host favorites",
+      label: i18n.t("menu.addFolderHostFavorites"),
       icon: <Heart size={ICON} />,
       onSelect: () =>
         void addHostFavorite(
