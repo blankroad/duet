@@ -309,6 +309,15 @@ mod tests {
         // gone.txt: base 에 있고 left 가 삭제, right 는 그대로 → LeftDeleted(되살리지 않음).
         std::fs::write(base.join("gone.txt"), b"x").unwrap();
         std::fs::write(r.join("gone.txt"), b"x").unwrap();
+        // eq() 는 modified_ms 정확 일치 요구 — 순차 write 가 ms 경계에 걸리면
+        // "right 변경"으로 오분류돼 플래키. 두 파일 mtime 을 동일 값으로 고정.
+        let fixed =
+            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        for p in [base.join("gone.txt"), r.join("gone.txt")] {
+            let f = std::fs::OpenOptions::new().append(true).open(&p).unwrap();
+            f.set_times(std::fs::FileTimes::new().set_modified(fixed))
+                .unwrap();
+        }
         // new.txt: base 없음, left 만 추가 → LeftAdded.
         std::fs::write(l.join("new.txt"), b"n").unwrap();
 
