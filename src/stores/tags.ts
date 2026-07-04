@@ -25,7 +25,7 @@ export async function bootstrapTags(): Promise<void> {
 export async function setTags(key: string, tags: string[]): Promise<void> {
   const r = await commands.tagSet(key, tags);
   if (r.status === "ok") useTags.getState().setAll(r.data);
-  else useToast.getState().show(`Set tags: ${formatErr(r.error)}`);
+  else useToast.getState().show(`Set tags: ${formatErr(r.error)}`, "error");
 }
 
 /** 키의 태그 목록(없으면 빈 배열). */

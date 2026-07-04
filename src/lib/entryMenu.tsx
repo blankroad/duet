@@ -112,9 +112,9 @@ function sshAlias(location: Location): string | null {
 async function copyText(text: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(text);
-    useToast.getState().show(`Copied: ${text}`);
+    useToast.getState().show(`Copied: ${text}`, "success");
   } catch {
-    useToast.getState().show("Clipboard unavailable");
+    useToast.getState().show("Clipboard unavailable", "error");
   }
 }
 
@@ -122,14 +122,14 @@ async function copyText(text: string): Promise<void> {
 async function revealEntry(target: Location): Promise<void> {
   const r = await commands.revealPath(target);
   if (r.status === "error")
-    useToast.getState().show(`Reveal failed: ${formatErr(r.error)}`);
+    useToast.getState().show(`Reveal failed: ${formatErr(r.error)}`, "error");
 }
 
 /** 해당 폴더에서 OS 터미널 열기 (로컬 전용). */
 async function openTerminalAt(target: Location): Promise<void> {
   const r = await commands.openTerminal(target);
   if (r.status === "error")
-    useToast.getState().show(`Open terminal failed: ${formatErr(r.error)}`);
+    useToast.getState().show(`Open terminal failed: ${formatErr(r.error)}`, "error");
 }
 
 /** 원격 파일을 에디터로 열고 변경 시 자동 재업로드(편집 라운드트립). */

@@ -33,7 +33,7 @@ async function persist(next: HostGroup[]): Promise<void> {
     useHostGroups.getState().setGroups(r.data);
   } else {
     useHostGroups.getState().setGroups(prev);
-    useToast.getState().show(`Group update failed: ${formatErr(r.error)}`);
+    useToast.getState().show(`Group update failed: ${formatErr(r.error)}`, "error");
   }
 }
 

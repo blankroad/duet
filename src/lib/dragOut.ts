@@ -29,7 +29,7 @@ export async function resolveDragPaths(items: EntryRef[]): Promise<string[]> {
   if (items.length === 0) return [];
   const r = await commands.localAbsPaths(items);
   if (r.status !== "ok") {
-    useToast.getState().show(`Drag out: ${formatErr(r.error)}`);
+    useToast.getState().show(`Drag out: ${formatErr(r.error)}`, "error");
     return [];
   }
   return r.data;
@@ -42,6 +42,6 @@ export async function resolveDragPaths(items: EntryRef[]): Promise<string[]> {
 export function startDragWithPaths(paths: string[]): void {
   if (paths.length === 0) return;
   void startDrag({ item: paths, icon: DRAG_ICON, mode: "copy" }).catch((e) => {
-    useToast.getState().show(`Drag out failed: ${formatErr(e)}`);
+    useToast.getState().show(`Drag out failed: ${formatErr(e)}`, "error");
   });
 }

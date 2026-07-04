@@ -97,10 +97,10 @@ export function useTaskEvents() {
               // 로컬 Windows 보호 경로 → UAC 승격.
               dialogs.open({ kind: "elevate-op", pending: retry });
             } else {
-              useToast.getState().show(`Operation failed — ${msg}`);
+              useToast.getState().show(`Operation failed — ${msg}`, "error");
             }
           } else {
-            useToast.getState().show(`Operation failed — ${msg}`);
+            useToast.getState().show(`Operation failed — ${msg}`, "error");
           }
           remove(id);
           break;

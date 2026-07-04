@@ -44,11 +44,11 @@ export async function setKeymap(
 export async function unsetKeymap(key: string): Promise<void> {
   const r = await commands.keymapUnset(key);
   if (r.status === "ok") useKeymap.getState().setAll(r.data);
-  else useToast.getState().show(`Unbind key: ${formatErr(r.error)}`);
+  else useToast.getState().show(`Unbind key: ${formatErr(r.error)}`, "error");
 }
 
 export async function resetKeymap(): Promise<void> {
   const r = await commands.keymapReset();
   if (r.status === "ok") useKeymap.getState().setAll(r.data);
-  else useToast.getState().show(`Reset keymap: ${formatErr(r.error)}`);
+  else useToast.getState().show(`Reset keymap: ${formatErr(r.error)}`, "error");
 }

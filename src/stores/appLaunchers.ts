@@ -21,7 +21,7 @@ export function isAppFolder(item: AppItem): boolean {
 
 const apply = (r: { status: "ok"; data: AppItem[] } | { status: "error"; error: unknown }) => {
   if (r.status === "ok") useAppLaunchers.getState().setAll(r.data);
-  else useToast.getState().show(`App launcher: ${formatErr(r.error)}`);
+  else useToast.getState().show(`App launcher: ${formatErr(r.error)}`, "error");
 };
 
 export async function bootstrapAppLaunchers(): Promise<void> {
@@ -73,5 +73,5 @@ export async function reorderInFolder(folderId: string, ids: string[]): Promise<
 /** 앱 실행 — 인자 포함. 실패 시 토스트. */
 export async function launchApp(path: string, args: string[] = []): Promise<void> {
   const r = await commands.appLaunch(path, args);
-  if (r.status === "error") useToast.getState().show(`Launch failed: ${formatErr(r.error)}`);
+  if (r.status === "error") useToast.getState().show(`Launch failed: ${formatErr(r.error)}`, "error");
 }

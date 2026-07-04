@@ -31,7 +31,7 @@ export function useOsFileDrop() {
         if (!dst) return; // 패널 밖에 드롭 — 무시
         const r = await commands.fsCopyPlanExternal(paths, dst);
         if (r.status === "ok") open({ kind: "copy-confirm", plan: r.data });
-        else showToast(`Import failed: ${formatErr(r.error)}`);
+        else showToast(`Import failed: ${formatErr(r.error)}`, "error");
       })
       .then((un) => {
         if (cancelled) un();

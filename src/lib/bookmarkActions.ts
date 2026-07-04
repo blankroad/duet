@@ -13,11 +13,16 @@ export async function bookmarkLocation(location: Location, name: string): Promis
     const connId = location.source.connection_id;
     const conn = Object.values(useConnections.getState().active).find((c) => c.id === connId);
     if (!conn) {
-      useToast.getState().show("Active connection not found");
+      useToast.getState().show("Active connection not found", "error");
       return;
     }
     const ok = await addHostFavorite(conn.alias, name, String(location.path));
-    useToast.getState().show(ok ? `Bookmarked on ${conn.alias}: ${name}` : "Bookmark failed");
+    useToast
+      .getState()
+      .show(
+        ok ? `Bookmarked on ${conn.alias}: ${name}` : "Bookmark failed",
+        ok ? "success" : "error",
+      );
     return;
   }
   if (findBookmarkId(location)) return;

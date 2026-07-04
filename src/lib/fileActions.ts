@@ -9,6 +9,7 @@ import {
   type PaneId,
 } from "@/stores/panes";
 import type { DialogState } from "@/stores/ui-dialogs";
+import type { ToastFn } from "@/stores/toast";
 import { childLocation, sameLocation, sourceKey } from "@/lib/entryDnd";
 import { formatErr } from "@/lib/error";
 import { rememberExtract } from "@/lib/extractPending";
@@ -17,7 +18,6 @@ import { useClipboard } from "@/stores/clipboard";
 import { useShelf } from "@/stores/shelf";
 
 type OpenFn = (d: DialogState) => void;
-type ToastFn = (msg: string) => void;
 
 /**
  * 파괴적/생성 작업 트리거 — 키보드(useDestructiveKeys)와 툴바(PaneToolbar)가 공유.
@@ -85,8 +85,9 @@ export function triggerRenameSmart(open: OpenFn, showToast: ToastFn): void {
 /** Ctrl+Z — 마지막 파괴적 작업 되돌리기 (다이얼로그 없이 toast). */
 export async function triggerUndo(showToast: ToastFn): Promise<void> {
   const r = await commands.undoLast();
-  if (r.status === "ok") showToast(r.data.message ?? `Undone (${r.data.kind})`);
-  else showToast(`Undo failed: ${formatErr(r.error)}`);
+  if (r.status === "ok")
+    showToast(r.data.message ?? `Undone (${r.data.kind})`, "success");
+  else showToast(`Undo failed: ${formatErr(r.error)}`, "error");
 }
 
 async function copyToClipboard(
@@ -100,9 +101,9 @@ async function copyToClipboard(
   }
   try {
     await navigator.clipboard.writeText(text);
-    showToast(`Copied ${label.toLowerCase()}`);
+    showToast(`Copied ${label.toLowerCase()}`, "success");
   } catch {
-    showToast("Clipboard unavailable");
+    showToast("Clipboard unavailable", "error");
   }
 }
 
@@ -159,6 +160,7 @@ export function clipCopy(showToast: ToastFn): void {
   useClipboard.getState().set(targets, "copy");
   showToast(
     `Copied ${targets.length} item${plural(targets.length)} — paste with Ctrl+V`,
+    "success",
   );
 }
 
@@ -172,6 +174,7 @@ export function clipCut(showToast: ToastFn): void {
   useClipboard.getState().set(targets, "move");
   showToast(
     `Cut ${targets.length} item${plural(targets.length)} — paste with Ctrl+V`,
+    "success",
   );
 }
 
@@ -224,7 +227,7 @@ export async function triggerCompare(
   if (r.status === "error") {
     // 취소는 조용히 닫기, 그 외는 토스트.
     if (r.error.kind !== "Cancelled")
-      showToast(`Compare: ${formatErr(r.error)}`);
+      showToast(`Compare: ${formatErr(r.error)}`, "error");
     open({ kind: "none" });
     return;
   }
@@ -248,7 +251,7 @@ export async function triggerThreeWay(
   const baseLoc: Location = { source: left.source, path: input.trim() };
   const r = await commands.fsCompareThreeWay(baseLoc, left, right);
   if (r.status === "error") {
-    showToast(`3-way: ${formatErr(r.error)}`);
+    showToast(`3-way: ${formatErr(r.error)}`, "error");
     return;
   }
   open({ kind: "three-way", plan: r.data });
@@ -265,7 +268,7 @@ export async function triggerSync(
   const dst = activeTab(state, opposite).location;
   const r = await commands.fsSyncPlan(src, dst);
   if (r.status === "error") {
-    showToast(`Sync: ${formatErr(r.error)}`);
+    showToast(`Sync: ${formatErr(r.error)}`, "error");
     return;
   }
   const label = (loc: Location) => basename(String(loc.path));
@@ -333,17 +336,17 @@ export async function planTransferTo(
     if (mode === "move") {
       const r = await commands.fsMovePlan(targets, dst);
       if (r.status === "ok") open({ kind: "move-confirm", plan: r.data });
-      else showToast(`Move plan failed: ${formatErr(r.error)}`);
+      else showToast(`Move plan failed: ${formatErr(r.error)}`, "error");
     } else {
       const r = await commands.fsCopyPlan(targets, dst);
       if (r.status === "ok") open({ kind: "copy-confirm", plan: r.data });
-      else showToast(`Copy plan failed: ${formatErr(r.error)}`);
+      else showToast(`Copy plan failed: ${formatErr(r.error)}`, "error");
     }
   } catch (e) {
     // commands.* 가 구조화된 DuetError 대신 예외를 throw 한 경우(명령 미등록·직렬화
     // 실패 등). 호출부가 `void` 라 잡지 않으면 unhandled rejection 으로 조용히 사라짐
     // — 토스트로 노출해 진짜 원인을 보이게 한다.
-    showToast(`${verb} failed: ${e instanceof Error ? e.message : String(e)}`);
+    showToast(`${verb} failed: ${e instanceof Error ? e.message : String(e)}`, "error");
   }
 }
 
@@ -429,13 +432,13 @@ export async function triggerExtract(showToast: ToastFn): Promise<void> {
   }
   const plan = await commands.fsExtractPlan(targets[0]!);
   if (plan.status === "error") {
-    showToast(`Extract failed: ${formatErr(plan.error)}`);
+    showToast(`Extract failed: ${formatErr(plan.error)}`, "error");
     return;
   }
   // 1차 시도는 암호 없이 — 암호 zip 이면 task 가 NeedPassword 로 실패한다.
   const exec = await commands.fsExtractExecute(plan.data, null);
   if (exec.status === "error") {
-    showToast(`Extract failed: ${formatErr(exec.error)}`);
+    showToast(`Extract failed: ${formatErr(exec.error)}`, "error");
     return;
   }
   rememberExtract(exec.data, { plan: plan.data, attempted: false });
@@ -486,6 +489,6 @@ export async function triggerDelete(
       plan: r.data,
     });
   } else {
-    showToast(`Delete plan failed: ${formatErr(r.error)}`);
+    showToast(`Delete plan failed: ${formatErr(r.error)}`, "error");
   }
 }

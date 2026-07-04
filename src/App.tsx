@@ -172,7 +172,7 @@ function App() {
           e && typeof e === "object" && "kind" in e
             ? `${(e as { kind: string }).kind}: ${formatErr(e as DuetError)}`
             : String(e);
-        showToast(`Cannot open ${path} — ${msg}`);
+        showToast(`Cannot open ${path} — ${msg}`, "error");
       }
     },
     [listDirectory, showToast],
@@ -200,7 +200,7 @@ function App() {
           e && typeof e === "object" && "kind" in e
             ? `${(e as { kind: string }).kind}: ${formatErr(e as DuetError)}`
             : String(e);
-        showToast(`Cannot open ${location.path} — ${msg}`);
+        showToast(`Cannot open ${location.path} — ${msg}`, "error");
       }
     },
     [listDirectory, showToast],
@@ -245,12 +245,12 @@ function App() {
         if (src.kind === "local" && platform() === "windows") {
           const r = await commands.openRecycleBin();
           if (r.status === "error")
-            showToast(`Recycle Bin — ${formatErr(r.error)}`);
+            showToast(`Recycle Bin — ${formatErr(r.error)}`, "error");
           return;
         }
         const r = await commands.trashLocation(src);
         if (r.status === "error") {
-          showToast(`Trash unavailable — ${formatErr(r.error)}`);
+          showToast(`Trash unavailable — ${formatErr(r.error)}`, "error");
           return;
         }
         await navigateTo(id, r.data);
@@ -270,12 +270,12 @@ function App() {
       for (const t of targets) {
         const r = await commands.trashRestore(t);
         if (r.status === "ok") ok += 1;
-        else showToast(`Put back failed: ${formatErr(r.error)}`);
+        else showToast(`Put back failed: ${formatErr(r.error)}`, "error");
       }
       if (ok > 0) {
         const loc = activeTab(usePanes.getState(), id).location;
         await navigateTo(id, loc, { pushHistory: false });
-        showToast(`Put back ${ok} item${ok === 1 ? "" : "s"}`);
+        showToast(`Put back ${ok} item${ok === 1 ? "" : "s"}`, "success");
       }
     })();
   }, [navigateTo, showToast]);
@@ -336,7 +336,7 @@ function App() {
                 .open({ kind: "browse-password", paneId: id, archive });
               return;
             }
-            showToast(`Cannot open ${entry.name} — ${formatErr(r.error)}`);
+            showToast(`Cannot open ${entry.name} — ${formatErr(r.error)}`, "error");
             return;
           }
           await navigateTo(id, r.data);
@@ -354,7 +354,7 @@ function App() {
           childLocation(tab.location, entry.name),
         );
         if (r.status === "error")
-          showToast(`Cannot open ${entry.name} — ${formatErr(r.error)}`);
+          showToast(`Cannot open ${entry.name} — ${formatErr(r.error)}`, "error");
       })();
     },
     [navigate, navigateTo, onUp, showToast, syncMirror],
@@ -433,8 +433,8 @@ function App() {
               // forward-slash 통일(D:/test/test1) — copyPathsOf 와 동일.
               void navigator.clipboard
                 .writeText(String(par.path).replace(/\\/g, "/"))
-                .then(() => showToast("Copied path"))
-                .catch(() => showToast("Clipboard unavailable"));
+                .then(() => showToast("Copied path", "success"))
+                .catch(() => showToast("Clipboard unavailable", "error"));
             },
           });
         }
@@ -740,6 +740,7 @@ function App() {
             r.status === "ok"
               ? `Passwordless login set up — installed at ${r.data}`
               : `Setup failed: ${formatErr(r.error)}`,
+            r.status === "ok" ? "success" : "error",
           );
         })();
       },
@@ -764,7 +765,7 @@ function App() {
       closeDialog();
       const r = await commands.fsRename(target, newName);
       if (r.status === "ok") refreshAffected([target.location]);
-      else showToast(`Rename failed: ${formatErr(r.error)}`);
+      else showToast(`Rename failed: ${formatErr(r.error)}`, "error");
     },
     [dialog, closeDialog, refreshAffected, showToast],
   );
@@ -776,7 +777,7 @@ function App() {
       closeDialog();
       const r = await commands.fsBatchRename(targets, rule);
       if (r.status === "ok") refreshAffected([targets[0]!.location]);
-      else showToast(`Batch rename failed: ${formatErr(r.error)}`);
+      else showToast(`Batch rename failed: ${formatErr(r.error)}`, "error");
     },
     [dialog, closeDialog, refreshAffected, showToast],
   );
@@ -788,7 +789,7 @@ function App() {
       closeDialog();
       const r = await commands.fsMkdir(parent, name);
       if (r.status === "ok") refreshAffected([parent]);
-      else showToast(`Mkdir failed: ${formatErr(r.error)}`);
+      else showToast(`Mkdir failed: ${formatErr(r.error)}`, "error");
     },
     [dialog, closeDialog, refreshAffected, showToast],
   );
@@ -800,13 +801,13 @@ function App() {
       closeDialog();
       const plan = await commands.fsCompressPlan(items, name, format);
       if (plan.status === "error") {
-        showToast(`Compress failed: ${formatErr(plan.error)}`);
+        showToast(`Compress failed: ${formatErr(plan.error)}`, "error");
         return;
       }
       // execute 는 task 로 — 완료 시 affected_locations 자동 새로고침 (useTaskEvents).
       const exec = await commands.fsCompressExecute(plan.data);
       if (exec.status === "error")
-        showToast(`Compress failed: ${formatErr(exec.error)}`);
+        showToast(`Compress failed: ${formatErr(exec.error)}`, "error");
     },
     [dialog, closeDialog, showToast],
   );
@@ -824,7 +825,7 @@ function App() {
         };
         const r = await commands.fsRepackPlan(tab.location, original);
         if (r.status === "error") {
-          showToast(`Update archive failed: ${formatErr(r.error)}`);
+          showToast(`Update archive failed: ${formatErr(r.error)}`, "error");
           return;
         }
         openDialog({
@@ -849,7 +850,7 @@ function App() {
       });
     } else {
       closeDialog();
-      showToast(`Update archive failed: ${formatErr(r.error)}`);
+      showToast(`Update archive failed: ${formatErr(r.error)}`, "error");
     }
   }, [dialog, openDialog, closeDialog, showToast]);
 
@@ -868,7 +869,7 @@ function App() {
       // refresh. 여기선 enqueue 결과만 확인(즉시 refresh 하면 아직 삭제 전이라 stale).
       const r = await commands.fsDeleteExecute(plan, word);
       if (r.status === "ok") rememberElevatable(r.data, { op: "delete", plan });
-      else showToast(`Delete failed: ${formatErr(r.error)}`);
+      else showToast(`Delete failed: ${formatErr(r.error)}`, "error");
     },
     [dialog, closeDialog, showToast],
   );
@@ -885,10 +886,10 @@ function App() {
     closeDialog();
     const r = await commands.ejectVolume(String(path));
     if (r.status === "ok") {
-      showToast(`Ejected ${name}`);
+      showToast(`Ejected ${name}`, "success");
       void refreshVolumes();
     } else {
-      showToast(`Eject failed: ${formatErr(r.error)}`);
+      showToast(`Eject failed: ${formatErr(r.error)}`, "error");
     }
   }, [dialog, closeDialog, showToast]);
 
@@ -903,7 +904,7 @@ function App() {
         openDialog({ kind: "progress", title: "Copying…", taskId: r.data });
       } else {
         closeDialog();
-        showToast(`Copy failed: ${formatErr(r.error)}`);
+        showToast(`Copy failed: ${formatErr(r.error)}`, "error");
       }
     },
     [dialog, openDialog, closeDialog, showToast],
@@ -923,7 +924,7 @@ function App() {
     closeDialog();
     const r = await runElevated(p);
     if (r.status === "error") {
-      showToast(`Elevated ${p.op} failed: ${formatErr(r.error)}`);
+      showToast(`Elevated ${p.op} failed: ${formatErr(r.error)}`, "error");
       return;
     }
     const o = r.data;
@@ -932,9 +933,9 @@ function App() {
       return;
     }
     if (o.failed.length > 0) {
-      showToast(`${o.ok} ok, ${o.failed.length} failed — ${o.failed[0]}`);
+      showToast(`${o.ok} ok, ${o.failed.length} failed — ${o.failed[0]}`, "error");
     } else {
-      showToast(`${o.ok} item(s) — done as administrator`);
+      showToast(`${o.ok} item(s) — done as administrator`, "success");
     }
     onRefresh("left");
     onRefresh("right");
@@ -951,7 +952,7 @@ function App() {
   const handleSudoResult = useCallback(
     (r: Awaited<ReturnType<typeof commands.fsCopyExecuteSudo>>, p: ElevatablePlan) => {
       if (r.status === "error") {
-        showToast(`sudo ${p.op} failed: ${formatErr(r.error)}`);
+        showToast(`sudo ${p.op} failed: ${formatErr(r.error)}`, "error");
         return;
       }
       const o = r.data;
@@ -964,9 +965,9 @@ function App() {
         return;
       }
       if (o.failed.length > 0) {
-        showToast(`${o.count} ok, ${o.failed.length} failed — ${o.failed[0]}`);
+        showToast(`${o.count} ok, ${o.failed.length} failed — ${o.failed[0]}`, "error");
       } else {
-        showToast(`${o.count} item(s) — done with sudo`);
+        showToast(`${o.count} item(s) — done with sudo`, "success");
       }
       onRefresh("left");
       onRefresh("right");
@@ -1004,7 +1005,7 @@ function App() {
         openDialog({ kind: "progress", title: "Syncing…", taskId: r.data });
       } else {
         closeDialog();
-        showToast(`Sync failed: ${formatErr(r.error)}`);
+        showToast(`Sync failed: ${formatErr(r.error)}`, "error");
       }
     },
     [dialog, openDialog, closeDialog, showToast],
@@ -1020,7 +1021,7 @@ function App() {
         openDialog({ kind: "progress", title: "Moving…", taskId: r.data });
       } else {
         closeDialog();
-        showToast(`Move failed: ${formatErr(r.error)}`);
+        showToast(`Move failed: ${formatErr(r.error)}`, "error");
       }
     },
     [dialog, openDialog, closeDialog, showToast],
@@ -1152,7 +1153,7 @@ function App() {
       // 첫번째 성공한 listDirectory 가 패널에 적용됨.
       const homeRes = await commands.sshHomeDirectory(dto.id);
       if (homeRes.status === "ok") candidates.push(homeRes.data);
-      else showToast(`ssh_home_directory failed: ${formatErr(homeRes.error)}`);
+      else showToast(`ssh_home_directory failed: ${formatErr(homeRes.error)}`, "error");
       candidates.push("~", "/");
 
       let succeeded = false;
@@ -1163,7 +1164,7 @@ function App() {
           const entries = await listDirectory(loc);
           state.setEntries(paneId, loc, entries);
           state.setActivePane(paneId);
-          showToast(`Connected: ${alias} → ${paneId} pane (${path})`);
+          showToast(`Connected: ${alias} → ${paneId} pane (${path})`, "success");
           succeeded = true;
           break;
         } catch (e) {
@@ -1178,6 +1179,7 @@ function App() {
       if (!succeeded) {
         showToast(
           `Connected ${alias}, but list failed:\n${failures.join("\n")}`,
+          "error",
         );
       }
     },
@@ -1368,7 +1370,7 @@ function App() {
             void (async () => {
               const r = await commands.fsMakeSymlink(dialog.parent, name, target);
               if (r.status === "error") {
-                showToast(`Symlink failed: ${formatErr(r.error)}`);
+                showToast(`Symlink failed: ${formatErr(r.error)}`, "error");
                 return;
               }
               closeDialog();
@@ -1387,7 +1389,7 @@ function App() {
             // NeedPassword 로 실패하고 useTaskEvents 가 이 다이얼로그를 다시 연다.
             const r = await commands.fsExtractExecute(dialog.plan, pw);
             if (r.status === "error") {
-              showToast(`Extract failed: ${formatErr(r.error)}`);
+              showToast(`Extract failed: ${formatErr(r.error)}`, "error");
               return "ok";
             }
             rememberExtract(r.data, { plan: dialog.plan, attempted: true });
@@ -1413,6 +1415,7 @@ function App() {
             if (r.error.kind === "NeedPassword") return "retry";
             showToast(
               `Cannot open ${dialog.archive.name} — ${formatErr(r.error)}`,
+              "error",
             );
             return "ok";
           }}
@@ -1458,7 +1461,7 @@ function App() {
                 });
               } else {
                 closeDialog();
-                showToast(`3-way apply failed: ${formatErr(r.error)}`);
+                showToast(`3-way apply failed: ${formatErr(r.error)}`, "error");
               }
             })();
           }}
@@ -1480,7 +1483,7 @@ function App() {
                 });
               } else {
                 closeDialog();
-                showToast(`Merge failed: ${formatErr(r.error)}`);
+                showToast(`Merge failed: ${formatErr(r.error)}`, "error");
               }
             })();
           }}
@@ -1496,7 +1499,7 @@ function App() {
                 });
               } else {
                 closeDialog();
-                showToast(`Apply failed: ${formatErr(r.error)}`);
+                showToast(`Apply failed: ${formatErr(r.error)}`, "error");
               }
             })();
           }}

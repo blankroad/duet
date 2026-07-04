@@ -66,7 +66,7 @@ export function PermissionsDialog({
     const r = await commands.fsSetPermissions(targets, mode, recursive);
     if (r.status === "error") {
       setBusy(false);
-      showToast(`Permissions failed: ${formatErr(r.error)}`);
+      showToast(`Permissions failed: ${formatErr(r.error)}`, "error");
       return;
     }
     if (chownWanted) {
@@ -78,11 +78,11 @@ export function PermissionsDialog({
       );
       if (o.status === "error") {
         setBusy(false);
-        showToast(`Owner change failed: ${formatErr(o.error)}`);
+        showToast(`Owner change failed: ${formatErr(o.error)}`, "error");
         return;
       }
     }
-    showToast(`Permissions updated (${targets.length})`);
+    showToast(`Permissions updated (${targets.length})`, "success");
     onApplied();
     onClose();
   };

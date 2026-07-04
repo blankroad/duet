@@ -28,5 +28,5 @@ export async function setHostNickname(
 ): Promise<void> {
   const r = await commands.hostNicknameSet(alias, nickname);
   if (r.status === "ok") useHostNicknames.getState().setAll(r.data);
-  else useToast.getState().show(`Set nickname: ${formatErr(r.error)}`);
+  else useToast.getState().show(`Set nickname: ${formatErr(r.error)}`, "error");
 }

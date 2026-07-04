@@ -208,8 +208,8 @@ function openMenu(e: React.MouseEvent, items: MenuEntry[]): void {
 function copyText(text: string): void {
   void navigator.clipboard
     .writeText(text)
-    .then(() => useToast.getState().show(`Copied: ${text}`))
-    .catch(() => useToast.getState().show("Clipboard unavailable"));
+    .then(() => useToast.getState().show(`Copied: ${text}`, "success"))
+    .catch(() => useToast.getState().show("Clipboard unavailable", "error"));
 }
 
 /** 드래그 삽입 위치 표시 라인. */

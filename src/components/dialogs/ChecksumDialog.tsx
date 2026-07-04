@@ -59,8 +59,8 @@ export function ChecksumDialog({ targets, onClose }: ChecksumDialogProps) {
   const copyRow = (name: string, hash: string) => {
     void navigator.clipboard
       .writeText(`${hash}  ${name}`)
-      .then(() => showToast("Copied"))
-      .catch(() => showToast("Clipboard unavailable"));
+      .then(() => showToast("Copied", "success"))
+      .catch(() => showToast("Clipboard unavailable", "error"));
   };
   const doneRows = targets
     .map((t) => ({ name: t.name, st: rows[t.name] }))
@@ -69,8 +69,8 @@ export function ChecksumDialog({ targets, onClose }: ChecksumDialogProps) {
     const text = doneRows.map((r) => `${r.st.hash}  ${r.name}`).join("\n");
     void navigator.clipboard
       .writeText(text)
-      .then(() => showToast("Copied all"))
-      .catch(() => showToast("Clipboard unavailable"));
+      .then(() => showToast("Copied all", "success"))
+      .catch(() => showToast("Clipboard unavailable", "error"));
   };
 
   return (

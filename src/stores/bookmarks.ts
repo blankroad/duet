@@ -61,7 +61,7 @@ export async function addBookmark(
 export async function removeBookmark(id: string): Promise<void> {
   const r = await commands.bookmarksRemove(id);
   if (r.status === "ok") useBookmarks.getState().setAll(r.data);
-  else useToast.getState().show(`Remove bookmark: ${formatErr(r.error)}`);
+  else useToast.getState().show(`Remove bookmark: ${formatErr(r.error)}`, "error");
 }
 
 /** 드래그 재정렬 — id 순서대로. 낙관적 갱신 후 백엔드 반환값으로 정합. */
