@@ -74,8 +74,12 @@ export function TopBar() {
         <FolderGit2 size={15} />
       </IconBtn>
       <IconBtn
-        label={`Undo last action (${displayKey("Ctrl+Z")})`}
+        label={`Undo last action (${displayKey("Ctrl+Z")}) — right-click: history`}
         onClick={() => void triggerUndo(useToast.getState().show)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          useUIDialogs.getState().open({ kind: "history" });
+        }}
       >
         <Undo2 size={15} />
       </IconBtn>
@@ -203,17 +207,20 @@ function IconBtn({
   label,
   active,
   onClick,
+  onContextMenu,
   children,
 }: {
   label: string;
   active?: boolean;
   onClick: () => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
   children: React.ReactNode;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      onContextMenu={onContextMenu}
       title={label}
       aria-label={label}
       className={clsx(

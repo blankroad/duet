@@ -40,7 +40,8 @@ export type DialogState =
   | { kind: "eject-confirm"; volume: Volume }
   | { kind: "progress"; title: string; taskId: string }
   | { kind: "settings" }
-  | { kind: "shortcuts" };
+  | { kind: "shortcuts" }
+  | { kind: "history" };
 
 interface State {
   dialog: DialogState;

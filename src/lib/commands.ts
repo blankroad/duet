@@ -92,6 +92,8 @@ export interface BuiltinDeps {
   openContextMenu: () => void;
   /** 단축키 치트시트 다이얼로그. */
   openShortcuts: () => void;
+  /** 작업 히스토리(journal) 다이얼로그. */
+  openHistory: () => void;
   // ssh
   setupKeyAuth: () => void;
 }
@@ -450,6 +452,12 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
       category: "File",
       defaultKey: "Ctrl+Z",
       action: deps.undo,
+    },
+    {
+      id: "edit.history",
+      label: "Operation history",
+      category: "File",
+      action: deps.openHistory,
     },
     {
       id: "file.contextMenu",
