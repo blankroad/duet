@@ -9,6 +9,7 @@ import { useJournal } from "@/stores/journal";
 export function useJournalEvents() {
   const pushed = useJournal((s) => s.pushed);
   const markUndone = useJournal((s) => s.markUndone);
+  const markRedone = useJournal((s) => s.markRedone);
   const setHistory = useJournal((s) => s.setHistory);
 
   // 부트스트랩: tail 100 로드
@@ -28,9 +29,10 @@ export function useJournalEvents() {
     const unlistenP = events.journalChangedEvent.listen(({ payload }) => {
       if (payload.change === "push") pushed(payload.entry);
       else if (payload.change === "undone") markUndone(payload.entry.id);
+      else if (payload.change === "redone") markRedone(payload.entry.id);
     });
     return () => {
       unlistenP.then((fn) => fn());
     };
-  }, [pushed, markUndone]);
+  }, [pushed, markUndone, markRedone]);
 }

@@ -140,6 +140,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::fs_ops::fs_repack_plan,
             commands::fs_ops::fs_compress_execute,
             commands::undo::undo_last,
+            commands::undo::redo_last,
             commands::undo::undo_history,
             commands::frecency::frecency_record,
             commands::frecency::frecency_query,

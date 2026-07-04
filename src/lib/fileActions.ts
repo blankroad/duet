@@ -91,6 +91,18 @@ export async function triggerUndo(showToast: ToastFn): Promise<void> {
   else showToast(`Undo failed: ${formatErr(r.error)}`, "error");
 }
 
+/** Ctrl+Shift+Z — 마지막으로 되돌린 작업 다시 실행. 미지원 op 는 백엔드가
+ *  Skipped + 사유 메시지로 응답 (journal 상태 불변). */
+export async function triggerRedo(showToast: ToastFn): Promise<void> {
+  const r = await commands.redoLast();
+  if (r.status === "ok") {
+    if (r.data.kind === "ok") showToast(r.data.message ?? "Redone", "success");
+    else showToast(r.data.message ?? `Redo ${r.data.kind}`);
+  } else {
+    showToast(`Redo failed: ${formatErr(r.error)}`, "error");
+  }
+}
+
 async function copyToClipboard(
   text: string,
   showToast: ToastFn,

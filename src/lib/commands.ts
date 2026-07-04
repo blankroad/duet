@@ -88,6 +88,7 @@ export interface BuiltinDeps {
   clipCut: () => void;
   clipPaste: () => void;
   undo: () => void;
+  redo: () => void;
   /** 커서 항목(없으면 빈 영역) 컨텍스트 메뉴를 키보드로 오픈. */
   openContextMenu: () => void;
   /** 단축키 치트시트 다이얼로그. */
@@ -452,6 +453,13 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
       category: "File",
       defaultKey: "Ctrl+Z",
       action: deps.undo,
+    },
+    {
+      id: "edit.redo",
+      label: "Redo last undone operation",
+      category: "File",
+      defaultKey: "Ctrl+Shift+Z",
+      action: deps.redo,
     },
     {
       id: "edit.history",

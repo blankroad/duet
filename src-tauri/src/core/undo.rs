@@ -547,6 +547,188 @@ pub async fn execute_undo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
     }
 }
 
+/// 되돌린(undone) entry 의 **원래 작업을 재적용** (redo).
+///
+/// 1단계 지원 범위 — journal 데이터만으로 안전하게 재실행 가능한 것:
+/// - Move: `MoveItem{src_original → dst_now}` 재이동. 단 원래 이동이 덮어쓰기
+///   (.bak 백업)를 동반했다면 재이동이 복원된 대상 파일과 충돌 → 미지원.
+/// - Rename / BatchRename: original → current 재적용.
+/// - Mkdir: 재생성.
+/// - Chmod(비재귀): op 에 기록된 새 mode 재적용.
+///
+/// 미지원(Skipped 로 안내): Copy/Sync/Merge/CompareApply/ThreeWayApply(소스 경로
+/// 미기록), Symlink(target 미기록), Trash(재삭제 시 휴지통 id 가 바뀌어 이후
+/// undo 의 기록이 스테일해짐 — §4 위반 위험).
+pub async fn execute_redo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> UndoOutcome {
+    const UNSUPPORTED: &str = "This operation can't be redone";
+    match &entry.undo {
+        UndoAction::UndoRename {
+            source,
+            current,
+            original,
+        } => {
+            let fs = match fs_for(source, pool).await {
+                Ok(f) => f,
+                Err(e) => return error("source unreachable", e),
+            };
+            if fs.metadata(original).await.is_err() {
+                return skipped("Item no longer at original location — redo skipped");
+            }
+            if fs.metadata(current).await.is_ok() {
+                return skipped("An item already exists at the renamed name — redo skipped");
+            }
+            if let Err(e) = fs.rename(original, current).await {
+                return error("rename forward", e);
+            }
+            let mut refresh = std::collections::HashSet::new();
+            if let Some(p) = current.parent() {
+                refresh.insert(p.to_path_buf());
+            }
+            ok_with_locs(source, refresh)
+        }
+        UndoAction::UndoBatchRename { source, pairs } => {
+            let fs = match fs_for(source, pool).await {
+                Ok(f) => f,
+                Err(e) => return error("source unreachable", e),
+            };
+            // forward 순서로 original → current 재적용 (undo 는 역순이었음).
+            let mut refresh = std::collections::HashSet::<PathBuf>::new();
+            for p in pairs.iter() {
+                if fs.metadata(&p.original).await.is_err() {
+                    return skipped("Item no longer at original location — redo skipped");
+                }
+                if let Err(e) = fs.rename(&p.original, &p.current).await {
+                    return error("rename forward", e);
+                }
+                if let Some(par) = p.current.parent() {
+                    refresh.insert(par.to_path_buf());
+                }
+            }
+            ok_with_locs(source, refresh)
+        }
+        UndoAction::UndoMkdir { source, path } => {
+            let fs = match fs_for(source, pool).await {
+                Ok(f) => f,
+                Err(e) => return error("source unreachable", e),
+            };
+            if fs.metadata(path).await.is_ok() {
+                return skipped("Directory already exists — redo skipped");
+            }
+            if let Err(e) = fs.mkdir(path).await {
+                return error("mkdir", e);
+            }
+            let mut refresh = std::collections::HashSet::new();
+            if let Some(p) = path.parent() {
+                refresh.insert(p.to_path_buf());
+            }
+            ok_with_locs(source, refresh)
+        }
+        UndoAction::UndoChmod { source, items } => {
+            // 재적용할 새 mode 는 op 에만 기록돼 있음 (undo 데이터는 old_mode).
+            let mode = match &entry.op {
+                crate::services::journal::OpKind::Chmod {
+                    mode,
+                    recursive: false,
+                    ..
+                } => *mode,
+                _ => return skipped(UNSUPPORTED),
+            };
+            let fs = match fs_for(source, pool).await {
+                Ok(f) => f,
+                Err(e) => return error("source unreachable", e),
+            };
+            let mut refresh = std::collections::HashSet::new();
+            for item in items {
+                if let Err(e) = fs.set_mode(&item.path, mode, false).await {
+                    return error("chmod forward", e);
+                }
+                if let Some(p) = item.path.parent() {
+                    refresh.insert(p.to_path_buf());
+                }
+            }
+            ok_with_locs(source, refresh)
+        }
+        UndoAction::UndoMove {
+            src_source,
+            dst_source,
+            moved,
+            backups_to_restore,
+        } => {
+            // 덮어쓰기 동반 이동은 재이동 시 복원된 대상과 충돌 — 1단계 미지원.
+            if !backups_to_restore.is_empty() {
+                return skipped(UNSUPPORTED);
+            }
+            let src_fs_r = fs_for(src_source, pool).await;
+            let dst_fs_r = fs_for(dst_source, pool).await;
+            let (src_fs, dst_fs) = match (src_fs_r, dst_fs_r) {
+                (Ok(a), Ok(b)) => (a, b),
+                _ => {
+                    return UndoOutcome {
+                        kind: UndoKind::Error,
+                        message: Some("source unreachable".into()),
+                        refreshed_locations: vec![],
+                    }
+                }
+            };
+            for m in moved {
+                if src_fs.metadata(&m.src_original).await.is_err() {
+                    return skipped("Item no longer at original location — redo skipped");
+                }
+                if dst_fs.metadata(&m.dst_now).await.is_ok() {
+                    return skipped("An item already exists at the destination — redo skipped");
+                }
+                // undo 와 대칭: 같은 source 면 rename, cross-device/cross-source 는
+                // copy_relay + remove 폴백.
+                let renamed = if src_source == dst_source {
+                    match src_fs.rename(&m.src_original, &m.dst_now).await {
+                        Ok(()) => true,
+                        Err(DuetError::CrossDevice(_)) => false,
+                        Err(e) => return error("move forward", e),
+                    }
+                } else {
+                    false
+                };
+                if !renamed {
+                    if let Err(e) =
+                        copy_relay(&*src_fs, &m.src_original, &*dst_fs, &m.dst_now).await
+                    {
+                        return error("copy forward", e);
+                    }
+                    let _ = src_fs.remove(&m.src_original).await;
+                }
+            }
+            let mut refresh = std::collections::HashSet::<(SourceId, PathBuf)>::new();
+            for m in moved {
+                if let Some(p) = m.dst_now.parent() {
+                    refresh.insert((dst_source.clone(), p.to_path_buf()));
+                }
+                if let Some(p) = m.src_original.parent() {
+                    refresh.insert((src_source.clone(), p.to_path_buf()));
+                }
+            }
+            UndoOutcome {
+                kind: UndoKind::Ok,
+                message: None,
+                refreshed_locations: refresh
+                    .into_iter()
+                    .map(|(s, p)| Location { source: s, path: p })
+                    .collect(),
+            }
+        }
+        // Copy/Sync/Merge/CompareApply/ThreeWayApply/Symlink/Trash/Irreversible —
+        // 소스 경로·타깃 미기록 또는 재실행 시 journal 데이터가 스테일해짐.
+        _ => skipped(UNSUPPORTED),
+    }
+}
+
+fn skipped(msg: &str) -> UndoOutcome {
+    UndoOutcome {
+        kind: UndoKind::Skipped,
+        message: Some(msg.into()),
+        refreshed_locations: vec![],
+    }
+}
+
 fn error(prefix: &str, e: DuetError) -> UndoOutcome {
     UndoOutcome {
         kind: UndoKind::Error,
@@ -610,6 +792,64 @@ mod tests {
         let outcome = execute_undo(&entry, &pool).await;
         assert!(matches!(outcome.kind, UndoKind::Ok));
         assert!(!target.exists());
+    }
+
+    #[tokio::test]
+    async fn redo_rename_reapplies_forward() {
+        let dir = TempDir::new().unwrap();
+        let original = dir.path().join("a.txt");
+        let current = dir.path().join("b.txt");
+        // undo 직후 상태: 파일이 original 로 돌아와 있음.
+        tokio::fs::write(&original, b"x").await.unwrap();
+        let pool = ConnectionPool::new();
+        let entry = mk_entry(UndoAction::UndoRename {
+            source: SourceId::Local,
+            current: current.clone(),
+            original: original.clone(),
+        });
+        let outcome = execute_redo(&entry, &pool).await;
+        assert!(
+            matches!(outcome.kind, UndoKind::Ok),
+            "{:?}",
+            outcome.message
+        );
+        assert!(current.exists());
+        assert!(!original.exists());
+    }
+
+    #[tokio::test]
+    async fn redo_mkdir_recreates_and_move_with_backups_unsupported() {
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("new");
+        let pool = ConnectionPool::new();
+        // mkdir redo — undo 로 지워진 폴더 재생성.
+        let entry = mk_entry(UndoAction::UndoMkdir {
+            source: SourceId::Local,
+            path: target.clone(),
+        });
+        let outcome = execute_redo(&entry, &pool).await;
+        assert!(matches!(outcome.kind, UndoKind::Ok));
+        assert!(target.exists());
+        // 덮어쓰기(.bak) 동반 이동은 1단계 미지원 — Skipped 안내.
+        let entry = mk_entry(UndoAction::UndoMove {
+            src_source: SourceId::Local,
+            dst_source: SourceId::Local,
+            moved: vec![],
+            backups_to_restore: vec![crate::services::journal::BackupRestore {
+                backup_path: dir.path().join("x.bak"),
+                original_path: dir.path().join("x"),
+            }],
+        });
+        let outcome = execute_redo(&entry, &pool).await;
+        assert!(matches!(outcome.kind, UndoKind::Skipped));
+    }
+
+    #[tokio::test]
+    async fn redo_unsupported_variants_are_skipped() {
+        let pool = ConnectionPool::new();
+        let entry = mk_entry(UndoAction::Irreversible);
+        let outcome = execute_redo(&entry, &pool).await;
+        assert!(matches!(outcome.kind, UndoKind::Skipped));
     }
 
     #[tokio::test]

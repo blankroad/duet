@@ -30,8 +30,9 @@
   "history": {
     "title": "Operation history",
     "empty": "No operations recorded yet",
-    "redoNote": "Redo isn't supported yet — only the most recent operation can be undone, in order.",
+    "redoNote": "Redo re-applies the last undone operation. Copy/sync/merge and deletes can't be redone.",
     "undoLast": "Undo last ({{key}})",
+    "redoLast": "Redo ({{key}})",
     "next": "next {{key}}",
     "op": {
       "trash": "Deleted {{count}} item(s) to trash — {{loc}}",

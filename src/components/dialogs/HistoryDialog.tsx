@@ -1,11 +1,11 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { X, History, Undo2 } from "lucide-react";
+import { X, History, Undo2, Redo2 } from "lucide-react";
 import clsx from "clsx";
 import { useJournal } from "@/stores/journal";
 import { useToast } from "@/stores/toast";
-import { triggerUndo } from "@/lib/fileActions";
+import { triggerUndo, triggerRedo } from "@/lib/fileActions";
 import { basename } from "@/lib/paths";
 import { displayKey } from "@/lib/keyDisplay";
 import type { JournalEntry, Location, OpKind } from "@/types/bindings";
@@ -21,6 +21,7 @@ export function HistoryDialog({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const entries = useJournal((s) => s.entries);
   const hasUndoable = useJournal((s) => s.hasUndoable);
+  const hasRedoable = useJournal((s) => s.hasRedoable);
   const showToast = useToast((s) => s.show);
 
   // 최신이 위. "다음 Ctrl+Z 대상" = 아직 안 되돌린 것 중 가장 최근.
@@ -74,6 +75,15 @@ export function HistoryDialog({ onClose }: { onClose: () => void }) {
             >
               <Undo2 size={13} aria-hidden />
               {t("history.undoLast", { key: displayKey("Ctrl+Z") })}
+            </button>
+            <button
+              type="button"
+              disabled={!hasRedoable}
+              onClick={() => void triggerRedo(showToast)}
+              className="flex shrink-0 items-center gap-1.5 rounded border border-border px-3 py-1 text-base hover:bg-subtle disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              <Redo2 size={13} aria-hidden />
+              {t("history.redoLast", { key: displayKey("Ctrl+Shift+Z") })}
             </button>
           </div>
           <Dialog.Description className="sr-only">

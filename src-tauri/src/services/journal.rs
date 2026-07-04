@@ -258,7 +258,13 @@ pub struct ChmodItem {
 #[serde(tag = "type")]
 enum JsonlRecord {
     Push(Box<JournalEntry>),
-    MarkUndone { id: JournalId },
+    MarkUndone {
+        id: JournalId,
+    },
+    /// redo 성공 — undone 을 false 로 되돌림 (undo 의 역마킹).
+    MarkRedone {
+        id: JournalId,
+    },
 }
 
 pub struct Journal {
@@ -328,6 +334,35 @@ impl Journal {
         self.append(JsonlRecord::MarkUndone { id }).await
     }
 
+    /// 꼬리쪽 연속 undone 구간에서 **가장 이른** entry — 다음 redo 대상 (LIFO 역순).
+    ///
+    /// undo 가 B→A 순서로 진행됐다면 redo 는 A→B 순서. 마지막 entry 가 undone 이
+    /// 아니면(새 작업이 이후에 push 됨) redo 불가 — 표준 undo/redo 스택 관례.
+    pub async fn peek_redoable(&self) -> Result<Option<JournalEntry>, DuetError> {
+        let lock = self.inner.lock().await;
+        let mut candidate = None;
+        for e in lock.iter().rev() {
+            if e.undone {
+                candidate = Some(e.clone());
+            } else {
+                break;
+            }
+        }
+        Ok(candidate)
+    }
+
+    /// redo 실행 성공 후 호출 — undone 을 false 로 되돌림. 멱등.
+    pub async fn commit_redone(&self, id: JournalId) -> Result<(), DuetError> {
+        {
+            let mut lock = self.inner.lock().await;
+            match lock.iter_mut().find(|e| e.id == id) {
+                Some(e) if e.undone => e.undone = false,
+                _ => return Ok(()),
+            }
+        }
+        self.append(JsonlRecord::MarkRedone { id }).await
+    }
+
     pub async fn history(&self, limit: usize) -> Vec<JournalEntry> {
         let lock = self.inner.lock().await;
         lock.iter().rev().take(limit).cloned().collect()
@@ -375,6 +410,11 @@ async fn read_tail(path: &Path, limit: usize) -> Result<VecDeque<JournalEntry>, 
                     found.undone = true;
                 }
             }
+            JsonlRecord::MarkRedone { id } => {
+                if let Some(found) = entries.iter_mut().find(|e| e.id == id) {
+                    found.undone = false;
+                }
+            }
         }
     }
     let start = entries.len().saturating_sub(limit);
@@ -409,6 +449,45 @@ mod tests {
         j.push(mk_op(), mk_undo()).await.unwrap();
         let h = j.history(10).await;
         assert_eq!(h.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn redo_peek_lifo_and_commit_roundtrip() {
+        let dir = tempdir().unwrap();
+        let j = Journal::load_from(&dir.path().join("j.jsonl"))
+            .await
+            .unwrap();
+        let a = j.push(mk_op(), mk_undo()).await.unwrap();
+        let b = j.push(mk_op(), mk_undo()).await.unwrap();
+        // undo 진행 전엔 redo 없음.
+        assert!(j.peek_redoable().await.unwrap().is_none());
+        // undo 순서 B → A. redo 는 역순 A → B.
+        j.commit_undone(b.id.clone()).await.unwrap();
+        j.commit_undone(a.id.clone()).await.unwrap();
+        assert_eq!(j.peek_redoable().await.unwrap().unwrap().id, a.id);
+        j.commit_redone(a.id.clone()).await.unwrap();
+        assert_eq!(j.peek_redoable().await.unwrap().unwrap().id, b.id);
+        j.commit_redone(b.id.clone()).await.unwrap();
+        assert!(j.peek_redoable().await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn redo_blocked_by_new_push_and_survives_replay() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("j.jsonl");
+        let j = Journal::load_from(&path).await.unwrap();
+        let a = j.push(mk_op(), mk_undo()).await.unwrap();
+        j.commit_undone(a.id.clone()).await.unwrap();
+        // 새 push 가 끼면 마지막 entry 가 non-undone → redo 불가 (표준 관례).
+        let b = j.push(mk_op(), mk_undo()).await.unwrap();
+        assert!(j.peek_redoable().await.unwrap().is_none());
+        j.commit_undone(b.id.clone()).await.unwrap();
+        j.commit_redone(b.id.clone()).await.unwrap();
+        // replay: MarkRedone 반영 — b 는 undone=false, a 는 여전히 undone.
+        let j2 = Journal::load_from(&path).await.unwrap();
+        let hist = j2.history(10).await;
+        assert!(!hist.iter().find(|e| e.id == b.id).unwrap().undone);
+        assert!(hist.iter().find(|e| e.id == a.id).unwrap().undone);
     }
 
     #[tokio::test]
