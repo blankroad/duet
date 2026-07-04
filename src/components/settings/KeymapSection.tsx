@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAllCommands } from "@/stores/commands";
 import { useKeymap, setKeymap, unsetKeymap, resetKeymap } from "@/stores/keymap";
 import { formatKeyEvent } from "@/lib/keyEvent";
+import { displayKey } from "@/lib/keyDisplay";
 import { confirm as tauriConfirm } from "@tauri-apps/plugin-dialog";
 import { AlertTriangle, Search, RotateCcw } from "lucide-react";
 
@@ -88,7 +89,7 @@ export function KeymapSection() {
                 />
               ) : (
                 <span className="flex items-center gap-1 font-mono text-meta">
-                  {key ?? <span className="text-fg-muted">(none)</span>}
+                  {key ? displayKey(key) : <span className="text-fg-muted">(none)</span>}
                   {bound && (
                     <span className="text-accent" title="Customized (not default)">
                       ●

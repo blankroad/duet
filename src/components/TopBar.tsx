@@ -8,6 +8,7 @@ import { usePalette } from "@/stores/palette";
 import { useSearch } from "@/stores/search";
 import { useUIDialogs } from "@/stores/ui-dialogs";
 import { useToast } from "@/stores/toast";
+import { displayKey } from "@/lib/keyDisplay";
 import { triggerCompare, triggerUndo } from "@/lib/fileActions";
 import { AppLauncherStrip } from "@/components/AppLauncherStrip";
 
@@ -56,7 +57,11 @@ export function TopBar() {
         </span>
       </span>
       <Divider />
-      <IconBtn label="Toggle sidebar (Ctrl+B)" active={sidebarOpen} onClick={toggleSidebar}>
+      <IconBtn
+        label={`Toggle sidebar (${displayKey("Ctrl+B")})`}
+        active={sidebarOpen}
+        onClick={toggleSidebar}
+      >
         <PanelLeft size={15} />
       </IconBtn>
       <IconBtn label="Toggle preview (F11)" active={previewOpen} onClick={togglePreview}>
@@ -69,7 +74,7 @@ export function TopBar() {
         <FolderGit2 size={15} />
       </IconBtn>
       <IconBtn
-        label="Undo last action (Ctrl+Z)"
+        label={`Undo last action (${displayKey("Ctrl+Z")})`}
         onClick={() => void triggerUndo(useToast.getState().show)}
       >
         <Undo2 size={15} />
@@ -82,14 +87,17 @@ export function TopBar() {
         <AppLauncherStrip />
       </div>
 
-      <IconBtn label="Search (Ctrl+Shift+F)" onClick={openSearch}>
+      <IconBtn label={`Search (${displayKey("Ctrl+Shift+F")})`} onClick={openSearch}>
         <Search size={15} />
       </IconBtn>
-      <IconBtn label="Command palette (Ctrl+P)" onClick={() => usePalette.getState().open()}>
+      <IconBtn
+        label={`Command palette (${displayKey("Ctrl+P")})`}
+        onClick={() => usePalette.getState().open()}
+      >
         <Command size={15} />
       </IconBtn>
       <IconBtn
-        label="Settings (Ctrl+,)"
+        label={`Settings (${displayKey("Ctrl+,")})`}
         onClick={() => useUIDialogs.getState().open({ kind: "settings" })}
       >
         <Settings size={15} />

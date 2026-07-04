@@ -3,7 +3,9 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { Search } from "lucide-react";
 import { usePalette } from "@/stores/palette";
 import { useAllCommands } from "@/stores/commands";
+import { useKeymap, effectiveKey } from "@/stores/keymap";
 import { fuzzyScore } from "@/lib/fuzzy";
+import { displayKey } from "@/lib/keyDisplay";
 import type { Command } from "@/lib/commands";
 
 /**
@@ -13,6 +15,7 @@ export function CommandPalette() {
   const isOpen = usePalette((s) => s.isOpen);
   const close = usePalette((s) => s.close);
   const all = useAllCommands();
+  const bindings = useKeymap((s) => s.bindings);
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -81,25 +84,30 @@ export function CommandPalette() {
             {ranked.length === 0 ? (
               <div className="px-3 py-2 text-meta text-fg-muted">No results</div>
             ) : (
-              ranked.map((cmd, i) => (
-                <button
-                  key={cmd.id}
-                  type="button"
-                  onClick={() => execute(cmd)}
-                  onMouseEnter={() => setCursor(i)}
-                  className={`flex w-full items-center gap-3 px-3 py-1.5 text-left text-base ${
-                    i === cursor ? "bg-active text-fg" : "hover:bg-border"
-                  }`}
-                >
-                  <span className="flex-1 truncate">{cmd.label}</span>
-                  <span className="shrink-0 text-meta text-fg-muted">{cmd.category}</span>
-                  {cmd.defaultKey && (
-                    <span className="shrink-0 rounded bg-subtle px-1.5 py-0.5 text-meta text-fg-muted">
-                      {cmd.defaultKey}
-                    </span>
-                  )}
-                </button>
-              ))
+              ranked.map((cmd, i) => {
+                // 리바인드된 키(effective) 표시 — 팔레트가 factory 키를 보여주면
+                // 사용자가 바꾼 단축키와 어긋난다.
+                const key = effectiveKey(cmd.id, bindings, cmd.defaultKey);
+                return (
+                  <button
+                    key={cmd.id}
+                    type="button"
+                    onClick={() => execute(cmd)}
+                    onMouseEnter={() => setCursor(i)}
+                    className={`flex w-full items-center gap-3 px-3 py-1.5 text-left text-base ${
+                      i === cursor ? "bg-active text-fg" : "hover:bg-border"
+                    }`}
+                  >
+                    <span className="flex-1 truncate">{cmd.label}</span>
+                    <span className="shrink-0 text-meta text-fg-muted">{cmd.category}</span>
+                    {key && (
+                      <span className="shrink-0 rounded bg-subtle px-1.5 py-0.5 text-meta text-fg-muted">
+                        {displayKey(key)}
+                      </span>
+                    )}
+                  </button>
+                );
+              })
             )}
           </div>
           <Dialog.Description className="sr-only">Command palette</Dialog.Description>

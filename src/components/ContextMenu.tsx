@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import clsx from "clsx";
+import { displayKey } from "@/lib/keyDisplay";
 import {
   useContextMenu,
   isSeparator,
@@ -290,7 +291,9 @@ function Row({
         {item.icon && <span className="shrink-0 text-fg-muted">{item.icon}</span>}
         <span className="flex-1 truncate">{item.label}</span>
         {item.shortcut && (
-          <span className="shrink-0 text-meta text-fg-muted">{item.shortcut}</span>
+          <span className="shrink-0 text-meta text-fg-muted">
+            {displayKey(item.shortcut)}
+          </span>
         )}
         {hasKids && <ChevronRight size={12} className="shrink-0 text-fg-muted" />}
       </button>
