@@ -23,7 +23,9 @@
     "replace": "교체",
     "skip": "건너뛰기",
     "keepBoth": "둘 다 유지",
-    "withChoices": "선택대로 {{cta}}"
+    "withChoices": "선택대로 {{cta}}",
+    "metaNew": "새 파일",
+    "metaExisting": "기존"
   },
   "history": {
     "title": "작업 히스토리",

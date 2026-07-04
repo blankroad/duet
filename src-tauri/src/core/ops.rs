@@ -67,6 +67,12 @@ pub struct Conflict {
     pub name: String,
     pub dst_path: PathBuf,
     pub will_become_backup: PathBuf,
+    /// 기존(덮어써질) 대상 파일 메타 — 충돌 다이얼로그의 새↔기존 비교 표시용.
+    pub dst_size: Option<u64>,
+    pub dst_modified_ms: Option<i64>,
+    /// 새(복사될) 소스 파일 메타 — stat 실패 시 None (plan 은 계속 유효).
+    pub src_size: Option<u64>,
+    pub src_modified_ms: Option<i64>,
 }
 
 /// 충돌(대상에 같은 이름 존재) 시 처리 방식 — 탐색기/파인더/TC 식. 프론트가 선택해 전달.
@@ -289,14 +295,21 @@ pub async fn copy_plan(
     let mut total = 0u64;
     for it in &items {
         let dst_path = dst_fs.join(&dst.path, &it.name);
-        if dst_fs.metadata(&dst_path).await.is_ok() {
+        let src_path = src_fs.join(&it.location.path, &it.name);
+        if let Ok(dst_meta) = dst_fs.metadata(&dst_path).await {
+            // 충돌 항목만 src stat 1회 추가(로컬 stat / SFTP 왕복 1회) —
+            // 다이얼로그의 새↔기존 크기/수정시각 비교용. 실패해도 plan 유효(None).
+            let src_meta = src_fs.metadata(&src_path).await.ok();
             conflicts.push(Conflict {
                 name: it.name.clone(),
                 dst_path: dst_path.clone(),
                 will_become_backup: dst_fs.join(&dst.path, &backup_name(&it.name)),
+                dst_size: dst_meta.size,
+                dst_modified_ms: dst_meta.modified_ms,
+                src_size: src_meta.as_ref().and_then(|m| m.size),
+                src_modified_ms: src_meta.as_ref().and_then(|m| m.modified_ms),
             });
         }
-        let src_path = src_fs.join(&it.location.path, &it.name);
         // 디렉토리는 하위 전체 크기(dir_size: 로컬=재귀 walk, SSH=du -sb)로 합산 →
         // 폴더 복사도 진행률 분모(총량)가 정확해져 "얼마 남았는지" 표시 가능. 실패 시 0.
         total += src_fs.dir_size(&src_path).await.unwrap_or(0);
@@ -3978,6 +3991,11 @@ mod tests {
         let plan = copy_plan(&local, &local, vec![item], dst).await.unwrap();
         assert_eq!(plan.conflicts.len(), 1);
         assert_eq!(plan.conflicts[0].name, "a");
+        // 새↔기존 비교 메타: dst("existing"=8B)/src("new"=3B) 크기 + 수정시각.
+        assert_eq!(plan.conflicts[0].dst_size, Some(8));
+        assert_eq!(plan.conflicts[0].src_size, Some(3));
+        assert!(plan.conflicts[0].dst_modified_ms.is_some());
+        assert!(plan.conflicts[0].src_modified_ms.is_some());
     }
 
     #[tokio::test]

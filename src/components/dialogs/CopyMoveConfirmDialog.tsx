@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { X, FilePlus2, SkipForward, Copy, ListChecks } from "lucide-react";
 import clsx from "clsx";
 import type { ReactNode } from "react";
+import { formatSize, formatTime } from "@/lib/format";
 import type { Conflict, ConflictPolicy } from "@/types/bindings";
 
 /**
@@ -109,28 +110,37 @@ export function CopyMoveConfirmDialog({
                   {/* 상단 일괄 세터 — 개별 모드에서도 한 번에 초기화 가능. */}
                   <div className="flex items-center gap-2 text-meta text-fg-muted">
                     <span>{t("conflict.setAll")}</span>
-                    <MiniBtn label={t("conflict.replace")} onClick={() => setAll("replace")} />
-                    <MiniBtn label={t("conflict.skip")} onClick={() => setAll("skip")} />
-                    <MiniBtn label={t("conflict.keepBoth")} onClick={() => setAll("keepboth")} />
+                    <MiniBtn
+                      label={t("conflict.replace")}
+                      onClick={() => setAll("replace")}
+                    />
+                    <MiniBtn
+                      label={t("conflict.skip")}
+                      onClick={() => setAll("skip")}
+                    />
+                    <MiniBtn
+                      label={t("conflict.keepBoth")}
+                      onClick={() => setAll("keepboth")}
+                    />
                   </div>
                   <ul className="min-h-0 flex-1 divide-y divide-border overflow-auto rounded border border-border">
                     {conflicts.map((c) => (
-                      <li
-                        key={c.name}
-                        className="flex items-center gap-2 px-2 py-1.5"
-                      >
-                        <span
-                          className="min-w-0 flex-1 truncate font-mono text-base"
-                          title={c.dst_path}
-                        >
-                          {c.name}
-                        </span>
-                        <PolicyPicker
-                          value={decisions[c.name] ?? "skip"}
-                          onChange={(p) =>
-                            setDecisions((d) => ({ ...d, [c.name]: p }))
-                          }
-                        />
+                      <li key={c.name} className="px-2 py-1.5">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="min-w-0 flex-1 truncate font-mono text-base"
+                            title={c.dst_path}
+                          >
+                            {c.name}
+                          </span>
+                          <PolicyPicker
+                            value={decisions[c.name] ?? "skip"}
+                            onChange={(p) =>
+                              setDecisions((d) => ({ ...d, [c.name]: p }))
+                            }
+                          />
+                        </div>
+                        <ConflictMeta c={c} />
                       </li>
                     ))}
                   </ul>
@@ -176,6 +186,44 @@ export function CopyMoveConfirmDialog({
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+  );
+}
+
+/**
+ * 새(소스)↔기존(대상) 크기/수정시각 비교 한 줄 — 더 최신인 쪽을 진하게.
+ * 메타를 못 읽었으면(None) 그 쪽은 생략.
+ */
+function ConflictMeta({ c }: { c: Conflict }) {
+  const { t } = useTranslation();
+  const side = (size: number | null, ms: number | null) =>
+    [size != null ? formatSize(size) : null, ms != null ? formatTime(ms) : null]
+      .filter(Boolean)
+      .join(" · ");
+  const src = side(c.src_size, c.src_modified_ms);
+  const dst = side(c.dst_size, c.dst_modified_ms);
+  if (!src && !dst) return null;
+  const srcNewer =
+    c.src_modified_ms != null &&
+    c.dst_modified_ms != null &&
+    c.src_modified_ms > c.dst_modified_ms;
+  const dstNewer =
+    c.src_modified_ms != null &&
+    c.dst_modified_ms != null &&
+    c.dst_modified_ms > c.src_modified_ms;
+  return (
+    <div className="mt-0.5 text-meta text-fg-muted">
+      {src && (
+        <span className={clsx(srcNewer && "text-fg")}>
+          {t("conflict.metaNew")}: {src}
+        </span>
+      )}
+      {src && dst && <span className="mx-1.5 opacity-60">↔</span>}
+      {dst && (
+        <span className={clsx(dstNewer && "text-fg")}>
+          {t("conflict.metaExisting")}: {dst}
+        </span>
+      )}
+    </div>
   );
 }
 

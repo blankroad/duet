@@ -23,7 +23,9 @@
     "replace": "Replace",
     "skip": "Skip",
     "keepBoth": "Keep both",
-    "withChoices": "{{cta}} with choices"
+    "withChoices": "{{cta}} with choices",
+    "metaNew": "New",
+    "metaExisting": "Existing"
   },
   "history": {
     "title": "Operation history",
