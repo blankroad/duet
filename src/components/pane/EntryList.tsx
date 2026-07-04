@@ -13,7 +13,7 @@ import {
 } from "@/stores/panes";
 import { childLocation } from "@/lib/entryDnd";
 import { setHoverEntry, clearHover } from "@/stores/previewHover";
-import { useUI } from "@/stores/ui";
+import { useUI, densityMetrics } from "@/stores/ui";
 import { useContextMenu } from "@/stores/contextMenu";
 import { useMarquee } from "@/hooks/useMarquee";
 import { useEntryDrag } from "@/hooks/useEntryDrag";
@@ -42,7 +42,6 @@ interface EntryListProps {
   onRenamed: () => void;
 }
 
-const ROW_HEIGHT = 28;
 
 /**
  * 가상 스크롤 파일 리스트 + 정렬 가능 컬럼 헤더.
@@ -68,6 +67,8 @@ export function EntryList({
   const onEntryMouseDown = useEntryDrag(id);
   const splitExt = useUI((s) => s.splitExt);
   const renameTarget = useUI((s) => s.renameTarget);
+  // 밀도(행 높이) — 가상 스크롤 estimateSize/마키 hitTest 와 행 렌더가 공유.
+  const rowHeight = densityMetrics(useUI((s) => s.density)).row;
   // OS 아이콘(EntryIcon localPath)용 — 현재 패널 폴더 location. 원격이면 null 전달.
   const location = usePanes((s) => activeTab(s, id).location);
   // "크기 계산" 결과(name → bytes) — 폴더 행의 크기 컬럼 표시.
@@ -81,16 +82,21 @@ export function EntryList({
   const virtualizer = useVirtualizer({
     count: entries.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => ROW_HEIGHT,
+    estimateSize: () => rowHeight,
     overscan: 8,
   });
+
+  // 밀도 전환 시 캐시된 행 높이 재측정.
+  useEffect(() => {
+    virtualizer.measure();
+  }, [rowHeight, virtualizer]);
 
   const { marquee, onContainerMouseDown } = useMarquee({
     id,
     scrollRef: parentRef,
     entries,
     hitTest: (rect) =>
-      rowsInRect(rect.y1, rect.y2, ROW_HEIGHT, entries.length).filter(
+      rowsInRect(rect.y1, rect.y2, rowHeight, entries.length).filter(
         (i) => !isParentEntry(entries[i]!),
       ),
   });

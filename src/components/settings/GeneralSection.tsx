@@ -5,6 +5,7 @@ import { commands } from "@/types/bindings";
 import type { Settings, SettingsPatch } from "@/types/bindings";
 import { applyTabDefaults, type SortKey, type ViewMode } from "@/stores/panes";
 import { useAppSettings } from "@/stores/settings";
+import { useUI, type Density } from "@/stores/ui";
 import { applyTheme } from "@/lib/theme";
 import { buildSettingsPatch as buildPatch } from "@/lib/settingsPatch";
 
@@ -14,6 +15,8 @@ const selectClass =
   "rounded border border-border bg-subtle px-2 py-1 text-base focus:border-accent focus:outline-none";
 
 export function GeneralSection() {
+  const density = useUI((s) => s.density);
+  const setDensity = useUI((s) => s.setDensity);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
   // 탐색기 통합 상태 (Windows 전용, 레지스트리가 SoT). 두 토글이 같은 키군을 만지므로
@@ -103,6 +106,24 @@ export function GeneralSection() {
           <option value="system">System</option>
           <option value="light">Light</option>
           <option value="dark">Dark</option>
+        </select>
+      </div>
+
+      {/* 밀도 — 비민감 UI 설정이라 settings.toml 이 아닌 localStorage(useUI) 영속. */}
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <div className="text-base">List density</div>
+          <div className="text-meta text-fg-muted">
+            Row height in file lists. Compact fits more items.
+          </div>
+        </div>
+        <select
+          className={selectClass}
+          value={density}
+          onChange={(e) => setDensity(e.target.value as Density)}
+        >
+          <option value="normal">Normal</option>
+          <option value="compact">Compact</option>
         </select>
       </div>
 

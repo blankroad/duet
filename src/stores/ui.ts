@@ -9,6 +9,32 @@ import type { PaneId } from "@/stores/panes";
 const COLLAPSE_KEY = "duet.sidebar.collapsed";
 const SPLITEXT_KEY = "duet.view.splitExt";
 const SYNCBROWSE_KEY = "duet.view.syncBrowse";
+const DENSITY_KEY = "duet.view.density";
+
+/** 목록 밀도 — 행 높이/셀 크기만 바뀌고 폰트는 유지 (TC 식 compact). */
+export type Density = "normal" | "compact";
+
+/** 밀도별 픽셀 메트릭 — 가상 스크롤 estimateSize/마키 hitTest 와 CSS 가 공유. */
+export function densityMetrics(d: Density): {
+  row: number;
+  tile: number;
+  gridCell: number;
+} {
+  // gridCell 하한: 썸네일 48 + 이름 1줄 + 패딩 ≈ 84px — 더 줄이면 잘림.
+  return d === "compact"
+    ? { row: 22, tile: 40, gridCell: 84 }
+    : { row: 28, tile: 48, gridCell: 92 };
+}
+
+function loadDensity(): Density {
+  try {
+    return localStorage.getItem(DENSITY_KEY) === "compact"
+      ? "compact"
+      : "normal";
+  } catch {
+    return "normal";
+  }
+}
 
 /** boolean UI 설정 localStorage 로드 (비민감). */
 function loadBool(key: string): boolean {
@@ -78,6 +104,9 @@ interface UIState {
   renameTarget: { pane: PaneId; name: string } | null;
   requestInlineRename: (pane: PaneId, name: string) => void;
   clearInlineRename: () => void;
+  /** 목록 밀도 (행 높이). 비민감 UI 설정 — localStorage 영속. */
+  density: Density;
+  setDensity: (d: Density) => void;
 }
 
 export const useUI = create<UIState>((set) => ({
@@ -125,4 +154,13 @@ export const useUI = create<UIState>((set) => ({
   renameTarget: null,
   requestInlineRename: (pane, name) => set({ renameTarget: { pane, name } }),
   clearInlineRename: () => set({ renameTarget: null }),
+  density: loadDensity(),
+  setDensity: (d) => {
+    try {
+      localStorage.setItem(DENSITY_KEY, d);
+    } catch {
+      /* localStorage 불가 — 메모리 상태만 */
+    }
+    set({ density: d });
+  },
 }));

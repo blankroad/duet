@@ -12,7 +12,7 @@ import {
   type PaneId,
 } from "@/stores/panes";
 import { setHoverEntry, clearHover } from "@/stores/previewHover";
-import { useUI } from "@/stores/ui";
+import { useUI, densityMetrics } from "@/stores/ui";
 import { InlineRenameInput } from "./InlineRenameInput";
 import { formatSize, formatTime } from "@/lib/format";
 import { EntryIcon } from "@/lib/fileIcon";
@@ -44,8 +44,6 @@ interface EntryGridProps {
   onRenamed: () => void;
 }
 
-const GRID_CELL_HEIGHT = 92;
-const TILE_HEIGHT = 48;
 
 /**
  * Grid / Tiles 뷰 — 가상 스크롤.
@@ -97,8 +95,9 @@ export function EntryGrid({
     return () => ro.disconnect();
   }, [mode, onColumns]);
 
+  const metrics = densityMetrics(useUI((s) => s.density));
   const cols = mode === "grid" ? Math.max(1, colsRef.current) : 1;
-  const rowHeight = mode === "grid" ? GRID_CELL_HEIGHT : TILE_HEIGHT;
+  const rowHeight = mode === "grid" ? metrics.gridCell : metrics.tile;
   const rowCount = Math.ceil(entries.length / cols);
 
   const virtualizer = useVirtualizer({
@@ -107,6 +106,11 @@ export function EntryGrid({
     estimateSize: () => rowHeight,
     overscan: 6,
   });
+
+  // 밀도/모드 전환 시 캐시된 행 높이 재측정.
+  useEffect(() => {
+    virtualizer.measure();
+  }, [rowHeight, virtualizer]);
 
   useEffect(() => {
     if (cursorIndex >= 0) {
@@ -437,7 +441,7 @@ function TileRow({
         onDoubleClick={onDoubleClick}
         title="Parent folder — drop here to move/copy up"
         className={clsx(
-          "flex h-12 items-center gap-3 px-3 cursor-default hover:bg-subtle",
+          "flex h-full items-center gap-3 px-3 cursor-default hover:bg-subtle",
           isCursor
             ? "border-l-2 border-l-accent pl-[10px]"
             : "border-l-2 border-l-transparent",
@@ -456,7 +460,7 @@ function TileRow({
       onMouseDown={onMouseDown}
       onContextMenu={onContextMenu}
       className={clsx(
-        "flex h-12 items-center gap-3 px-3 cursor-default",
+        "flex h-full items-center gap-3 px-3 cursor-default",
         // 선택 행은 hover 회색으로 덮지 않음 (마키 드래그 중 파란 선택색 유지).
         isSelected ? "bg-active" : "hover:bg-subtle",
         isCursor
