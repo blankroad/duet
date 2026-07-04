@@ -130,7 +130,6 @@ import type {
   CompressFormat,
   ConnectionDto,
   CopyStrategy,
-  DuetError,
   Entry,
   EntryRef,
   HostFavorite,
@@ -176,11 +175,7 @@ function App() {
       } catch (e) {
         usePanes.getState().setLoading(id, false);
         // 사용자가 더블클릭해도 silent fail 면 무반응으로 인식. toast 로 노출.
-        const msg =
-          e && typeof e === "object" && "kind" in e
-            ? `${(e as { kind: string }).kind}: ${formatErr(e as DuetError)}`
-            : String(e);
-        showToast(`Cannot open ${path} — ${msg}`, "error");
+        showToast(`Cannot open ${path} — ${formatErr(e)}`, "error");
       }
     },
     [listDirectory, showToast],
@@ -206,11 +201,7 @@ function App() {
         }
       } catch (e) {
         usePanes.getState().setLoading(id, false);
-        const msg =
-          e && typeof e === "object" && "kind" in e
-            ? `${(e as { kind: string }).kind}: ${formatErr(e as DuetError)}`
-            : String(e);
-        showToast(`Cannot open ${location.path} — ${msg}`, "error");
+        showToast(`Cannot open ${location.path} — ${formatErr(e)}`, "error");
       }
     },
     [listDirectory, showToast],
@@ -1250,11 +1241,7 @@ function App() {
           break;
         } catch (e) {
           // useTauri throws DuetError 또는 IpcError; formatErr 가 양쪽 처리.
-          const msg =
-            e && typeof e === "object" && "kind" in e
-              ? formatErr(e as DuetError)
-              : String(e);
-          failures.push(`${path}: ${msg}`);
+          failures.push(`${path}: ${formatErr(e)}`);
         }
       }
       if (!succeeded) {
