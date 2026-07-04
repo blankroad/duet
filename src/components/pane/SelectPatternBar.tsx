@@ -45,8 +45,8 @@ export function SelectPatternBar({ id }: { id: PaneId }) {
       .getState()
       .show(
         n === 0
-          ? `일치 항목 없음: ${pattern}`
-          : `${n}개 ${mode === "add" ? "선택됨" : "선택 해제됨"}`,
+          ? `No matches: ${pattern}`
+          : `${n} item${n === 1 ? "" : "s"} ${mode === "add" ? "selected" : "deselected"}`,
       );
   };
 
@@ -60,7 +60,7 @@ export function SelectPatternBar({ id }: { id: PaneId }) {
         <MinusSquare size={11} className="shrink-0 text-fg-muted" />
       )}
       <span className="shrink-0 text-base text-fg-muted">
-        {isAdd ? "선택" : "선택 해제"}
+        {isAdd ? "Select" : "Deselect"}
       </span>
       <input
         ref={inputRef}
@@ -78,7 +78,7 @@ export function SelectPatternBar({ id }: { id: PaneId }) {
           }
         }}
         onBlur={() => setOpen(false)}
-        placeholder="패턴 (예: *.ts, img_??.png, report)"
+        placeholder="Pattern (e.g. *.ts, img_??.png, report)"
         className="flex-1 bg-transparent font-mono text-base focus:outline-none"
       />
       <button
@@ -91,7 +91,7 @@ export function SelectPatternBar({ id }: { id: PaneId }) {
         }}
         className="rounded px-1 py-0.5 text-base text-fg-muted hover:bg-border"
       >
-        적용
+        Apply
       </button>
       <button
         type="button"

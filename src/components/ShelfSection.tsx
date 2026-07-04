@@ -42,24 +42,24 @@ export function ShelfSection() {
           type="button"
           onClick={() => void applyShelfTo("copy", open, showToast)}
           className="flex flex-1 items-center justify-center gap-1 rounded-panel border border-border py-0.5 text-meta hover:bg-border"
-          title="여기로 복사 (활성 패널)"
+          title="Copy here (active pane)"
         >
-          <Copy size={11} /> 복사
+          <Copy size={11} /> Copy
         </button>
         <button
           type="button"
           onClick={() => void applyShelfTo("move", open, showToast)}
           className="flex flex-1 items-center justify-center gap-1 rounded-panel border border-border py-0.5 text-meta hover:bg-border"
-          title="여기로 이동 (활성 패널)"
+          title="Move here (active pane)"
         >
-          <FolderInput size={11} /> 이동
+          <FolderInput size={11} /> Move
         </button>
         <button
           type="button"
           onClick={() => clear()}
           className="rounded-panel p-1 text-fg-muted hover:bg-border hover:text-danger"
           aria-label="Clear shelf"
-          title="선반 비우기"
+          title="Clear shelf"
         >
           <Trash2 size={11} />
         </button>

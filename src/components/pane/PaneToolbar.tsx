@@ -73,7 +73,7 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
       <ToolButton
         label={
           syncBrowse
-            ? "Synchronized browsing: ON — 양 패널 동반 이동"
+            ? "Synchronized browsing: ON — panes navigate together"
             : "Synchronized browsing: OFF"
         }
         active={syncBrowse}

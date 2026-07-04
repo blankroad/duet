@@ -360,8 +360,8 @@ export function addSelectionToShelf(showToast: ToastFn): void {
   const total = useShelf.getState().items.length;
   showToast(
     n === 0
-      ? "이미 선반에 있음"
-      : `선반에 ${n}개 담음 (총 ${total})`,
+      ? "Already on the shelf"
+      : `Added ${n} item${plural(n)} to shelf (${total} total)`,
   );
 }
 
@@ -377,7 +377,7 @@ export async function applyShelfTo(
 ): Promise<void> {
   const items = useShelf.getState().items;
   if (items.length === 0) {
-    showToast("선반이 비어 있음");
+    showToast("Shelf is empty");
     return;
   }
   const dst = resolveActiveTargets().tab.location;
@@ -392,7 +392,7 @@ export async function applyShelfTo(
   await planTransferTo(groupList[0]!, dst, mode, open, showToast);
   if (groupList.length > 1) {
     showToast(
-      `다른 소스 ${groupList.length - 1}개 그룹은 선반에 남음 — 다시 적용하세요`,
+      `${groupList.length - 1} group${plural(groupList.length - 1)} from other sources left on shelf — apply again`,
     );
   }
 }
