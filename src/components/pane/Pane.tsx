@@ -4,6 +4,7 @@ import { TabBar } from "./TabBar";
 import { PathBar } from "./PathBar";
 import { PaneFilterBar } from "./PaneFilterBar";
 import { SelectPatternBar } from "./SelectPatternBar";
+import { ConnectionBanner } from "./ConnectionBanner";
 import { PaneToolbar } from "./PaneToolbar";
 import { EntryList } from "./EntryList";
 import { EntryGrid } from "./EntryGrid";
@@ -37,6 +38,8 @@ interface PaneProps {
   onEmptyContextMenu: (id: PaneId, e: React.MouseEvent) => void;
   /** 아카이브 browse 중 "Update archive" repack 트리거. */
   onUpdateArchive: (id: PaneId) => void;
+  /** SSH 연결 끊김 배너의 Reconnect — alias 모르면 null. */
+  onReconnect: (alias: string | null, id: PaneId) => void;
 }
 
 /**
@@ -55,6 +58,7 @@ export function Pane({
   onEntryContextMenu,
   onEmptyContextMenu,
   onUpdateArchive,
+  onReconnect,
 }: PaneProps) {
   const isActive = usePanes((s) => s.activePane === id);
   const setActivePane = usePanes((s) => s.setActivePane);
@@ -141,6 +145,7 @@ export function Pane({
       <PaneToolbar id={id} />
       <PaneFilterBar id={id} />
       <SelectPatternBar id={id} />
+      <ConnectionBanner id={id} onReconnect={onReconnect} />
       <div className="relative flex min-h-0 flex-1 flex-col">
         {tab.viewMode === "details" ? (
           <EntryList

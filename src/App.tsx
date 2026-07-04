@@ -90,7 +90,7 @@ import { applyTheme } from "@/lib/theme";
 import { useSearch } from "@/stores/search";
 import { useUIDialogs } from "@/stores/ui-dialogs";
 import { useToast } from "@/stores/toast";
-import { bootstrapSavedHosts } from "@/stores/savedHosts";
+import { bootstrapSavedHosts, useSavedHosts } from "@/stores/savedHosts";
 import {
   bootstrapBookmarks,
   addBookmark,
@@ -1172,6 +1172,32 @@ function App() {
     [],
   );
 
+  /**
+   * SSH 배너 Reconnect — ssh-config 호스트면 ConnectionDialog(연결 후 같은
+   * 경로로 복귀, onOpenHostPath 의 pendingNav), 저장된 호스트면 프리필 ad-hoc,
+   * 둘 다 모르면 빈 ad-hoc 다이얼로그.
+   */
+  const onPaneReconnect = useCallback(
+    (alias: string | null, paneId: PaneId) => {
+      const path = String(activeTab(usePanes.getState(), paneId).location.path);
+      if (alias) {
+        if (useConnections.getState().hosts.some((h) => h.alias === alias)) {
+          onOpenHostPath(alias, path, paneId);
+          return;
+        }
+        const saved = useSavedHosts
+          .getState()
+          .hosts.find((h) => h.alias === alias);
+        if (saved) {
+          onSavedActivate(saved);
+          return;
+        }
+      }
+      onAdHocOpen();
+    },
+    [onOpenHostPath, onSavedActivate, onAdHocOpen],
+  );
+
   // 팔레트/동적 커맨드용 — 활성 패널 기준 래퍼.
   const onBookmarkActivate = useCallback(
     (location: Location) =>
@@ -1353,6 +1379,7 @@ function App() {
           onEntryContextMenu={onEntryContextMenu}
           onEmptyContextMenu={onEmptyContextMenu}
           onUpdateArchive={onUpdateArchive}
+          onReconnect={onPaneReconnect}
         />
         <SwapPanesButton />
         <Pane
@@ -1366,6 +1393,7 @@ function App() {
           onEntryContextMenu={onEntryContextMenu}
           onEmptyContextMenu={onEmptyContextMenu}
           onUpdateArchive={onUpdateArchive}
+          onReconnect={onPaneReconnect}
         />
         {previewOpen && <PreviewPane />}
       </main>
