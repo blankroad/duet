@@ -1,4 +1,5 @@
 import { useMemo, useRef } from "react";
+import { Loader } from "lucide-react";
 import { TabBar } from "./TabBar";
 import { PathBar } from "./PathBar";
 import { PaneFilterBar } from "./PaneFilterBar";
@@ -6,7 +7,13 @@ import { SelectPatternBar } from "./SelectPatternBar";
 import { PaneToolbar } from "./PaneToolbar";
 import { EntryList } from "./EntryList";
 import { EntryGrid } from "./EntryGrid";
-import { usePanes, activeTab, computeDisplayed, isParentEntry, type PaneId } from "@/stores/panes";
+import {
+  usePanes,
+  activeTab,
+  computeDisplayed,
+  isParentEntry,
+  type PaneId,
+} from "@/stores/panes";
 import { useUI } from "@/stores/ui";
 import { useAppSettings } from "@/stores/settings";
 import type { Entry } from "@/types/bindings";
@@ -21,7 +28,12 @@ interface PaneProps {
   onForward: (id: PaneId) => void;
   /** "위로" — 부모 디렉토리(또는 아카이브 루트에서 빠져나가기)는 App 이 결정. */
   onUp: (id: PaneId) => void;
-  onEntryContextMenu: (id: PaneId, entry: Entry, index: number, e: React.MouseEvent) => void;
+  onEntryContextMenu: (
+    id: PaneId,
+    entry: Entry,
+    index: number,
+    e: React.MouseEvent,
+  ) => void;
   onEmptyContextMenu: (id: PaneId, e: React.MouseEvent) => void;
   /** 아카이브 browse 중 "Update archive" repack 트리거. */
   onUpdateArchive: (id: PaneId) => void;
@@ -32,7 +44,18 @@ interface PaneProps {
  * dumb component — IPC 호출은 App.tsx 가 일괄 처리.
  * displayed entries 는 store selector (raw → filter → hidden → sort) 결과.
  */
-export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward, onUp, onEntryContextMenu, onEmptyContextMenu, onUpdateArchive }: PaneProps) {
+export function Pane({
+  id,
+  onNavigate,
+  onActivate,
+  onRefresh,
+  onBack,
+  onForward,
+  onUp,
+  onEntryContextMenu,
+  onEmptyContextMenu,
+  onUpdateArchive,
+}: PaneProps) {
   const isActive = usePanes((s) => s.activePane === id);
   const setActivePane = usePanes((s) => s.setActivePane);
   const setCursor = usePanes((s) => s.setCursor);
@@ -49,6 +72,8 @@ export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward,
   // selector 가 매번 새 배열을 반환하면 zustand v5 무한 re-render → useMemo 로
   // tab(안정 ref) 변경 시에만 재정렬. (activeTab 은 기존 tab ref 반환.)
   const displayed = useMemo(() => computeDisplayed(tab), [tab]);
+  // 합성 ".." 행뿐이면 실질적으로 빈 폴더 — 플레이스홀더 표시 기준.
+  const hasRealEntries = displayed.some((e) => !isParentEntry(e));
 
   const goUp = () => onUp(id);
 
@@ -93,9 +118,7 @@ export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward,
         "flex flex-1 flex-col min-h-0 overflow-hidden rounded-panel border transition duration-150",
         // 활성: 살짝 떠 보이게(elevation 그림자) + 얇은 강조색 1px 테두리.
         // 비활성: 평평(그림자 없음) + 은은한 회색 테두리. border 폭은 동일 → 레이아웃 불변.
-        isActive
-          ? "border-accent shadow-raised"
-          : "border-border",
+        isActive ? "border-accent shadow-raised" : "border-border",
       )}
       onMouseDown={() => setActivePane(id)}
     >
@@ -118,35 +141,61 @@ export function Pane({ id, onNavigate, onActivate, onRefresh, onBack, onForward,
       <PaneToolbar id={id} />
       <PaneFilterBar id={id} />
       <SelectPatternBar id={id} />
-      {tab.viewMode === "details" ? (
-        <EntryList
-          id={id}
-          entries={displayed}
-          cursorIndex={tab.cursorIndex}
-          selected={tab.selected}
-          sortKey={tab.sortKey}
-          sortOrder={tab.sortOrder}
-          onCursorMove={handleEntryClick}
-          onActivate={(entry) => activate(entry)}
-          onToggleSelect={(name) => toggleSelected(id, name)}
-          onSortClick={(k) => toggleSortKey(id, k)}
-          onEntryContextMenu={(e, entry, index) => onEntryContextMenu(id, entry, index, e)}
-          onEmptyContextMenu={(e) => onEmptyContextMenu(id, e)}
-        />
-      ) : (
-        <EntryGrid
-          id={id}
-          entries={displayed}
-          mode={tab.viewMode}
-          cursorIndex={tab.cursorIndex}
-          selected={tab.selected}
-          onCursorMove={handleEntryClick}
-          onActivate={(entry) => activate(entry)}
-          onColumns={(c) => setGridCols(id, c)}
-          onEntryContextMenu={(e, entry, index) => onEntryContextMenu(id, entry, index, e)}
-          onEmptyContextMenu={(e) => onEmptyContextMenu(id, e)}
-        />
-      )}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        {tab.viewMode === "details" ? (
+          <EntryList
+            id={id}
+            entries={displayed}
+            cursorIndex={tab.cursorIndex}
+            selected={tab.selected}
+            sortKey={tab.sortKey}
+            sortOrder={tab.sortOrder}
+            onCursorMove={handleEntryClick}
+            onActivate={(entry) => activate(entry)}
+            onToggleSelect={(name) => toggleSelected(id, name)}
+            onSortClick={(k) => toggleSortKey(id, k)}
+            onEntryContextMenu={(e, entry, index) =>
+              onEntryContextMenu(id, entry, index, e)
+            }
+            onEmptyContextMenu={(e) => onEmptyContextMenu(id, e)}
+          />
+        ) : (
+          <EntryGrid
+            id={id}
+            entries={displayed}
+            mode={tab.viewMode}
+            cursorIndex={tab.cursorIndex}
+            selected={tab.selected}
+            onCursorMove={handleEntryClick}
+            onActivate={(entry) => activate(entry)}
+            onColumns={(c) => setGridCols(id, c)}
+            onEntryContextMenu={(e, entry, index) =>
+              onEntryContextMenu(id, entry, index, e)
+            }
+            onEmptyContextMenu={(e) => onEmptyContextMenu(id, e)}
+          />
+        )}
+        {tab.loading && (
+          // 200ms 지연 등장(animate-fade-in-late) — 빠른 로컬 탐색에선 안 보임.
+          // pointer-events-none: 로드 중에도 ".." 클릭/취소성 조작 방해 안 함.
+          <div className="pointer-events-none absolute inset-0 z-10 flex animate-fade-in-late items-center justify-center bg-base/60">
+            <Loader
+              size={20}
+              className="animate-spin text-fg-muted"
+              aria-label="Loading"
+            />
+          </div>
+        )}
+        {!tab.loading && !hasRealEntries && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <span className="text-base text-fg-muted">
+              {tab.filter.length > 0
+                ? "No items match the filter"
+                : "This folder is empty"}
+            </span>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

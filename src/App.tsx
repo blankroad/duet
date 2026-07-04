@@ -23,7 +23,11 @@ import { ConfirmDialog } from "@/components/dialogs/ConfirmDialog";
 import { CopyMoveConfirmDialog } from "@/components/dialogs/CopyMoveConfirmDialog";
 import { DangerConfirmDialog } from "@/components/dialogs/DangerConfirmDialog";
 import { SudoPasswordDialog } from "@/components/dialogs/SudoPasswordDialog";
-import { rememberElevatable, elevatableDestPath, type ElevatablePlan } from "@/lib/elevatePending";
+import {
+  rememberElevatable,
+  elevatableDestPath,
+  type ElevatablePlan,
+} from "@/lib/elevatePending";
 import { rememberExtract } from "@/lib/extractPending";
 import { ProgressModal } from "@/components/dialogs/ProgressModal";
 import { SettingsDialog } from "@/components/SettingsDialog";
@@ -154,6 +158,9 @@ function App() {
     async (id: PaneId, path: string, opts: { pushHistory?: boolean } = {}) => {
       const state = usePanes.getState();
       const location = { ...activeTab(state, id).location, path };
+      // 로드 중 표시 — 느린 SSH ls 에서 이전 목록이 그대로 보여 "무반응"으로
+      // 오인되는 것 방지. setEntries 가 성공 시 자동 해제.
+      state.setLoading(id, true);
       try {
         const entries = await listDirectory(location);
         state.setEntries(id, location, entries, {
@@ -167,6 +174,7 @@ function App() {
           void commands.frecencyRecord(location); // 점퍼(Ctrl+J) 랭킹용
         }
       } catch (e) {
+        usePanes.getState().setLoading(id, false);
         // 사용자가 더블클릭해도 silent fail 면 무반응으로 인식. toast 로 노출.
         const msg =
           e && typeof e === "object" && "kind" in e
@@ -185,6 +193,7 @@ function App() {
       location: Location,
       opts: { pushHistory?: boolean } = {},
     ) => {
+      usePanes.getState().setLoading(id, true);
       try {
         const entries = await listDirectory(location);
         usePanes.getState().setEntries(id, location, entries, {
@@ -196,6 +205,7 @@ function App() {
           void commands.frecencyRecord(location); // 점퍼(Ctrl+J) 랭킹용
         }
       } catch (e) {
+        usePanes.getState().setLoading(id, false);
         const msg =
           e && typeof e === "object" && "kind" in e
             ? `${(e as { kind: string }).kind}: ${formatErr(e as DuetError)}`
@@ -336,7 +346,10 @@ function App() {
                 .open({ kind: "browse-password", paneId: id, archive });
               return;
             }
-            showToast(`Cannot open ${entry.name} — ${formatErr(r.error)}`, "error");
+            showToast(
+              `Cannot open ${entry.name} — ${formatErr(r.error)}`,
+              "error",
+            );
             return;
           }
           await navigateTo(id, r.data);
@@ -354,7 +367,10 @@ function App() {
           childLocation(tab.location, entry.name),
         );
         if (r.status === "error")
-          showToast(`Cannot open ${entry.name} — ${formatErr(r.error)}`, "error");
+          showToast(
+            `Cannot open ${entry.name} — ${formatErr(r.error)}`,
+            "error",
+          );
       })();
     },
     [navigate, navigateTo, onUp, showToast, syncMirror],
@@ -912,8 +928,10 @@ function App() {
 
   // 로컬 UAC 승격 실행 — op 로 커맨드 선택(결과 타입은 셋 다 ElevatedOutcome 동일).
   const runElevated = useCallback((p: ElevatablePlan) => {
-    if (p.op === "copy") return commands.fsCopyExecuteElevated(p.plan, p.policy);
-    if (p.op === "move") return commands.fsMoveExecuteElevated(p.plan, p.policy);
+    if (p.op === "copy")
+      return commands.fsCopyExecuteElevated(p.plan, p.policy);
+    if (p.op === "move")
+      return commands.fsMoveExecuteElevated(p.plan, p.policy);
     return commands.fsDeleteExecuteElevated(p.plan);
   }, []);
 
@@ -933,7 +951,10 @@ function App() {
       return;
     }
     if (o.failed.length > 0) {
-      showToast(`${o.ok} ok, ${o.failed.length} failed — ${o.failed[0]}`, "error");
+      showToast(
+        `${o.ok} ok, ${o.failed.length} failed — ${o.failed[0]}`,
+        "error",
+      );
     } else {
       showToast(`${o.ok} item(s) — done as administrator`, "success");
     }
@@ -943,14 +964,19 @@ function App() {
 
   // 원격 sudo 실행 — op 로 커맨드 선택(결과 타입 셋 다 SudoOutcome 동일).
   const runSudo = useCallback((p: ElevatablePlan, password: string | null) => {
-    if (p.op === "copy") return commands.fsCopyExecuteSudo(p.plan, p.policy, password);
-    if (p.op === "move") return commands.fsMoveExecuteSudo(p.plan, p.policy, password);
+    if (p.op === "copy")
+      return commands.fsCopyExecuteSudo(p.plan, p.policy, password);
+    if (p.op === "move")
+      return commands.fsMoveExecuteSudo(p.plan, p.policy, password);
     return commands.fsDeleteExecuteSudo(p.plan, password);
   }, []);
 
   /** 원격 sudo 결과 처리 — 비번 필요/오류면 비번 다이얼로그, 성공이면 토스트+새로고침. */
   const handleSudoResult = useCallback(
-    (r: Awaited<ReturnType<typeof commands.fsCopyExecuteSudo>>, p: ElevatablePlan) => {
+    (
+      r: Awaited<ReturnType<typeof commands.fsCopyExecuteSudo>>,
+      p: ElevatablePlan,
+    ) => {
       if (r.status === "error") {
         showToast(`sudo ${p.op} failed: ${formatErr(r.error)}`, "error");
         return;
@@ -965,7 +991,10 @@ function App() {
         return;
       }
       if (o.failed.length > 0) {
-        showToast(`${o.count} ok, ${o.failed.length} failed — ${o.failed[0]}`, "error");
+        showToast(
+          `${o.count} ok, ${o.failed.length} failed — ${o.failed[0]}`,
+          "error",
+        );
       } else {
         showToast(`${o.count} item(s) — done with sudo`, "success");
       }
@@ -1153,7 +1182,11 @@ function App() {
       // 첫번째 성공한 listDirectory 가 패널에 적용됨.
       const homeRes = await commands.sshHomeDirectory(dto.id);
       if (homeRes.status === "ok") candidates.push(homeRes.data);
-      else showToast(`ssh_home_directory failed: ${formatErr(homeRes.error)}`, "error");
+      else
+        showToast(
+          `ssh_home_directory failed: ${formatErr(homeRes.error)}`,
+          "error",
+        );
       candidates.push("~", "/");
 
       let succeeded = false;
@@ -1164,7 +1197,10 @@ function App() {
           const entries = await listDirectory(loc);
           state.setEntries(paneId, loc, entries);
           state.setActivePane(paneId);
-          showToast(`Connected: ${alias} → ${paneId} pane (${path})`, "success");
+          showToast(
+            `Connected: ${alias} → ${paneId} pane (${path})`,
+            "success",
+          );
           succeeded = true;
           break;
         } catch (e) {
@@ -1368,7 +1404,11 @@ function App() {
           onClose={closeDialog}
           onSubmit={(name, target) => {
             void (async () => {
-              const r = await commands.fsMakeSymlink(dialog.parent, name, target);
+              const r = await commands.fsMakeSymlink(
+                dialog.parent,
+                name,
+                target,
+              );
               if (r.status === "error") {
                 showToast(`Symlink failed: ${formatErr(r.error)}`, "error");
                 return;
@@ -1571,7 +1611,8 @@ function App() {
               <span className="break-all font-mono">
                 {elevatableDestPath(dialog.pending)}
               </span>{" "}
-              needs administrator rights. Retry with elevation? Windows will show a UAC prompt.
+              needs administrator rights. Retry with elevation? Windows will
+              show a UAC prompt.
             </div>
           }
           ctaLabel="Retry as administrator"
@@ -1589,7 +1630,8 @@ function App() {
               <span className="break-all font-mono">
                 {elevatableDestPath(dialog.pending)}
               </span>{" "}
-              on the remote needs root. Retry with <span className="font-mono">sudo</span>?
+              on the remote needs root. Retry with{" "}
+              <span className="font-mono">sudo</span>?
             </div>
           }
           ctaLabel="Retry with sudo"

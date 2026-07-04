@@ -68,9 +68,16 @@ const config: Config = {
           "0%": { transform: "translateX(-100%)" },
           "100%": { transform: "translateX(400%)" },
         },
+        fadeIn: {
+          "0%": { opacity: "0" },
+          "100%": { opacity: "1" },
+        },
       },
       animation: {
         indeterminate: "indeterminate 1.2s ease-in-out infinite",
+        // 디렉토리 로딩 스피너 — 200ms 지연 후 등장(backwards 로 지연 중 투명).
+        // 빠른 로컬 탐색에선 아예 안 보여 깜빡임 없음.
+        "fade-in-late": "fadeIn 120ms ease-out 200ms backwards",
       },
     },
   },

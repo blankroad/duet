@@ -39,6 +39,7 @@ const mkTab = (path: string, entries: Entry[] = []): TabState => ({
   showHidden: false,
   viewMode: "details",
   gridCols: 1,
+  loading: false,
   filter: "",
   filterFocused: false,
   dirSizes: {},
@@ -296,6 +297,19 @@ describe("panes — '..' parent row", () => {
     expect(
       selectDisplayedEntries("left", usePanes.getState()).map((e) => e.name),
     ).toEqual([".."]);
+  });
+});
+
+describe("panes — loading flag", () => {
+  beforeEach(reset);
+
+  it("setLoading sets, setEntries clears", () => {
+    usePanes.getState().setLoading("left", true);
+    expect(activeTab(usePanes.getState(), "left").loading).toBe(true);
+    usePanes
+      .getState()
+      .setEntries("left", { source: { kind: "local" }, path: "/a" }, []);
+    expect(activeTab(usePanes.getState(), "left").loading).toBe(false);
   });
 });
 

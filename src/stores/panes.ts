@@ -43,6 +43,8 @@ export interface TabState {
   viewMode: ViewMode;
   /** grid 뷰의 현재 컬럼 수. EntryGrid 가 폭 측정 후 보고 — 키보드 ↑↓ 이동폭에 사용. */
   gridCols: number;
+  /** listDirectory 진행 중 — 느린 원격 탐색에서 "멈춘 것처럼 보임" 방지 스피너용. */
+  loading: boolean;
   filter: string;
   filterFocused: boolean;
   /** "크기 계산"으로 구한 폴더 재귀 크기(name → bytes). 다른 폴더로 이동 시 리셋. */
@@ -93,6 +95,8 @@ interface PanesState {
   setViewMode: (id: PaneId, mode: ViewMode) => void;
   cycleViewMode: (id: PaneId) => void;
   setGridCols: (id: PaneId, cols: number) => void;
+  /** 디렉토리 로드 시작/종료 표시 — navigate 가 set, setEntries 가 자동 해제. */
+  setLoading: (id: PaneId, loading: boolean) => void;
   setFilter: (id: PaneId, filter: string) => void;
   setFilterFocused: (id: PaneId, focused: boolean) => void;
   /** 아카이브 브라우즈 컨텍스트 설정/해제 (진입 시 set, null=해제). */
@@ -162,6 +166,7 @@ const initialTab = (location: Location = home()): TabState => ({
   showHidden: tabDefaults.showHidden,
   viewMode: tabDefaults.viewMode,
   gridCols: 1,
+  loading: false,
   filter: "",
   filterFocused: false,
   dirSizes: {},
@@ -260,6 +265,7 @@ export const usePanes = create<PanesState>((set, get) => ({
         entries,
         cursorIndex: entries.length > 0 ? 0 : -1,
         selected: new Set(),
+        loading: false,
         loadedAt: Date.now(),
         filter: navigated ? "" : cur.filter,
         filterFocused: navigated ? false : cur.filterFocused,
@@ -459,6 +465,15 @@ export const usePanes = create<PanesState>((set, get) => ({
         },
       };
     }),
+  setLoading: (id, loading) =>
+    set((s) => ({
+      panes: {
+        ...s.panes,
+        [id]: withActiveTab(s.panes[id], (t) =>
+          t.loading === loading ? t : { ...t, loading },
+        ),
+      },
+    })),
   setFilter: (id, filter) =>
     set((s) => ({
       panes: {
