@@ -1,5 +1,6 @@
 import { useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
+import { useTranslation } from "react-i18next";
 import { X, FilePlus2, SkipForward, Copy, ListChecks } from "lucide-react";
 import clsx from "clsx";
 import type { ReactNode } from "react";
@@ -31,6 +32,7 @@ export function CopyMoveConfirmDialog({
   onConfirm: (policy: ConflictPolicy) => void;
   onConfirmPerFile: (decisions: Record<string, ConflictPolicy>) => void;
 }) {
+  const { t } = useTranslation();
   const [perFile, setPerFile] = useState(false);
   // 개별 모드 기본값: skip — 아무것도 덮어쓰거나 새로 만들지 않는 안전한 시작점.
   const [decisions, setDecisions] = useState<Record<string, ConflictPolicy>>(
@@ -51,7 +53,7 @@ export function CopyMoveConfirmDialog({
             </Dialog.Title>
             <Dialog.Close
               className="rounded p-1 text-fg-muted hover:bg-border"
-              aria-label="Close"
+              aria-label={t("common.close")}
             >
               <X size={14} />
             </Dialog.Close>
@@ -61,8 +63,7 @@ export function CopyMoveConfirmDialog({
           {conflicts.length > 0 ? (
             <div className="mt-4 flex min-h-0 flex-col space-y-2">
               <div className="text-meta text-fg-muted">
-                {conflicts.length} item(s) already exist at the destination.
-                Choose how to resolve:
+                {t("conflict.exist", { count: conflicts.length })}
               </div>
 
               {!perFile ? (
@@ -70,26 +71,26 @@ export function CopyMoveConfirmDialog({
                   <div className="flex flex-col gap-1.5">
                     <ChoiceButton
                       icon={<Copy size={14} />}
-                      label="Replace all"
-                      hint="Overwrite existing (permanent — cannot be undone)"
+                      label={t("conflict.replaceAll")}
+                      hint={t("conflict.replaceAllHint")}
                       onClick={() => onConfirm("replace")}
                     />
                     <ChoiceButton
                       icon={<SkipForward size={14} />}
-                      label="Skip all"
-                      hint="Don't copy conflicting items"
+                      label={t("conflict.skipAll")}
+                      hint={t("conflict.skipAllHint")}
                       onClick={() => onConfirm("skip")}
                     />
                     <ChoiceButton
                       icon={<FilePlus2 size={14} />}
-                      label="Keep both (all)"
-                      hint="Copy with a new name — name (1).ext"
+                      label={t("conflict.keepBothAll")}
+                      hint={t("conflict.keepBothAllHint")}
                       onClick={() => onConfirm("keepboth")}
                     />
                     <ChoiceButton
                       icon={<ListChecks size={14} />}
-                      label="Choose per file…"
-                      hint="Decide Replace / Skip / Keep both for each item"
+                      label={t("conflict.perFile")}
+                      hint={t("conflict.perFileHint")}
                       onClick={() => setPerFile(true)}
                     />
                   </div>
@@ -99,7 +100,7 @@ export function CopyMoveConfirmDialog({
                       onClick={onCancel}
                       className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
                     >
-                      Cancel
+                      {t("common.cancel")}
                     </button>
                   </div>
                 </>
@@ -107,10 +108,10 @@ export function CopyMoveConfirmDialog({
                 <>
                   {/* 상단 일괄 세터 — 개별 모드에서도 한 번에 초기화 가능. */}
                   <div className="flex items-center gap-2 text-meta text-fg-muted">
-                    <span>Set all:</span>
-                    <MiniBtn label="Replace" onClick={() => setAll("replace")} />
-                    <MiniBtn label="Skip" onClick={() => setAll("skip")} />
-                    <MiniBtn label="Keep both" onClick={() => setAll("keepboth")} />
+                    <span>{t("conflict.setAll")}</span>
+                    <MiniBtn label={t("conflict.replace")} onClick={() => setAll("replace")} />
+                    <MiniBtn label={t("conflict.skip")} onClick={() => setAll("skip")} />
+                    <MiniBtn label={t("conflict.keepBoth")} onClick={() => setAll("keepboth")} />
                   </div>
                   <ul className="min-h-0 flex-1 divide-y divide-border overflow-auto rounded border border-border">
                     {conflicts.map((c) => (
@@ -139,14 +140,14 @@ export function CopyMoveConfirmDialog({
                       onClick={onCancel}
                       className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
                     >
-                      Cancel
+                      {t("common.cancel")}
                     </button>
                     <button
                       type="button"
                       onClick={() => onConfirmPerFile(decisions)}
                       className="rounded bg-accent px-3 py-1 text-base text-white"
                     >
-                      {ctaLabel} with choices
+                      {t("conflict.withChoices", { cta: ctaLabel })}
                     </button>
                   </div>
                 </>
@@ -159,7 +160,7 @@ export function CopyMoveConfirmDialog({
                 onClick={onCancel}
                 className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
               >
-                Cancel
+                {t("common.cancel")}
               </button>
               <button
                 type="button"
@@ -186,10 +187,11 @@ function PolicyPicker({
   value: ConflictPolicy;
   onChange: (p: ConflictPolicy) => void;
 }) {
+  const { t } = useTranslation();
   const opts: Array<{ p: ConflictPolicy; label: string; danger?: boolean }> = [
-    { p: "replace", label: "Replace", danger: true },
-    { p: "skip", label: "Skip" },
-    { p: "keepboth", label: "Keep both" },
+    { p: "replace", label: t("conflict.replace"), danger: true },
+    { p: "skip", label: t("conflict.skip") },
+    { p: "keepboth", label: t("conflict.keepBoth") },
   ];
   return (
     <div className="flex shrink-0 overflow-hidden rounded border border-border text-meta">

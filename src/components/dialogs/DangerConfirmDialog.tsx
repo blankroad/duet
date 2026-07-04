@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
+import { useTranslation, Trans } from "react-i18next";
 import { X, AlertTriangle } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -19,6 +20,7 @@ export function DangerConfirmDialog({
   onCancel,
   onConfirm,
 }: DangerConfirmDialogProps) {
+  const { t } = useTranslation();
   const [typed, setTyped] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const enabled = typed === requiredWord;
@@ -42,7 +44,7 @@ export function DangerConfirmDialog({
             </Dialog.Title>
             <Dialog.Close
               className="rounded p-1 text-fg-muted hover:bg-border"
-              aria-label="Close"
+              aria-label={t("common.close")}
             >
               <X size={14} />
             </Dialog.Close>
@@ -50,8 +52,14 @@ export function DangerConfirmDialog({
           <div className="text-base">{body}</div>
           <div className="mt-3">
             <div className="mb-1 text-meta text-fg-muted">
-              Type <span className="font-mono text-fg">{requiredWord}</span> to
-              confirm:
+              <Trans
+                i18nKey="common.typeToConfirm"
+                values={{ word: requiredWord }}
+                components={{
+                  // {{word}} 를 mono 스타일로 감싸기 위한 Trans 사용.
+                  1: <span className="font-mono text-fg" />,
+                }}
+              />
             </div>
             <input
               ref={inputRef}
@@ -71,7 +79,7 @@ export function DangerConfirmDialog({
               onClick={onCancel}
               className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
             >
-              Cancel
+              {t("common.cancel")}
             </button>
             <button
               type="button"
@@ -79,7 +87,7 @@ export function DangerConfirmDialog({
               disabled={!enabled}
               className="rounded bg-danger px-3 py-1 text-base text-white disabled:opacity-30"
             >
-              Delete
+              {t("common.delete")}
             </button>
           </div>
           <Dialog.Description className="sr-only">{title}</Dialog.Description>

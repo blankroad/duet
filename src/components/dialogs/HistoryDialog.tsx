@@ -1,4 +1,6 @@
 import * as Dialog from "@radix-ui/react-dialog";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { X, History, Undo2 } from "lucide-react";
 import clsx from "clsx";
 import { useJournal } from "@/stores/journal";
@@ -16,6 +18,7 @@ import type { JournalEntry, Location, OpKind } from "@/types/bindings";
  * redo / 임의 항목 undo 는 백엔드 미지원 (undoLast 만) — 후속.
  */
 export function HistoryDialog({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation();
   const entries = useJournal((s) => s.entries);
   const hasUndoable = useJournal((s) => s.hasUndoable);
   const showToast = useToast((s) => s.show);
@@ -32,13 +35,13 @@ export function HistoryDialog({ onClose }: { onClose: () => void }) {
           <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
             <History size={15} className="text-fg-muted" aria-hidden />
             <Dialog.Title className="text-title font-medium">
-              Operation history
+              {t("history.title")}
             </Dialog.Title>
             <Dialog.Close asChild>
               <button
                 type="button"
                 className="ml-auto rounded p-1 text-fg-muted hover:bg-border"
-                aria-label="Close"
+                aria-label={t("common.close")}
               >
                 <X size={14} />
               </button>
@@ -48,7 +51,7 @@ export function HistoryDialog({ onClose }: { onClose: () => void }) {
           <div className="min-h-0 flex-1 overflow-auto">
             {newestFirst.length === 0 ? (
               <div className="px-4 py-6 text-center text-base text-fg-muted">
-                No operations recorded yet
+                {t("history.empty")}
               </div>
             ) : (
               <ul className="divide-y divide-border">
@@ -61,8 +64,7 @@ export function HistoryDialog({ onClose }: { onClose: () => void }) {
 
           <div className="flex items-center gap-2 border-t border-border px-4 py-2.5">
             <span className="text-meta text-fg-muted">
-              Redo isn't supported yet — only the most recent operation can be
-              undone, in order.
+              {t("history.redoNote")}
             </span>
             <button
               type="button"
@@ -71,7 +73,7 @@ export function HistoryDialog({ onClose }: { onClose: () => void }) {
               className="ml-auto flex shrink-0 items-center gap-1.5 rounded border border-border px-3 py-1 text-base hover:bg-subtle disabled:opacity-40 disabled:hover:bg-transparent"
             >
               <Undo2 size={13} aria-hidden />
-              Undo last ({displayKey("Ctrl+Z")})
+              {t("history.undoLast", { key: displayKey("Ctrl+Z") })}
             </button>
           </div>
           <Dialog.Description className="sr-only">
@@ -90,6 +92,7 @@ function HistoryRow({
   entry: JournalEntry;
   isNext: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <li
       className={clsx(
@@ -97,10 +100,10 @@ function HistoryRow({
         entry.undone && "text-fg-muted line-through opacity-60",
       )}
     >
-      <span className="min-w-0 flex-1 truncate">{opLabel(entry.op)}</span>
+      <span className="min-w-0 flex-1 truncate">{opLabel(entry.op, t)}</span>
       {isNext && (
         <span className="shrink-0 rounded bg-subtle px-1.5 py-0.5 text-meta text-accent">
-          next {displayKey("Ctrl+Z")}
+          {t("history.next", { key: displayKey("Ctrl+Z") })}
         </span>
       )}
       <span className="shrink-0 text-meta text-fg-muted">
@@ -126,34 +129,36 @@ function formatStamp(ts: string): string {
 const shortLoc = (l: Location) => basename(String(l.path), "/");
 
 /** journal op 을 한 줄 요약 — 미지의 op kind 는 kind 문자열 fallback. */
-function opLabel(op: OpKind): string {
+function opLabel(op: OpKind, t: TFunction): string {
   switch (op.kind) {
     case "trash":
-      return `Deleted ${op.count} item(s) to trash — ${shortLoc(op.location)}`;
+      return t("history.op.trash", { count: op.count, loc: shortLoc(op.location) });
     case "permanent_delete":
-      return `Permanently deleted ${op.count} item(s) — ${shortLoc(op.location)}`;
+      return t("history.op.permanentDelete", { count: op.count, loc: shortLoc(op.location) });
     case "copy":
-      return `Copied ${op.count} item(s) → ${shortLoc(op.dst)}`;
+      return t("history.op.copy", { count: op.count, loc: shortLoc(op.dst) });
     case "move":
-      return `Moved ${op.count} item(s) → ${shortLoc(op.dst)}`;
+      return t("history.op.move", { count: op.count, loc: shortLoc(op.dst) });
     case "rename":
-      return `Renamed ${op.from} → ${op.to}`;
+      return t("history.op.rename", { from: op.from, to: op.to });
     case "batch_rename":
-      return `Batch renamed ${op.count} item(s) — ${shortLoc(op.location)}`;
+      return t("history.op.batchRename", { count: op.count, loc: shortLoc(op.location) });
     case "mkdir":
-      return `New folder — ${basename(op.path, op.path)}`;
+      return t("history.op.mkdir", { name: basename(op.path, op.path) });
     case "extract":
-      return `Extracted ${basename(String(op.archive.path), "archive")}`;
+      return t("history.op.extract", { name: basename(String(op.archive.path), "archive") });
     case "compress":
-      return `Compressed ${op.count} item(s) → ${shortLoc(op.dst)}`;
+      return t("history.op.compress", { count: op.count, loc: shortLoc(op.dst) });
     case "sync":
-      return `Synced ${op.count} item(s)${op.pruned > 0 ? `, pruned ${op.pruned}` : ""} → ${shortLoc(op.dst)}`;
+      return op.pruned > 0
+        ? t("history.op.syncPruned", { count: op.count, pruned: op.pruned, loc: shortLoc(op.dst) })
+        : t("history.op.sync", { count: op.count, loc: shortLoc(op.dst) });
     case "merge":
-      return `Merged folders — ${op.to_left + op.to_right} item(s)`;
+      return t("history.op.merge", { count: op.to_left + op.to_right });
     case "compare_apply":
-      return `Compare apply — ${op.applied} item(s)`;
+      return t("history.op.compareApply", { count: op.applied });
     case "three_way_apply":
-      return `3-way apply — ${op.applied} item(s)`;
+      return t("history.op.threeWayApply", { count: op.applied });
     default:
       return (op as { kind: string }).kind.replace(/_/g, " ");
   }

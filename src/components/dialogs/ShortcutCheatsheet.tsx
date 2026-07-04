@@ -1,4 +1,5 @@
 import * as Dialog from "@radix-ui/react-dialog";
+import { useTranslation } from "react-i18next";
 import { X, Keyboard } from "lucide-react";
 import { useAllCommands } from "@/stores/commands";
 import { useKeymap, effectiveKey } from "@/stores/keymap";
@@ -11,22 +12,24 @@ import { displayKey } from "@/lib/keyDisplay";
  * 발견 가능성 보완용 읽기 전용 뷰 — 편집은 Settings › Keymap 에서.
  */
 
-/** command 로 등록되지 않은 내장 키/제스처 — useKeyboardNav·DnD 하드와이어드. */
+/** command 로 등록되지 않은 내장 키/제스처 — useKeyboardNav·DnD 하드와이어드.
+ *  what 은 i18n 키 (cheatsheet.g.*). */
 const BUILTIN_GESTURES: Array<{ keys: string; what: string }> = [
-  { keys: "↑ ↓ (← → in grid)", what: "Move cursor" },
-  { keys: "Enter", what: "Open item" },
-  { keys: "Backspace", what: "Go up / leave archive" },
-  { keys: "Tab", what: "Switch pane" },
-  { keys: "Space", what: "Quick Look preview" },
-  { keys: "Ctrl/⌘+Space", what: "Toggle select at cursor" },
-  { keys: "Shift+Click", what: "Select range" },
-  { keys: "Ctrl/⌘+Click", what: "Toggle select" },
-  { keys: "Drag on empty area", what: "Marquee select" },
-  { keys: "Drag item", what: "Copy out to OS / other pane" },
-  { keys: "Ctrl/Shift before drag", what: "Move instead of copy (local)" },
+  { keys: "↑ ↓ (← → in grid)", what: "moveCursor" },
+  { keys: "Enter", what: "open" },
+  { keys: "Backspace", what: "goUp" },
+  { keys: "Tab", what: "switchPane" },
+  { keys: "Space", what: "quickLook" },
+  { keys: "Ctrl/⌘+Space", what: "toggleSelect" },
+  { keys: "Shift+Click", what: "rangeSelect" },
+  { keys: "Ctrl/⌘+Click", what: "toggleClick" },
+  { keys: "Drag on empty area", what: "marquee" },
+  { keys: "Drag item", what: "dragOut" },
+  { keys: "Ctrl/Shift before drag", what: "dragMove" },
 ];
 
 export function ShortcutCheatsheet({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation();
   const all = useAllCommands();
   const bindings = useKeymap((s) => s.bindings);
 
@@ -48,16 +51,16 @@ export function ShortcutCheatsheet({ onClose }: { onClose: () => void }) {
           <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
             <Keyboard size={15} className="text-fg-muted" aria-hidden />
             <Dialog.Title className="text-title font-medium">
-              Keyboard shortcuts
+              {t("cheatsheet.title")}
             </Dialog.Title>
             <span className="ml-2 text-meta text-fg-muted">
-              Customize in Settings › Keymap
+              {t("cheatsheet.customize")}
             </span>
             <Dialog.Close asChild>
               <button
                 type="button"
                 className="ml-auto rounded p-1 text-fg-muted hover:bg-border"
-                aria-label="Close"
+                aria-label={t("common.close")}
               >
                 <X size={14} />
               </button>
@@ -66,9 +69,14 @@ export function ShortcutCheatsheet({ onClose }: { onClose: () => void }) {
 
           <div className="min-h-0 flex-1 overflow-auto p-4">
             <div className="columns-2 gap-6 [column-fill:_balance]">
-              <Section title="Basics">
+              <Section title={t("cheatsheet.basics")}>
                 {BUILTIN_GESTURES.map((g) => (
-                  <Row key={g.keys} label={g.what} keys={g.keys} raw />
+                  <Row
+                    key={g.keys}
+                    label={t(`cheatsheet.g.${g.what}`)}
+                    keys={g.keys}
+                    raw
+                  />
                 ))}
               </Section>
               {[...byCategory.entries()].map(([category, cmds]) => (

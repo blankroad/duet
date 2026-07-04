@@ -2,7 +2,69 @@
   "common": {
     "cancel": "Cancel",
     "close": "Close",
-    "apply": "Apply"
+    "apply": "Apply",
+    "delete": "Delete",
+    "background": "Background",
+    "working": "Working…",
+    "runInBackground": "Run in background",
+    "typeToConfirm": "Type <1>{{word}}</1> to confirm:"
+  },
+  "conflict": {
+    "exist": "{{count}} item(s) already exist at the destination. Choose how to resolve:",
+    "replaceAll": "Replace all",
+    "replaceAllHint": "Overwrite existing (permanent — cannot be undone)",
+    "skipAll": "Skip all",
+    "skipAllHint": "Don't copy conflicting items",
+    "keepBothAll": "Keep both (all)",
+    "keepBothAllHint": "Copy with a new name — name (1).ext",
+    "perFile": "Choose per file…",
+    "perFileHint": "Decide Replace / Skip / Keep both for each item",
+    "setAll": "Set all:",
+    "replace": "Replace",
+    "skip": "Skip",
+    "keepBoth": "Keep both",
+    "withChoices": "{{cta}} with choices"
+  },
+  "history": {
+    "title": "Operation history",
+    "empty": "No operations recorded yet",
+    "redoNote": "Redo isn't supported yet — only the most recent operation can be undone, in order.",
+    "undoLast": "Undo last ({{key}})",
+    "next": "next {{key}}",
+    "op": {
+      "trash": "Deleted {{count}} item(s) to trash — {{loc}}",
+      "permanentDelete": "Permanently deleted {{count}} item(s) — {{loc}}",
+      "copy": "Copied {{count}} item(s) → {{loc}}",
+      "move": "Moved {{count}} item(s) → {{loc}}",
+      "rename": "Renamed {{from}} → {{to}}",
+      "batchRename": "Batch renamed {{count}} item(s) — {{loc}}",
+      "mkdir": "New folder — {{name}}",
+      "extract": "Extracted {{name}}",
+      "compress": "Compressed {{count}} item(s) → {{loc}}",
+      "sync": "Synced {{count}} item(s) → {{loc}}",
+      "syncPruned": "Synced {{count}} item(s), pruned {{pruned}} → {{loc}}",
+      "merge": "Merged folders — {{count}} item(s)",
+      "compareApply": "Compare apply — {{count}} item(s)",
+      "threeWayApply": "3-way apply — {{count}} item(s)"
+    }
+  },
+  "cheatsheet": {
+    "title": "Keyboard shortcuts",
+    "customize": "Customize in Settings › Keymap",
+    "basics": "Basics",
+    "g": {
+      "moveCursor": "Move cursor",
+      "open": "Open item",
+      "goUp": "Go up / leave archive",
+      "switchPane": "Switch pane",
+      "quickLook": "Quick Look preview",
+      "toggleSelect": "Toggle select at cursor",
+      "rangeSelect": "Select range",
+      "toggleClick": "Toggle select",
+      "marquee": "Marquee select",
+      "dragOut": "Copy out to OS / other pane",
+      "dragMove": "Move instead of copy (local)"
+    }
   },
   "topbar": {
     "toggleSidebar": "Toggle sidebar ({{key}})",

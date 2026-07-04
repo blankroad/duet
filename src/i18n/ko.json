@@ -2,7 +2,69 @@
   "common": {
     "cancel": "취소",
     "close": "닫기",
-    "apply": "적용"
+    "apply": "적용",
+    "delete": "삭제",
+    "background": "백그라운드",
+    "working": "작업 중…",
+    "runInBackground": "백그라운드로 실행",
+    "typeToConfirm": "<1>{{word}}</1> 를 입력해 확인:"
+  },
+  "conflict": {
+    "exist": "대상에 같은 이름의 항목이 {{count}}개 있습니다. 처리 방법을 선택하세요:",
+    "replaceAll": "모두 교체",
+    "replaceAllHint": "기존 파일 덮어쓰기 (영구 — 되돌릴 수 없음)",
+    "skipAll": "모두 건너뛰기",
+    "skipAllHint": "충돌 항목은 복사하지 않음",
+    "keepBothAll": "모두 유지",
+    "keepBothAllHint": "새 이름으로 복사 — name (1).ext",
+    "perFile": "파일별로 선택…",
+    "perFileHint": "항목마다 교체/건너뛰기/둘 다 유지를 결정",
+    "setAll": "일괄 설정:",
+    "replace": "교체",
+    "skip": "건너뛰기",
+    "keepBoth": "둘 다 유지",
+    "withChoices": "선택대로 {{cta}}"
+  },
+  "history": {
+    "title": "작업 히스토리",
+    "empty": "기록된 작업이 없습니다",
+    "redoNote": "다시 실행(redo)은 아직 지원되지 않습니다 — 가장 최근 작업부터 순서대로만 되돌릴 수 있습니다.",
+    "undoLast": "마지막 작업 되돌리기 ({{key}})",
+    "next": "다음 {{key}}",
+    "op": {
+      "trash": "{{count}}개 휴지통으로 삭제 — {{loc}}",
+      "permanentDelete": "{{count}}개 영구 삭제 — {{loc}}",
+      "copy": "{{count}}개 복사 → {{loc}}",
+      "move": "{{count}}개 이동 → {{loc}}",
+      "rename": "이름 변경 {{from}} → {{to}}",
+      "batchRename": "{{count}}개 일괄 이름변경 — {{loc}}",
+      "mkdir": "새 폴더 — {{name}}",
+      "extract": "{{name}} 압축 해제",
+      "compress": "{{count}}개 압축 → {{loc}}",
+      "sync": "{{count}}개 동기화 → {{loc}}",
+      "syncPruned": "{{count}}개 동기화, {{pruned}}개 정리 → {{loc}}",
+      "merge": "폴더 병합 — {{count}}개",
+      "compareApply": "비교 적용 — {{count}}개",
+      "threeWayApply": "3-way 적용 — {{count}}개"
+    }
+  },
+  "cheatsheet": {
+    "title": "키보드 단축키",
+    "customize": "설정 › 키맵에서 변경",
+    "basics": "기본 조작",
+    "g": {
+      "moveCursor": "커서 이동",
+      "open": "항목 열기",
+      "goUp": "위로 / 아카이브 나가기",
+      "switchPane": "패널 전환",
+      "quickLook": "Quick Look 미리보기",
+      "toggleSelect": "커서 항목 선택 토글",
+      "rangeSelect": "범위 선택",
+      "toggleClick": "선택 토글",
+      "marquee": "마키(드래그) 선택",
+      "dragOut": "OS/반대 패널로 복사",
+      "dragMove": "복사 대신 이동 (로컬)"
+    }
   },
   "topbar": {
     "toggleSidebar": "사이드바 토글 ({{key}})",

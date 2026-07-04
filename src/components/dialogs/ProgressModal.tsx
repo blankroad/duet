@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
+import { useTranslation } from "react-i18next";
 import { Loader, X } from "lucide-react";
 import { formatSize } from "@/lib/format";
 import { useTasks } from "@/stores/tasks";
@@ -15,6 +16,7 @@ export function ProgressModal({
   taskId: string;
   onBackground: () => void;
 }) {
+  const { t } = useTranslation();
   const task = useTasks((s) => s.tasks.get(taskId));
   const progress = task?.progress ?? null;
 
@@ -39,8 +41,8 @@ export function ProgressModal({
               type="button"
               onClick={onBackground}
               className="rounded p-1 text-fg-muted hover:bg-border"
-              aria-label="Background"
-              title="Run in background"
+              aria-label={t("common.background")}
+              title={t("common.runInBackground")}
             >
               <X size={14} />
             </button>
@@ -56,14 +58,14 @@ export function ProgressModal({
               onClick={() => void commands.taskCancel(taskId)}
               className="rounded border border-border px-3 py-1 text-base text-danger hover:bg-subtle"
             >
-              Cancel
+              {t("common.cancel")}
             </button>
             <button
               type="button"
               onClick={onBackground}
               className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
             >
-              Background
+              {t("common.background")}
             </button>
           </div>
 
@@ -75,10 +77,11 @@ export function ProgressModal({
 }
 
 function SpinnerBody() {
+  const { t } = useTranslation();
   return (
     <div className="mt-3 flex items-center gap-2 text-base text-fg-muted">
       <Loader size={14} className="animate-spin" />
-      <span>Working…</span>
+      <span>{t("common.working")}</span>
     </div>
   );
 }

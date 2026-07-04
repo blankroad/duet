@@ -1,4 +1,5 @@
 import * as Dialog from "@radix-ui/react-dialog";
+import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -19,6 +20,7 @@ export function ConfirmDialog({
   onCancel,
   onConfirm,
 }: ConfirmDialogProps) {
+  const { t } = useTranslation();
   const ctaCls =
     ctaTone === "danger" ? "bg-danger text-white" : "bg-accent text-white";
   return (
@@ -30,7 +32,7 @@ export function ConfirmDialog({
             <Dialog.Title className="text-title font-medium">{title}</Dialog.Title>
             <Dialog.Close
               className="rounded p-1 text-fg-muted hover:bg-border"
-              aria-label="Close"
+              aria-label={t("common.close")}
             >
               <X size={14} />
             </Dialog.Close>
@@ -42,7 +44,7 @@ export function ConfirmDialog({
               onClick={onCancel}
               className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
             >
-              Cancel
+              {t("common.cancel")}
             </button>
             <button
               type="button"
