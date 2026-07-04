@@ -129,7 +129,9 @@ import { commands } from "@/types/bindings";
 import type {
   CompressFormat,
   ConnectionDto,
+  CopyPlan,
   CopyStrategy,
+  MovePlan,
   Entry,
   EntryRef,
   HostFavorite,
@@ -951,6 +953,87 @@ function App() {
     [dialog, openDialog, closeDialog, showToast],
   );
 
+  /**
+   * per-file 충돌 해결 실행 — 파일별 결정(Replace/Skip/KeepBoth)을 정책별
+   * 그룹으로 나눠 각각 재plan 후 실행. skip 은 제외, 비충돌 항목은 첫 그룹에
+   * 합류(작업 수 최소화). 가장 큰 그룹을 ProgressModal 로 표시하고 나머지
+   * 그룹의 진행은 TasksBar 에서.
+   */
+  const onTransferPerFile = useCallback(
+    async (
+      mode: "copy" | "move",
+      plan: CopyPlan | MovePlan,
+      decisions: Record<string, ConflictPolicy>,
+    ) => {
+      closeDialog();
+      const conflictNames = new Set(plan.conflicts.map((c) => c.name));
+      const groups = new Map<ConflictPolicy, EntryRef[]>();
+      const rest: EntryRef[] = [];
+      for (const it of plan.items) {
+        if (!conflictNames.has(it.name)) {
+          rest.push(it);
+          continue;
+        }
+        const p = decisions[it.name] ?? "skip";
+        if (p === "skip") continue;
+        groups.set(p, [...(groups.get(p) ?? []), it]);
+      }
+      if (rest.length > 0) {
+        // 비충돌 항목은 정책과 무관 — 아무 그룹에나 합류. 전부 skip 이었으면
+        // 비충돌만 담은 그룹(정책값 무의미)으로 실행.
+        const first = groups.keys().next();
+        if (!first.done) groups.get(first.value)!.push(...rest);
+        else groups.set("skip", rest);
+      }
+      if (groups.size === 0) {
+        showToast("Nothing to do — all conflicting items skipped");
+        return;
+      }
+      const verb = mode === "copy" ? "Copy" : "Move";
+      let show: { taskId: string; count: number } | null = null;
+      for (const [policy, items] of groups) {
+        let taskId: string | null = null;
+        if (mode === "copy") {
+          const p = await commands.fsCopyPlan(items, plan.dst);
+          if (p.status === "error") {
+            showToast(`Copy plan failed: ${formatErr(p.error)}`, "error");
+            continue;
+          }
+          const r = await commands.fsCopyExecute(p.data, policy);
+          if (r.status === "error") {
+            showToast(`Copy failed: ${formatErr(r.error)}`, "error");
+            continue;
+          }
+          rememberElevatable(r.data, { op: "copy", plan: p.data, policy });
+          taskId = r.data;
+        } else {
+          const p = await commands.fsMovePlan(items, plan.dst);
+          if (p.status === "error") {
+            showToast(`Move plan failed: ${formatErr(p.error)}`, "error");
+            continue;
+          }
+          const r = await commands.fsMoveExecute(p.data, policy);
+          if (r.status === "error") {
+            showToast(`Move failed: ${formatErr(r.error)}`, "error");
+            continue;
+          }
+          rememberElevatable(r.data, { op: "move", plan: p.data, policy });
+          taskId = r.data;
+        }
+        if (taskId && (!show || items.length > show.count))
+          show = { taskId, count: items.length };
+      }
+      if (show) {
+        openDialog({
+          kind: "progress",
+          title: verb === "Copy" ? "Copying…" : "Moving…",
+          taskId: show.taskId,
+        });
+      }
+    },
+    [closeDialog, openDialog, showToast],
+  );
+
   // 로컬 UAC 승격 실행 — op 로 커맨드 선택(결과 타입은 셋 다 ElevatedOutcome 동일).
   const runElevated = useCallback((p: ElevatablePlan) => {
     if (p.op === "copy")
@@ -1639,9 +1722,12 @@ function App() {
             />
           }
           ctaLabel="Copy"
-          conflicts={dialog.plan.conflicts.length}
+          conflicts={dialog.plan.conflicts}
           onCancel={closeDialog}
           onConfirm={onCopyConfirm}
+          onConfirmPerFile={(d) =>
+            void onTransferPerFile("copy", dialog.plan, d)
+          }
         />
       )}
       {dialog.kind === "elevate-op" && (
@@ -1703,9 +1789,12 @@ function App() {
             />
           }
           ctaLabel="Move"
-          conflicts={dialog.plan.conflicts.length}
+          conflicts={dialog.plan.conflicts}
           onCancel={closeDialog}
           onConfirm={onMoveConfirm}
+          onConfirmPerFile={(d) =>
+            void onTransferPerFile("move", dialog.plan, d)
+          }
         />
       )}
       {dialog.kind === "progress" && (
