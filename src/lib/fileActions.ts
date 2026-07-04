@@ -16,6 +16,7 @@ import { rememberExtract } from "@/lib/extractPending";
 import { basename } from "@/lib/paths";
 import { useClipboard } from "@/stores/clipboard";
 import { useShelf } from "@/stores/shelf";
+import { useUI } from "@/stores/ui";
 
 type OpenFn = (d: DialogState) => void;
 
@@ -55,14 +56,14 @@ export function resolveActiveTargets(): ActiveCtx {
   return { active, opposite, tab, targets };
 }
 
-/** F2 — 단일 선택만 rename. */
-export function triggerRename(open: OpenFn, showToast: ToastFn): void {
-  const { targets } = resolveActiveTargets();
+/** F2 — 단일 선택만 rename. 다이얼로그 대신 행 안 인라인 편집. */
+export function triggerRename(showToast: ToastFn): void {
+  const { active, targets } = resolveActiveTargets();
   if (targets.length !== 1) {
     showToast("Rename: select exactly one item");
     return;
   }
-  open({ kind: "rename", target: targets[0]! });
+  useUI.getState().requestInlineRename(active, targets[0]!.name);
 }
 
 /** 여러 항목 일괄 이름변경 — 규칙/미리보기 다이얼로그 오픈 (1개 이상). */
@@ -75,11 +76,11 @@ export function triggerBatchRename(open: OpenFn, showToast: ToastFn): void {
   open({ kind: "batch-rename", targets });
 }
 
-/** F2 — 단일이면 rename, 다중이면 batch rename (단축키 한 개로 통합). */
+/** F2 — 단일이면 인라인 rename, 다중이면 batch rename (단축키 한 개로 통합). */
 export function triggerRenameSmart(open: OpenFn, showToast: ToastFn): void {
   const { targets } = resolveActiveTargets();
   if (targets.length > 1) triggerBatchRename(open, showToast);
-  else triggerRename(open, showToast);
+  else triggerRename(showToast);
 }
 
 /** Ctrl+Z — 마지막 파괴적 작업 되돌리기 (다이얼로그 없이 toast). */
@@ -308,7 +309,8 @@ export function triggerPermissions(open: OpenFn, showToast: ToastFn): void {
   const modes = eligible.map((t) => entryOf(t.name)?.permissions ?? null);
   const first = modes[0];
   const common =
-    first != null && modes.every((m) => m != null && (m & 0o777) === (first & 0o777));
+    first != null &&
+    modes.every((m) => m != null && (m & 0o777) === (first & 0o777));
   open({
     kind: "permissions",
     targets: eligible,
@@ -346,7 +348,10 @@ export async function planTransferTo(
     // commands.* 가 구조화된 DuetError 대신 예외를 throw 한 경우(명령 미등록·직렬화
     // 실패 등). 호출부가 `void` 라 잡지 않으면 unhandled rejection 으로 조용히 사라짐
     // — 토스트로 노출해 진짜 원인을 보이게 한다.
-    showToast(`${verb} failed: ${e instanceof Error ? e.message : String(e)}`, "error");
+    showToast(
+      `${verb} failed: ${e instanceof Error ? e.message : String(e)}`,
+      "error",
+    );
   }
 }
 

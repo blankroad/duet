@@ -9,7 +9,13 @@ import { kindLabel, formatPerms, formatFullDate } from "@/lib/fileInfo";
  * 인스펙터 — 커서 항목(파일/폴더)의 속성 표시. 대부분 Entry 에 이미 있는 값이라
  * fetch 없이 즉시. 폴더는 항목 수(직계)만 가벼운 list 1회(디바운스)로 보강.
  */
-export function PreviewInspector({ entry, location }: { entry: Entry; location: Location }) {
+export function PreviewInspector({
+  entry,
+  location,
+}: {
+  entry: Entry;
+  location: Location;
+}) {
   const folderCount = useFolderCount(entry.kind === "dir" ? location : null);
   const sizeRow =
     entry.kind === "dir"
@@ -31,7 +37,9 @@ export function PreviewInspector({ entry, location }: { entry: Entry; location: 
             location.source.kind === "local" ? String(location.path) : null
           }
         />
-        <span className="min-w-0 break-all font-mono text-base">{entry.name}</span>
+        <span className="min-w-0 break-all font-mono text-base">
+          {entry.name}
+        </span>
       </div>
       <dl className="grid grid-cols-[5rem_1fr] gap-x-2 gap-y-1 text-meta">
         <Row k="Kind" v={kindLabel(entry)} />
@@ -44,11 +52,24 @@ export function PreviewInspector({ entry, location }: { entry: Entry; location: 
   );
 }
 
-function Row({ k, v, mono, titled }: { k: string; v: string; mono?: boolean; titled?: boolean }) {
+function Row({
+  k,
+  v,
+  mono,
+  titled,
+}: {
+  k: string;
+  v: string;
+  mono?: boolean;
+  titled?: boolean;
+}) {
   return (
     <>
       <dt className="text-fg-muted">{k}</dt>
-      <dd className={`min-w-0 truncate ${mono ? "font-mono" : ""}`} title={titled ? v : undefined}>
+      <dd
+        className={`min-w-0 truncate ${mono ? "font-mono" : ""}`}
+        title={titled ? v : undefined}
+      >
         {v}
       </dd>
     </>

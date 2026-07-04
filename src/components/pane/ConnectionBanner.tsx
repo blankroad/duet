@@ -24,9 +24,7 @@ export function ConnectionBanner({
 }) {
   const source = usePanes((s) => activeTab(s, id).location.source);
   const connId = source.kind === "ssh" ? source.connection_id : null;
-  const conn = useConnections((s) =>
-    connId ? s.active[connId] : undefined,
-  );
+  const conn = useConnections((s) => (connId ? s.active[connId] : undefined));
   const lastAlias = useRef<string | null>(null);
   if (conn) lastAlias.current = conn.alias;
 
@@ -34,8 +32,7 @@ export function ConnectionBanner({
   const state = conn?.state ?? { kind: "disconnected" as const };
   if (state.kind === "connected") return null;
 
-  const label =
-    lastAlias.current ?? `${source.user}@${source.host_ip}`;
+  const label = lastAlias.current ?? `${source.user}@${source.host_ip}`;
 
   if (state.kind === "connecting") {
     return (
@@ -49,8 +46,7 @@ export function ConnectionBanner({
     );
   }
 
-  const message =
-    state.kind === "error" ? state.message : "Connection closed";
+  const message = state.kind === "error" ? state.message : "Connection closed";
 
   return (
     <div

@@ -1,5 +1,18 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, ArrowUp, RotateCw, Star, FileArchive, Pencil, Monitor, Server, BookMarked, Folder, Plus } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  RotateCw,
+  Star,
+  FileArchive,
+  Pencil,
+  Monitor,
+  Server,
+  BookMarked,
+  Folder,
+  Plus,
+} from "lucide-react";
 import { platform } from "@tauri-apps/plugin-os";
 import type { Location } from "@/types/bindings";
 
@@ -69,7 +82,21 @@ interface PathBarProps {
  *
  * MVP-0: breadcrumb 표시 + 새로고침. 직접 입력 모드(Ctrl+L)는 추후.
  */
-export function PathBar({ location, archive, canBack, canForward, onBack, onForward, onUp, onRefresh, onSegmentClick, onUpdateArchive, editNonce, editActive, onNewTab }: PathBarProps) {
+export function PathBar({
+  location,
+  archive,
+  canBack,
+  canForward,
+  onBack,
+  onForward,
+  onUp,
+  onRefresh,
+  onSegmentClick,
+  onUpdateArchive,
+  editNonce,
+  editActive,
+  onNewTab,
+}: PathBarProps) {
   const isLocal = location.source.kind === "local";
   const sourceTitle = useHostLabel(location.source);
   const winLocal = isLocal && platform() === "windows";
@@ -105,11 +132,16 @@ export function PathBar({ location, archive, canBack, canForward, onBack, onForw
           .slice(archive.root.length)
           .split("/")
           .filter(Boolean)
-          .map((seg, i, arr) => ({ label: seg, path: archive.root + "/" + arr.slice(0, i + 1).join("/") }))
+          .map((seg, i, arr) => ({
+            label: seg,
+            path: archive.root + "/" + arr.slice(0, i + 1).join("/"),
+          }))
       : [];
 
   const bookmarkId = useBookmarks(
-    (s) => s.items.find((b) => sameBookmarkLocation(b.location, location))?.id ?? null,
+    (s) =>
+      s.items.find((b) => sameBookmarkLocation(b.location, location))?.id ??
+      null,
   );
   const bookmarked = bookmarkId !== null;
   const toggleBookmark = () => {
@@ -131,10 +163,16 @@ export function PathBar({ location, archive, canBack, canForward, onBack, onForw
         ? useBookmarks
             .getState()
             .items.filter((b) => b.location.source.kind === "local")
-            .map((b) => ({ id: b.id, name: b.name, path: String(b.location.path) }))
+            .map((b) => ({
+              id: b.id,
+              name: b.name,
+              path: String(b.location.path),
+            }))
         : useHostFavorites
             .getState()
-            .items.filter((f) => f.host_alias === (src.connection_id.split(":")[0] ?? ""))
+            .items.filter(
+              (f) => f.host_alias === (src.connection_id.split(":")[0] ?? ""),
+            )
             .map((f) => ({ id: f.id, name: f.name, path: String(f.path) }));
 
     const list: MenuEntry[] =
@@ -183,7 +221,12 @@ export function PathBar({ location, archive, canBack, canForward, onBack, onForw
       >
         <ArrowRight size={14} />
       </button>
-      <button onClick={onUp} className="rounded p-1 hover:bg-border" disabled={!onUp} aria-label="Up">
+      <button
+        onClick={onUp}
+        className="rounded p-1 hover:bg-border"
+        disabled={!onUp}
+        aria-label="Up"
+      >
         <ArrowUp size={14} />
       </button>
       {archive ? (
@@ -199,7 +242,10 @@ export function PathBar({ location, archive, canBack, canForward, onBack, onForw
           {archiveSegments.map((s) => (
             <span key={s.path} className="flex items-center">
               <span className="text-fg-muted">/</span>
-              <button onClick={() => onSegmentClick?.(s.path)} className="rounded px-1 hover:bg-border">
+              <button
+                onClick={() => onSegmentClick?.(s.path)}
+                className="rounded px-1 hover:bg-border"
+              >
                 {s.label}
               </button>
             </span>
@@ -213,7 +259,9 @@ export function PathBar({ location, archive, canBack, canForward, onBack, onForw
               Update archive
             </button>
           ) : (
-            <span className="ml-1 shrink-0 rounded bg-subtle px-1 text-meta text-fg-muted">read-only</span>
+            <span className="ml-1 shrink-0 rounded bg-subtle px-1 text-meta text-fg-muted">
+              read-only
+            </span>
           )}
         </div>
       ) : editing ? (
@@ -247,7 +295,10 @@ export function PathBar({ location, archive, canBack, canForward, onBack, onForw
           </span>
           <div className="ml-1 flex items-center gap-0.5 font-mono truncate">
             {!winLocal && (
-              <button onClick={() => onSegmentClick?.("/")} className="rounded px-1 hover:bg-border">
+              <button
+                onClick={() => onSegmentClick?.("/")}
+                className="rounded px-1 hover:bg-border"
+              >
                 /
               </button>
             )}
@@ -259,7 +310,9 @@ export function PathBar({ location, archive, canBack, canForward, onBack, onForw
                 >
                   {c.label}
                 </button>
-                {i < crumbs.length - 1 && <span className="text-fg-muted">/</span>}
+                {i < crumbs.length - 1 && (
+                  <span className="text-fg-muted">/</span>
+                )}
               </span>
             ))}
           </div>
@@ -303,7 +356,11 @@ export function PathBar({ location, archive, canBack, canForward, onBack, onForw
             onClick={toggleBookmark}
             className="rounded p-1 hover:bg-border"
             aria-label={bookmarked ? "Remove bookmark" : "Bookmark this folder"}
-            title={bookmarked ? "Bookmarked (Ctrl+D)" : "Bookmark this folder (Ctrl+D)"}
+            title={
+              bookmarked
+                ? "Bookmarked (Ctrl+D)"
+                : "Bookmark this folder (Ctrl+D)"
+            }
           >
             <Star
               size={14}
@@ -312,7 +369,11 @@ export function PathBar({ location, archive, canBack, canForward, onBack, onForw
             />
           </button>
         )}
-        <button onClick={onRefresh} className="rounded p-1 hover:bg-border" aria-label="Refresh">
+        <button
+          onClick={onRefresh}
+          className="rounded p-1 hover:bg-border"
+          aria-label="Refresh"
+        >
           <RotateCw size={14} />
         </button>
       </div>

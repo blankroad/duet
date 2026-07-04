@@ -1,9 +1,10 @@
 import { FolderUp } from "lucide-react";
-import type { Entry } from "@/types/bindings";
+import type { Entry, EntryRef } from "@/types/bindings";
 import { formatSize, formatTime } from "@/lib/format";
 import { splitNameExt } from "@/lib/fileInfo";
 import { EntryIcon } from "@/lib/fileIcon";
 import { isParentEntry } from "@/stores/panes";
+import { InlineRenameInput } from "./InlineRenameInput";
 import clsx from "clsx";
 
 interface EntryRowProps {
@@ -16,6 +17,9 @@ interface EntryRowProps {
   localPath: string | null;
   /** "크기 계산"으로 구한 폴더 재귀 크기(bytes) — 있으면 크기 컬럼에 표시. */
   dirSize?: number | undefined;
+  /** 인라인 이름변경(F2) 중이면 대상 EntryRef — 이름 셀이 input 으로 전환. */
+  renameRef?: EntryRef | null;
+  onRenameDone?: (renamed: boolean) => void;
   onClick: (e: React.MouseEvent) => void;
   onDoubleClick: () => void;
 }
@@ -34,6 +38,8 @@ export function EntryRow({
   splitExt,
   localPath,
   dirSize,
+  renameRef,
+  onRenameDone,
   onClick,
   onDoubleClick,
 }: EntryRowProps) {
@@ -76,14 +82,23 @@ export function EntryRow({
       {/* 드래그 핸들 = 아이콘+이름 (항목 이동). 우측 메타 컬럼은 마키 시작 영역. */}
       <span data-drag-handle className="flex min-w-0 flex-1 items-center gap-2">
         <EntryIcon entry={entry} size={14} localPath={localPath} />
-        <span
-          className={clsx(
-            "font-mono truncate",
-            entry.hidden && "text-fg-muted",
-          )}
-        >
-          {stem}
-        </span>
+        {renameRef && onRenameDone ? (
+          <InlineRenameInput
+            target={renameRef}
+            isDir={entry.kind === "dir"}
+            onDone={onRenameDone}
+            className="flex-1 text-base"
+          />
+        ) : (
+          <span
+            className={clsx(
+              "font-mono truncate",
+              entry.hidden && "text-fg-muted",
+            )}
+          >
+            {stem}
+          </span>
+        )}
       </span>
       {splitExt && (
         <span className="font-mono w-16 truncate text-meta text-fg-muted">

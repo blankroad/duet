@@ -38,6 +38,8 @@ interface EntryListProps {
     index: number,
   ) => void;
   onEmptyContextMenu: (e: React.MouseEvent) => void;
+  /** 인라인 이름변경 성공 후 목록 새로고침 (원격은 fs watcher 가 없음). */
+  onRenamed: () => void;
 }
 
 const ROW_HEIGHT = 28;
@@ -60,10 +62,12 @@ export function EntryList({
   onSortClick,
   onEntryContextMenu,
   onEmptyContextMenu,
+  onRenamed,
 }: EntryListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const onEntryMouseDown = useEntryDrag(id);
   const splitExt = useUI((s) => s.splitExt);
+  const renameTarget = useUI((s) => s.renameTarget);
   // OS 아이콘(EntryIcon localPath)용 — 현재 패널 폴더 location. 원격이면 null 전달.
   const location = usePanes((s) => activeTab(s, id).location);
   // "크기 계산" 결과(name → bytes) — 폴더 행의 크기 컬럼 표시.
@@ -225,6 +229,17 @@ export function EntryList({
                       : null
                   }
                   dirSize={dirSizes[entry.name]}
+                  renameRef={
+                    renameTarget?.pane === id &&
+                    renameTarget.name === entry.name &&
+                    !isParentEntry(entry)
+                      ? { location, name: entry.name }
+                      : null
+                  }
+                  onRenameDone={(renamed) => {
+                    useUI.getState().clearInlineRename();
+                    if (renamed) onRenamed();
+                  }}
                   onClick={(e) => onCursorMove(vi.index, e)}
                   onDoubleClick={() => onActivate(entry, vi.index)}
                 />

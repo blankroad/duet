@@ -6,7 +6,6 @@ import { StatusBar } from "@/components/StatusBar";
 import { TasksBar } from "@/components/TasksBar";
 import { ConnectionDialog } from "@/components/connection/ConnectionDialog";
 import { AdHocConnectDialog } from "@/components/connection/AdHocConnectDialog";
-import { RenameDialog } from "@/components/dialogs/RenameDialog";
 import { BatchRenameDialog } from "@/components/dialogs/BatchRenameDialog";
 import { CompareDialog } from "@/components/dialogs/CompareDialog";
 import { CompareScanningDialog } from "@/components/dialogs/CompareScanningDialog";
@@ -812,18 +811,6 @@ function App() {
     openContextMenuAtCursor,
   ]);
 
-  const onRenameSubmit = useCallback(
-    async (newName: string) => {
-      if (dialog.kind !== "rename") return;
-      const target = dialog.target;
-      closeDialog();
-      const r = await commands.fsRename(target, newName);
-      if (r.status === "ok") refreshAffected([target.location]);
-      else showToast(`Rename failed: ${formatErr(r.error)}`, "error");
-    },
-    [dialog, closeDialog, refreshAffected, showToast],
-  );
-
   const onBatchRenameSubmit = useCallback(
     async (rule: import("@/types/bindings").RenameRule) => {
       if (dialog.kind !== "batch-rename") return;
@@ -1415,13 +1402,6 @@ function App() {
         prefill={adHocPrefill}
       />
 
-      {dialog.kind === "rename" && (
-        <RenameDialog
-          target={dialog.target}
-          onClose={closeDialog}
-          onSubmit={onRenameSubmit}
-        />
-      )}
       {dialog.kind === "batch-rename" && (
         <BatchRenameDialog
           targets={dialog.targets}

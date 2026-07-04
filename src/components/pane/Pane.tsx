@@ -163,6 +163,7 @@ export function Pane({
               onEntryContextMenu(id, entry, index, e)
             }
             onEmptyContextMenu={(e) => onEmptyContextMenu(id, e)}
+            onRenamed={() => onRefresh(id)}
           />
         ) : (
           <EntryGrid
@@ -178,6 +179,7 @@ export function Pane({
               onEntryContextMenu(id, entry, index, e)
             }
             onEmptyContextMenu={(e) => onEmptyContextMenu(id, e)}
+            onRenamed={() => onRefresh(id)}
           />
         )}
         {tab.loading && (

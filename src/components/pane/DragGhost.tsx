@@ -12,7 +12,10 @@ export function DragGhost() {
   const label = useDragState((s) => s.label);
   if (!active) return null;
   return (
-    <div className="pointer-events-none fixed z-50" style={{ left: x + 10, top: y + 10 }}>
+    <div
+      className="pointer-events-none fixed z-50"
+      style={{ left: x + 10, top: y + 10 }}
+    >
       <div className="flex items-center gap-1.5 rounded-panel border border-border bg-base px-2 py-1 text-meta shadow-panel">
         <Files size={13} className="text-accent" />
         <span className="font-mono">{label}</span>

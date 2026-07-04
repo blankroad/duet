@@ -6,10 +6,14 @@ import { previewStreamUrl } from "@/lib/previewUrl";
 
 // 무거운 스택은 lazy chunk 로 분리.
 const PreviewContent = lazy(() =>
-  import("@/components/pane/PreviewContent").then((m) => ({ default: m.PreviewContent })),
+  import("@/components/pane/PreviewContent").then((m) => ({
+    default: m.PreviewContent,
+  })),
 );
 const PreviewPdf = lazy(() =>
-  import("@/components/pane/PreviewPdf").then((m) => ({ default: m.PreviewPdf })),
+  import("@/components/pane/PreviewPdf").then((m) => ({
+    default: m.PreviewPdf,
+  })),
 );
 
 /**
@@ -29,7 +33,11 @@ export function PreviewView({
     case "text":
       return (
         <Suspense fallback={<Centered>Loading…</Centered>}>
-          <PreviewContent name={name} text={data.text ?? ""} truncated={data.truncated} />
+          <PreviewContent
+            name={name}
+            text={data.text ?? ""}
+            truncated={data.truncated}
+          />
         </Suspense>
       );
     case "image":
@@ -54,12 +62,26 @@ export function PreviewView({
     case "audio":
     case "video":
       // location 변경 시 remount 로 error 상태 리셋.
-      return <MediaPreview key={location.path} kind={data.kind} location={location} />;
+      return (
+        <MediaPreview
+          key={location.path}
+          kind={data.kind}
+          location={location}
+        />
+      );
     case "binary":
-      return <NoPreview label={`Binary file · ${formatSize(data.total_size)}`} location={location} />;
+      return (
+        <NoPreview
+          label={`Binary file · ${formatSize(data.total_size)}`}
+          location={location}
+        />
+      );
     case "toolarge":
       return (
-        <NoPreview label={`Too large to preview · ${formatSize(data.total_size)}`} location={location} />
+        <NoPreview
+          label={`Too large to preview · ${formatSize(data.total_size)}`}
+          location={location}
+        />
       );
   }
 }
@@ -83,7 +105,13 @@ function NoPreview({ label, location }: { label: string; location: Location }) {
 }
 
 /** 오디오/비디오 — 코덱 미지원(특히 Linux/WebKitGTK) 시 외부 앱 폴백. */
-function MediaPreview({ kind, location }: { kind: "audio" | "video"; location: Location }) {
+function MediaPreview({
+  kind,
+  location,
+}: {
+  kind: "audio" | "video";
+  location: Location;
+}) {
   const [failed, setFailed] = useState(false);
   const url = previewStreamUrl(location);
   if (failed) {
@@ -105,18 +133,34 @@ function MediaPreview({ kind, location }: { kind: "audio" | "video"; location: L
   if (kind === "audio") {
     return (
       <div className="flex h-full items-center justify-center p-3">
-        <audio controls src={url} className="w-full" onError={() => setFailed(true)} />
+        <audio
+          controls
+          src={url}
+          className="w-full"
+          onError={() => setFailed(true)}
+        />
       </div>
     );
   }
   return (
     <div className="flex h-full items-center justify-center bg-black/80 p-1">
-      <video controls src={url} className="max-h-full max-w-full" onError={() => setFailed(true)} />
+      <video
+        controls
+        src={url}
+        className="max-h-full max-w-full"
+        onError={() => setFailed(true)}
+      />
     </div>
   );
 }
 
-export function Centered({ children, tone }: { children: React.ReactNode; tone?: "danger" }) {
+export function Centered({
+  children,
+  tone,
+}: {
+  children: React.ReactNode;
+  tone?: "danger";
+}) {
   return (
     <div
       className={`flex h-full items-center justify-center p-4 text-center text-meta ${

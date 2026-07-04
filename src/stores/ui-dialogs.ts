@@ -5,7 +5,7 @@ import type { ElevatablePlan } from "@/lib/elevatePending";
 
 export type DialogState =
   | { kind: "none" }
-  | { kind: "rename"; target: EntryRef }
+  // 단일 rename 은 인라인 편집(useUI.renameTarget)으로 대체 — 다이얼로그 없음.
   | { kind: "batch-rename"; targets: EntryRef[] }
   | { kind: "mkdir"; parent: Location }
   | { kind: "delete-confirm"; plan: DeletePlan }

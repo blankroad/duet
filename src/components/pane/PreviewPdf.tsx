@@ -12,7 +12,13 @@ const MAX_PAGES = 20;
  * PDF 미리보기 — pdf.js 로 `duet-preview://` 스트림을 canvas 렌더.
  * 무거운 스택이라 호출부에서 lazy-load. 실패 시 onFallback(외부 앱 열기).
  */
-export function PreviewPdf({ url, onFallback }: { url: string; onFallback: () => void }) {
+export function PreviewPdf({
+  url,
+  onFallback,
+}: {
+  url: string;
+  onFallback: () => void;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [failed, setFailed] = useState(false);
 

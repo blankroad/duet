@@ -20,7 +20,10 @@ export function cursorTarget(): PreviewTarget | null {
   if (!entry || entry.name === "..") return null;
   const base = tab.location.path;
   const sep = base.endsWith("/") ? "" : "/";
-  return { location: { source: tab.location.source, path: base + sep + entry.name }, entry };
+  return {
+    location: { source: tab.location.source, path: base + sep + entry.name },
+    entry,
+  };
 }
 
 type LoadState =
@@ -30,24 +33,30 @@ type LoadState =
   | { phase: "ready"; name: string; location: Location; data: PreviewData };
 
 /** 활성 패널 cursor + location 변화를 추적하는 구독 키. */
-export function cursorPreviewDep(s: ReturnType<typeof usePanes.getState>): string {
+export function cursorPreviewDep(
+  s: ReturnType<typeof usePanes.getState>,
+): string {
   const tab = activeTab(s, s.activePane);
   const displayed = selectDisplayedEntries(s.activePane, s);
   const entry = displayed[tab.cursorIndex];
   const srcKey =
-    tab.location.source.kind === "ssh" ? tab.location.source.connection_id.toString() : "local";
+    tab.location.source.kind === "ssh"
+      ? tab.location.source.connection_id.toString()
+      : "local";
   return `${s.activePane}|${srcKey}|${tab.location.path}|${entry?.name ?? ""}|${entry?.kind ?? ""}`;
 }
 
 function locKey(loc: Location | null): string {
   if (!loc) return "";
-  const src = loc.source.kind === "ssh" ? loc.source.connection_id.toString() : "local";
+  const src =
+    loc.source.kind === "ssh" ? loc.source.connection_id.toString() : "local";
   return `${src}|${loc.path}`;
 }
 
 /** target(파일)의 미리보기 fetch (debounce). 파일이 아니거나 null 이면 empty. */
 export function usePreviewLoad(target: PreviewTarget | null): LoadState {
-  const fileLoc = target && target.entry.kind === "file" ? target.location : null;
+  const fileLoc =
+    target && target.entry.kind === "file" ? target.location : null;
   const name = target?.entry.name ?? "";
   const key = locKey(fileLoc);
   const locRef = useRef(fileLoc);
@@ -68,7 +77,8 @@ export function usePreviewLoad(target: PreviewTarget | null): LoadState {
     const t = setTimeout(async () => {
       const r = await commands.fsReadPreview(loc);
       if (cancelled) return;
-      if (r.status === "ok") setState({ phase: "ready", name: nm, location: loc, data: r.data });
+      if (r.status === "ok")
+        setState({ phase: "ready", name: nm, location: loc, data: r.data });
       else setState({ phase: "error", name: nm, message: formatErr(r.error) });
     }, 150);
     return () => {
@@ -81,10 +91,18 @@ export function usePreviewLoad(target: PreviewTarget | null): LoadState {
 }
 
 function PreviewBody({ state }: { state: LoadState }) {
-  if (state.phase === "empty") return <Centered>Select a file to preview</Centered>;
+  if (state.phase === "empty")
+    return <Centered>Select a file to preview</Centered>;
   if (state.phase === "loading") return <Centered>Loading…</Centered>;
-  if (state.phase === "error") return <Centered tone="danger">{state.message}</Centered>;
-  return <PreviewView name={state.name} location={state.location} data={state.data} />;
+  if (state.phase === "error")
+    return <Centered tone="danger">{state.message}</Centered>;
+  return (
+    <PreviewView
+      name={state.name}
+      location={state.location}
+      data={state.data}
+    />
+  );
 }
 
 /**

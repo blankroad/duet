@@ -11,11 +11,21 @@ import {
   FolderSync,
 } from "lucide-react";
 import clsx from "clsx";
-import { usePanes, activeTab, type PaneId, type ViewMode } from "@/stores/panes";
+import {
+  usePanes,
+  activeTab,
+  type PaneId,
+  type ViewMode,
+} from "@/stores/panes";
 import { useUI } from "@/stores/ui";
 import { useUIDialogs } from "@/stores/ui-dialogs";
 import { useToast } from "@/stores/toast";
-import { triggerCopy, triggerDelete, triggerMove, triggerMkdir } from "@/lib/fileActions";
+import {
+  triggerCopy,
+  triggerDelete,
+  triggerMove,
+  triggerMkdir,
+} from "@/lib/fileActions";
 
 interface PaneToolbarProps {
   id: PaneId;
@@ -43,10 +53,16 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
       <ToolButton label="New folder (F7)" onClick={() => triggerMkdir(open)}>
         <FolderPlus size={15} />
       </ToolButton>
-      <ToolButton label="Copy → other pane (F5)" onClick={() => void triggerCopy(open, showToast)}>
+      <ToolButton
+        label="Copy → other pane (F5)"
+        onClick={() => void triggerCopy(open, showToast)}
+      >
         <Copy size={15} />
       </ToolButton>
-      <ToolButton label="Move → other pane (F6)" onClick={() => void triggerMove(open, showToast)}>
+      <ToolButton
+        label="Move → other pane (F6)"
+        onClick={() => void triggerMove(open, showToast)}
+      >
         <MoveRight size={15} />
       </ToolButton>
       <ToolButton
@@ -58,13 +74,28 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
 
       <div className="flex-1" />
 
-      <ViewButton label="Details" mode="details" current={viewMode} onClick={() => setViewMode(id, "details")}>
+      <ViewButton
+        label="Details"
+        mode="details"
+        current={viewMode}
+        onClick={() => setViewMode(id, "details")}
+      >
         <List size={15} />
       </ViewButton>
-      <ViewButton label="Grid" mode="grid" current={viewMode} onClick={() => setViewMode(id, "grid")}>
+      <ViewButton
+        label="Grid"
+        mode="grid"
+        current={viewMode}
+        onClick={() => setViewMode(id, "grid")}
+      >
         <LayoutGrid size={15} />
       </ViewButton>
-      <ViewButton label="Tiles" mode="tiles" current={viewMode} onClick={() => setViewMode(id, "tiles")}>
+      <ViewButton
+        label="Tiles"
+        mode="tiles"
+        current={viewMode}
+        onClick={() => setViewMode(id, "tiles")}
+      >
         <Rows3 size={15} />
       </ViewButton>
 
@@ -82,7 +113,11 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
         <FolderSync size={15} />
       </ToolButton>
       <ToolButton
-        label={showHidden ? "Hide hidden files (Ctrl+H)" : "Show hidden files (Ctrl+H)"}
+        label={
+          showHidden
+            ? "Hide hidden files (Ctrl+H)"
+            : "Show hidden files (Ctrl+H)"
+        }
         active={showHidden}
         onClick={() => toggleShowHidden(id)}
       >
@@ -104,7 +139,13 @@ interface ToolButtonProps {
   children: React.ReactNode;
 }
 
-function ToolButton({ label, active, disabled, onClick, children }: ToolButtonProps) {
+function ToolButton({
+  label,
+  active,
+  disabled,
+  onClick,
+  children,
+}: ToolButtonProps) {
   return (
     <button
       type="button"

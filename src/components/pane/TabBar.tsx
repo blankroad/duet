@@ -27,7 +27,9 @@ export function TabBar({ id }: { id: PaneId }) {
             title={t.location.path}
             className={clsx(
               "group flex cursor-default items-center gap-1 border-l-2 px-2 hover:bg-border",
-              active ? "border-l-accent bg-base text-fg" : "border-l-transparent text-fg-muted",
+              active
+                ? "border-l-accent bg-base text-fg"
+                : "border-l-transparent text-fg-muted",
             )}
           >
             <span className="truncate max-w-[10rem]">{label}</span>

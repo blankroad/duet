@@ -331,7 +331,7 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
       icon: <Pencil size={ICON} />,
       shortcut: "F2",
       disabled: multi,
-      onSelect: () => triggerRename(open, showToast),
+      onSelect: () => triggerRename(showToast),
     },
     ...(multi
       ? [

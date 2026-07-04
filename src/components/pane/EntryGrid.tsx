@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { FolderUp } from "lucide-react";
 import { platform } from "@tauri-apps/plugin-os";
 import clsx from "clsx";
-import type { Entry, Location } from "@/types/bindings";
+import type { Entry, EntryRef, Location } from "@/types/bindings";
 import {
   activeTab,
   gridColumns,
@@ -12,6 +12,8 @@ import {
   type PaneId,
 } from "@/stores/panes";
 import { setHoverEntry, clearHover } from "@/stores/previewHover";
+import { useUI } from "@/stores/ui";
+import { InlineRenameInput } from "./InlineRenameInput";
 import { formatSize, formatTime } from "@/lib/format";
 import { EntryIcon } from "@/lib/fileIcon";
 import { useAppSettings } from "@/stores/settings";
@@ -38,6 +40,8 @@ interface EntryGridProps {
     index: number,
   ) => void;
   onEmptyContextMenu: (e: React.MouseEvent) => void;
+  /** 인라인 이름변경 성공 후 목록 새로고침 (원격은 fs watcher 가 없음). */
+  onRenamed: () => void;
 }
 
 const GRID_CELL_HEIGHT = 92;
@@ -60,9 +64,11 @@ export function EntryGrid({
   onColumns,
   onEntryContextMenu,
   onEmptyContextMenu,
+  onRenamed,
 }: EntryGridProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const colsRef = useRef(1);
+  const renameTarget = useUI((s) => s.renameTarget);
   // 썸네일 URL 빌드용 — 현재 패널 폴더 location.
   const location = usePanes((s) => activeTab(s, id).location);
   // "크기 계산" 결과 — 타일 메타의 폴더 크기 표시.
@@ -183,6 +189,16 @@ export function EntryGrid({
                   isSelected,
                   dirSize: dirSizes[entry.name],
                   highlight: dragActive && overFolder === entry.name,
+                  renameRef:
+                    renameTarget?.pane === id &&
+                    renameTarget.name === entry.name &&
+                    !isParentEntry(entry)
+                      ? { location, name: entry.name }
+                      : null,
+                  onRenameDone: (renamed) => {
+                    useUI.getState().clearInlineRename();
+                    if (renamed) onRenamed();
+                  },
                   onMouseEnter: () => setHoverEntry(id, entry),
                   onMouseDown: (e) => {
                     // 아이콘/이름(핸들) 위에서만 드래그 시작 — 그 외 여백은 마키로.
@@ -232,6 +248,9 @@ interface CellProps {
   /** "크기 계산" 결과(bytes) — 타일 메타의 크기 표시에 사용. */
   dirSize?: number | undefined;
   highlight: boolean;
+  /** 인라인 이름변경(F2) 중이면 대상 EntryRef — 이름 라벨이 input 으로 전환. */
+  renameRef: EntryRef | null;
+  onRenameDone: (renamed: boolean) => void;
   onMouseEnter: () => void;
   onMouseDown: (e: React.MouseEvent) => void;
   onContextMenu: (e: React.MouseEvent) => void;
@@ -318,6 +337,8 @@ function GridCell({
   isCursor,
   isSelected,
   highlight,
+  renameRef,
+  onRenameDone,
   onMouseEnter,
   onMouseDown,
   onContextMenu,
@@ -367,14 +388,23 @@ function GridCell({
       {/* 드래그 핸들 = 아이콘+이름. 셀 여백/간격은 마키 시작 영역. */}
       <span data-drag-handle className="flex flex-col items-center gap-1">
         <Thumb entry={entry} location={location} size={48} />
-        <span
-          className={clsx(
-            "font-mono text-meta text-center line-clamp-2 break-all",
-            entry.hidden && "text-fg-muted",
-          )}
-        >
-          {entry.name}
-        </span>
+        {renameRef ? (
+          <InlineRenameInput
+            target={renameRef}
+            isDir={entry.kind === "dir"}
+            onDone={onRenameDone}
+            className="w-full text-center text-meta"
+          />
+        ) : (
+          <span
+            className={clsx(
+              "font-mono text-meta text-center line-clamp-2 break-all",
+              entry.hidden && "text-fg-muted",
+            )}
+          >
+            {entry.name}
+          </span>
+        )}
       </span>
     </div>
   );
@@ -387,6 +417,8 @@ function TileRow({
   isSelected,
   dirSize,
   highlight,
+  renameRef,
+  onRenameDone,
   onMouseEnter,
   onMouseDown,
   onContextMenu,
@@ -439,16 +471,26 @@ function TileRow({
       <span data-drag-handle className="flex min-w-0 items-center gap-3">
         <Thumb entry={entry} location={location} size={24} />
         <div className="flex min-w-0 flex-col">
-          <span
-            className={clsx(
-              "font-mono truncate",
-              entry.hidden && "text-fg-muted",
-            )}
-          >
-            {entry.name}
-          </span>
+          {renameRef ? (
+            <InlineRenameInput
+              target={renameRef}
+              isDir={entry.kind === "dir"}
+              onDone={onRenameDone}
+              className="text-base"
+            />
+          ) : (
+            <span
+              className={clsx(
+                "font-mono truncate",
+                entry.hidden && "text-fg-muted",
+              )}
+            >
+              {entry.name}
+            </span>
+          )}
           <span className="text-meta text-fg-muted">
-            {formatSize(dirSize ?? entry.size)} · {formatTime(entry.modified_ms)}
+            {formatSize(dirSize ?? entry.size)} ·{" "}
+            {formatTime(entry.modified_ms)}
           </span>
         </div>
       </span>

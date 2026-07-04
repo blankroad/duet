@@ -74,6 +74,10 @@ interface UIState {
   selectPatternMode: "add" | "remove";
   selectPatternNonce: number;
   requestSelectPattern: (pane: PaneId, mode: "add" | "remove") => void;
+  /** 인라인 이름변경(F2) 대상 — 해당 pane 의 행/셀이 편집 input 으로 전환. */
+  renameTarget: { pane: PaneId; name: string } | null;
+  requestInlineRename: (pane: PaneId, name: string) => void;
+  clearInlineRename: () => void;
 }
 
 export const useUI = create<UIState>((set) => ({
@@ -118,4 +122,7 @@ export const useUI = create<UIState>((set) => ({
       selectPatternMode: mode,
       selectPatternNonce: s.selectPatternNonce + 1,
     })),
+  renameTarget: null,
+  requestInlineRename: (pane, name) => set({ renameTarget: { pane, name } }),
+  clearInlineRename: () => set({ renameTarget: null }),
 }));
