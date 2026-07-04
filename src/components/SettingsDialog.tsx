@@ -1,5 +1,6 @@
 import { useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
+import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 import { GeneralSection } from "./settings/GeneralSection";
 import { KeymapSection } from "./settings/KeymapSection";
@@ -9,15 +10,17 @@ import { OpenWithSection } from "./settings/OpenWithSection";
 
 type SectionId = "general" | "icons" | "openwith" | "keymap" | "aliases";
 
+// label 은 i18n 키 — 렌더 시 t() 로 해석.
 const SECTIONS: { id: SectionId; label: string }[] = [
-  { id: "general", label: "General" },
-  { id: "icons", label: "File icons" },
-  { id: "openwith", label: "Open with" },
-  { id: "keymap", label: "Keymap" },
-  { id: "aliases", label: "Aliases" },
+  { id: "general", label: "settings.nav.general" },
+  { id: "icons", label: "settings.nav.fileIcons" },
+  { id: "openwith", label: "settings.nav.openWith" },
+  { id: "keymap", label: "settings.nav.keymap" },
+  { id: "aliases", label: "settings.nav.aliases" },
 ];
 
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation();
   const [section, setSection] = useState<SectionId>("general");
 
   return (
@@ -26,10 +29,12 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
         <Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex h-[32rem] w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 flex-col rounded-md border border-border bg-base shadow-lg focus:outline-none">
           <div className="flex items-center justify-between border-b border-border px-4 py-2">
-            <Dialog.Title className="text-title font-medium">Settings</Dialog.Title>
+            <Dialog.Title className="text-title font-medium">
+              {t("settings.title")}
+            </Dialog.Title>
             <Dialog.Close
               className="rounded p-1 text-fg-muted hover:bg-border"
-              aria-label="Close"
+              aria-label={t("common.close")}
             >
               <X size={14} />
             </Dialog.Close>
@@ -45,7 +50,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                     section === s.id ? "bg-active text-fg" : "text-fg-muted hover:bg-border"
                   }`}
                 >
-                  {s.label}
+                  {t(s.label)}
                 </button>
               ))}
             </aside>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { PanelLeft, PanelRight, Search, Command, Settings, FolderGit2, Undo2 } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useTranslation } from "react-i18next";
 import clsx from "clsx";
 import { useUI } from "@/stores/ui";
 import { usePanes, activeTab } from "@/stores/panes";
@@ -21,6 +22,7 @@ import { AppLauncherStrip } from "@/components/AppLauncherStrip";
  * (data-tauri-drag-region), 우측에 최소화/최대화/닫기 커스텀 컨트롤.
  */
 export function TopBar() {
+  const { t } = useTranslation();
   const sidebarOpen = useUI((s) => s.sidebarOpen);
   const previewOpen = useUI((s) => s.previewOpen);
   const toggleSidebar = useUI((s) => s.toggleSidebar);
@@ -58,23 +60,23 @@ export function TopBar() {
       </span>
       <Divider />
       <IconBtn
-        label={`Toggle sidebar (${displayKey("Ctrl+B")})`}
+        label={t("topbar.toggleSidebar", { key: displayKey("Ctrl+B") })}
         active={sidebarOpen}
         onClick={toggleSidebar}
       >
         <PanelLeft size={15} />
       </IconBtn>
-      <IconBtn label="Toggle preview (F11)" active={previewOpen} onClick={togglePreview}>
+      <IconBtn label={t("topbar.togglePreview")} active={previewOpen} onClick={togglePreview}>
         <PanelRight size={15} />
       </IconBtn>
       <IconBtn
-        label="Compare folders (left ↔ right)"
+        label={t("topbar.compareFolders")}
         onClick={() => void triggerCompare(useUIDialogs.getState().open, useToast.getState().show)}
       >
         <FolderGit2 size={15} />
       </IconBtn>
       <IconBtn
-        label={`Undo last action (${displayKey("Ctrl+Z")}) — right-click: history`}
+        label={t("topbar.undo", { key: displayKey("Ctrl+Z") })}
         onClick={() => void triggerUndo(useToast.getState().show)}
         onContextMenu={(e) => {
           e.preventDefault();
@@ -91,17 +93,17 @@ export function TopBar() {
         <AppLauncherStrip />
       </div>
 
-      <IconBtn label={`Search (${displayKey("Ctrl+Shift+F")})`} onClick={openSearch}>
+      <IconBtn label={t("topbar.search", { key: displayKey("Ctrl+Shift+F") })} onClick={openSearch}>
         <Search size={15} />
       </IconBtn>
       <IconBtn
-        label={`Command palette (${displayKey("Ctrl+P")})`}
+        label={t("topbar.palette", { key: displayKey("Ctrl+P") })}
         onClick={() => usePalette.getState().open()}
       >
         <Command size={15} />
       </IconBtn>
       <IconBtn
-        label={`Settings (${displayKey("Ctrl+,")})`}
+        label={t("topbar.settings", { key: displayKey("Ctrl+,") })}
         onClick={() => useUIDialogs.getState().open({ kind: "settings" })}
       >
         <Settings size={15} />
@@ -115,6 +117,7 @@ export function TopBar() {
 
 /** 우측 창 컨트롤 — 최소화 / 최대화·복원 / 닫기 (Windows/VS Code 스타일). */
 function WindowControls() {
+  const { t } = useTranslation();
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
@@ -146,13 +149,13 @@ function WindowControls() {
   return (
     // -mr-2 로 헤더 우측 패딩을 상쇄해 화면 가장자리까지 flush
     <div className="-mr-2 flex h-10 items-center">
-      <WinBtn label="Minimize" onClick={() => run((w) => w.minimize())}>
+      <WinBtn label={t("topbar.minimize")} onClick={() => run((w) => w.minimize())}>
         <svg width="11" height="11" viewBox="0 0 11 11" stroke="currentColor" strokeWidth="1.1" aria-hidden="true">
           <line x1="1.5" y1="5.5" x2="9.5" y2="5.5" />
         </svg>
       </WinBtn>
       <WinBtn
-        label={maximized ? "Restore" : "Maximize"}
+        label={maximized ? t("topbar.restore") : t("topbar.maximize")}
         onClick={() => run((w) => w.toggleMaximize())}
       >
         {maximized ? (
@@ -166,7 +169,7 @@ function WindowControls() {
           </svg>
         )}
       </WinBtn>
-      <WinBtn label="Close" danger onClick={() => run((w) => w.close())}>
+      <WinBtn label={t("topbar.closeWindow")} danger onClick={() => run((w) => w.close())}>
         <svg width="11" height="11" viewBox="0 0 11 11" stroke="currentColor" strokeWidth="1.1" aria-hidden="true">
           <line x1="1.5" y1="1.5" x2="9.5" y2="9.5" />
           <line x1="9.5" y1="1.5" x2="1.5" y2="9.5" />

@@ -1,4 +1,5 @@
 import { useMemo, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { Loader } from "lucide-react";
 import { TabBar } from "./TabBar";
 import { PathBar } from "./PathBar";
@@ -60,6 +61,7 @@ export function Pane({
   onUpdateArchive,
   onReconnect,
 }: PaneProps) {
+  const { t } = useTranslation();
   const isActive = usePanes((s) => s.activePane === id);
   const setActivePane = usePanes((s) => s.setActivePane);
   const setCursor = usePanes((s) => s.setCursor);
@@ -189,7 +191,7 @@ export function Pane({
             <Loader
               size={20}
               className="animate-spin text-fg-muted"
-              aria-label="Loading"
+              aria-label={t("pane.loading")}
             />
           </div>
         )}
@@ -197,8 +199,8 @@ export function Pane({
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
             <span className="text-base text-fg-muted">
               {tab.filter.length > 0
-                ? "No items match the filter"
-                : "This folder is empty"}
+                ? t("pane.noFilterMatch")
+                : t("pane.emptyFolder")}
             </span>
           </div>
         )}

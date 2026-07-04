@@ -4,8 +4,10 @@ import { platform } from "@tauri-apps/plugin-os";
 import { commands } from "@/types/bindings";
 import type { Settings, SettingsPatch } from "@/types/bindings";
 import { applyTabDefaults, type SortKey, type ViewMode } from "@/stores/panes";
+import { useTranslation } from "react-i18next";
 import { useAppSettings } from "@/stores/settings";
 import { useUI, type Density } from "@/stores/ui";
+import { setLang, storedLang, type LangSetting } from "@/i18n";
 import { applyTheme } from "@/lib/theme";
 import { buildSettingsPatch as buildPatch } from "@/lib/settingsPatch";
 
@@ -15,8 +17,11 @@ const selectClass =
   "rounded border border-border bg-subtle px-2 py-1 text-base focus:border-accent focus:outline-none";
 
 export function GeneralSection() {
+  const { t } = useTranslation();
   const density = useUI((s) => s.density);
   const setDensity = useUI((s) => s.setDensity);
+  // 언어 설정값 — setLang 이 i18n 언어를 바꾸면 useTranslation 이 리렌더.
+  const [lang, setLangState] = useState<LangSetting>(storedLang());
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
   // 탐색기 통합 상태 (Windows 전용, 레지스트리가 SoT). 두 토글이 같은 키군을 만지므로
@@ -92,29 +97,52 @@ export function GeneralSection() {
 
   return (
     <div className="space-y-4">
+      {/* 언어 — localStorage(i18n) 영속. */}
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <div className="text-base">{t("settings.language")}</div>
+          <div className="text-meta text-fg-muted">
+            {t("settings.languageHint")}
+          </div>
+        </div>
+        <select
+          className={selectClass}
+          value={lang}
+          onChange={(e) => {
+            const v = e.target.value as LangSetting;
+            setLangState(v);
+            setLang(v);
+          }}
+        >
+          <option value="system">{t("settings.langSystem")}</option>
+          <option value="en">English</option>
+          <option value="ko">한국어</option>
+        </select>
+      </div>
+
       {/* 외관 */}
       <div className="flex items-center justify-between gap-2">
         <div>
-          <div className="text-base">Theme</div>
-          <div className="text-meta text-fg-muted">System follows your OS setting.</div>
+          <div className="text-base">{t("settings.theme")}</div>
+          <div className="text-meta text-fg-muted">{t("settings.themeHint")}</div>
         </div>
         <select
           className={selectClass}
           value={settings.theme ?? "system"}
           onChange={(e) => void save({ theme: e.target.value })}
         >
-          <option value="system">System</option>
-          <option value="light">Light</option>
-          <option value="dark">Dark</option>
+          <option value="system">{t("settings.themeSystem")}</option>
+          <option value="light">{t("settings.themeLight")}</option>
+          <option value="dark">{t("settings.themeDark")}</option>
         </select>
       </div>
 
       {/* 밀도 — 비민감 UI 설정이라 settings.toml 이 아닌 localStorage(useUI) 영속. */}
       <div className="flex items-center justify-between gap-2">
         <div>
-          <div className="text-base">List density</div>
+          <div className="text-base">{t("settings.density")}</div>
           <div className="text-meta text-fg-muted">
-            Row height in file lists. Compact fits more items.
+            {t("settings.densityHint")}
           </div>
         </div>
         <select
@@ -122,8 +150,8 @@ export function GeneralSection() {
           value={density}
           onChange={(e) => setDensity(e.target.value as Density)}
         >
-          <option value="normal">Normal</option>
-          <option value="compact">Compact</option>
+          <option value="normal">{t("settings.densityNormal")}</option>
+          <option value="compact">{t("settings.densityCompact")}</option>
         </select>
       </div>
 

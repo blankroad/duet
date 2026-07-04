@@ -1,0 +1,80 @@
+{
+  "common": {
+    "cancel": "취소",
+    "close": "닫기",
+    "apply": "적용"
+  },
+  "topbar": {
+    "toggleSidebar": "사이드바 토글 ({{key}})",
+    "togglePreview": "미리보기 토글 (F11)",
+    "compareFolders": "폴더 비교 (왼쪽 ↔ 오른쪽)",
+    "undo": "마지막 작업 되돌리기 ({{key}}) — 우클릭: 히스토리",
+    "search": "검색 ({{key}})",
+    "palette": "커맨드 팔레트 ({{key}})",
+    "settings": "설정 ({{key}})",
+    "minimize": "최소화",
+    "maximize": "최대화",
+    "restore": "이전 크기로",
+    "closeWindow": "닫기"
+  },
+  "toolbar": {
+    "newFolder": "새 폴더 (F7)",
+    "copy": "반대 패널로 복사 (F5)",
+    "move": "반대 패널로 이동 (F6)",
+    "deleteTrash": "휴지통으로 삭제 (Del)",
+    "viewDetails": "상세",
+    "viewGrid": "그리드",
+    "viewTiles": "타일",
+    "syncBrowseOn": "동기화 브라우징: 켜짐 — 양 패널 동반 이동",
+    "syncBrowseOff": "동기화 브라우징: 꺼짐",
+    "hideHidden": "숨김 파일 숨기기 (Ctrl+H)",
+    "showHidden": "숨김 파일 표시 (Ctrl+H)"
+  },
+  "shelf": {
+    "title": "선반",
+    "copyHere": "여기로 복사 (활성 패널)",
+    "copy": "복사",
+    "moveHere": "여기로 이동 (활성 패널)",
+    "move": "이동",
+    "clear": "선반 비우기",
+    "remove": "선반에서 제거"
+  },
+  "selectPattern": {
+    "select": "선택",
+    "deselect": "선택 해제",
+    "placeholder": "패턴 (예: *.ts, img_??.png, report)"
+  },
+  "banner": {
+    "connecting": "{{label}} 에 연결 중…",
+    "connectionLost": "연결 끊김",
+    "disconnected": "연결 종료됨",
+    "reconnect": "재연결"
+  },
+  "pane": {
+    "emptyFolder": "빈 폴더입니다",
+    "noFilterMatch": "필터와 일치하는 항목 없음",
+    "loading": "불러오는 중"
+  },
+  "settings": {
+    "title": "설정",
+    "nav": {
+      "general": "일반",
+      "fileIcons": "파일 아이콘",
+      "openWith": "연결 프로그램",
+      "keymap": "키맵",
+      "aliases": "별칭"
+    },
+    "language": "언어",
+    "languageHint": "UI 언어. System 은 OS 설정을 따릅니다.",
+    "langSystem": "시스템",
+    "theme": "테마",
+    "themeHint": "System 은 OS 설정을 따릅니다.",
+    "themeSystem": "시스템",
+    "themeLight": "라이트",
+    "themeDark": "다크",
+    "density": "목록 밀도",
+    "densityHint": "파일 목록 행 높이. Compact 는 더 많이 표시됩니다.",
+    "densityNormal": "보통",
+    "densityCompact": "좁게"
+  }
+}

@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { Loader, Unplug, RefreshCw } from "lucide-react";
 import clsx from "clsx";
 import { usePanes, activeTab, type PaneId } from "@/stores/panes";
@@ -22,6 +23,7 @@ export function ConnectionBanner({
   /** alias 는 알 수 없으면 null — App 이 ad-hoc 다이얼로그로 폴백. */
   onReconnect: (alias: string | null, paneId: PaneId) => void;
 }) {
+  const { t } = useTranslation();
   const source = usePanes((s) => activeTab(s, id).location.source);
   const connId = source.kind === "ssh" ? source.connection_id : null;
   const conn = useConnections((s) => (connId ? s.active[connId] : undefined));
@@ -41,7 +43,7 @@ export function ConnectionBanner({
         className="flex h-7 shrink-0 items-center gap-2 border-b border-border bg-subtle px-2 text-meta text-fg-muted"
       >
         <Loader size={12} className="animate-spin" aria-hidden />
-        <span className="truncate">Connecting to {label}…</span>
+        <span className="truncate">{t("banner.connecting", { label })}</span>
       </div>
     );
   }
@@ -57,7 +59,10 @@ export function ConnectionBanner({
     >
       <Unplug size={12} className="shrink-0 text-danger" aria-hidden />
       <span className="min-w-0 truncate text-fg" title={message}>
-        {state.kind === "error" ? "Connection lost" : "Disconnected"} — {label}
+        {state.kind === "error"
+          ? t("banner.connectionLost")
+          : t("banner.disconnected")}{" "}
+        — {label}
       </span>
       <button
         type="button"
@@ -65,7 +70,7 @@ export function ConnectionBanner({
         className="ml-auto flex shrink-0 items-center gap-1 rounded-panel border border-border bg-base px-2 py-0.5 text-meta hover:bg-subtle"
       >
         <RefreshCw size={11} aria-hidden />
-        Reconnect
+        {t("banner.reconnect")}
       </button>
     </div>
   );

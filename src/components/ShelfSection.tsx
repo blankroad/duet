@@ -1,4 +1,5 @@
 import { Layers, X, Copy, FolderInput, Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useShelf, shelfKey } from "@/stores/shelf";
 import { useConnections } from "@/stores/connections";
 import { useUIDialogs } from "@/stores/ui-dialogs";
@@ -21,6 +22,7 @@ function sourceLabel(ref: EntryRef): string {
  * 비었으면 렌더 안 함(항목이 생기면 자동 노출).
  */
 export function ShelfSection() {
+  const { t } = useTranslation();
   const items = useShelf((s) => s.items);
   const remove = useShelf((s) => s.remove);
   const clear = useShelf((s) => s.clear);
@@ -33,7 +35,7 @@ export function ShelfSection() {
     <div className="border-b border-border px-2 py-1">
       <div className="flex items-center gap-1 text-meta text-fg-muted">
         <Layers size={12} />
-        <span className="truncate">Shelf</span>
+        <span className="truncate">{t("shelf.title")}</span>
         <span className="ml-auto opacity-50">{items.length}</span>
       </div>
 
@@ -42,24 +44,24 @@ export function ShelfSection() {
           type="button"
           onClick={() => void applyShelfTo("copy", open, showToast)}
           className="flex flex-1 items-center justify-center gap-1 rounded-panel border border-border py-0.5 text-meta hover:bg-border"
-          title="Copy here (active pane)"
+          title={t("shelf.copyHere")}
         >
-          <Copy size={11} /> Copy
+          <Copy size={11} /> {t("shelf.copy")}
         </button>
         <button
           type="button"
           onClick={() => void applyShelfTo("move", open, showToast)}
           className="flex flex-1 items-center justify-center gap-1 rounded-panel border border-border py-0.5 text-meta hover:bg-border"
-          title="Move here (active pane)"
+          title={t("shelf.moveHere")}
         >
-          <FolderInput size={11} /> Move
+          <FolderInput size={11} /> {t("shelf.move")}
         </button>
         <button
           type="button"
           onClick={() => clear()}
           className="rounded-panel p-1 text-fg-muted hover:bg-border hover:text-danger"
-          aria-label="Clear shelf"
-          title="Clear shelf"
+          aria-label={t("shelf.clear")}
+          title={t("shelf.clear")}
         >
           <Trash2 size={11} />
         </button>
@@ -81,8 +83,8 @@ export function ShelfSection() {
               type="button"
               onClick={() => remove(shelfKey(it))}
               className="shrink-0 rounded p-0.5 text-fg-muted opacity-0 hover:bg-border hover:text-danger group-hover:opacity-100"
-              aria-label="Remove from shelf"
-              title="Remove"
+              aria-label={t("shelf.remove")}
+              title={t("shelf.remove")}
             >
               <X size={11} />
             </button>

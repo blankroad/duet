@@ -1,0 +1,80 @@
+{
+  "common": {
+    "cancel": "Cancel",
+    "close": "Close",
+    "apply": "Apply"
+  },
+  "topbar": {
+    "toggleSidebar": "Toggle sidebar ({{key}})",
+    "togglePreview": "Toggle preview (F11)",
+    "compareFolders": "Compare folders (left ↔ right)",
+    "undo": "Undo last action ({{key}}) — right-click: history",
+    "search": "Search ({{key}})",
+    "palette": "Command palette ({{key}})",
+    "settings": "Settings ({{key}})",
+    "minimize": "Minimize",
+    "maximize": "Maximize",
+    "restore": "Restore",
+    "closeWindow": "Close"
+  },
+  "toolbar": {
+    "newFolder": "New folder (F7)",
+    "copy": "Copy → other pane (F5)",
+    "move": "Move → other pane (F6)",
+    "deleteTrash": "Delete to trash (Del)",
+    "viewDetails": "Details",
+    "viewGrid": "Grid",
+    "viewTiles": "Tiles",
+    "syncBrowseOn": "Synchronized browsing: ON — panes navigate together",
+    "syncBrowseOff": "Synchronized browsing: OFF",
+    "hideHidden": "Hide hidden files (Ctrl+H)",
+    "showHidden": "Show hidden files (Ctrl+H)"
+  },
+  "shelf": {
+    "title": "Shelf",
+    "copyHere": "Copy here (active pane)",
+    "copy": "Copy",
+    "moveHere": "Move here (active pane)",
+    "move": "Move",
+    "clear": "Clear shelf",
+    "remove": "Remove from shelf"
+  },
+  "selectPattern": {
+    "select": "Select",
+    "deselect": "Deselect",
+    "placeholder": "Pattern (e.g. *.ts, img_??.png, report)"
+  },
+  "banner": {
+    "connecting": "Connecting to {{label}}…",
+    "connectionLost": "Connection lost",
+    "disconnected": "Disconnected",
+    "reconnect": "Reconnect"
+  },
+  "pane": {
+    "emptyFolder": "This folder is empty",
+    "noFilterMatch": "No items match the filter",
+    "loading": "Loading"
+  },
+  "settings": {
+    "title": "Settings",
+    "nav": {
+      "general": "General",
+      "fileIcons": "File icons",
+      "openWith": "Open with",
+      "keymap": "Keymap",
+      "aliases": "Aliases"
+    },
+    "language": "Language",
+    "languageHint": "UI language. System follows your OS.",
+    "langSystem": "System",
+    "theme": "Theme",
+    "themeHint": "System follows your OS setting.",
+    "themeSystem": "System",
+    "themeLight": "Light",
+    "themeDark": "Dark",
+    "density": "List density",
+    "densityHint": "Row height in file lists. Compact fits more items.",
+    "densityNormal": "Normal",
+    "densityCompact": "Compact"
+  }
+}

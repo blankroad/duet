@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { CheckSquare, MinusSquare, X } from "lucide-react";
 import { usePanes, type PaneId } from "@/stores/panes";
 import { useUI } from "@/stores/ui";
@@ -16,6 +17,7 @@ import { useToast } from "@/stores/toast";
  * 필터(PaneFilterBar)와 독립 — 대상은 항상 현재 표시 항목(displayedEntries).
  */
 export function SelectPatternBar({ id }: { id: PaneId }) {
+  const { t } = useTranslation();
   const reqPane = useUI((s) => s.selectPatternPane);
   const reqMode = useUI((s) => s.selectPatternMode);
   const nonce = useUI((s) => s.selectPatternNonce);
@@ -60,7 +62,7 @@ export function SelectPatternBar({ id }: { id: PaneId }) {
         <MinusSquare size={11} className="shrink-0 text-fg-muted" />
       )}
       <span className="shrink-0 text-base text-fg-muted">
-        {isAdd ? "Select" : "Deselect"}
+        {isAdd ? t("selectPattern.select") : t("selectPattern.deselect")}
       </span>
       <input
         ref={inputRef}
@@ -78,7 +80,7 @@ export function SelectPatternBar({ id }: { id: PaneId }) {
           }
         }}
         onBlur={() => setOpen(false)}
-        placeholder="Pattern (e.g. *.ts, img_??.png, report)"
+        placeholder={t("selectPattern.placeholder")}
         className="flex-1 bg-transparent font-mono text-base focus:outline-none"
       />
       <button
@@ -91,7 +93,7 @@ export function SelectPatternBar({ id }: { id: PaneId }) {
         }}
         className="rounded px-1 py-0.5 text-base text-fg-muted hover:bg-border"
       >
-        Apply
+        {t("common.apply")}
       </button>
       <button
         type="button"

@@ -11,6 +11,7 @@ import {
   FolderSync,
 } from "lucide-react";
 import clsx from "clsx";
+import { useTranslation } from "react-i18next";
 import {
   usePanes,
   activeTab,
@@ -39,6 +40,7 @@ interface PaneToolbarProps {
  * 모든 액션은 키보드와 동일 경로(파괴적 액션 lib/fileActions, 뷰/hidden panes store).
  */
 export function PaneToolbar({ id }: PaneToolbarProps) {
+  const { t } = useTranslation();
   const viewMode = usePanes((s) => activeTab(s, id).viewMode);
   const showHidden = usePanes((s) => activeTab(s, id).showHidden);
   const setViewMode = usePanes((s) => s.setViewMode);
@@ -50,23 +52,23 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
 
   return (
     <div className="flex h-8 shrink-0 items-center gap-0.5 border-b border-border px-1.5">
-      <ToolButton label="New folder (F7)" onClick={() => triggerMkdir(open)}>
+      <ToolButton label={t("toolbar.newFolder")} onClick={() => triggerMkdir(open)}>
         <FolderPlus size={15} />
       </ToolButton>
       <ToolButton
-        label="Copy → other pane (F5)"
+        label={t("toolbar.copy")}
         onClick={() => void triggerCopy(open, showToast)}
       >
         <Copy size={15} />
       </ToolButton>
       <ToolButton
-        label="Move → other pane (F6)"
+        label={t("toolbar.move")}
         onClick={() => void triggerMove(open, showToast)}
       >
         <MoveRight size={15} />
       </ToolButton>
       <ToolButton
-        label="Delete to trash (Del)"
+        label={t("toolbar.deleteTrash")}
         onClick={() => void triggerDelete("trash", open, showToast)}
       >
         <Trash2 size={15} />
@@ -75,7 +77,7 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
       <div className="flex-1" />
 
       <ViewButton
-        label="Details"
+        label={t("toolbar.viewDetails")}
         mode="details"
         current={viewMode}
         onClick={() => setViewMode(id, "details")}
@@ -83,7 +85,7 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
         <List size={15} />
       </ViewButton>
       <ViewButton
-        label="Grid"
+        label={t("toolbar.viewGrid")}
         mode="grid"
         current={viewMode}
         onClick={() => setViewMode(id, "grid")}
@@ -91,7 +93,7 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
         <LayoutGrid size={15} />
       </ViewButton>
       <ViewButton
-        label="Tiles"
+        label={t("toolbar.viewTiles")}
         mode="tiles"
         current={viewMode}
         onClick={() => setViewMode(id, "tiles")}
@@ -102,22 +104,14 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
       <Divider />
 
       <ToolButton
-        label={
-          syncBrowse
-            ? "Synchronized browsing: ON — panes navigate together"
-            : "Synchronized browsing: OFF"
-        }
+        label={syncBrowse ? t("toolbar.syncBrowseOn") : t("toolbar.syncBrowseOff")}
         active={syncBrowse}
         onClick={() => toggleSyncBrowse()}
       >
         <FolderSync size={15} />
       </ToolButton>
       <ToolButton
-        label={
-          showHidden
-            ? "Hide hidden files (Ctrl+H)"
-            : "Show hidden files (Ctrl+H)"
-        }
+        label={showHidden ? t("toolbar.hideHidden") : t("toolbar.showHidden")}
         active={showHidden}
         onClick={() => toggleShowHidden(id)}
       >
