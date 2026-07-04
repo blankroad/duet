@@ -3,6 +3,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { Loader, X } from "lucide-react";
 import { formatSize } from "@/lib/format";
 import { useTasks } from "@/stores/tasks";
+import { commands } from "@/types/bindings";
 import type { ProgressInfo } from "@/types/bindings";
 
 export function ProgressModal({
@@ -47,7 +48,16 @@ export function ProgressModal({
 
           {progress ? <ProgressBody p={progress} /> : <SpinnerBody />}
 
-          <div className="mt-4 flex justify-end">
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              type="button"
+              // 취소 요청만 보내고 모달은 유지 — task 가 실제로 사라지면
+              // (cancelled 이벤트 → store 제거) 위 useEffect 가 닫는다.
+              onClick={() => void commands.taskCancel(taskId)}
+              className="rounded border border-border px-3 py-1 text-base text-danger hover:bg-subtle"
+            >
+              Cancel
+            </button>
             <button
               type="button"
               onClick={onBackground}
