@@ -7,7 +7,8 @@
     "background": "백그라운드",
     "working": "작업 중…",
     "runInBackground": "백그라운드로 실행",
-    "typeToConfirm": "<1>{{word}}</1> 를 입력해 확인:"
+    "typeToConfirm": "<1>{{word}}</1> 를 입력해 확인:",
+    "ok": "확인"
   },
   "conflict": {
     "exist": "대상에 같은 이름의 항목이 {{count}}개 있습니다. 처리 방법을 선택하세요:",
@@ -165,7 +166,8 @@
         "rightDeleted": "삭제 →",
         "deleteConflict": "삭제 충돌"
       },
-      "desc": "공통 base 디렉토리에 대한 좌/우 3-way 비교."
+      "desc": "공통 base 디렉토리에 대한 좌/우 3-way 비교.",
+      "basePrompt": "Base(공통 조상) 디렉토리 경로 — 왼쪽 소스 기준:"
     },
     "batchRename": {
       "title_other": "일괄 이름변경 — {{count}}개",
@@ -554,7 +556,11 @@
     "symlinkFailed": "심볼릭 링크 실패: {{err}}",
     "threeWayApplyFailed": "3-way 적용 실패: {{err}}",
     "mergeFailed": "병합 실패: {{err}}",
-    "applyFailed": "적용 실패: {{err}}"
+    "applyFailed": "적용 실패: {{err}}",
+    "taskDone": "완료: {{title}}",
+    "taskDoneGeneric": "작업 완료",
+    "taskCancelled": "취소됨: {{title}}",
+    "taskCancelledGeneric": "작업 취소됨"
   },
   "sidebar": {
     "tasks": "작업",
@@ -652,7 +658,8 @@
     "doubleClickRename": "더블클릭으로 이름 변경"
   },
   "tags": {
-    "clear": "지우기"
+    "clear": "지우기",
+    "editPrompt": "태그 (쉼표로 구분):"
   },
   "jumper": {
     "placeholder": "자주 가는 폴더로 점프…",

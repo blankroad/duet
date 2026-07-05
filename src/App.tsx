@@ -31,6 +31,7 @@ import { rememberExtract } from "@/lib/extractPending";
 import { ProgressModal } from "@/components/dialogs/ProgressModal";
 import { ShortcutCheatsheet } from "@/components/dialogs/ShortcutCheatsheet";
 import { HistoryDialog } from "@/components/dialogs/HistoryDialog";
+import { PromptDialogHost } from "@/components/dialogs/PromptDialog";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { Toast } from "@/components/Toast";
 import { SearchPanel } from "@/components/SearchPanel";
@@ -1975,6 +1976,7 @@ function App() {
       )}
       {dialog.kind === "history" && <HistoryDialog onClose={closeDialog} />}
       {quickLookOpen && <QuickLook />}
+      <PromptDialogHost />
       <Toast />
       <CommandPalette />
       <FrecencyJumper onOpenLocation={onOpenLocation} />

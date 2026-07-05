@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import { Plus } from "lucide-react";
 import i18n from "@/i18n";
+import { promptText } from "@/stores/promptDialog";
 import clsx from "clsx";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { AppItem } from "@/types/bindings";
@@ -120,14 +121,12 @@ function AppGlyph({ app, px }: { app: AppItem; px: number }) {
 }
 
 function openArgsDialog(app: AppItem): void {
-  useUIDialogs
-    .getState()
-    .open({
-      kind: "app-args",
-      appId: app.id,
-      name: app.name,
-      args: app.args ?? [],
-    });
+  useUIDialogs.getState().open({
+    kind: "app-args",
+    appId: app.id,
+    name: app.name,
+    args: app.args ?? [],
+  });
 }
 
 /** 우클릭 메뉴 구성 — 앱 공통(실행/인자/이름변경/[폴더밖]/제거). */
@@ -149,8 +148,12 @@ function appMenu(app: AppItem, folderId?: string): MenuEntry[] {
       label: i18n.t("launcher.renameLabel"),
       onSelect: () => {
         // 여기 표시되는 이름(label)만 변경 — 실행 경로(app.path)는 그대로.
-        const n = window.prompt(i18n.t("launcher.displayNamePrompt"), app.name);
-        if (n) void renameAppLauncher(app.id, n);
+        void promptText({
+          title: i18n.t("launcher.displayNamePrompt"),
+          initial: app.name,
+        }).then((n) => {
+          if (n) void renameAppLauncher(app.id, n);
+        });
       },
     },
     ...(folderId
@@ -225,8 +228,12 @@ function FolderTile({
       id: "rename",
       label: t("launcher.renameFolder"),
       onSelect: () => {
-        const n = window.prompt(t("launcher.folderNamePrompt"), folder.name);
-        if (n) void renameAppLauncher(folder.id, n);
+        void promptText({
+          title: t("launcher.folderNamePrompt"),
+          initial: folder.name,
+        }).then((n) => {
+          if (n) void renameAppLauncher(folder.id, n);
+        });
       },
     },
     {

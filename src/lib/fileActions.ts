@@ -18,6 +18,7 @@ import { basename } from "@/lib/paths";
 import { useClipboard } from "@/stores/clipboard";
 import { useShelf } from "@/stores/shelf";
 import { useUI } from "@/stores/ui";
+import { promptText } from "@/stores/promptDialog";
 
 type OpenFn = (d: DialogState) => void;
 
@@ -265,10 +266,10 @@ export async function triggerThreeWay(
   const state = usePanes.getState();
   const left = activeTab(state, active).location;
   const right = activeTab(state, opposite).location;
-  const input = window.prompt(
-    "Base (common ancestor) directory path — relative to the left source:",
-    String(left.path),
-  );
+  const input = await promptText({
+    title: i18n.t("dialog.threeWay.basePrompt"),
+    initial: String(left.path),
+  });
   if (input == null || input.trim() === "") return;
   const baseLoc: Location = { source: left.source, path: input.trim() };
   const r = await commands.fsCompareThreeWay(baseLoc, left, right);

@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { commands } from "@/types/bindings";
 import { useToast } from "@/stores/toast";
+import { promptText } from "@/stores/promptDialog";
+import i18n from "@/i18n";
 import { formatErr } from "@/lib/error";
 
 /** key → 태그 목록. 백엔드 tags.json 미러. key = `host:<alias>` / `bm:<id>` / `fav:<id>`. */
@@ -41,22 +43,29 @@ export function allTagNames(byKey: TagMap): string[] {
 }
 
 /** 활성 필터(OR) 매칭 — 필터 없으면 항상 통과. */
-export function matchesTagFilter(itemTags: string[], active: string[]): boolean {
+export function matchesTagFilter(
+  itemTags: string[],
+  active: string[],
+): boolean {
   if (active.length === 0) return true;
   return active.some((t) => itemTags.includes(t));
 }
 
 /** 쉼표 구분 입력으로 태그 편집(프롬프트). 취소(null)면 무시. */
 export function editTagsPrompt(key: string, current: string[]): void {
-  const next = window.prompt("Tags (comma-separated):", current.join(", "));
-  if (next === null) return;
-  void setTags(
-    key,
-    next
-      .split(",")
-      .map((t) => t.trim())
-      .filter(Boolean),
-  );
+  void promptText({
+    title: i18n.t("tags.editPrompt"),
+    initial: current.join(", "),
+  }).then((next) => {
+    if (next === null) return;
+    void setTags(
+      key,
+      next
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean),
+    );
+  });
 }
 
 // ── 키 빌더 ───────────────────────────────────────────────────────────────

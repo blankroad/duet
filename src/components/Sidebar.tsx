@@ -63,6 +63,7 @@ import {
 import { usePanes, activeTab, type PaneId } from "@/stores/panes";
 import { useContextMenu, type MenuEntry } from "@/stores/contextMenu";
 import { useToast } from "@/stores/toast";
+import { promptText } from "@/stores/promptDialog";
 import { useReorderable } from "@/hooks/useReorderable";
 import { ShelfSection } from "@/components/ShelfSection";
 import { useHostNicknames, setHostNickname } from "@/stores/hostNicknames";
@@ -689,8 +690,11 @@ function moveToGroupEntry(
       id: "new-group",
       label: i18n.t("sidebar.newGroup"),
       onSelect: () => {
-        const name = window.prompt(i18n.t("sidebar.newGroupPrompt"));
-        if (name && name.trim()) void createGroup(name.trim(), host.alias);
+        void promptText({ title: i18n.t("sidebar.newGroupPrompt") }).then(
+          (name) => {
+            if (name && name.trim()) void createGroup(name.trim(), host.alias);
+          },
+        );
       },
     },
   ];
@@ -739,8 +743,12 @@ function HostGroupFolder({
       id: "rename",
       label: t("sidebar.renameGroup"),
       onSelect: () => {
-        const n = window.prompt(t("sidebar.groupNamePrompt"), group.name);
-        if (n && n.trim()) void renameGroup(group.id, n.trim());
+        void promptText({
+          title: t("sidebar.groupNamePrompt"),
+          initial: group.name,
+        }).then((n) => {
+          if (n && n.trim()) void renameGroup(group.id, n.trim());
+        });
       },
     },
     {
@@ -822,11 +830,12 @@ function SavedHostItem({
       id: "rename",
       label: t("sidebar.setDisplayName"),
       onSelect: () => {
-        const next = window.prompt(
-          t("sidebar.displayNamePrompt", { alias: host.alias }),
-          nickname ?? "",
-        );
-        if (next !== null) void setHostNickname(host.alias, next);
+        void promptText({
+          title: t("sidebar.displayNamePrompt", { alias: host.alias }),
+          initial: nickname ?? "",
+        }).then((next) => {
+          if (next !== null) void setHostNickname(host.alias, next);
+        });
       },
     },
     {
@@ -1227,12 +1236,12 @@ function HostItem({
 
   // 별명 설정/해제 — config alias 키로 저장. 패널·상태바도 이 별명을 따른다.
   const promptName = () => {
-    const next = window.prompt(
-      t("sidebar.displayNamePrompt", { alias: host.alias }),
-      nickname ?? "",
-    );
-    if (next === null) return;
-    void setHostNickname(host.alias, next);
+    void promptText({
+      title: t("sidebar.displayNamePrompt", { alias: host.alias }),
+      initial: nickname ?? "",
+    }).then((next) => {
+      if (next !== null) void setHostNickname(host.alias, next);
+    });
   };
 
   const menu: MenuEntry[] = [

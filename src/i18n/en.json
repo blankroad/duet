@@ -7,7 +7,8 @@
     "background": "Background",
     "working": "Working…",
     "runInBackground": "Run in background",
-    "typeToConfirm": "Type <1>{{word}}</1> to confirm:"
+    "typeToConfirm": "Type <1>{{word}}</1> to confirm:",
+    "ok": "OK"
   },
   "conflict": {
     "exist": "{{count}} item(s) already exist at the destination. Choose how to resolve:",
@@ -167,7 +168,8 @@
         "rightDeleted": "Deleted →",
         "deleteConflict": "Delete conflict"
       },
-      "desc": "Three-way comparison of left and right against a common base directory."
+      "desc": "Three-way comparison of left and right against a common base directory.",
+      "basePrompt": "Base (common ancestor) directory path — relative to the left source:"
     },
     "batchRename": {
       "title_one": "Batch rename — {{count}} item",
@@ -557,7 +559,11 @@
     "symlinkFailed": "Symlink failed: {{err}}",
     "threeWayApplyFailed": "3-way apply failed: {{err}}",
     "mergeFailed": "Merge failed: {{err}}",
-    "applyFailed": "Apply failed: {{err}}"
+    "applyFailed": "Apply failed: {{err}}",
+    "taskDone": "Completed: {{title}}",
+    "taskDoneGeneric": "Task completed",
+    "taskCancelled": "Cancelled: {{title}}",
+    "taskCancelledGeneric": "Task cancelled"
   },
   "sidebar": {
     "tasks": "Tasks",
@@ -655,7 +661,8 @@
     "doubleClickRename": "Double-click to rename"
   },
   "tags": {
-    "clear": "clear"
+    "clear": "clear",
+    "editPrompt": "Tags (comma-separated):"
   },
   "jumper": {
     "placeholder": "Jump to a frequent folder…",

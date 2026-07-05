@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { platform } from "@tauri-apps/plugin-os";
+import i18n from "@/i18n";
 import { events, commands } from "@/types/bindings";
 import { useTasks } from "@/stores/tasks";
 import { useToast } from "@/stores/toast";
@@ -54,21 +55,41 @@ export function useTaskEvents() {
         case "progress":
           setProgress(id, payload.change.progress);
           break;
-        case "completed":
+        case "completed": {
           setStatus(id, {
             kind: "completed",
             journal_id: payload.change.journal_id,
           });
           takeElevatable(id); // 성공 → 승격/암호 재시도 후보 정리
           takeExtract(id);
+          // 종결 즉시 목록에서 사라지므로 완료 확인 지점이 없던 문제 — 성공 토스트.
+          const title = useTasks.getState().tasks.get(id)?.title;
+          useToast
+            .getState()
+            .show(
+              title
+                ? i18n.t("toast.taskDone", { title })
+                : i18n.t("toast.taskDoneGeneric"),
+              "success",
+            );
           remove(id);
           break;
-        case "cancelled":
+        }
+        case "cancelled": {
           setStatus(id, { kind: "cancelled" });
           takeElevatable(id);
           takeExtract(id);
+          const title = useTasks.getState().tasks.get(id)?.title;
+          useToast
+            .getState()
+            .show(
+              title
+                ? i18n.t("toast.taskCancelled", { title })
+                : i18n.t("toast.taskCancelledGeneric"),
+            );
           remove(id);
           break;
+        }
         case "failed": {
           const msg = payload.change.message;
           setError(id, msg);
