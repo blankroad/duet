@@ -465,7 +465,22 @@
     "density": "List density",
     "densityHint": "Row height in file lists. Compact fits more items.",
     "densityNormal": "Normal",
-    "densityCompact": "Compact"
+    "densityCompact": "Compact",
+    "keymap": {
+      "search": "Search commands or keys…",
+      "restoreDefaults": "Restore defaults",
+      "restoreConfirm": "Reset all keybindings to defaults?",
+      "restoreTitle": "Restore all default keybindings",
+      "colCommand": "Command",
+      "colCategory": "Category",
+      "colKey": "Key",
+      "colActions": "Actions",
+      "none": "(none)",
+      "customized": "Customized (not default)",
+      "edit": "Edit",
+      "reset": "Reset",
+      "pressKey": "Press key…"
+    }
   },
   "toast": {
     "renameSelectOne": "Rename: select exactly one item",
@@ -705,5 +720,112 @@
   },
   "dnd": {
     "items": "{{count}} items"
+  },
+  "cmd": {
+    "tab": {
+      "new": "New tab",
+      "close": "Close tab",
+      "next": "Next tab",
+      "prev": "Previous tab",
+      "moveToOther": "Move tab to other panel"
+    },
+    "nav": {
+      "back": "Go back",
+      "forward": "Go forward",
+      "jump": "Jump to frequent folder"
+    },
+    "pane": {
+      "editPath": "Edit path (type a location)",
+      "swap": "Swap panels (left ↔ right)"
+    },
+    "view": {
+      "refresh": "Refresh",
+      "toggleHidden": "Toggle hidden files",
+      "toggleSidebar": "Toggle sidebar",
+      "togglePreview": "Toggle preview",
+      "quickLook": "Quick Look (large preview)",
+      "syncBrowse": "Toggle synchronized browsing",
+      "details": "View: Details",
+      "grid": "View: Grid",
+      "tiles": "View: Tiles"
+    },
+    "sort": {
+      "byName": "Sort by name",
+      "bySize": "Sort by size",
+      "byMtime": "Sort by modified",
+      "byKind": "Sort by kind",
+      "byExt": "Sort by extension"
+    },
+    "bookmark": {
+      "toggle": "Bookmark this folder"
+    },
+    "filter": {
+      "focus": "Focus filter"
+    },
+    "search": {
+      "global": "Global search"
+    },
+    "select": {
+      "byPattern": "Select by pattern (glob)",
+      "removeByPattern": "Deselect by pattern (glob)"
+    },
+    "shelf": {
+      "add": "Add to shelf",
+      "applyCopy": "Shelf: copy here",
+      "applyMove": "Shelf: move here",
+      "clear": "Shelf: clear"
+    },
+    "file": {
+      "compare": "Compare folders (left ↔ right)",
+      "threeWay": "3-way compare (base ↔ left ↔ right)",
+      "sync": "Sync to other pane (mirror)",
+      "copy": "Copy to other panel",
+      "move": "Move to other panel",
+      "rename": "Rename",
+      "newFolder": "New folder",
+      "delete": "Delete (to trash)",
+      "deletePerm": "Delete permanently",
+      "clipCopy": "Copy",
+      "clipCut": "Cut",
+      "clipPaste": "Paste",
+      "copyPath": "Copy path",
+      "copyName": "Copy name",
+      "calcSize": "Calculate folder size",
+      "contextMenu": "Open context menu"
+    },
+    "settings": {
+      "open": "Open settings"
+    },
+    "palette": {
+      "open": "Command palette"
+    },
+    "app": {
+      "quit": "Quit"
+    },
+    "edit": {
+      "undo": "Undo last operation",
+      "redo": "Redo last undone operation",
+      "history": "Operation history"
+    },
+    "help": {
+      "shortcuts": "Keyboard shortcuts"
+    },
+    "ssh": {
+      "setupKeyAuth": "Set up passwordless login (this host)"
+    }
+  },
+  "cmdCategory": {
+    "Tab": "Tab",
+    "Navigation": "Navigation",
+    "View": "View",
+    "Sort": "Sort",
+    "Filter": "Filter",
+    "Search": "Search",
+    "Select": "Select",
+    "File": "File",
+    "Connection": "Connection",
+    "Settings": "Settings",
+    "Help": "Help",
+    "User": "User"
   }
 }

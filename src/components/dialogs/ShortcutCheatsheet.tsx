@@ -4,6 +4,7 @@ import { X, Keyboard } from "lucide-react";
 import { useAllCommands } from "@/stores/commands";
 import { useKeymap, effectiveKey } from "@/stores/keymap";
 import { displayKey } from "@/lib/keyDisplay";
+import { commandLabel, commandCategory } from "@/lib/commands";
 
 /**
  * 단축키 치트시트 (F1) — 카테고리별 command 단축키(리바인드 반영) +
@@ -33,13 +34,14 @@ export function ShortcutCheatsheet({ onClose }: { onClose: () => void }) {
   const all = useAllCommands();
   const bindings = useKeymap((s) => s.bindings);
 
-  // 카테고리 → [label, key] (키 있는 command 만, 등록 순서 유지).
+  // 카테고리 → [label, key] (키 있는 command 만, 등록 순서 유지). 라벨/카테고리는
+  // 렌더 시 t() 해석 — 언어 전환 즉시 반영.
   const byCategory = new Map<string, Array<{ label: string; key: string }>>();
   for (const cmd of all) {
     const key = effectiveKey(cmd.id, bindings, cmd.defaultKey);
     if (!key) continue;
     const list = byCategory.get(cmd.category) ?? [];
-    list.push({ label: cmd.label, key });
+    list.push({ label: commandLabel(cmd, t), key });
     byCategory.set(cmd.category, list);
   }
 
@@ -80,7 +82,7 @@ export function ShortcutCheatsheet({ onClose }: { onClose: () => void }) {
                 ))}
               </Section>
               {[...byCategory.entries()].map(([category, cmds]) => (
-                <Section key={category} title={category}>
+                <Section key={category} title={commandCategory(category, t)}>
                   {cmds.map((c) => (
                     <Row key={c.label} label={c.label} keys={c.key} />
                   ))}

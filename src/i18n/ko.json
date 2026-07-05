@@ -462,7 +462,22 @@
     "density": "목록 밀도",
     "densityHint": "파일 목록 행 높이. Compact 는 더 많이 표시됩니다.",
     "densityNormal": "보통",
-    "densityCompact": "좁게"
+    "densityCompact": "좁게",
+    "keymap": {
+      "search": "명령 또는 키 검색…",
+      "restoreDefaults": "기본값 복원",
+      "restoreConfirm": "모든 키바인딩을 기본값으로 되돌릴까요?",
+      "restoreTitle": "모든 키바인딩 기본값 복원",
+      "colCommand": "명령",
+      "colCategory": "분류",
+      "colKey": "키",
+      "colActions": "동작",
+      "none": "(없음)",
+      "customized": "사용자 지정 (기본값 아님)",
+      "edit": "편집",
+      "reset": "초기화",
+      "pressKey": "키를 누르세요…"
+    }
   },
   "toast": {
     "renameSelectOne": "이름 변경: 항목을 하나만 선택하세요",
@@ -701,5 +716,112 @@
   },
   "dnd": {
     "items": "{{count}}개"
+  },
+  "cmd": {
+    "tab": {
+      "new": "새 탭",
+      "close": "탭 닫기",
+      "next": "다음 탭",
+      "prev": "이전 탭",
+      "moveToOther": "탭을 반대 패널로 이동"
+    },
+    "nav": {
+      "back": "뒤로",
+      "forward": "앞으로",
+      "jump": "자주 가는 폴더로 이동"
+    },
+    "pane": {
+      "editPath": "경로 직접 입력",
+      "swap": "패널 교환 (왼쪽 ↔ 오른쪽)"
+    },
+    "view": {
+      "refresh": "새로고침",
+      "toggleHidden": "숨김 파일 토글",
+      "toggleSidebar": "사이드바 토글",
+      "togglePreview": "미리보기 토글",
+      "quickLook": "Quick Look (대형 미리보기)",
+      "syncBrowse": "동기화 브라우징 토글",
+      "details": "보기: 상세",
+      "grid": "보기: 그리드",
+      "tiles": "보기: 타일"
+    },
+    "sort": {
+      "byName": "이름순 정렬",
+      "bySize": "크기순 정렬",
+      "byMtime": "수정일순 정렬",
+      "byKind": "종류순 정렬",
+      "byExt": "확장자순 정렬"
+    },
+    "bookmark": {
+      "toggle": "이 폴더 북마크"
+    },
+    "filter": {
+      "focus": "필터로 포커스"
+    },
+    "search": {
+      "global": "전역 검색"
+    },
+    "select": {
+      "byPattern": "패턴으로 선택 (glob)",
+      "removeByPattern": "패턴으로 선택 해제 (glob)"
+    },
+    "shelf": {
+      "add": "선반에 담기",
+      "applyCopy": "선반: 여기로 복사",
+      "applyMove": "선반: 여기로 이동",
+      "clear": "선반: 비우기"
+    },
+    "file": {
+      "compare": "폴더 비교 (왼쪽 ↔ 오른쪽)",
+      "threeWay": "3-way 비교 (base ↔ 왼쪽 ↔ 오른쪽)",
+      "sync": "반대 패널로 동기화 (미러)",
+      "copy": "반대 패널로 복사",
+      "move": "반대 패널로 이동",
+      "rename": "이름 변경",
+      "newFolder": "새 폴더",
+      "delete": "삭제 (휴지통)",
+      "deletePerm": "영구 삭제",
+      "clipCopy": "복사",
+      "clipCut": "잘라내기",
+      "clipPaste": "붙여넣기",
+      "copyPath": "경로 복사",
+      "copyName": "이름 복사",
+      "calcSize": "폴더 크기 계산",
+      "contextMenu": "컨텍스트 메뉴 열기"
+    },
+    "settings": {
+      "open": "설정 열기"
+    },
+    "palette": {
+      "open": "커맨드 팔레트"
+    },
+    "app": {
+      "quit": "종료"
+    },
+    "edit": {
+      "undo": "마지막 작업 되돌리기",
+      "redo": "되돌린 작업 다시 실행",
+      "history": "작업 히스토리"
+    },
+    "help": {
+      "shortcuts": "키보드 단축키"
+    },
+    "ssh": {
+      "setupKeyAuth": "비밀번호 없는 로그인 설정 (이 호스트)"
+    }
+  },
+  "cmdCategory": {
+    "Tab": "탭",
+    "Navigation": "탐색",
+    "View": "보기",
+    "Sort": "정렬",
+    "Filter": "필터",
+    "Search": "검색",
+    "Select": "선택",
+    "File": "파일",
+    "Connection": "연결",
+    "Settings": "설정",
+    "Help": "도움말",
+    "User": "사용자"
   }
 }

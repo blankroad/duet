@@ -7,6 +7,7 @@ import { useAllCommands } from "@/stores/commands";
 import { useKeymap, effectiveKey } from "@/stores/keymap";
 import { fuzzyScore } from "@/lib/fuzzy";
 import { displayKey } from "@/lib/keyDisplay";
+import { commandLabel, commandCategory } from "@/lib/commands";
 import type { Command } from "@/lib/commands";
 
 /**
@@ -31,13 +32,21 @@ export function CommandPalette() {
     }
   }, [isOpen]);
 
+  // 번역된 라벨로 검색/표시 — 언어 전환 시 t 가 바뀌며 자동 재계산.
   const ranked = useMemo(() => {
     const scored = all
-      .map((c) => ({ cmd: c, score: fuzzyScore(query, c.label) }))
-      .filter((x): x is { cmd: Command; score: number } => x.score !== null);
+      .map((c) => ({
+        cmd: c,
+        label: commandLabel(c, t),
+        score: fuzzyScore(query, commandLabel(c, t)),
+      }))
+      .filter(
+        (x): x is { cmd: Command; label: string; score: number } =>
+          x.score !== null,
+      );
     scored.sort((a, b) => b.score - a.score);
-    return scored.map((x) => x.cmd);
-  }, [all, query]);
+    return scored.map((x) => ({ cmd: x.cmd, label: x.label }));
+  }, [all, query, t]);
 
   useEffect(() => {
     if (cursor >= ranked.length) setCursor(0);
@@ -71,8 +80,8 @@ export function CommandPalette() {
                   setCursor((c) => Math.max(0, c - 1));
                 } else if (e.key === "Enter") {
                   e.preventDefault();
-                  const cmd = ranked[cursor];
-                  if (cmd) execute(cmd);
+                  const item = ranked[cursor];
+                  if (item) execute(item.cmd);
                 } else if (e.key === "Escape") {
                   e.preventDefault();
                   close();
@@ -88,7 +97,7 @@ export function CommandPalette() {
                 {t("palette.noResults")}
               </div>
             ) : (
-              ranked.map((cmd, i) => {
+              ranked.map(({ cmd, label }, i) => {
                 // 리바인드된 키(effective) 표시 — 팔레트가 factory 키를 보여주면
                 // 사용자가 바꾼 단축키와 어긋난다.
                 const key = effectiveKey(cmd.id, bindings, cmd.defaultKey);
@@ -102,9 +111,9 @@ export function CommandPalette() {
                       i === cursor ? "bg-active text-fg" : "hover:bg-border"
                     }`}
                   >
-                    <span className="flex-1 truncate">{cmd.label}</span>
+                    <span className="flex-1 truncate">{label}</span>
                     <span className="shrink-0 text-meta text-fg-muted">
-                      {cmd.category}
+                      {commandCategory(cmd.category, t)}
                     </span>
                     {key && (
                       <span className="shrink-0 rounded bg-subtle px-1.5 py-0.5 text-meta text-fg-muted">

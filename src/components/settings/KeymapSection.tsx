@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useAllCommands } from "@/stores/commands";
 import { useKeymap, setKeymap, unsetKeymap, resetKeymap } from "@/stores/keymap";
 import { formatKeyEvent } from "@/lib/keyEvent";
 import { displayKey } from "@/lib/keyDisplay";
+import { commandLabel, commandCategory } from "@/lib/commands";
 import { confirm as tauriConfirm } from "@tauri-apps/plugin-dialog";
 import { AlertTriangle, Search, RotateCcw } from "lucide-react";
 
 export function KeymapSection() {
+  const { t } = useTranslation();
   const all = useAllCommands();
   const bindings = useKeymap((s) => s.bindings);
   const [editing, setEditing] = useState<string | null>(null);
@@ -23,8 +26,11 @@ export function KeymapSection() {
   const q = query.trim().toLowerCase();
   const shown = q
     ? all.filter((c) => {
-        const key = bindings.find((b) => b.command_id === c.id)?.key ?? c.defaultKey ?? "";
+        const key =
+          bindings.find((b) => b.command_id === c.id)?.key ?? c.defaultKey ?? "";
+        // 번역 라벨 + 원문 라벨 둘 다 매칭 — 한국어 UI 에서 영어 검색도 동작.
         return (
+          commandLabel(c, t).toLowerCase().includes(q) ||
           c.label.toLowerCase().includes(q) ||
           c.category.toLowerCase().includes(q) ||
           c.id.toLowerCase().includes(q) ||
@@ -37,35 +43,38 @@ export function KeymapSection() {
     <div className="space-y-1">
       <div className="flex items-center gap-2 px-2 pb-2">
         <div className="relative flex-1">
-          <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-fg-muted" />
+          <Search
+            size={12}
+            className="absolute left-2 top-1/2 -translate-y-1/2 text-fg-muted"
+          />
           <input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search commands or keys…"
+            placeholder={t("settings.keymap.search")}
             className="w-full rounded border border-border bg-subtle py-1 pl-7 pr-2 text-base focus:border-accent focus:outline-none"
           />
         </div>
         <button
           type="button"
           onClick={() => {
-            void tauriConfirm("Reset all keybindings to defaults?", {
-              title: "Restore defaults",
+            void tauriConfirm(t("settings.keymap.restoreConfirm"), {
+              title: t("settings.keymap.restoreDefaults"),
             }).then((ok) => {
               if (ok) void resetKeymap();
             });
           }}
           className="flex items-center gap-1 rounded border border-border px-2 py-1 text-meta text-fg-muted hover:bg-border hover:text-fg"
-          title="Restore all default keybindings"
+          title={t("settings.keymap.restoreTitle")}
         >
-          <RotateCcw size={12} /> Restore defaults
+          <RotateCcw size={12} /> {t("settings.keymap.restoreDefaults")}
         </button>
       </div>
       <div className="grid grid-cols-[1fr_5rem_8rem_5rem] gap-2 border-b border-border px-2 py-1 text-meta text-fg-muted">
-        <div>Command</div>
-        <div>Category</div>
-        <div>Key</div>
-        <div>Actions</div>
+        <div>{t("settings.keymap.colCommand")}</div>
+        <div>{t("settings.keymap.colCategory")}</div>
+        <div>{t("settings.keymap.colKey")}</div>
+        <div>{t("settings.keymap.colActions")}</div>
       </div>
       {shown.map((cmd) => {
         const bound = bindings.find((b) => b.command_id === cmd.id);
@@ -76,8 +85,12 @@ export function KeymapSection() {
             key={cmd.id}
             className="grid grid-cols-[1fr_5rem_8rem_5rem] items-center gap-2 px-2 py-0.5 text-base hover:bg-subtle"
           >
-            <div className="truncate" title={cmd.id}>{cmd.label}</div>
-            <div className="text-meta text-fg-muted">{cmd.category}</div>
+            <div className="truncate" title={cmd.id}>
+              {commandLabel(cmd, t)}
+            </div>
+            <div className="text-meta text-fg-muted">
+              {commandCategory(cmd.category, t)}
+            </div>
             <div>
               {editing === cmd.id ? (
                 <KeyCaptureInput
@@ -89,13 +102,24 @@ export function KeymapSection() {
                 />
               ) : (
                 <span className="flex items-center gap-1 font-mono text-meta">
-                  {key ? displayKey(key) : <span className="text-fg-muted">(none)</span>}
+                  {key ? (
+                    displayKey(key)
+                  ) : (
+                    <span className="text-fg-muted">
+                      {t("settings.keymap.none")}
+                    </span>
+                  )}
                   {bound && (
-                    <span className="text-accent" title="Customized (not default)">
+                    <span
+                      className="text-accent"
+                      title={t("settings.keymap.customized")}
+                    >
                       ●
                     </span>
                   )}
-                  {conflict && <AlertTriangle size={11} className="text-danger" />}
+                  {conflict && (
+                    <AlertTriangle size={11} className="text-danger" />
+                  )}
                 </span>
               )}
             </div>
@@ -105,7 +129,7 @@ export function KeymapSection() {
                 onClick={() => setEditing(cmd.id)}
                 className="rounded px-1.5 py-0.5 text-fg-muted hover:bg-border hover:text-fg"
               >
-                Edit
+                {t("settings.keymap.edit")}
               </button>
               {bound && (
                 <button
@@ -113,7 +137,7 @@ export function KeymapSection() {
                   onClick={() => void unsetKeymap(bound.key)}
                   className="rounded px-1.5 py-0.5 text-fg-muted hover:bg-border hover:text-fg"
                 >
-                  Reset
+                  {t("settings.keymap.reset")}
                 </button>
               )}
             </div>
@@ -131,6 +155,7 @@ function KeyCaptureInput({
   onCancel: () => void;
   onCapture: (key: string) => void;
 }) {
+  const { t } = useTranslation();
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => {
     ref.current?.focus();
@@ -141,7 +166,7 @@ function KeyCaptureInput({
       type="text"
       readOnly
       value=""
-      placeholder="Press key…"
+      placeholder={t("settings.keymap.pressKey")}
       onKeyDown={(e) => {
         if (e.key === "Escape") {
           e.preventDefault();

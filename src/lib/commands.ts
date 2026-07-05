@@ -12,6 +12,25 @@ export type CommandCategory =
   | "Help"
   | "User";
 
+/**
+ * command 라벨/카테고리의 표시 해석 — builtin 은 `cmd.<id>` i18n 키로 번역,
+ * 동적 command(호스트/북마크 등, 키 없음)는 raw label 로 폴백. 팔레트/키맵/
+ * 치트시트가 공유 — command 객체는 언어와 무관하게 재빌드 불필요.
+ */
+export function commandLabel(
+  cmd: Command,
+  t: (key: string, opts: { defaultValue: string }) => string,
+): string {
+  return t(`cmd.${cmd.id}`, { defaultValue: cmd.label });
+}
+
+export function commandCategory(
+  category: CommandCategory | string,
+  t: (key: string, opts: { defaultValue: string }) => string,
+): string {
+  return t(`cmdCategory.${category}`, { defaultValue: String(category) });
+}
+
 export interface Command {
   id: string;
   label: string;
