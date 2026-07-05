@@ -48,14 +48,31 @@ commands → services → core → fs → platform
 
 - SSH agent (`SSH_AUTH_SOCK`) 또는 `~/.ssh/config` IdentityFile 우선 — 가능한 비밀번호 사용 자체를 회피
 - `tracing` 로그에 자격증명 출력 금지 (`Debug` derive 시 주의)
-- 자격증명을 디스크에 저장하려면 OS keychain (`keyring` crate) 사용
+- 자격증명을 디스크에 저장하려면 OS keychain (`keyring` crate) **또는 아래 age vault**
+
+**비밀 저장소 age vault (2026-07 예외, 사용자 승인):** 저장된 호스트 비밀번호는 OS
+keychain 대신 마스터 비밀번호로 암호화한 `<config_dir>/duet/secrets.age` 파일에 보관한다
+(age passphrase: scrypt → ChaCha20-Poly1305, 내부 JSON `{alias: password}`,
+파일 권한 `0o600`). 평문은 메모리에만·로그 금지·drop 시 zeroize 노력.
+- 이유: OS keychain 은 플랫폼별 편차(Linux Secret Service 부재 등)가 커 이식성이
+  낮다. age vault 는 모든 OS 에서 동일하게 동작하고 마스터 비번 1회 입력으로 충분.
+- `secrets.age` 유출돼도 마스터 비번 없이는 평문 복구 불가.
+- `keyring` crate 는 이 결정으로 미사용이라 의존성에서 제거함.
+- 마스터 비번·복호화 map 은 unlock 세션 동안 메모리 상주(best-effort zeroize) —
+  강한 보장은 후속(`secrecy`/`zeroize` crate).
 
 **비밀번호 IPC 전달 (2026-05 완화):** 사용자가 dialog 의 password input 에 직접 입력한 경우는 IPC 로 backend 에 전달 가능. 단 다음 모두 충족:
 - input 은 `<input type="password">` (DOM 표시 마스킹)
 - frontend store / localStorage / sessionStorage 에 저장 절대 금지 — 컴포넌트 local state 에만, command 호출 직후 clear
 - backend command 인자 외 어디에도 영구화 금지, drop 시 zeroize 노력 (러스트 소멸 시점)
 - 로그 출력 금지 (위 § 동일)
-- OS-native secure prompt 가 불가능한 환경 (web/embed 등) 의 fallback 으로 정의 — 가능하면 keyring 캐시 후 재사용
+- OS-native secure prompt 가 불가능한 환경 (web/embed 등) 의 fallback 으로 정의 — 가능하면 age vault 에 저장 후 **백엔드에서 꺼내 재사용**(평문을 프론트로 되돌리지 않음, 아래 참조)
+
+**저장된 비밀번호 재사용은 백엔드-only (2026-07):** vault 에 저장된 호스트 비밀번호로
+접속할 때, 평문을 `vault_get` 으로 프론트에 반환해 입력칸에 prefill 하지 않는다. 프론트는
+"이 호스트로 접속" 의도만 보내고 backend 가 vault 에서 비번을 꺼내 직접 사용한다 — 평문이
+webview(렌더러) 메모리·DOM 에 존재하는 노출면을 없앤다. `vault_set`(사용자가 새로 입력)은
+§5 완화대로 여전히 프론트→백엔드 한 방향 허용.
 
 이 완화는 "프론트엔드로 절대 전달 안 함" 의 원칙을 약화하지만, 실용성을 위한 의도된 trade-off. 이전 strict 정책으로 회귀 가능 (Task 7b: OS-native dialog).
 
