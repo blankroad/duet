@@ -172,6 +172,16 @@ impl SecretVault {
         tokio::fs::write(&tmp, encrypted)
             .await
             .map_err(DuetError::from)?;
+        // §5 방어심층: 비밀 저장소는 소유자만 읽기(0o600). age 암호화라 유출돼도 평문은
+        // 아니지만, 파일 권한으로 노출면 자체를 줄인다. rename 전 tmp 에 설정해 넓은
+        // 권한으로 잠시라도 노출되지 않게 한다.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            tokio::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))
+                .await
+                .map_err(DuetError::from)?;
+        }
         tokio::fs::rename(&tmp, &self.path)
             .await
             .map_err(DuetError::from)?;

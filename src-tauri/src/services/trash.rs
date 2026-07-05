@@ -34,7 +34,9 @@ pub fn remote_trash_path_for(base: &Path, batch_id: &str, original_abs: &Path) -
     let mut out = crate::fs::posix_join(base, batch_id);
     let s = original_abs.to_string_lossy();
     for seg in s.split('/') {
-        if seg.is_empty() || seg == "." {
+        // `..` 를 걸러 trash 대상이 `<base>/<batch>` 밖으로 탈출(경로 traversal)하는 것을
+        // 방지 — 서버 `mv` 가 `..` 를 해석해 다른 위치를 덮어쓰는 것을 막는 방어심층.
+        if seg.is_empty() || seg == "." || seg == ".." {
             continue;
         }
         out = crate::fs::posix_join(&out, seg);
@@ -62,6 +64,16 @@ mod tests {
             p,
             PathBuf::from("/home/u/.duet-trash/BATCH/etc/foo/bar.txt")
         );
+    }
+
+    #[test]
+    fn dotdot_segments_cannot_escape_batch_dir() {
+        // 경로 traversal 방지 — `..` 세그먼트를 걸러 trash 대상이 batch dir 밖으로
+        // 못 나가게 한다. (서버 `mv` 가 `..` 를 해석해 다른 위치를 덮어쓰는 것 차단.)
+        let base = Path::new("/home/u/.duet-trash");
+        let p = remote_trash_path_for(base, "B", Path::new("/etc/../../root/x"));
+        assert_eq!(p, PathBuf::from("/home/u/.duet-trash/B/etc/root/x"));
+        assert!(!p.to_string_lossy().contains(".."));
     }
 
     #[test]
