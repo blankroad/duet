@@ -978,7 +978,8 @@ function App() {
       // 삭제는 이제 백그라운드 task — 완료 시 useTaskEvents 가 affected_locations 로
       // refresh. 여기선 enqueue 결과만 확인(즉시 refresh 하면 아직 삭제 전이라 stale).
       const r = await commands.fsDeleteExecute(plan, word);
-      if (r.status === "ok") rememberElevatable(r.data, { op: "delete", plan });
+      if (r.status === "ok")
+        rememberElevatable(r.data, { op: "delete", plan, confirmWord: word });
       else
         showToast(
           i18n.t("toast.deleteFailed", { err: formatErr(r.error) }),
@@ -1135,7 +1136,7 @@ function App() {
       return commands.fsCopyExecuteElevated(p.plan, p.policy);
     if (p.op === "move")
       return commands.fsMoveExecuteElevated(p.plan, p.policy);
-    return commands.fsDeleteExecuteElevated(p.plan);
+    return commands.fsDeleteExecuteElevated(p.plan, p.confirmWord);
   }, []);
 
   /** 보호 경로 copy/move/delete 권한 실패 → 로컬 UAC 승격 재시도. */
@@ -1178,7 +1179,7 @@ function App() {
       return commands.fsCopyExecuteSudo(p.plan, p.policy, password);
     if (p.op === "move")
       return commands.fsMoveExecuteSudo(p.plan, p.policy, password);
-    return commands.fsDeleteExecuteSudo(p.plan, password);
+    return commands.fsDeleteExecuteSudo(p.plan, password, p.confirmWord);
   }, []);
 
   /** 원격 sudo 결과 처리 — 비번 필요/오류면 비번 다이얼로그, 성공이면 토스트+새로고침. */

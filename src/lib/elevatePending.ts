@@ -15,7 +15,9 @@ import type {
 export type ElevatablePlan =
   | { op: "copy"; plan: CopyPlan; policy: ConflictPolicy }
   | { op: "move"; plan: MovePlan; policy: ConflictPolicy }
-  | { op: "delete"; plan: DeletePlan };
+  // confirmWord: 영구삭제(§3) 단어-타이핑 확인. 승격 재시도 시 백엔드가 재검증하므로
+  // 최초 삭제에서 사용자가 입력한 값을 함께 보관한다(휴지통 삭제는 빈 문자열).
+  | { op: "delete"; plan: DeletePlan; confirmWord: string };
 
 const pending = new Map<string, ElevatablePlan>();
 

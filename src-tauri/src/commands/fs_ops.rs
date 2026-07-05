@@ -498,6 +498,7 @@ pub async fn fs_move_execute_elevated(
 #[specta::specta]
 pub async fn fs_delete_execute_elevated(
     plan: DeletePlan,
+    confirm_word: String,
     settings: tauri::State<'_, Arc<SettingsStore>>,
     journal: tauri::State<'_, Arc<Journal>>,
     app: tauri::AppHandle,
@@ -512,6 +513,11 @@ pub async fn fs_delete_execute_elevated(
         DeleteMode::Trash => ElevatedOp::Trash,
         DeleteMode::Permanent => {
             if !settings.get().await.permanent_delete_enabled {
+                return Err(DuetError::NotPermitted);
+            }
+            // §3: 영구삭제 단어-타이핑 확인을 승격(UAC) 경로에서도 강제 — 기본 경로
+            // `delete_execute` 와 동일 게이트. command 직접 호출로도 우회 불가.
+            if confirm_word != crate::core::ops::PERMANENT_DELETE_CONFIRM_WORD {
                 return Err(DuetError::NotPermitted);
             }
             ElevatedOp::Delete
@@ -663,6 +669,7 @@ pub async fn fs_move_execute_sudo(
 pub async fn fs_delete_execute_sudo(
     plan: DeletePlan,
     password: Option<String>,
+    confirm_word: String,
     pool: tauri::State<'_, Arc<ConnectionPool>>,
     settings: tauri::State<'_, Arc<SettingsStore>>,
     journal: tauri::State<'_, Arc<Journal>>,
@@ -678,6 +685,10 @@ pub async fn fs_delete_execute_sudo(
         DeleteMode::Trash => (ElevatedOp::Move, false),
         DeleteMode::Permanent => {
             if !settings.get().await.permanent_delete_enabled {
+                return Err(DuetError::NotPermitted);
+            }
+            // §3: 영구삭제 단어-타이핑 확인을 sudo 경로에서도 강제.
+            if confirm_word != crate::core::ops::PERMANENT_DELETE_CONFIRM_WORD {
                 return Err(DuetError::NotPermitted);
             }
             (ElevatedOp::Delete, true)
