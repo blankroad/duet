@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { commands } from "@/types/bindings";
 import type { Entry, Location } from "@/types/bindings";
 import { EntryIcon } from "@/lib/fileIcon";
@@ -16,12 +17,13 @@ export function PreviewInspector({
   entry: Entry;
   location: Location;
 }) {
+  const { t } = useTranslation();
   const folderCount = useFolderCount(entry.kind === "dir" ? location : null);
   const sizeRow =
     entry.kind === "dir"
       ? folderCount == null
-        ? "Counting…"
-        : `${folderCount} item${folderCount === 1 ? "" : "s"}`
+        ? t("preview.counting")
+        : t("preview.itemCount", { count: folderCount })
       : entry.size != null
         ? formatSize(entry.size)
         : "—";
@@ -42,11 +44,14 @@ export function PreviewInspector({
         </span>
       </div>
       <dl className="grid grid-cols-[5rem_1fr] gap-x-2 gap-y-1 text-meta">
-        <Row k="Kind" v={kindLabel(entry)} />
-        <Row k={entry.kind === "dir" ? "Items" : "Size"} v={sizeRow} />
-        <Row k="Modified" v={formatFullDate(entry.modified_ms)} />
-        <Row k="Perms" v={formatPerms(entry.permissions)} mono />
-        <Row k="Where" v={String(location.path)} mono titled />
+        <Row k={t("preview.kind")} v={kindLabel(entry)} />
+        <Row
+          k={entry.kind === "dir" ? t("preview.items") : t("preview.size")}
+          v={sizeRow}
+        />
+        <Row k={t("preview.modified")} v={formatFullDate(entry.modified_ms)} />
+        <Row k={t("preview.perms")} v={formatPerms(entry.permissions)} mono />
+        <Row k={t("preview.where")} v={String(location.path)} mono titled />
       </dl>
     </div>
   );

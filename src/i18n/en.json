@@ -598,5 +598,112 @@
       "connecting": "connecting",
       "disconnected": "disconnected"
     }
+  },
+  "tasks": {
+    "count": "{{count}} tasks"
+  },
+  "statusbar": {
+    "selected": "{{count}} selected"
+  },
+  "search": {
+    "namePlaceholder": "Search filenames…",
+    "contentPlaceholder": "Search file contents…",
+    "modeName": "Name",
+    "modeNameTitle": "Search by filename",
+    "modeText": "Text",
+    "modeTextTitle": "Search file contents (grep)",
+    "reindex": "Reindex",
+    "reindexTitle": "Reindex (refresh file-name index)",
+    "indexingDrive": "indexing drive… {{n}}",
+    "indexing": "indexing…",
+    "minChars": "min 2 chars",
+    "hits": "{{count}} hits",
+    "close": "Close search",
+    "truncated": "showing 500 — refine query for more"
+  },
+  "launcher": {
+    "addApp": "Add application",
+    "launch": "Launch",
+    "editArgs": "Edit arguments…",
+    "renameLabel": "Rename label…",
+    "displayNamePrompt": "Display name (label shown here)",
+    "moveOutOfFolder": "Move out of folder",
+    "renameFolder": "Rename folder…",
+    "folderNamePrompt": "Folder name",
+    "dissolveFolder": "Dissolve folder",
+    "doubleClickRename": "Double-click to rename"
+  },
+  "tags": {
+    "clear": "clear"
+  },
+  "jumper": {
+    "placeholder": "Jump to a frequent folder…",
+    "noMatch": "No matching folders",
+    "noHistory": "No history yet",
+    "desc": "Frecency jumper",
+    "title": "Jump to folder"
+  },
+  "palette": {
+    "placeholder": "Type a command…",
+    "noResults": "No results",
+    "title": "Command palette"
+  },
+  "pathbar": {
+    "back": "Back",
+    "backTitle": "Back (Alt+←)",
+    "forward": "Forward",
+    "forwardTitle": "Forward (Alt+→)",
+    "up": "Up",
+    "archiveReadOnlyTitle": "{{name}} (read-only)",
+    "updateArchive": "Update archive",
+    "updateArchiveTitle": "Repack your edits back into the archive (previous version kept as .bak — undoable)",
+    "readOnly": "read-only",
+    "pathPlaceholder": "Type a path and press Enter…",
+    "goToPath": "Go to path",
+    "newTabTitle": "New tab (Ctrl+T)",
+    "editPath": "Edit path",
+    "editPathTitle": "Edit path / go to location (Ctrl+L)",
+    "favorites": "Favorites",
+    "favoritesTitle": "Favorites — go to a saved folder",
+    "noFavorites": "No favorites yet",
+    "addThisFolder": "Add this folder",
+    "removeThisFolder": "Remove this folder",
+    "bookmarkThisFolder": "Bookmark this folder",
+    "bookmarkTitle": "Bookmark this folder (Ctrl+D)",
+    "bookmarkedTitle": "Bookmarked (Ctrl+D)",
+    "swapPanes": "Swap panels (left ↔ right)",
+    "swapPanesTitle": "Swap panels (left ↔ right) — Ctrl+U"
+  },
+  "tabs": {
+    "newTab": "New tab",
+    "closeTab": "Close tab"
+  },
+  "filter": {
+    "placeholder": "Filter…",
+    "clear": "Clear filter"
+  },
+  "preview": {
+    "quickLook": "Quick Look",
+    "closeQuickLook": "Close Quick Look (Esc)",
+    "closeQuickLookTitle": "Close (Esc / Space)",
+    "info": "Info",
+    "close": "Close preview",
+    "closeTitle": "Close preview (F11)",
+    "selectFile": "Select a file to preview",
+    "selectItem": "Select a file or folder",
+    "loading": "Loading…",
+    "counting": "Counting…",
+    "itemCount_one": "{{count}} item",
+    "itemCount_other": "{{count}} items",
+    "kind": "Kind",
+    "items": "Items",
+    "size": "Size",
+    "modified": "Modified",
+    "perms": "Perms",
+    "where": "Where",
+    "truncated": "Preview truncated — file is larger"
+  },
+  "dnd": {
+    "items": "{{count}} items"
   }
 }

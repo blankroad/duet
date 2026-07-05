@@ -1,4 +1,5 @@
 import clsx from "clsx";
+import { useTranslation } from "react-i18next";
 import { useTags, allTagNames } from "@/stores/tags";
 import { useTagFilter } from "@/stores/tagFilter";
 
@@ -7,6 +8,7 @@ import { useTagFilter } from "@/stores/tagFilter";
  * 를 좁힌다. 태그가 하나도 없으면 렌더 안 함.
  */
 export function TagBar() {
+  const { t: tr } = useTranslation();
   const byKey = useTags((s) => s.byKey);
   const active = useTagFilter((s) => s.active);
   const toggle = useTagFilter((s) => s.toggle);
@@ -41,7 +43,7 @@ export function TagBar() {
           onClick={clear}
           className="ml-auto text-meta text-fg-muted hover:text-fg"
         >
-          clear
+          {tr("tags.clear")}
         </button>
       )}
     </div>

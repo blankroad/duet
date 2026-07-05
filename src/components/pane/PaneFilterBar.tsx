@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { Search, X } from "lucide-react";
 import { usePanes, activeTab, type PaneId } from "@/stores/panes";
 
@@ -11,6 +12,7 @@ import { usePanes, activeTab, type PaneId } from "@/stores/panes";
  * - Enter: filterFocused=false (필터 텍스트 유지)
  */
 export function PaneFilterBar({ id }: { id: PaneId }) {
+  const { t } = useTranslation();
   const filter = usePanes((s) => activeTab(s, id).filter);
   const filterFocused = usePanes((s) => activeTab(s, id).filterFocused);
   const setFilter = usePanes((s) => s.setFilter);
@@ -43,7 +45,7 @@ export function PaneFilterBar({ id }: { id: PaneId }) {
             setFilterFocused(id, false);
           }
         }}
-        placeholder="Filter…"
+        placeholder={t("filter.placeholder")}
         className="flex-1 bg-transparent font-mono text-base focus:outline-none"
       />
       <button
@@ -53,7 +55,7 @@ export function PaneFilterBar({ id }: { id: PaneId }) {
           setFilterFocused(id, false);
         }}
         className="rounded p-0.5 text-fg-muted hover:bg-border"
-        aria-label="Clear filter"
+        aria-label={t("filter.clear")}
       >
         <X size={11} />
       </button>

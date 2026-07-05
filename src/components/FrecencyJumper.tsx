@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Compass } from "lucide-react";
 import { useFrecency } from "@/stores/frecency";
@@ -26,6 +27,7 @@ export function FrecencyJumper({
 }: {
   onOpenLocation: (location: Location, pane: PaneId) => void;
 }) {
+  const { t } = useTranslation();
   const isOpen = useFrecency((s) => s.isOpen);
   const close = useFrecency((s) => s.close);
   const [query, setQuery] = useState("");
@@ -37,15 +39,15 @@ export function FrecencyJumper({
     if (isOpen) {
       setQuery("");
       setCursor(0);
-      const t = setTimeout(() => inputRef.current?.focus(), 0);
-      return () => clearTimeout(t);
+      const timer = setTimeout(() => inputRef.current?.focus(), 0);
+      return () => clearTimeout(timer);
     }
   }, [isOpen]);
 
   // 질의 → 백엔드 frecency 조회 (150ms 디바운스). 열려 있을 때만.
   useEffect(() => {
     if (!isOpen) return;
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       void commands.frecencyQuery(query, 50).then((r) => {
         if (r.status === "ok") {
           setResults(r.data);
@@ -53,7 +55,7 @@ export function FrecencyJumper({
         }
       });
     }, 150);
-    return () => clearTimeout(t);
+    return () => clearTimeout(timer);
   }, [isOpen, query]);
 
   if (!isOpen) return null;
@@ -91,14 +93,14 @@ export function FrecencyJumper({
                   close();
                 }
               }}
-              placeholder="Jump to a frequent folder…"
+              placeholder={t("jumper.placeholder")}
               className="flex-1 bg-transparent font-mono text-base focus:outline-none"
             />
           </div>
           <div className="max-h-80 overflow-auto py-1">
             {results.length === 0 ? (
               <div className="px-3 py-2 text-meta text-fg-muted">
-                {query ? "No matching folders" : "No history yet"}
+                {query ? t("jumper.noMatch") : t("jumper.noHistory")}
               </div>
             ) : (
               results.map((entry, i) => (
@@ -122,9 +124,9 @@ export function FrecencyJumper({
             )}
           </div>
           <Dialog.Description className="sr-only">
-            Frecency jumper
+            {t("jumper.desc")}
           </Dialog.Description>
-          <Dialog.Title className="sr-only">Jump to folder</Dialog.Title>
+          <Dialog.Title className="sr-only">{t("jumper.title")}</Dialog.Title>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   ArrowLeft,
   ArrowRight,
@@ -97,6 +98,7 @@ export function PathBar({
   editActive,
   onNewTab,
 }: PathBarProps) {
+  const { t } = useTranslation();
   const isLocal = location.source.kind === "local";
   const sourceTitle = useHostLabel(location.source);
   const winLocal = isLocal && platform() === "windows";
@@ -177,7 +179,7 @@ export function PathBar({
 
     const list: MenuEntry[] =
       favs.length === 0
-        ? [{ id: "empty", label: "No favorites yet", disabled: true }]
+        ? [{ id: "empty", label: t("pathbar.noFavorites"), disabled: true }]
         : favs.map((f) => ({
             id: f.id,
             label: f.name,
@@ -189,7 +191,9 @@ export function PathBar({
     const entries: MenuEntry[] = [
       {
         id: "add",
-        label: bookmarked ? "Remove this folder" : "Add this folder",
+        label: bookmarked
+          ? t("pathbar.removeThisFolder")
+          : t("pathbar.addThisFolder"),
         icon: <Star size={13} />,
         onSelect: toggleBookmark,
       },
@@ -206,8 +210,8 @@ export function PathBar({
         onClick={onBack}
         disabled={!canBack}
         className="rounded p-1 text-fg-muted hover:bg-border hover:text-fg disabled:opacity-30"
-        aria-label="Back"
-        title="Back (Alt+←)"
+        aria-label={t("pathbar.back")}
+        title={t("pathbar.backTitle")}
       >
         <ArrowLeft size={14} />
       </button>
@@ -216,8 +220,8 @@ export function PathBar({
         onClick={onForward}
         disabled={!canForward}
         className="rounded p-1 text-fg-muted hover:bg-border hover:text-fg disabled:opacity-30"
-        aria-label="Forward"
-        title="Forward (Alt+→)"
+        aria-label={t("pathbar.forward")}
+        title={t("pathbar.forwardTitle")}
       >
         <ArrowRight size={14} />
       </button>
@@ -225,7 +229,7 @@ export function PathBar({
         onClick={onUp}
         className="rounded p-1 hover:bg-border"
         disabled={!onUp}
-        aria-label="Up"
+        aria-label={t("pathbar.up")}
       >
         <ArrowUp size={14} />
       </button>
@@ -235,7 +239,7 @@ export function PathBar({
           <button
             onClick={() => onSegmentClick?.(archive.root)}
             className="rounded px-1 hover:bg-border"
-            title={`${archive.label} (read-only)`}
+            title={t("pathbar.archiveReadOnlyTitle", { name: archive.label })}
           >
             {archive.label}
           </button>
@@ -254,13 +258,13 @@ export function PathBar({
             <button
               onClick={onUpdateArchive}
               className="ml-1 shrink-0 rounded bg-accent/10 px-1.5 text-meta text-accent hover:bg-accent/20"
-              title="Repack your edits back into the archive (previous version kept as .bak — undoable)"
+              title={t("pathbar.updateArchiveTitle")}
             >
-              Update archive
+              {t("pathbar.updateArchive")}
             </button>
           ) : (
             <span className="ml-1 shrink-0 rounded bg-subtle px-1 text-meta text-fg-muted">
-              read-only
+              {t("pathbar.readOnly")}
             </span>
           )}
         </div>
@@ -280,8 +284,8 @@ export function PathBar({
           }}
           onBlur={() => setEditing(false)}
           spellCheck={false}
-          placeholder="Type a path and press Enter…"
-          aria-label="Go to path"
+          placeholder={t("pathbar.pathPlaceholder")}
+          aria-label={t("pathbar.goToPath")}
           className="ml-2 min-w-0 flex-1 rounded border border-accent bg-subtle px-2 py-0.5 font-mono text-base focus:outline-none"
         />
       ) : (
@@ -323,8 +327,8 @@ export function PathBar({
           <button
             onClick={onNewTab}
             className="rounded p-1 hover:bg-border"
-            aria-label="New tab"
-            title="New tab (Ctrl+T)"
+            aria-label={t("tabs.newTab")}
+            title={t("pathbar.newTabTitle")}
           >
             <Plus size={14} className="text-fg-muted" />
           </button>
@@ -333,8 +337,8 @@ export function PathBar({
           <button
             onClick={startEdit}
             className="rounded p-1 hover:bg-border"
-            aria-label="Edit path"
-            title="Edit path / go to location (Ctrl+L)"
+            aria-label={t("pathbar.editPath")}
+            title={t("pathbar.editPathTitle")}
           >
             <Pencil size={13} className="text-fg-muted" />
           </button>
@@ -344,8 +348,8 @@ export function PathBar({
           <button
             onClick={openFavorites}
             className="rounded p-1 hover:bg-border"
-            aria-label="Favorites"
-            title="Favorites — go to a saved folder"
+            aria-label={t("pathbar.favorites")}
+            title={t("pathbar.favoritesTitle")}
           >
             <BookMarked size={14} className="text-fg-muted" />
           </button>
@@ -355,11 +359,15 @@ export function PathBar({
           <button
             onClick={toggleBookmark}
             className="rounded p-1 hover:bg-border"
-            aria-label={bookmarked ? "Remove bookmark" : "Bookmark this folder"}
+            aria-label={
+              bookmarked
+                ? t("sidebar.removeBookmark")
+                : t("pathbar.bookmarkThisFolder")
+            }
             title={
               bookmarked
-                ? "Bookmarked (Ctrl+D)"
-                : "Bookmark this folder (Ctrl+D)"
+                ? t("pathbar.bookmarkedTitle")
+                : t("pathbar.bookmarkTitle")
             }
           >
             <Star
@@ -372,7 +380,7 @@ export function PathBar({
         <button
           onClick={onRefresh}
           className="rounded p-1 hover:bg-border"
-          aria-label="Refresh"
+          aria-label={t("menu.refresh")}
         >
           <RotateCw size={14} />
         </button>

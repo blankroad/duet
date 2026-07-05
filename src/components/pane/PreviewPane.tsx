@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 import { commands } from "@/types/bindings";
 import type { Entry, Location, PreviewData } from "@/types/bindings";
@@ -91,9 +92,11 @@ export function usePreviewLoad(target: PreviewTarget | null): LoadState {
 }
 
 function PreviewBody({ state }: { state: LoadState }) {
+  const { t } = useTranslation();
   if (state.phase === "empty")
-    return <Centered>Select a file to preview</Centered>;
-  if (state.phase === "loading") return <Centered>Loading…</Centered>;
+    return <Centered>{t("preview.selectFile")}</Centered>;
+  if (state.phase === "loading")
+    return <Centered>{t("preview.loading")}</Centered>;
   if (state.phase === "error")
     return <Centered tone="danger">{state.message}</Centered>;
   return (
@@ -111,6 +114,7 @@ function PreviewBody({ state }: { state: LoadState }) {
  * 폴더면 속성만. 파일 읽기는 백엔드 커맨드 경유 (CLAUDE.md §1).
  */
 export function PreviewPane() {
+  const { t } = useTranslation();
   const togglePreview = useUI((s) => s.togglePreview);
   const hover = usePreviewHover((s) => s.target);
   const cursorKey = usePanes(cursorPreviewDep);
@@ -123,11 +127,13 @@ export function PreviewPane() {
   return (
     <div className="flex w-80 shrink-0 flex-col overflow-hidden rounded-panel border border-border">
       <div className="flex h-8 shrink-0 items-center justify-between border-b border-border px-2">
-        <span className="truncate text-meta text-fg-muted">Info</span>
+        <span className="truncate text-meta text-fg-muted">
+          {t("preview.info")}
+        </span>
         <button
           type="button"
-          title="Close preview (F11)"
-          aria-label="Close preview"
+          title={t("preview.closeTitle")}
+          aria-label={t("preview.close")}
           onClick={() => togglePreview()}
           className="flex h-5 w-5 items-center justify-center rounded-panel text-fg-muted hover:bg-subtle hover:text-fg"
         >
@@ -136,7 +142,7 @@ export function PreviewPane() {
       </div>
       <div className="flex-1 min-h-0 overflow-auto">
         {!target ? (
-          <Centered>Select a file or folder</Centered>
+          <Centered>{t("preview.selectItem")}</Centered>
         ) : (
           <>
             <PreviewInspector entry={target.entry} location={target.location} />

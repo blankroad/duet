@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Search } from "lucide-react";
 import { usePalette } from "@/stores/palette";
@@ -12,6 +13,7 @@ import type { Command } from "@/lib/commands";
  * Ctrl+P 커맨드 팔레트. fuzzy 매칭 + Enter 실행.
  */
 export function CommandPalette() {
+  const { t } = useTranslation();
   const isOpen = usePalette((s) => s.isOpen);
   const close = usePalette((s) => s.close);
   const all = useAllCommands();
@@ -24,8 +26,8 @@ export function CommandPalette() {
     if (isOpen) {
       setQuery("");
       setCursor(0);
-      const t = setTimeout(() => inputRef.current?.focus(), 0);
-      return () => clearTimeout(t);
+      const timer = setTimeout(() => inputRef.current?.focus(), 0);
+      return () => clearTimeout(timer);
     }
   }, [isOpen]);
 
@@ -76,13 +78,15 @@ export function CommandPalette() {
                   close();
                 }
               }}
-              placeholder="Type a command…"
+              placeholder={t("palette.placeholder")}
               className="flex-1 bg-transparent font-mono text-base focus:outline-none"
             />
           </div>
           <div className="max-h-80 overflow-auto py-1">
             {ranked.length === 0 ? (
-              <div className="px-3 py-2 text-meta text-fg-muted">No results</div>
+              <div className="px-3 py-2 text-meta text-fg-muted">
+                {t("palette.noResults")}
+              </div>
             ) : (
               ranked.map((cmd, i) => {
                 // 리바인드된 키(effective) 표시 — 팔레트가 factory 키를 보여주면
@@ -99,7 +103,9 @@ export function CommandPalette() {
                     }`}
                   >
                     <span className="flex-1 truncate">{cmd.label}</span>
-                    <span className="shrink-0 text-meta text-fg-muted">{cmd.category}</span>
+                    <span className="shrink-0 text-meta text-fg-muted">
+                      {cmd.category}
+                    </span>
                     {key && (
                       <span className="shrink-0 rounded bg-subtle px-1.5 py-0.5 text-meta text-fg-muted">
                         {displayKey(key)}
@@ -110,8 +116,10 @@ export function CommandPalette() {
               })
             )}
           </div>
-          <Dialog.Description className="sr-only">Command palette</Dialog.Description>
-          <Dialog.Title className="sr-only">Command palette</Dialog.Title>
+          <Dialog.Description className="sr-only">
+            {t("palette.title")}
+          </Dialog.Description>
+          <Dialog.Title className="sr-only">{t("palette.title")}</Dialog.Title>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

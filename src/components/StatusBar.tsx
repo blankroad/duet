@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import {
   usePanes,
   activeTab,
@@ -24,6 +25,7 @@ import {
  * (드래그-아웃은 파일 행을 직접 끌면 됨 — useEntryDrag. 하단 전용 버튼은 제거됨.)
  */
 export function StatusBar() {
+  const { t } = useTranslation();
   const activeId = usePanes((s) => s.activePane);
   const tab = usePanes((s) => activeTab(s, activeId));
 
@@ -69,7 +71,7 @@ export function StatusBar() {
         {counts}
         {totalSize > 0 && ` · ${formatSize(totalSize)}`}
         {selectedCount > 0 &&
-          ` • ${selectedCount} selected (${formatSize(selectedSize)})`}
+          ` • ${t("statusbar.selected", { count: selectedCount })} (${formatSize(selectedSize)})`}
       </span>
       <span className="min-w-0 flex-1 truncate text-center">
         {focused && focusedMeta && (

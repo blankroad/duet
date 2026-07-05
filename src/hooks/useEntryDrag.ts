@@ -14,6 +14,7 @@ import { planTransferTo } from "@/lib/fileActions";
 import { resolveDragPaths, startDragWithPaths } from "@/lib/dragOut";
 import { useUIDialogs } from "@/stores/ui-dialogs";
 import { useToast } from "@/stores/toast";
+import i18n from "@/i18n";
 
 /**
  * 항목 행/셀의 포인터 기반 드래그. **드래그 시작 시점의 Ctrl** 로 메커니즘이 갈린다:
@@ -107,7 +108,9 @@ export function useEntryDrag(id: PaneId) {
             source: tab.location,
             targets,
             label:
-              names.length === 1 ? (names[0] ?? "") : `${names.length} items`,
+              names.length === 1
+                ? (names[0] ?? "")
+                : i18n.t("dnd.items", { count: names.length }),
             x: ev.clientX,
             y: ev.clientY,
           });

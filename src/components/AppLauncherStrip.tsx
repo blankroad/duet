@@ -1,6 +1,8 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import { Plus } from "lucide-react";
+import i18n from "@/i18n";
 import clsx from "clsx";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { AppItem } from "@/types/bindings";
@@ -26,16 +28,18 @@ import { useUIDialogs } from "@/stores/ui-dialogs";
  * 중앙(40% 밴드, 300ms)=폴더로 머지. 폴더 클릭 = 플라이아웃. 우클릭 = 인자/이름/제거.
  */
 export function AppLauncherStrip() {
+  const { t } = useTranslation();
   const items = useAppLaunchers((s) => s.items);
   const dragIsFolder = useRef(false);
-  const { dragKey, insertBeforeKey, mergeTargetKey, onItemMouseDown } = useReorderable({
-    group: "apps",
-    keys: items.map((a) => a.id),
-    onCommit: (next) => void reorderAppLaunchers(next),
-    axis: "x",
-    onMerge: (drag, target) => void groupApps(drag, target),
-    canMerge: () => !dragIsFolder.current, // 폴더를 끌 때는 머지 금지(재정렬만)
-  });
+  const { dragKey, insertBeforeKey, mergeTargetKey, onItemMouseDown } =
+    useReorderable({
+      group: "apps",
+      keys: items.map((a) => a.id),
+      onCommit: (next) => void reorderAppLaunchers(next),
+      axis: "x",
+      onMerge: (drag, target) => void groupApps(drag, target),
+      canMerge: () => !dragIsFolder.current, // 폴더를 끌 때는 머지 금지(재정렬만)
+    });
 
   const startDrag = (e: React.MouseEvent, id: string) => {
     dragIsFolder.current = items.find((i) => i.id === id)?.path == null;
@@ -68,8 +72,8 @@ export function AppLauncherStrip() {
       <button
         type="button"
         onClick={() => void registerApp()}
-        title="Add application"
-        aria-label="Add application"
+        title={t("launcher.addApp")}
+        aria-label={t("launcher.addApp")}
         className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-muted hover:bg-subtle hover:text-fg"
       >
         <Plus size={15} />
@@ -82,7 +86,10 @@ const tileBase =
   "flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-subtle text-fg hover:bg-border";
 
 function mergeCls(merge: boolean, dragging: boolean): string {
-  return clsx(dragging && "opacity-50", merge && "scale-110 ring-2 ring-accent");
+  return clsx(
+    dragging && "opacity-50",
+    merge && "scale-110 ring-2 ring-accent",
+  );
 }
 
 /**
@@ -115,21 +122,34 @@ function AppGlyph({ app, px }: { app: AppItem; px: number }) {
 function openArgsDialog(app: AppItem): void {
   useUIDialogs
     .getState()
-    .open({ kind: "app-args", appId: app.id, name: app.name, args: app.args ?? [] });
+    .open({
+      kind: "app-args",
+      appId: app.id,
+      name: app.name,
+      args: app.args ?? [],
+    });
 }
 
 /** 우클릭 메뉴 구성 — 앱 공통(실행/인자/이름변경/[폴더밖]/제거). */
 function appMenu(app: AppItem, folderId?: string): MenuEntry[] {
   const args = app.args ?? [];
   return [
-    { id: "launch", label: "Launch", onSelect: () => void launchApp(String(app.path), args) },
-    { id: "args", label: "Edit arguments…", onSelect: () => openArgsDialog(app) },
+    {
+      id: "launch",
+      label: i18n.t("launcher.launch"),
+      onSelect: () => void launchApp(String(app.path), args),
+    },
+    {
+      id: "args",
+      label: i18n.t("launcher.editArgs"),
+      onSelect: () => openArgsDialog(app),
+    },
     {
       id: "rename",
-      label: "Rename label…",
+      label: i18n.t("launcher.renameLabel"),
       onSelect: () => {
         // 여기 표시되는 이름(label)만 변경 — 실행 경로(app.path)는 그대로.
-        const n = window.prompt("Display name (label shown here)", app.name);
+        const n = window.prompt(i18n.t("launcher.displayNamePrompt"), app.name);
         if (n) void renameAppLauncher(app.id, n);
       },
     },
@@ -137,13 +157,18 @@ function appMenu(app: AppItem, folderId?: string): MenuEntry[] {
       ? [
           {
             id: "out",
-            label: "Move out of folder",
+            label: i18n.t("launcher.moveOutOfFolder"),
             onSelect: () => void moveOutOfFolder(app.id, folderId),
           },
         ]
       : []),
     { kind: "separator" as const },
-    { id: "remove", label: "Remove", danger: true, onSelect: () => void removeAppLauncher(app.id) },
+    {
+      id: "remove",
+      label: i18n.t("sidebar.remove"),
+      danger: true,
+      onSelect: () => void removeAppLauncher(app.id),
+    },
   ];
 }
 
@@ -191,19 +216,24 @@ function FolderTile({
   dragging: boolean;
   onMouseDown: (e: React.MouseEvent) => void;
 }) {
+  const { t } = useTranslation();
   const [flyoutOpen, setFlyoutOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const children = folder.children ?? [];
   const menu: MenuEntry[] = [
     {
       id: "rename",
-      label: "Rename folder…",
+      label: t("launcher.renameFolder"),
       onSelect: () => {
-        const n = window.prompt("Folder name", folder.name);
+        const n = window.prompt(t("launcher.folderNamePrompt"), folder.name);
         if (n) void renameAppLauncher(folder.id, n);
       },
     },
-    { id: "dissolve", label: "Dissolve folder", onSelect: () => void dissolveFolder(folder.id) },
+    {
+      id: "dissolve",
+      label: t("launcher.dissolveFolder"),
+      onSelect: () => void dissolveFolder(folder.id),
+    },
   ];
   return (
     <div className="shrink-0">
@@ -256,6 +286,7 @@ function FolderFlyout({
   anchor: HTMLElement | null;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const cardRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const [editing, setEditing] = useState(false);
@@ -326,14 +357,19 @@ function FolderFlyout({
               setDraft(folder.name);
               setEditing(true);
             }}
-            title="Double-click to rename"
+            title={t("launcher.doubleClickRename")}
           >
             {folder.name}
           </div>
         )}
         <div className="grid max-w-[18rem] grid-cols-4 gap-1">
           {children.map((c) => (
-            <FolderChild key={c.id} app={c} folderId={folder.id} onLaunched={onClose} />
+            <FolderChild
+              key={c.id}
+              app={c}
+              folderId={folder.id}
+              onLaunched={onClose}
+            />
           ))}
         </div>
       </div>
@@ -362,7 +398,9 @@ function FolderChild({
       }}
       onContextMenu={(e) => {
         e.preventDefault();
-        useContextMenu.getState().openAt(e.clientX, e.clientY, appMenu(app, folderId));
+        useContextMenu
+          .getState()
+          .openAt(e.clientX, e.clientY, appMenu(app, folderId));
       }}
       title={`${app.name}${args.length ? ` ${args.join(" ")}` : ""}\n${app.path}`}
       className="group flex w-16 flex-col items-center gap-1 rounded-lg p-1.5 hover:bg-subtle"
@@ -370,7 +408,9 @@ function FolderChild({
       <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-subtle text-fg group-hover:bg-base">
         <AppGlyph app={app} px={20} />
       </span>
-      <span className="w-full truncate text-center text-meta text-fg-muted">{app.name}</span>
+      <span className="w-full truncate text-center text-meta text-fg-muted">
+        {app.name}
+      </span>
     </button>
   );
 }
@@ -382,7 +422,7 @@ function DropLine() {
 /** 파일피커로 앱 선택 → 등록. mac `.app` 은 package 라 file 로 잡힘(directory:false). */
 async function registerApp(): Promise<void> {
   const selected = await open({
-    title: "Add application",
+    title: i18n.t("launcher.addApp"),
     multiple: false,
     directory: false,
     defaultPath: "/Applications",

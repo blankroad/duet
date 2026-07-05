@@ -595,5 +595,111 @@
       "connecting": "연결 중",
       "disconnected": "연결 안 됨"
     }
+  },
+  "tasks": {
+    "count": "작업 {{count}}개"
+  },
+  "statusbar": {
+    "selected": "{{count}}개 선택됨"
+  },
+  "search": {
+    "namePlaceholder": "파일 이름 검색…",
+    "contentPlaceholder": "파일 내용 검색…",
+    "modeName": "이름",
+    "modeNameTitle": "파일 이름으로 검색",
+    "modeText": "내용",
+    "modeTextTitle": "파일 내용 검색 (grep)",
+    "reindex": "다시 색인",
+    "reindexTitle": "다시 색인 (파일 이름 인덱스 새로고침)",
+    "indexingDrive": "드라이브 색인 중… {{n}}",
+    "indexing": "색인 중…",
+    "minChars": "2자 이상 입력",
+    "hits": "{{count}}건",
+    "close": "검색 닫기",
+    "truncated": "500건까지만 표시 — 검색어를 좁혀보세요"
+  },
+  "launcher": {
+    "addApp": "앱 추가",
+    "launch": "실행",
+    "editArgs": "실행 인자 편집…",
+    "renameLabel": "표시 이름 변경…",
+    "displayNamePrompt": "표시 이름 (여기 표시되는 라벨)",
+    "moveOutOfFolder": "폴더 밖으로 이동",
+    "renameFolder": "폴더 이름 변경…",
+    "folderNamePrompt": "폴더 이름",
+    "dissolveFolder": "폴더 해체",
+    "doubleClickRename": "더블클릭으로 이름 변경"
+  },
+  "tags": {
+    "clear": "지우기"
+  },
+  "jumper": {
+    "placeholder": "자주 가는 폴더로 점프…",
+    "noMatch": "일치하는 폴더 없음",
+    "noHistory": "아직 기록 없음",
+    "desc": "Frecency 점퍼",
+    "title": "폴더로 점프"
+  },
+  "palette": {
+    "placeholder": "명령 입력…",
+    "noResults": "결과 없음",
+    "title": "커맨드 팔레트"
+  },
+  "pathbar": {
+    "back": "뒤로",
+    "backTitle": "뒤로 (Alt+←)",
+    "forward": "앞으로",
+    "forwardTitle": "앞으로 (Alt+→)",
+    "up": "위로",
+    "archiveReadOnlyTitle": "{{name}} (읽기 전용)",
+    "updateArchive": "아카이브 업데이트",
+    "updateArchiveTitle": "편집 내용을 아카이브로 다시 압축 (이전 버전은 .bak 보존 — 되돌리기 가능)",
+    "readOnly": "읽기 전용",
+    "pathPlaceholder": "경로 입력 후 Enter…",
+    "goToPath": "경로로 이동",
+    "newTabTitle": "새 탭 (Ctrl+T)",
+    "editPath": "경로 편집",
+    "editPathTitle": "경로 편집 / 위치로 이동 (Ctrl+L)",
+    "favorites": "즐겨찾기",
+    "favoritesTitle": "즐겨찾기 — 저장된 폴더로 이동",
+    "noFavorites": "즐겨찾기 없음",
+    "addThisFolder": "이 폴더 추가",
+    "removeThisFolder": "이 폴더 제거",
+    "bookmarkThisFolder": "이 폴더 북마크",
+    "bookmarkTitle": "이 폴더 북마크 (Ctrl+D)",
+    "bookmarkedTitle": "북마크됨 (Ctrl+D)",
+    "swapPanes": "패널 교환 (왼쪽 ↔ 오른쪽)",
+    "swapPanesTitle": "패널 교환 (왼쪽 ↔ 오른쪽) — Ctrl+U"
+  },
+  "tabs": {
+    "newTab": "새 탭",
+    "closeTab": "탭 닫기"
+  },
+  "filter": {
+    "placeholder": "필터…",
+    "clear": "필터 지우기"
+  },
+  "preview": {
+    "quickLook": "Quick Look",
+    "closeQuickLook": "Quick Look 닫기 (Esc)",
+    "closeQuickLookTitle": "닫기 (Esc / Space)",
+    "info": "정보",
+    "close": "미리보기 닫기",
+    "closeTitle": "미리보기 닫기 (F11)",
+    "selectFile": "미리 볼 파일을 선택하세요",
+    "selectItem": "파일 또는 폴더를 선택하세요",
+    "loading": "불러오는 중…",
+    "counting": "세는 중…",
+    "itemCount_other": "{{count}}개",
+    "kind": "종류",
+    "items": "항목",
+    "size": "크기",
+    "modified": "수정일",
+    "perms": "권한",
+    "where": "위치",
+    "truncated": "미리보기 잘림 — 파일이 더 큽니다"
+  },
+  "dnd": {
+    "items": "{{count}}개"
   }
 }

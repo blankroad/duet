@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Loader, Search, X, RefreshCw } from "lucide-react";
 import { commands } from "@/types/bindings";
 import type { SearchHit } from "@/types/bindings";
@@ -18,6 +19,7 @@ export function SearchPanel({
 }: {
   onPickHit: (hit: SearchHit) => void;
 }) {
+  const { t } = useTranslation();
   const isOpen = useSearch((s) => s.isOpen);
   const root = useSearch((s) => s.root);
   const query = useSearch((s) => s.query);
@@ -84,7 +86,7 @@ export function SearchPanel({
       max_results: 500,
       content,
     };
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       void (async () => {
         // 파일명 = 인덱스(즉시·오프라인), 내용 = grep/rg(원격 연결 필요).
         const r = content
@@ -95,7 +97,7 @@ export function SearchPanel({
         else setError(r.error.kind);
       })();
     }, 200);
-    return () => clearTimeout(t);
+    return () => clearTimeout(timer);
   }, [
     isOpen,
     root,
@@ -129,7 +131,11 @@ export function SearchPanel({
               close();
             }
           }}
-          placeholder={content ? "Search file contents…" : "Search filenames…"}
+          placeholder={
+            content
+              ? t("search.contentPlaceholder")
+              : t("search.namePlaceholder")
+          }
           className="flex-1 bg-transparent font-mono focus:outline-none"
         />
         {/* 파일명 ↔ 내용(grep) 모드 토글 */}
@@ -142,9 +148,9 @@ export function SearchPanel({
                 ? "bg-accent px-1.5 py-0.5 text-white"
                 : "px-1.5 py-0.5 text-fg-muted hover:bg-border"
             }
-            title="Search by filename"
+            title={t("search.modeNameTitle")}
           >
-            Name
+            {t("search.modeName")}
           </button>
           <button
             type="button"
@@ -154,9 +160,9 @@ export function SearchPanel({
                 ? "bg-accent px-1.5 py-0.5 text-white"
                 : "px-1.5 py-0.5 text-fg-muted hover:bg-border"
             }
-            title="Search file contents (grep)"
+            title={t("search.modeTextTitle")}
           >
-            Text
+            {t("search.modeText")}
           </button>
         </div>
         {!content && (
@@ -164,8 +170,8 @@ export function SearchPanel({
             type="button"
             onClick={reindex}
             className="shrink-0 rounded p-0.5 text-fg-muted hover:bg-border"
-            title="Reindex (refresh file-name index)"
-            aria-label="Reindex"
+            title={t("search.reindexTitle")}
+            aria-label={t("search.reindex")}
           >
             <RefreshCw size={11} />
           </button>
@@ -175,18 +181,18 @@ export function SearchPanel({
         )}
         <span className="shrink-0 text-meta text-fg-muted">
           {!content && !driveDone
-            ? `indexing drive… ${driveIndexed.toLocaleString()}`
+            ? t("search.indexingDrive", { n: driveIndexed.toLocaleString() })
             : indexing
-              ? "indexing…"
+              ? t("search.indexing")
               : query.trim().length < 2
-                ? "min 2 chars"
-                : `${results.length} hits`}
+                ? t("search.minChars")
+                : t("search.hits", { count: results.length })}
         </span>
         <button
           type="button"
           onClick={close}
           className="rounded p-0.5 text-fg-muted hover:bg-border"
-          aria-label="Close search"
+          aria-label={t("search.close")}
         >
           <X size={12} />
         </button>
@@ -213,7 +219,7 @@ export function SearchPanel({
           ))}
           {results.length >= 500 && (
             <div className="px-3 py-1 text-meta text-fg-muted">
-              showing 500 — refine query for more
+              {t("search.truncated")}
             </div>
           )}
         </div>

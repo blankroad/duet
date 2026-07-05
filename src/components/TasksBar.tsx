@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Loader, X, ChevronDown, ChevronUp } from "lucide-react";
 import { commands } from "@/types/bindings";
 import type { TaskDto } from "@/types/bindings";
@@ -13,6 +14,7 @@ import { formatSize } from "@/lib/format";
  * - active 2+: 첫 task summary + dropdown 토글
  */
 export function TasksBar() {
+  const { t } = useTranslation();
   const tasks = useTasks((s) => s.tasks);
   const [expanded, setExpanded] = useState(false);
   const active = selectActive(tasks);
@@ -37,7 +39,7 @@ export function TasksBar() {
           onClick={() => setExpanded(!expanded)}
           className="ml-auto flex items-center gap-1 rounded px-2 py-0.5 hover:bg-border"
         >
-          {active.length} tasks
+          {t("tasks.count", { count: active.length })}
           {expanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
         </button>
       </div>
@@ -55,6 +57,7 @@ export function TasksBar() {
 }
 
 function TaskRow({ task }: { task: TaskDto }) {
+  const { t } = useTranslation();
   const pct = task.progress?.percent ?? 0;
   return (
     <div className="flex flex-1 items-center gap-2">
@@ -70,7 +73,9 @@ function TaskRow({ task }: { task: TaskDto }) {
           </div>
           <span className="shrink-0 text-fg-muted">
             {formatSize(task.progress.bytes_done)}
-            {task.progress.bytes_total ? ` / ${formatSize(task.progress.bytes_total)}` : ""}
+            {task.progress.bytes_total
+              ? ` / ${formatSize(task.progress.bytes_total)}`
+              : ""}
           </span>
         </>
       )}
@@ -78,8 +83,8 @@ function TaskRow({ task }: { task: TaskDto }) {
         type="button"
         onClick={() => commands.taskCancel(task.id)}
         className="ml-auto shrink-0 rounded p-0.5 text-fg-muted hover:bg-border hover:text-danger"
-        aria-label="Cancel task"
-        title="Cancel task"
+        aria-label={t("sidebar.cancelTask")}
+        title={t("sidebar.cancelTask")}
       >
         <X size={11} />
       </button>

@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -85,6 +86,7 @@ function langFor(name: string): string | undefined {
 }
 
 export function PreviewContent({ name, text, truncated }: PreviewContentProps) {
+  const { t } = useTranslation();
   const markdown = isMarkdown(name);
 
   const html = useMemo(() => {
@@ -123,7 +125,7 @@ export function PreviewContent({ name, text, truncated }: PreviewContentProps) {
       )}
       {truncated && (
         <div className="border-t border-border px-2 py-1 text-center text-meta text-fg-muted">
-          Preview truncated — file is larger
+          {t("preview.truncated")}
         </div>
       )}
     </div>

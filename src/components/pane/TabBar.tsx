@@ -1,4 +1,5 @@
 import { X, Plus } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { usePanes, type PaneId } from "@/stores/panes";
 import { basename } from "@/lib/paths";
 import clsx from "clsx";
@@ -7,6 +8,7 @@ import clsx from "clsx";
  * 패널 상단 탭 바. 탭 1개일 때는 렌더 X.
  */
 export function TabBar({ id }: { id: PaneId }) {
+  const { t: tr } = useTranslation();
   const tabs = usePanes((s) => s.panes[id].tabs);
   const activeIndex = usePanes((s) => s.panes[id].activeTabIndex);
   const openTab = usePanes((s) => s.openTab);
@@ -43,7 +45,7 @@ export function TabBar({ id }: { id: PaneId }) {
                 "rounded p-0.5 opacity-0 hover:bg-border group-hover:opacity-100",
                 tabs.length <= 1 && "pointer-events-none opacity-30",
               )}
-              aria-label="Close tab"
+              aria-label={tr("tabs.closeTab")}
             >
               <X size={11} />
             </button>
@@ -54,8 +56,8 @@ export function TabBar({ id }: { id: PaneId }) {
         type="button"
         onClick={() => openTab(id)}
         className="flex items-center px-2 text-fg-muted hover:bg-border hover:text-fg"
-        aria-label="New tab"
-        title="New tab"
+        aria-label={tr("tabs.newTab")}
+        title={tr("tabs.newTab")}
       >
         <Plus size={12} />
       </button>

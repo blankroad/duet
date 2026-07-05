@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 import { usePanes } from "@/stores/panes";
 import { useUI } from "@/stores/ui";
@@ -18,6 +19,7 @@ import {
  * window keydown(useKeyboardNav)에 그대로 도달.
  */
 export function QuickLook() {
+  const { t } = useTranslation();
   const close = useUI((s) => s.closeQuickLook);
   // 오버레이는 리스트를 덮으므로 호버 불가 — cursor 기준만.
   const cursorKey = usePanes(cursorPreviewDep);
@@ -37,7 +39,7 @@ export function QuickLook() {
     return () => window.removeEventListener("keydown", onKey);
   }, [close]);
 
-  const title = state.phase === "empty" ? "Quick Look" : state.name;
+  const title = state.phase === "empty" ? t("preview.quickLook") : state.name;
 
   return (
     <div
@@ -54,8 +56,8 @@ export function QuickLook() {
           <button
             type="button"
             onClick={close}
-            aria-label="Close Quick Look (Esc)"
-            title="Close (Esc / Space)"
+            aria-label={t("preview.closeQuickLook")}
+            title={t("preview.closeQuickLookTitle")}
             className="flex h-6 w-6 items-center justify-center rounded text-fg-muted hover:bg-subtle hover:text-fg"
           >
             <X size={14} />
