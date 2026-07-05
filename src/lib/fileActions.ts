@@ -10,6 +10,7 @@ import {
 } from "@/stores/panes";
 import type { DialogState } from "@/stores/ui-dialogs";
 import type { ToastFn } from "@/stores/toast";
+import i18n from "@/i18n";
 import { childLocation, sameLocation, sourceKey } from "@/lib/entryDnd";
 import { formatErr } from "@/lib/error";
 import { rememberExtract } from "@/lib/extractPending";
@@ -60,7 +61,7 @@ export function resolveActiveTargets(): ActiveCtx {
 export function triggerRename(showToast: ToastFn): void {
   const { active, targets } = resolveActiveTargets();
   if (targets.length !== 1) {
-    showToast("Rename: select exactly one item");
+    showToast(i18n.t("toast.renameSelectOne"));
     return;
   }
   useUI.getState().requestInlineRename(active, targets[0]!.name);
@@ -70,7 +71,7 @@ export function triggerRename(showToast: ToastFn): void {
 export function triggerBatchRename(open: OpenFn, showToast: ToastFn): void {
   const { targets } = resolveActiveTargets();
   if (targets.length === 0) {
-    showToast("Batch rename: select at least one item");
+    showToast(i18n.t("toast.batchRenameSelectOne"));
     return;
   }
   open({ kind: "batch-rename", targets });
@@ -87,8 +88,12 @@ export function triggerRenameSmart(open: OpenFn, showToast: ToastFn): void {
 export async function triggerUndo(showToast: ToastFn): Promise<void> {
   const r = await commands.undoLast();
   if (r.status === "ok")
-    showToast(r.data.message ?? `Undone (${r.data.kind})`, "success");
-  else showToast(`Undo failed: ${formatErr(r.error)}`, "error");
+    showToast(
+      r.data.message ?? i18n.t("toast.undone", { kind: r.data.kind }),
+      "success",
+    );
+  else
+    showToast(i18n.t("toast.undoFailed", { err: formatErr(r.error) }), "error");
 }
 
 /** Ctrl+Shift+Z — 마지막으로 되돌린 작업 다시 실행. 미지원 op 는 백엔드가
@@ -96,10 +101,14 @@ export async function triggerUndo(showToast: ToastFn): Promise<void> {
 export async function triggerRedo(showToast: ToastFn): Promise<void> {
   const r = await commands.redoLast();
   if (r.status === "ok") {
-    if (r.data.kind === "ok") showToast(r.data.message ?? "Redone", "success");
-    else showToast(r.data.message ?? `Redo ${r.data.kind}`);
+    if (r.data.kind === "ok")
+      showToast(r.data.message ?? i18n.t("toast.redone"), "success");
+    else
+      showToast(
+        r.data.message ?? i18n.t("toast.redoKind", { kind: r.data.kind }),
+      );
   } else {
-    showToast(`Redo failed: ${formatErr(r.error)}`, "error");
+    showToast(i18n.t("toast.redoFailed", { err: formatErr(r.error) }), "error");
   }
 }
 
@@ -109,14 +118,17 @@ async function copyToClipboard(
   label: string,
 ): Promise<void> {
   if (!text) {
-    showToast(`${label}: nothing selected`);
+    showToast(i18n.t("toast.nothingSelected", { label }));
     return;
   }
   try {
     await navigator.clipboard.writeText(text);
-    showToast(`Copied ${label.toLowerCase()}`, "success");
+    showToast(
+      i18n.t("toast.copiedLabel", { label: label.toLowerCase() }),
+      "success",
+    );
   } catch {
-    showToast("Clipboard unavailable", "error");
+    showToast(i18n.t("toast.clipboardUnavailable"), "error");
   }
 }
 
@@ -133,7 +145,9 @@ export async function copyPathsOf(
   showToast: ToastFn,
 ): Promise<void> {
   if (targets.length === 0) {
-    showToast("Path: nothing selected");
+    showToast(
+      i18n.t("toast.nothingSelected", { label: i18n.t("toast.labelPath") }),
+    );
     return;
   }
   // 경로 텍스트는 forward-slash 로 통일 — D:/test/test1/test2. 백엔드 Path::join 은
@@ -142,7 +156,7 @@ export async function copyPathsOf(
   const paths = targets.map((t) =>
     String(childLocation(t.location, t.name).path).replace(/\\/g, "/"),
   );
-  await copyToClipboard(paths.join("\n"), showToast, "Path");
+  await copyToClipboard(paths.join("\n"), showToast, i18n.t("toast.labelPath"));
 }
 
 /** 활성 패널 선택 항목의 전체 경로 복사. */
@@ -154,41 +168,33 @@ export async function copySelectionPaths(showToast: ToastFn): Promise<void> {
 export async function copySelectionNames(showToast: ToastFn): Promise<void> {
   const { targets } = resolveActiveTargets();
   const text = targets.map((t) => t.name).join("\n");
-  await copyToClipboard(text, showToast, "Name");
+  await copyToClipboard(text, showToast, i18n.t("toast.labelName"));
 }
 
 // ── 파일 클립보드 (Ctrl+C / Ctrl+X / Ctrl+V) ─────────────────────────────────
 // OS 클립보드가 아니라 인앱 큐. 붙여넣기는 planTransferTo 로 — 기존 복사/이동 확인
 // 다이얼로그 + journal(§4) 을 그대로 탄다.
 
-const plural = (n: number) => (n === 1 ? "" : "s");
-
 /** Ctrl+C — 활성 패널 선택을 'copy' 로 클립보드에 담는다(원본 유지). */
 export function clipCopy(showToast: ToastFn): void {
   const { targets } = resolveActiveTargets();
   if (targets.length === 0) {
-    showToast("Copy: nothing selected");
+    showToast(i18n.t("toast.copyNothingSelected"));
     return;
   }
   useClipboard.getState().set(targets, "copy");
-  showToast(
-    `Copied ${targets.length} item${plural(targets.length)} — paste with Ctrl+V`,
-    "success",
-  );
+  showToast(i18n.t("toast.copiedItems", { count: targets.length }), "success");
 }
 
 /** Ctrl+X — 활성 패널 선택을 'move'(잘라내기) 로 담는다(붙여넣으면 원본 제거). */
 export function clipCut(showToast: ToastFn): void {
   const { targets } = resolveActiveTargets();
   if (targets.length === 0) {
-    showToast("Cut: nothing selected");
+    showToast(i18n.t("toast.cutNothingSelected"));
     return;
   }
   useClipboard.getState().set(targets, "move");
-  showToast(
-    `Cut ${targets.length} item${plural(targets.length)} — paste with Ctrl+V`,
-    "success",
-  );
+  showToast(i18n.t("toast.cutItems", { count: targets.length }), "success");
 }
 
 /** Ctrl+V — 클립보드 항목을 활성 패널 현재 폴더로 붙여넣기(copy/move, 확인 다이얼로그 경유). */
@@ -198,7 +204,7 @@ export async function clipPaste(
 ): Promise<void> {
   const clip = useClipboard.getState().entry;
   if (!clip || clip.targets.length === 0) {
-    showToast("Clipboard is empty — copy with Ctrl+C first");
+    showToast(i18n.t("toast.clipboardEmpty"));
     return;
   }
   const { tab } = resolveActiveTargets();
@@ -208,7 +214,7 @@ export async function clipPaste(
     clip.mode === "move" &&
     clip.targets.every((t) => sameLocation(t.location, dst))
   ) {
-    showToast("Already in this folder");
+    showToast(i18n.t("toast.alreadyInFolder"));
     return;
   }
   await planTransferTo(clip.targets, dst, clip.mode, open, showToast);
@@ -240,7 +246,10 @@ export async function triggerCompare(
   if (r.status === "error") {
     // 취소는 조용히 닫기, 그 외는 토스트.
     if (r.error.kind !== "Cancelled")
-      showToast(`Compare: ${formatErr(r.error)}`, "error");
+      showToast(
+        i18n.t("toast.compareError", { err: formatErr(r.error) }),
+        "error",
+      );
     open({ kind: "none" });
     return;
   }
@@ -264,7 +273,10 @@ export async function triggerThreeWay(
   const baseLoc: Location = { source: left.source, path: input.trim() };
   const r = await commands.fsCompareThreeWay(baseLoc, left, right);
   if (r.status === "error") {
-    showToast(`3-way: ${formatErr(r.error)}`, "error");
+    showToast(
+      i18n.t("toast.threeWayError", { err: formatErr(r.error) }),
+      "error",
+    );
     return;
   }
   open({ kind: "three-way", plan: r.data });
@@ -281,7 +293,7 @@ export async function triggerSync(
   const dst = activeTab(state, opposite).location;
   const r = await commands.fsSyncPlan(src, dst);
   if (r.status === "error") {
-    showToast(`Sync: ${formatErr(r.error)}`, "error");
+    showToast(i18n.t("toast.syncError", { err: formatErr(r.error) }), "error");
     return;
   }
   const label = (loc: Location) => basename(String(loc.path));
@@ -314,7 +326,7 @@ export function triggerPermissions(open: OpenFn, showToast: ToastFn): void {
     return kind === "dir" || kind === "file";
   });
   if (eligible.length === 0) {
-    showToast("Permissions: select files or folders (not symlinks)");
+    showToast(i18n.t("toast.permissionsSelect"));
     return;
   }
   // 선택 항목들의 mode 가 전부 같으면 그 값으로 프리필, 섞였으면 null(mixed).
@@ -340,28 +352,41 @@ export async function planTransferTo(
   open: OpenFn,
   showToast: ToastFn,
 ): Promise<void> {
-  const verb = mode === "move" ? "Move" : "Copy";
   // 선택/커서 대상이 없으면 조용히 끝나던 것 → 이유를 알린다 ("아무 일 없음" 방지).
   if (targets.length === 0) {
-    showToast(`${verb}: nothing selected`);
+    showToast(
+      mode === "move"
+        ? i18n.t("toast.moveNothingSelected")
+        : i18n.t("toast.copyNothingSelected"),
+    );
     return;
   }
   try {
     if (mode === "move") {
       const r = await commands.fsMovePlan(targets, dst);
       if (r.status === "ok") open({ kind: "move-confirm", plan: r.data });
-      else showToast(`Move plan failed: ${formatErr(r.error)}`, "error");
+      else
+        showToast(
+          i18n.t("toast.movePlanFailed", { err: formatErr(r.error) }),
+          "error",
+        );
     } else {
       const r = await commands.fsCopyPlan(targets, dst);
       if (r.status === "ok") open({ kind: "copy-confirm", plan: r.data });
-      else showToast(`Copy plan failed: ${formatErr(r.error)}`, "error");
+      else
+        showToast(
+          i18n.t("toast.copyPlanFailed", { err: formatErr(r.error) }),
+          "error",
+        );
     }
   } catch (e) {
     // commands.* 가 구조화된 DuetError 대신 예외를 throw 한 경우(명령 미등록·직렬화
     // 실패 등). 호출부가 `void` 라 잡지 않으면 unhandled rejection 으로 조용히 사라짐
     // — 토스트로 노출해 진짜 원인을 보이게 한다.
     showToast(
-      `${verb} failed: ${e instanceof Error ? e.message : String(e)}`,
+      i18n.t(mode === "move" ? "toast.moveFailed" : "toast.copyFailed", {
+        err: e instanceof Error ? e.message : String(e),
+      }),
       "error",
     );
   }
@@ -373,15 +398,15 @@ export async function planTransferTo(
 export function addSelectionToShelf(showToast: ToastFn): void {
   const { targets } = resolveActiveTargets();
   if (targets.length === 0) {
-    showToast("Shelf: nothing selected");
+    showToast(i18n.t("toast.shelfNothingSelected"));
     return;
   }
   const n = useShelf.getState().add(targets);
   const total = useShelf.getState().items.length;
   showToast(
     n === 0
-      ? "Already on the shelf"
-      : `Added ${n} item${plural(n)} to shelf (${total} total)`,
+      ? i18n.t("toast.alreadyOnShelf")
+      : i18n.t("toast.addedToShelf", { count: n, total }),
   );
 }
 
@@ -397,7 +422,7 @@ export async function applyShelfTo(
 ): Promise<void> {
   const items = useShelf.getState().items;
   if (items.length === 0) {
-    showToast("Shelf is empty");
+    showToast(i18n.t("toast.shelfEmpty"));
     return;
   }
   const dst = resolveActiveTargets().tab.location;
@@ -411,9 +436,7 @@ export async function applyShelfTo(
   const groupList = [...groups.values()];
   await planTransferTo(groupList[0]!, dst, mode, open, showToast);
   if (groupList.length > 1) {
-    showToast(
-      `${groupList.length - 1} group${plural(groupList.length - 1)} from other sources left on shelf — apply again`,
-    );
+    showToast(i18n.t("toast.shelfGroupsLeft", { count: groupList.length - 1 }));
   }
 }
 
@@ -444,18 +467,24 @@ export async function triggerMove(
 export async function triggerExtract(showToast: ToastFn): Promise<void> {
   const { targets } = resolveActiveTargets();
   if (targets.length !== 1) {
-    showToast("Extract: select one archive");
+    showToast(i18n.t("toast.extractSelectOne"));
     return;
   }
   const plan = await commands.fsExtractPlan(targets[0]!);
   if (plan.status === "error") {
-    showToast(`Extract failed: ${formatErr(plan.error)}`, "error");
+    showToast(
+      i18n.t("toast.extractFailed", { err: formatErr(plan.error) }),
+      "error",
+    );
     return;
   }
   // 1차 시도는 암호 없이 — 암호 zip 이면 task 가 NeedPassword 로 실패한다.
   const exec = await commands.fsExtractExecute(plan.data, null);
   if (exec.status === "error") {
-    showToast(`Extract failed: ${formatErr(exec.error)}`, "error");
+    showToast(
+      i18n.t("toast.extractFailed", { err: formatErr(exec.error) }),
+      "error",
+    );
     return;
   }
   rememberExtract(exec.data, { plan: plan.data, attempted: false });
@@ -465,7 +494,7 @@ export async function triggerExtract(showToast: ToastFn): Promise<void> {
 export function triggerCompress(open: OpenFn, showToast: ToastFn): void {
   const { targets } = resolveActiveTargets();
   if (targets.length === 0) {
-    showToast("Compress: select at least one item");
+    showToast(i18n.t("toast.compressSelectOne"));
     return;
   }
   // 단일 항목이면 그 이름, 여러 개면 부모 폴더 이름을 기본 아카이브 이름으로.
@@ -485,7 +514,7 @@ export function triggerChecksum(open: OpenFn, showToast: ToastFn): void {
     (t) => tab.entries.find((e) => e.name === t.name)?.kind === "file",
   );
   if (files.length === 0) {
-    showToast("Checksum: select at least one file");
+    showToast(i18n.t("toast.checksumSelectOne"));
     return;
   }
   open({ kind: "checksum", targets: files });
@@ -506,6 +535,9 @@ export async function triggerDelete(
       plan: r.data,
     });
   } else {
-    showToast(`Delete plan failed: ${formatErr(r.error)}`, "error");
+    showToast(
+      i18n.t("toast.deletePlanFailed", { err: formatErr(r.error) }),
+      "error",
+    );
   }
 }
