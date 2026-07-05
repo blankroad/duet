@@ -338,6 +338,7 @@ pub async fn execute_undo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
             created,
             backups_to_restore,
             pruned,
+            ..
         } => {
             let fs = match fs_for(dst_source, pool).await {
                 Ok(f) => f,
@@ -765,7 +766,57 @@ pub async fn execute_redo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
             }
             ok_with_locs(target_source, refresh)
         }
-        // Sync/Merge/CompareApply/ThreeWayApply/Symlink/Trash/Irreversible —
+        UndoAction::UndoSync {
+            dst_source,
+            created,
+            backups_to_restore,
+            pruned,
+            src_source,
+            created_from,
+        } => {
+            // 순수 추가형(덮어쓰기·prune 없음) sync 만 redo — 그 외는 재실행 시
+            // 백업/휴지통 기록이 스테일해짐.
+            if !backups_to_restore.is_empty() || !pruned.is_empty() {
+                return skipped(UNSUPPORTED);
+            }
+            let Some(src_source) = src_source else {
+                return skipped(UNSUPPORTED);
+            };
+            if created_from.len() != created.len() || created.is_empty() {
+                return skipped(UNSUPPORTED);
+            }
+            let src_fs_r = fs_for(src_source, pool).await;
+            let dst_fs_r = fs_for(dst_source, pool).await;
+            let (src_fs, dst_fs) = match (src_fs_r, dst_fs_r) {
+                (Ok(a), Ok(b)) => (a, b),
+                _ => {
+                    return UndoOutcome {
+                        kind: UndoKind::Error,
+                        message: Some("source unreachable".into()),
+                        refreshed_locations: vec![],
+                    }
+                }
+            };
+            for (src, dst) in created_from.iter().zip(created.iter()) {
+                if src_fs.metadata(src).await.is_err() {
+                    return skipped("Source item no longer exists — redo skipped");
+                }
+                if dst_fs.metadata(dst).await.is_ok() {
+                    continue; // 이미 있음(사용자가 재동기화 등) — 건너뜀
+                }
+                if let Err(e) = copy_relay(&*src_fs, src, &*dst_fs, dst).await {
+                    return error("copy forward", e);
+                }
+            }
+            let mut refresh = std::collections::HashSet::<PathBuf>::new();
+            for dst in created {
+                if let Some(p) = dst.parent() {
+                    refresh.insert(p.to_path_buf());
+                }
+            }
+            ok_with_locs(dst_source, refresh)
+        }
+        // Merge/CompareApply/ThreeWayApply/Symlink/Trash/Irreversible —
         // 소스 경로·타깃 미기록 또는 재실행 시 journal 데이터가 스테일해짐.
         _ => skipped(UNSUPPORTED),
     }
@@ -889,6 +940,45 @@ mod tests {
                 backup_path: dir.path().join("x.bak"),
                 original_path: dir.path().join("x"),
             }],
+        });
+        let outcome = execute_redo(&entry, &pool).await;
+        assert!(matches!(outcome.kind, UndoKind::Skipped));
+    }
+
+    #[tokio::test]
+    async fn redo_sync_recopies_pure_additive_only() {
+        let dir = TempDir::new().unwrap();
+        let src = dir.path().join("s.txt");
+        let dst = dir.path().join("dst").join("s.txt");
+        tokio::fs::create_dir(dir.path().join("dst")).await.unwrap();
+        tokio::fs::write(&src, b"sync").await.unwrap();
+        let pool = ConnectionPool::new();
+        let entry = mk_entry(UndoAction::UndoSync {
+            dst_source: SourceId::Local,
+            created: vec![dst.clone()],
+            backups_to_restore: vec![],
+            pruned: vec![],
+            src_source: Some(SourceId::Local),
+            created_from: vec![src.clone()],
+        });
+        let outcome = execute_redo(&entry, &pool).await;
+        assert!(
+            matches!(outcome.kind, UndoKind::Ok),
+            "{:?}",
+            outcome.message
+        );
+        assert_eq!(tokio::fs::read(&dst).await.unwrap(), b"sync");
+        // prune 동반 sync 는 미지원.
+        let entry = mk_entry(UndoAction::UndoSync {
+            dst_source: SourceId::Local,
+            created: vec![dst.clone()],
+            backups_to_restore: vec![],
+            pruned: vec![crate::services::journal::TrashItem {
+                trash_path: "x".into(),
+                original_path: dir.path().join("gone"),
+            }],
+            src_source: Some(SourceId::Local),
+            created_from: vec![src.clone()],
         });
         let outcome = execute_redo(&entry, &pool).await;
         assert!(matches!(outcome.kind, UndoKind::Skipped));

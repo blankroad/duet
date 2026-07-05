@@ -882,6 +882,7 @@ async fn sync_execute_local(
     let total = count_files(src_fs, &plan.src.path).await;
     let mut state = MirrorState {
         created: Vec::new(),
+        created_from: Vec::new(),
         backups: Vec::new(),
         done: 0,
         total,
@@ -922,12 +923,16 @@ async fn sync_execute_local(
         created: state.created,
         backups_to_restore: state.backups,
         pruned,
+        src_source: Some(plan.src.source.clone()),
+        created_from: state.created_from,
     };
     ctx.journal.push(op, undo).await
 }
 
 struct MirrorState {
     created: Vec<PathBuf>,
+    /// `created[i]` 의 원본 경로 — redo 용 (병렬 배열).
+    created_from: Vec<PathBuf>,
     backups: Vec<BackupRestore>,
     done: u64,
     total: u64,
@@ -978,6 +983,7 @@ async fn mirror_dir(
                         });
                     } else {
                         state.created.push(d.clone());
+                        state.created_from.push(s.clone());
                     }
                     crate::fs::copy_relay(src_fs, &s, dst_fs, &d).await?;
                 }
@@ -1136,9 +1142,12 @@ async fn sync_execute_same_host(
         )));
     }
     let mut created = Vec::new();
+    let mut created_from = Vec::new();
     for line in String::from_utf8_lossy(&dry_out.stdout).lines() {
         if let Some(rel) = parse_rsync_itemize_created_file(line) {
             created.push(crate::fs::posix_join(&plan.dst.path, &rel));
+            // same-host rsync — src/dst 모두 POSIX. redo 용 원본 경로.
+            created_from.push(crate::fs::posix_join(&plan.src.path, &rel));
         }
     }
 
@@ -1222,6 +1231,8 @@ async fn sync_execute_same_host(
         created,
         backups_to_restore: backups,
         pruned: vec![],
+        src_source: Some(plan.src.source.clone()),
+        created_from,
     };
     ctx.journal.push(op, undo).await
 }

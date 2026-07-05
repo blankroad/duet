@@ -190,6 +190,12 @@ pub enum UndoAction {
         created: Vec<PathBuf>,
         backups_to_restore: Vec<BackupRestore>,
         pruned: Vec<TrashItem>,
+        /// redo 용 원본 소스 — 구버전 라인엔 없음(default → redo 불가).
+        #[serde(default)]
+        src_source: Option<SourceId>,
+        /// `created[i]` 의 원본 경로(병렬 배열). 구버전은 빈 벡터.
+        #[serde(default)]
+        created_from: Vec<PathBuf>,
     },
     /// 비교 적용 되돌리기 — 양쪽 각각 새로 생성분 제거 + 덮어쓴 백업 복원.
     /// (방향이 ToLeft/ToRight 혼합이라 양쪽 모두 추적.)
