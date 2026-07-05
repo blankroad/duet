@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import * as Dialog from "@radix-ui/react-dialog";
 import { X, TriangleAlert } from "lucide-react";
 import { commands } from "@/types/bindings";
@@ -20,6 +21,11 @@ export interface PermissionsDialogProps {
 }
 
 const CLASSES = ["Owner", "Group", "Others"] as const;
+const CLASS_KEYS: Record<(typeof CLASSES)[number], string> = {
+  Owner: "dialog.permissions.classOwner",
+  Group: "dialog.permissions.classGroup",
+  Others: "dialog.permissions.classOthers",
+};
 const BITS = ["r", "w", "x"] as const;
 
 /**
@@ -38,6 +44,7 @@ export function PermissionsDialog({
   onClose,
   onApplied,
 }: PermissionsDialogProps) {
+  const { t } = useTranslation();
   const [mode, setMode] = useState<number>(initialMode ?? 0o644);
   const [octal, setOctal] = useState<string>(
     (initialMode ?? 0o644).toString(8).padStart(3, "0"),
@@ -66,7 +73,10 @@ export function PermissionsDialog({
     const r = await commands.fsSetPermissions(targets, mode, recursive);
     if (r.status === "error") {
       setBusy(false);
-      showToast(`Permissions failed: ${formatErr(r.error)}`, "error");
+      showToast(
+        t("dialog.permissions.failed", { err: formatErr(r.error) }),
+        "error",
+      );
       return;
     }
     if (chownWanted) {
@@ -78,11 +88,17 @@ export function PermissionsDialog({
       );
       if (o.status === "error") {
         setBusy(false);
-        showToast(`Owner change failed: ${formatErr(o.error)}`, "error");
+        showToast(
+          t("dialog.permissions.ownerFailed", { err: formatErr(o.error) }),
+          "error",
+        );
         return;
       }
     }
-    showToast(`Permissions updated (${targets.length})`, "success");
+    showToast(
+      t("dialog.permissions.updated", { count: targets.length }),
+      "success",
+    );
     onApplied();
     onClose();
   };
@@ -94,14 +110,16 @@ export function PermissionsDialog({
         <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none">
           <div className="mb-3 flex items-start justify-between">
             <Dialog.Title className="text-title font-medium">
-              Permissions
+              {t("dialog.permissions.title")}
               <span className="ml-2 text-meta font-normal text-fg-muted">
-                {targets.length === 1 ? targets[0]!.name : `${targets.length} items`}
+                {targets.length === 1
+                  ? targets[0]!.name
+                  : t("dialog.permissions.items", { count: targets.length })}
               </span>
             </Dialog.Title>
             <Dialog.Close
               className="rounded p-1 text-fg-muted hover:bg-border"
-              aria-label="Close"
+              aria-label={t("common.close")}
             >
               <X size={14} />
             </Dialog.Close>
@@ -117,7 +135,9 @@ export function PermissionsDialog({
             ))}
             {CLASSES.map((cls, row) => (
               <div key={cls} className="contents">
-                <span className="text-meta text-fg-muted">{cls}</span>
+                <span className="text-meta text-fg-muted">
+                  {t(CLASS_KEYS[cls])}
+                </span>
                 {BITS.map((b, col) => {
                   const bit = 1 << (8 - (row * 3 + col));
                   return (
@@ -135,7 +155,9 @@ export function PermissionsDialog({
           </div>
 
           <div className="mt-3 flex items-center gap-2">
-            <span className="text-meta text-fg-muted">Octal</span>
+            <span className="text-meta text-fg-muted">
+              {t("dialog.permissions.octal")}
+            </span>
             <input
               type="text"
               value={octal}
@@ -144,30 +166,36 @@ export function PermissionsDialog({
               className="w-20 rounded border border-border bg-subtle px-2 py-1 font-mono text-base focus:border-accent focus:outline-none"
             />
             {initialMode === null && (
-              <span className="text-meta text-fg-muted">(mixed — applying to all)</span>
+              <span className="text-meta text-fg-muted">
+                {t("dialog.permissions.mixed")}
+              </span>
             )}
           </div>
 
           {remote && (
             <div className="mt-3 grid grid-cols-2 gap-2">
               <label className="block">
-                <span className="text-meta text-fg-muted">Owner (chown)</span>
+                <span className="text-meta text-fg-muted">
+                  {t("dialog.permissions.ownerChown")}
+                </span>
                 <input
                   type="text"
                   value={owner}
                   onChange={(e) => setOwner(e.target.value)}
-                  placeholder="unchanged"
+                  placeholder={t("dialog.permissions.unchanged")}
                   spellCheck={false}
                   className="mt-0.5 w-full rounded border border-border bg-subtle px-2 py-1 font-mono text-base focus:border-accent focus:outline-none"
                 />
               </label>
               <label className="block">
-                <span className="text-meta text-fg-muted">Group</span>
+                <span className="text-meta text-fg-muted">
+                  {t("dialog.permissions.group")}
+                </span>
                 <input
                   type="text"
                   value={group}
                   onChange={(e) => setGroup(e.target.value)}
-                  placeholder="unchanged"
+                  placeholder={t("dialog.permissions.unchanged")}
                   spellCheck={false}
                   className="mt-0.5 w-full rounded border border-border bg-subtle px-2 py-1 font-mono text-base focus:border-accent focus:outline-none"
                 />
@@ -183,7 +211,9 @@ export function PermissionsDialog({
                 onChange={(e) => setRecursive(e.target.checked)}
                 className="mt-0.5"
               />
-              <span className="text-base">Apply recursively to contents</span>
+              <span className="text-base">
+                {t("dialog.permissions.recursive")}
+              </span>
             </label>
           )}
 
@@ -191,8 +221,8 @@ export function PermissionsDialog({
             <div className="mt-2 flex items-center gap-1.5 text-meta text-danger">
               <TriangleAlert size={12} className="shrink-0" />
               {recursive
-                ? "Recursive changes cannot be undone (Ctrl+Z won't restore old modes)."
-                : "Ownership changes cannot be undone."}
+                ? t("dialog.permissions.recursiveWarn")
+                : t("dialog.permissions.ownerWarn")}
             </div>
           )}
 
@@ -202,7 +232,7 @@ export function PermissionsDialog({
               onClick={onClose}
               className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
             >
-              Cancel
+              {t("common.cancel")}
             </button>
             <button
               type="button"
@@ -214,11 +244,13 @@ export function PermissionsDialog({
                   : "rounded bg-accent px-3 py-1 text-base text-white disabled:opacity-50"
               }
             >
-              {irreversible ? "Apply (no undo)" : "Apply"}
+              {irreversible
+                ? t("dialog.permissions.applyNoUndo")
+                : t("common.apply")}
             </button>
           </div>
           <Dialog.Description className="sr-only">
-            Edit POSIX permissions and ownership
+            {t("dialog.permissions.desc")}
           </Dialog.Description>
         </Dialog.Content>
       </Dialog.Portal>

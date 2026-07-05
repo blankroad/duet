@@ -1,8 +1,14 @@
 import { useEffect, useState } from "react";
+import { useTranslation, Trans } from "react-i18next";
 import * as Dialog from "@radix-ui/react-dialog";
 import { X, AlertTriangle, FilePlus2, Trash2, Loader2 } from "lucide-react";
 import clsx from "clsx";
-import { commands, type Location, type SyncPreview, type TrashUsage } from "@/types/bindings";
+import {
+  commands,
+  type Location,
+  type SyncPreview,
+  type TrashUsage,
+} from "@/types/bindings";
 import { formatErr } from "@/lib/error";
 import { formatSize } from "@/lib/format";
 
@@ -20,7 +26,15 @@ export interface SyncDialogProps {
  * 단방향 미러 확인 — 방향 + dry-run(복사/삭제 목록 사전 표시) + prune 토글.
  * prune 은 기본 OFF. 켜면 대상 전용 파일을 휴지통으로(undo 가능). 켰을 때 CTA danger.
  */
-export function SyncDialog({ srcLabel, dstLabel, src, dst, onClose, onConfirm }: SyncDialogProps) {
+export function SyncDialog({
+  srcLabel,
+  dstLabel,
+  src,
+  dst,
+  onClose,
+  onConfirm,
+}: SyncDialogProps) {
+  const { t } = useTranslation();
   const [prune, setPrune] = useState(false);
   const [preview, setPreview] = useState<SyncPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +56,11 @@ export function SyncDialog({ srcLabel, dstLabel, src, dst, onClose, onConfirm }:
   // 원격 휴지통 누적 — prune/백업이 쌓이는 곳(dst 우선). 로컬↔로컬이면 생략.
   useEffect(() => {
     const sshSource =
-      dst.source.kind === "ssh" ? dst.source : src.source.kind === "ssh" ? src.source : null;
+      dst.source.kind === "ssh"
+        ? dst.source
+        : src.source.kind === "ssh"
+          ? src.source
+          : null;
     if (!sshSource) return;
     let stale = false;
     void (async () => {
@@ -60,8 +78,13 @@ export function SyncDialog({ srcLabel, dstLabel, src, dst, onClose, onConfirm }:
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
         <Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex max-h-[80vh] w-full max-w-md -translate-x-1/2 -translate-y-1/2 flex-col rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none">
           <div className="mb-3 flex items-start justify-between">
-            <Dialog.Title className="text-title font-medium">Sync to other pane</Dialog.Title>
-            <Dialog.Close className="rounded p-1 text-fg-muted hover:bg-border" aria-label="Close">
+            <Dialog.Title className="text-title font-medium">
+              {t("dialog.sync.title")}
+            </Dialog.Title>
+            <Dialog.Close
+              className="rounded p-1 text-fg-muted hover:bg-border"
+              aria-label={t("common.close")}
+            >
               <X size={14} />
             </Dialog.Close>
           </div>
@@ -76,28 +99,40 @@ export function SyncDialog({ srcLabel, dstLabel, src, dst, onClose, onConfirm }:
           <div className="mt-3 min-h-0 flex-1">
             {error ? (
               <div className="rounded border border-danger/40 bg-danger/10 px-2 py-1 text-meta text-danger">
-                Preview failed: {error}
+                {t("dialog.sync.previewFailed", { err: error })}
               </div>
             ) : preview == null ? (
               <div className="flex items-center gap-2 text-meta text-fg-muted">
-                <Loader2 size={13} className="animate-spin" /> Computing changes…
+                <Loader2 size={13} className="animate-spin" />{" "}
+                {t("dialog.sync.computing")}
               </div>
             ) : (
               <div className="space-y-2 text-meta">
                 <Section
                   icon={<FilePlus2 size={12} className="text-accent" />}
-                  label="Copy (new/changed)"
+                  label={t("dialog.sync.copyLabel")}
                   items={preview.copy}
                   tone="text-fg"
                 />
                 <Section
-                  icon={<Trash2 size={12} className={prune ? "text-danger" : "text-fg-muted"} />}
-                  label={prune ? "Delete (trash)" : "Target-only (not deleted)"}
+                  icon={
+                    <Trash2
+                      size={12}
+                      className={prune ? "text-danger" : "text-fg-muted"}
+                    />
+                  }
+                  label={
+                    prune
+                      ? t("dialog.sync.deleteLabel")
+                      : t("dialog.sync.targetOnlyLabel")
+                  }
                   items={preview.prune}
                   tone={prune ? "text-danger" : "text-fg-muted"}
                 />
                 {preview.truncated && (
-                  <div className="text-amber-600">Too many items — only some are shown.</div>
+                  <div className="text-amber-600">
+                    {t("dialog.sync.truncated")}
+                  </div>
                 )}
               </div>
             )}
@@ -111,28 +146,34 @@ export function SyncDialog({ srcLabel, dstLabel, src, dst, onClose, onConfirm }:
               className="mt-0.5"
             />
             <span>
-              Also delete files missing from source (mirror)
+              {t("dialog.sync.pruneOption")}
               <span className="block text-meta text-fg-muted">
-                Sends files that exist only in the target{preview ? ` (${preview.prune.length})` : ""} to trash.
+                {preview
+                  ? t("dialog.sync.pruneHintCount", {
+                      count: preview.prune.length,
+                    })
+                  : t("dialog.sync.pruneHint")}
               </span>
             </span>
           </label>
 
           {trash && (
             <div className="mt-2 text-meta text-fg-muted">
-              Remote trash (<span className="font-mono">~/.duet-trash</span>) accumulated:{" "}
-              <b className={trash.bytes > 0 ? "text-fg" : ""}>{formatSize(trash.bytes)}</b>
-              {trash.bytes > 0 && " — prune/overwrite backups pile up on this host."}
+              <Trans
+                i18nKey="dialog.sync.remoteTrash"
+                components={{ 1: <span className="font-mono" /> }}
+              />{" "}
+              <b className={trash.bytes > 0 ? "text-fg" : ""}>
+                {formatSize(trash.bytes)}
+              </b>
+              {trash.bytes > 0 && t("dialog.sync.remoteTrashPile")}
             </div>
           )}
 
           {prune && (
             <div className="mt-2 flex items-start gap-1.5 rounded border border-amber-500/40 bg-amber-500/10 p-2 text-meta text-amber-600">
               <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-              <span>
-                Files only in the target folder move to trash. Undoable
-                (macOS local: restore manually in Finder).
-              </span>
+              <span>{t("dialog.sync.pruneWarn")}</span>
             </div>
           )}
 
@@ -142,18 +183,21 @@ export function SyncDialog({ srcLabel, dstLabel, src, dst, onClose, onConfirm }:
               onClick={onClose}
               className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
             >
-              Cancel
+              {t("common.cancel")}
             </button>
             <button
               type="button"
               onClick={() => onConfirm(prune)}
-              className={clsx("rounded px-3 py-1 text-base text-white", prune ? "bg-danger" : "bg-accent")}
+              className={clsx(
+                "rounded px-3 py-1 text-base text-white",
+                prune ? "bg-danger" : "bg-accent",
+              )}
             >
-              {prune ? "Sync + delete" : "Sync"}
+              {prune ? t("dialog.sync.ctaPruned") : t("dialog.sync.cta")}
             </button>
           </div>
           <Dialog.Description className="sr-only">
-            One-way mirror from the active pane to the other pane, with optional delete propagation.
+            {t("dialog.sync.desc")}
           </Dialog.Description>
         </Dialog.Content>
       </Dialog.Portal>

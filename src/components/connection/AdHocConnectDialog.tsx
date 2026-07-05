@@ -1,8 +1,14 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Lock, Unlock, X } from "lucide-react";
 import { commands } from "@/types/bindings";
-import type { ConnectionDto, DuetError, HostKeyInfo, SavedHost } from "@/types/bindings";
+import type {
+  ConnectionDto,
+  DuetError,
+  HostKeyInfo,
+  SavedHost,
+} from "@/types/bindings";
 import { useConnections } from "@/stores/connections";
 import { saveHost } from "@/stores/savedHosts";
 import { useVault, vaultGet, vaultSet } from "@/stores/vault";
@@ -39,6 +45,7 @@ export function AdHocConnectDialog({
   onConnected,
   prefill,
 }: AdHocConnectDialogProps) {
+  const { t } = useTranslation();
   const upsertActive = useConnections((s) => s.upsertActive);
 
   const [host, setHost] = useState("");
@@ -129,7 +136,7 @@ export function AdHocConnectDialog({
     if (!host.trim() || !user.trim() || Number.isNaN(portNum)) {
       setPhase({
         kind: "error",
-        error: { kind: "Io", message: "host/port/user required" } as DuetError,
+        error: { kind: "Io", message: t("dialog.adhoc.required") } as DuetError,
       });
       return;
     }
@@ -212,10 +219,12 @@ export function AdHocConnectDialog({
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
         <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none">
           <div className="mb-3 flex items-start justify-between gap-2">
-            <Dialog.Title className="text-title font-medium">Connect to host…</Dialog.Title>
+            <Dialog.Title className="text-title font-medium">
+              {t("dialog.adhoc.title")}
+            </Dialog.Title>
             <Dialog.Close
               className="rounded p-1 text-fg-muted hover:bg-border"
-              aria-label="Close"
+              aria-label={t("common.close")}
             >
               <X size={14} />
             </Dialog.Close>
@@ -223,19 +232,19 @@ export function AdHocConnectDialog({
 
           <div className="grid grid-cols-[5rem_1fr] gap-x-3 gap-y-2 text-base">
             <label htmlFor="adhoc-host" className="self-center text-fg-muted">
-              Host
+              {t("dialog.adhoc.host")}
             </label>
             <input
               id="adhoc-host"
               type="text"
               value={host}
               onChange={(e) => setHost(e.target.value)}
-              placeholder="192.168.0.2 or example.com"
+              placeholder={t("dialog.adhoc.hostPlaceholder")}
               autoFocus
               className="rounded border border-border bg-subtle px-2 py-1 font-mono focus:border-accent focus:outline-none"
             />
             <label htmlFor="adhoc-port" className="self-center text-fg-muted">
-              Port
+              {t("dialog.adhoc.port")}
             </label>
             <input
               id="adhoc-port"
@@ -247,7 +256,7 @@ export function AdHocConnectDialog({
               className="rounded border border-border bg-subtle px-2 py-1 font-mono focus:border-accent focus:outline-none"
             />
             <label htmlFor="adhoc-user" className="self-center text-fg-muted">
-              User
+              {t("dialog.adhoc.user")}
             </label>
             <input
               id="adhoc-user"
@@ -258,18 +267,18 @@ export function AdHocConnectDialog({
               className="rounded border border-border bg-subtle px-2 py-1 font-mono focus:border-accent focus:outline-none"
             />
             <label htmlFor="adhoc-key" className="self-center text-fg-muted">
-              Key
+              {t("dialog.adhoc.key")}
             </label>
             <input
               id="adhoc-key"
               type="text"
               value={keyPath}
               onChange={(e) => setKeyPath(e.target.value)}
-              placeholder="~/.ssh/id_ed25519 (optional)"
+              placeholder={t("dialog.adhoc.keyPlaceholder")}
               className="rounded border border-border bg-subtle px-2 py-1 font-mono focus:border-accent focus:outline-none"
             />
             <label htmlFor="adhoc-pw" className="self-center text-fg-muted">
-              Password
+              {t("dialog.adhoc.password")}
             </label>
             <input
               id="adhoc-pw"
@@ -277,16 +286,28 @@ export function AdHocConnectDialog({
               autoComplete="off"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="(optional — fallback if key/agent fails)"
+              placeholder={t("dialog.adhoc.pwPlaceholder")}
               className="rounded border border-border bg-subtle px-2 py-1 font-mono focus:border-accent focus:outline-none"
             />
           </div>
 
           <div className="mt-4">
-            <div className="text-meta text-fg-muted">Open in pane</div>
+            <div className="text-meta text-fg-muted">
+              {t("dialog.connection.openInPane")}
+            </div>
             <div className="mt-1 flex gap-2">
-              <PaneRadio value="left" current={target} onChange={setTarget} label="Left" />
-              <PaneRadio value="right" current={target} onChange={setTarget} label="Right" />
+              <PaneRadio
+                value="left"
+                current={target}
+                onChange={setTarget}
+                label={t("dialog.connection.paneLeft")}
+              />
+              <PaneRadio
+                value="right"
+                current={target}
+                onChange={setTarget}
+                label={t("dialog.connection.paneRight")}
+              />
             </div>
           </div>
 
@@ -303,13 +324,13 @@ export function AdHocConnectDialog({
               className="mt-2 flex w-full items-center justify-center gap-1 rounded border border-border px-2 py-1 text-meta text-fg-muted hover:bg-subtle hover:text-fg"
             >
               <Lock size={11} />
-              Unlock vault to autofill saved password
+              {t("dialog.adhoc.unlockVault")}
             </button>
           )}
           {prefill && vault.unlocked && (
             <div className="mt-2 flex items-center gap-1 text-meta text-fg-muted">
               <Unlock size={11} />
-              Vault unlocked — saved password (if any) loaded
+              {t("dialog.adhoc.vaultUnlocked")}
             </div>
           )}
 
@@ -320,13 +341,16 @@ export function AdHocConnectDialog({
                 checked={save}
                 onChange={(e) => setSave(e.target.checked)}
               />
-              <span>Save host</span>
+              <span>{t("dialog.adhoc.saveHost")}</span>
             </label>
             {save && (
               <div className="mt-2 space-y-2">
                 <div className="grid grid-cols-[5rem_1fr] gap-x-3 gap-y-2 text-base">
-                  <label htmlFor="adhoc-alias" className="self-center text-fg-muted">
-                    Alias
+                  <label
+                    htmlFor="adhoc-alias"
+                    className="self-center text-fg-muted"
+                  >
+                    {t("dialog.adhoc.alias")}
                   </label>
                   <input
                     id="adhoc-alias"
@@ -345,9 +369,7 @@ export function AdHocConnectDialog({
                       onChange={(e) => setSavePassword(e.target.checked)}
                     />
                     <Lock size={11} className="text-fg-muted" />
-                    <span>
-                      Save password too (encrypted with master — age scrypt+ChaCha20)
-                    </span>
+                    <span>{t("dialog.adhoc.savePassword")}</span>
                   </label>
                 )}
               </div>
@@ -360,7 +382,7 @@ export function AdHocConnectDialog({
               <div className="text-fg-muted">{formatErr(phase.error)}</div>
               {phase.error.kind === "AuthFailed" && (
                 <div className="mt-1 text-fg-muted">
-                  Key/agent failed. Enter a password and retry, or check the key file path.
+                  {t("dialog.adhoc.authFailedHint")}
                 </div>
               )}
             </div>
@@ -381,7 +403,7 @@ export function AdHocConnectDialog({
                 onClick={handleClose}
                 className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
               >
-                Cancel
+                {t("common.cancel")}
               </button>
               <button
                 type="button"
@@ -389,13 +411,15 @@ export function AdHocConnectDialog({
                 disabled={phase.kind === "connecting"}
                 className="rounded bg-accent px-3 py-1 text-base text-white disabled:opacity-50"
               >
-                {phase.kind === "connecting" ? "Connecting…" : "Connect"}
+                {phase.kind === "connecting"
+                  ? t("dialog.connection.connecting")
+                  : t("dialog.connection.connect")}
               </button>
             </div>
           )}
 
           <Dialog.Description className="sr-only">
-            Connect to a host that is not in your ~/.ssh/config.
+            {t("dialog.adhoc.desc")}
           </Dialog.Description>
         </Dialog.Content>
       </Dialog.Portal>

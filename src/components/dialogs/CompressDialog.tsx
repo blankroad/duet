@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import * as Dialog from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import type { CompressFormat } from "@/types/bindings";
@@ -17,7 +18,13 @@ const FORMATS: { value: CompressFormat; label: string }[] = [
   { value: "tar_gz", label: ".tar.gz" },
 ];
 
-export function CompressDialog({ itemCount, defaultName, onClose, onSubmit }: CompressDialogProps) {
+export function CompressDialog({
+  itemCount,
+  defaultName,
+  onClose,
+  onSubmit,
+}: CompressDialogProps) {
+  const { t } = useTranslation();
   const [name, setName] = useState(defaultName);
   const [format, setFormat] = useState<CompressFormat>("zip");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -42,19 +49,24 @@ export function CompressDialog({ itemCount, defaultName, onClose, onSubmit }: Co
           className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none"
         >
           <div className="mb-3 flex items-start justify-between">
-            <Dialog.Title className="text-title font-medium">Compress</Dialog.Title>
-            <Dialog.Close className="rounded p-1 text-fg-muted hover:bg-border" aria-label="Close">
+            <Dialog.Title className="text-title font-medium">
+              {t("dialog.compress.title")}
+            </Dialog.Title>
+            <Dialog.Close
+              className="rounded p-1 text-fg-muted hover:bg-border"
+              aria-label={t("common.close")}
+            >
               <X size={14} />
             </Dialog.Close>
           </div>
           <div className="mb-2 text-meta text-fg-muted">
-            {itemCount} item{itemCount === 1 ? "" : "s"} → archive
+            {t("dialog.compress.items", { count: itemCount })}
           </div>
           <input
             ref={inputRef}
             type="text"
             value={name}
-            placeholder="archive name"
+            placeholder={t("dialog.compress.placeholder")}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") submit();
@@ -85,7 +97,7 @@ export function CompressDialog({ itemCount, defaultName, onClose, onSubmit }: Co
               onClick={onClose}
               className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
             >
-              Cancel
+              {t("common.cancel")}
             </button>
             <button
               type="button"
@@ -93,11 +105,11 @@ export function CompressDialog({ itemCount, defaultName, onClose, onSubmit }: Co
               disabled={!name.trim()}
               className="rounded bg-accent px-3 py-1 text-base text-white disabled:opacity-50"
             >
-              Compress
+              {t("dialog.compress.cta")}
             </button>
           </div>
           <Dialog.Description className="sr-only">
-            Compress {itemCount} item(s) into an archive
+            {t("dialog.compress.desc", { count: itemCount })}
           </Dialog.Description>
         </Dialog.Content>
       </Dialog.Portal>

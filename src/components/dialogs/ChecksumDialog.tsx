@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import * as Dialog from "@radix-ui/react-dialog";
 import { X, Copy, Check, CircleAlert, LoaderCircle } from "lucide-react";
 import { commands } from "@/types/bindings";
@@ -26,6 +27,7 @@ type RowState =
  * - 행 복사는 `<hash>  <name>` (sha256sum 텍스트 포맷) — 그대로 검증 파일로 사용 가능.
  */
 export function ChecksumDialog({ targets, onClose }: ChecksumDialogProps) {
+  const { t } = useTranslation();
   const [algo, setAlgo] = useState<ChecksumAlgo>("sha256");
   const [rows, setRows] = useState<Record<string, RowState>>({});
   const [verify, setVerify] = useState("");
@@ -35,11 +37,16 @@ export function ChecksumDialog({ targets, onClose }: ChecksumDialogProps) {
 
   useEffect(() => {
     const gen = ++genRef.current;
-    setRows(Object.fromEntries(targets.map((t) => [t.name, { status: "pending" }])));
+    setRows(
+      Object.fromEntries(targets.map((t) => [t.name, { status: "pending" }])),
+    );
     void (async () => {
       // 순차 계산 — 원격 호스트에 동시 해시 폭주 방지 + 진행이 위에서 아래로 보임.
       for (const t of targets) {
-        const r = await commands.fsChecksum(childLocation(t.location, t.name), algo);
+        const r = await commands.fsChecksum(
+          childLocation(t.location, t.name),
+          algo,
+        );
         if (genRef.current !== gen) return;
         setRows((m) => ({
           ...m,
@@ -59,18 +66,21 @@ export function ChecksumDialog({ targets, onClose }: ChecksumDialogProps) {
   const copyRow = (name: string, hash: string) => {
     void navigator.clipboard
       .writeText(`${hash}  ${name}`)
-      .then(() => showToast("Copied", "success"))
-      .catch(() => showToast("Clipboard unavailable", "error"));
+      .then(() => showToast(t("dialog.checksum.copied"), "success"))
+      .catch(() => showToast(t("toast.clipboardUnavailable"), "error"));
   };
   const doneRows = targets
     .map((t) => ({ name: t.name, st: rows[t.name] }))
-    .filter((r): r is { name: string; st: RowState & { status: "done" } } => r.st?.status === "done");
+    .filter(
+      (r): r is { name: string; st: RowState & { status: "done" } } =>
+        r.st?.status === "done",
+    );
   const copyAll = () => {
     const text = doneRows.map((r) => `${r.st.hash}  ${r.name}`).join("\n");
     void navigator.clipboard
       .writeText(text)
-      .then(() => showToast("Copied all", "success"))
-      .catch(() => showToast("Clipboard unavailable", "error"));
+      .then(() => showToast(t("dialog.checksum.copiedAll"), "success"))
+      .catch(() => showToast(t("toast.clipboardUnavailable"), "error"));
   };
 
   return (
@@ -79,7 +89,9 @@ export function ChecksumDialog({ targets, onClose }: ChecksumDialogProps) {
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
         <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none">
           <div className="mb-3 flex items-start justify-between">
-            <Dialog.Title className="text-title font-medium">Checksum</Dialog.Title>
+            <Dialog.Title className="text-title font-medium">
+              {t("dialog.checksum.title")}
+            </Dialog.Title>
             <div className="flex items-center gap-2">
               <select
                 value={algo}
@@ -91,7 +103,7 @@ export function ChecksumDialog({ targets, onClose }: ChecksumDialogProps) {
               </select>
               <Dialog.Close
                 className="rounded p-1 text-fg-muted hover:bg-border"
-                aria-label="Close"
+                aria-label={t("common.close")}
               >
                 <X size={14} />
               </Dialog.Close>
@@ -99,34 +111,41 @@ export function ChecksumDialog({ targets, onClose }: ChecksumDialogProps) {
           </div>
 
           <div className="max-h-72 space-y-1 overflow-y-auto">
-            {targets.map((t) => {
-              const st = rows[t.name] ?? { status: "pending" as const };
+            {targets.map((tgt) => {
+              const st = rows[tgt.name] ?? { status: "pending" as const };
               const match =
                 expected && st.status === "done" ? st.hash === expected : null;
               return (
-                <div key={t.name} className="rounded border border-border px-2 py-1.5">
+                <div
+                  key={tgt.name}
+                  className="rounded border border-border px-2 py-1.5"
+                >
                   <div className="flex items-center gap-2">
                     <span className="min-w-0 flex-1 truncate font-mono text-base">
-                      {t.name}
+                      {tgt.name}
                     </span>
                     {st.status === "pending" && (
-                      <LoaderCircle size={13} className="animate-spin text-fg-muted" />
+                      <LoaderCircle
+                        size={13}
+                        className="animate-spin text-fg-muted"
+                      />
                     )}
                     {match === true && (
                       <span className="flex items-center gap-1 text-meta text-icon-code">
-                        <Check size={12} /> match
+                        <Check size={12} /> {t("dialog.checksum.match")}
                       </span>
                     )}
                     {match === false && (
                       <span className="flex items-center gap-1 text-meta text-danger">
-                        <CircleAlert size={12} /> mismatch
+                        <CircleAlert size={12} />{" "}
+                        {t("dialog.checksum.mismatch")}
                       </span>
                     )}
                     {st.status === "done" && (
                       <button
                         type="button"
-                        title="Copy (hash + name)"
-                        onClick={() => copyRow(t.name, st.hash)}
+                        title={t("dialog.checksum.copyRow")}
+                        onClick={() => copyRow(tgt.name, st.hash)}
                         className="rounded p-1 text-fg-muted hover:bg-border"
                       >
                         <Copy size={12} />
@@ -139,7 +158,9 @@ export function ChecksumDialog({ targets, onClose }: ChecksumDialogProps) {
                     </div>
                   )}
                   {st.status === "error" && (
-                    <div className="break-all text-meta text-danger">{st.message}</div>
+                    <div className="break-all text-meta text-danger">
+                      {st.message}
+                    </div>
                   )}
                 </div>
               );
@@ -151,7 +172,7 @@ export function ChecksumDialog({ targets, onClose }: ChecksumDialogProps) {
               type="text"
               value={verify}
               onChange={(e) => setVerify(e.target.value)}
-              placeholder="Verify: paste an expected hash to compare"
+              placeholder={t("dialog.checksum.verifyPlaceholder")}
               spellCheck={false}
               className="w-full rounded border border-border bg-subtle px-2 py-1 font-mono text-meta focus:border-accent focus:outline-none"
             />
@@ -164,18 +185,18 @@ export function ChecksumDialog({ targets, onClose }: ChecksumDialogProps) {
               disabled={doneRows.length === 0}
               className="rounded border border-border px-3 py-1 text-base hover:bg-subtle disabled:opacity-50"
             >
-              Copy all
+              {t("dialog.checksum.copyAll")}
             </button>
             <button
               type="button"
               onClick={onClose}
               className="rounded bg-accent px-3 py-1 text-base text-white"
             >
-              Close
+              {t("common.close")}
             </button>
           </div>
           <Dialog.Description className="sr-only">
-            File checksums for integrity verification
+            {t("dialog.checksum.desc")}
           </Dialog.Description>
         </Dialog.Content>
       </Dialog.Portal>

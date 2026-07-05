@@ -124,6 +124,7 @@ import { useKeymapEvents } from "@/hooks/useKeymapEvents";
 import { useTaskEvents } from "@/hooks/useTaskEvents";
 import { useIndexProgressEvents } from "@/hooks/useIndexProgressEvents";
 import i18n from "@/i18n";
+import { useTranslation, Trans } from "react-i18next";
 import { formatErr } from "@/lib/error";
 import { formatSize } from "@/lib/format";
 import { platform } from "@tauri-apps/plugin-os";
@@ -944,7 +945,7 @@ function App() {
     if (r.status === "ok") {
       openDialog({
         kind: "progress",
-        title: "Updating archive…",
+        title: i18n.t("dialog.progress.updatingArchive"),
         taskId: r.data,
       });
     } else {
@@ -1010,7 +1011,11 @@ function App() {
       if (r.status === "ok") {
         // 실패 시(보호 경로 권한 등) 승격 재시도를 위해 plan 을 기억.
         rememberElevatable(r.data, { op: "copy", plan, policy });
-        openDialog({ kind: "progress", title: "Copying…", taskId: r.data });
+        openDialog({
+          kind: "progress",
+          title: i18n.t("dialog.progress.copying"),
+          taskId: r.data,
+        });
       } else {
         closeDialog();
         showToast(
@@ -1058,7 +1063,6 @@ function App() {
         showToast(i18n.t("toast.nothingToDo"));
         return;
       }
-      const verb = mode === "copy" ? "Copy" : "Move";
       let show: { taskId: string; count: number } | null = null;
       for (const [policy, items] of groups) {
         let taskId: string | null = null;
@@ -1107,7 +1111,10 @@ function App() {
       if (show) {
         openDialog({
           kind: "progress",
-          title: verb === "Copy" ? "Copying…" : "Moving…",
+          title:
+            mode === "copy"
+              ? i18n.t("dialog.progress.copying")
+              : i18n.t("dialog.progress.moving"),
           taskId: show.taskId,
         });
       }
@@ -1234,7 +1241,11 @@ function App() {
       const plan = { ...dialog.plan, prune };
       const r = await commands.fsSyncExecute(plan);
       if (r.status === "ok") {
-        openDialog({ kind: "progress", title: "Syncing…", taskId: r.data });
+        openDialog({
+          kind: "progress",
+          title: i18n.t("dialog.progress.syncing"),
+          taskId: r.data,
+        });
       } else {
         closeDialog();
         showToast(
@@ -1253,7 +1264,11 @@ function App() {
       const r = await commands.fsMoveExecute(plan, policy);
       if (r.status === "ok") {
         rememberElevatable(r.data, { op: "move", plan, policy });
-        openDialog({ kind: "progress", title: "Moving…", taskId: r.data });
+        openDialog({
+          kind: "progress",
+          title: i18n.t("dialog.progress.moving"),
+          taskId: r.data,
+        });
       } else {
         closeDialog();
         showToast(
@@ -1713,9 +1728,12 @@ function App() {
       )}
       {dialog.kind === "delete-confirm" && (
         <ConfirmDialog
-          title="Delete to trash?"
-          body={`${dialog.plan.total_count} item(s), ${formatSize(dialog.plan.total_size_bytes)}`}
-          ctaLabel="Delete"
+          title={i18n.t("dialog.deleteConfirm.title")}
+          body={i18n.t("dialog.deleteConfirm.body", {
+            count: dialog.plan.total_count,
+            size: formatSize(dialog.plan.total_size_bytes),
+          })}
+          ctaLabel={i18n.t("common.delete")}
           ctaTone="neutral"
           onCancel={closeDialog}
           // 인자 없이 호출 — ConfirmDialog 의 onClick 이 이벤트를 넘기지 않도록 래핑.
@@ -1734,7 +1752,7 @@ function App() {
               if (r.status === "ok") {
                 openDialog({
                   kind: "progress",
-                  title: "Applying 3-way…",
+                  title: i18n.t("dialog.progress.applying3way"),
                   taskId: r.data,
                 });
               } else {
@@ -1761,7 +1779,7 @@ function App() {
               if (r.status === "ok") {
                 openDialog({
                   kind: "progress",
-                  title: "Merging…",
+                  title: i18n.t("dialog.progress.merging"),
                   taskId: r.data,
                 });
               } else {
@@ -1780,7 +1798,7 @@ function App() {
               if (r.status === "ok") {
                 openDialog({
                   kind: "progress",
-                  title: "Applying…",
+                  title: i18n.t("dialog.progress.applying"),
                   taskId: r.data,
                 });
               } else {
@@ -1806,9 +1824,11 @@ function App() {
       )}
       {dialog.kind === "repack-confirm" && (
         <ConfirmDialog
-          title={`Update “${dialog.label}”?`}
-          body={`Repack ${dialog.plan.item_names.length} item(s) into the archive. The previous version is kept as a .bak backup and can be restored with Undo.`}
-          ctaLabel="Update"
+          title={i18n.t("dialog.repack.title", { label: dialog.label })}
+          body={i18n.t("dialog.repack.body", {
+            count: dialog.plan.item_names.length,
+          })}
+          ctaLabel={i18n.t("dialog.repack.cta")}
           ctaTone="neutral"
           onCancel={closeDialog}
           onConfirm={onRepackConfirm}
@@ -1816,9 +1836,9 @@ function App() {
       )}
       {dialog.kind === "eject-confirm" && (
         <ConfirmDialog
-          title={`Eject “${dialog.volume.name}”?`}
-          body="The volume will be unmounted and safe to disconnect."
-          ctaLabel="Eject"
+          title={i18n.t("dialog.eject.title", { name: dialog.volume.name })}
+          body={i18n.t("dialog.eject.body")}
+          ctaLabel={i18n.t("dialog.eject.cta")}
           ctaTone="neutral"
           onCancel={closeDialog}
           onConfirm={onEjectConfirm}
@@ -1826,8 +1846,10 @@ function App() {
       )}
       {dialog.kind === "delete-danger" && (
         <DangerConfirmDialog
-          title="Permanently delete?"
-          body={`This CANNOT be undone. ${dialog.plan.total_count} item(s).`}
+          title={i18n.t("dialog.deleteDanger.title")}
+          body={i18n.t("dialog.deleteDanger.body", {
+            count: dialog.plan.total_count,
+          })}
           requiredWord="delete"
           onCancel={closeDialog}
           onConfirm={onDeleteConfirm}
@@ -1835,7 +1857,7 @@ function App() {
       )}
       {dialog.kind === "copy-confirm" && (
         <CopyMoveConfirmDialog
-          title="Copy"
+          title={i18n.t("dialog.transfer.copy")}
           body={
             <CopyOrMovePlanBody
               count={dialog.plan.items.length}
@@ -1845,7 +1867,7 @@ function App() {
               strategy={dialog.plan.strategy}
             />
           }
-          ctaLabel="Copy"
+          ctaLabel={i18n.t("dialog.transfer.copy")}
           conflicts={dialog.plan.conflicts}
           onCancel={closeDialog}
           onConfirm={onCopyConfirm}
@@ -1856,18 +1878,21 @@ function App() {
       )}
       {dialog.kind === "elevate-op" && (
         <ConfirmDialog
-          title="Administrator permission required"
+          title={i18n.t("dialog.elevate.title")}
           body={
             <div>
-              {dialog.pending.op === "delete" ? "Deleting at" : "Writing to"}{" "}
-              <span className="break-all font-mono">
-                {elevatableDestPath(dialog.pending)}
-              </span>{" "}
-              needs administrator rights. Retry with elevation? Windows will
-              show a UAC prompt.
+              <Trans
+                i18nKey={
+                  dialog.pending.op === "delete"
+                    ? "dialog.elevate.bodyDelete"
+                    : "dialog.elevate.bodyWrite"
+                }
+                values={{ path: elevatableDestPath(dialog.pending) }}
+                components={{ 1: <span className="break-all font-mono" /> }}
+              />
             </div>
           }
-          ctaLabel="Retry as administrator"
+          ctaLabel={i18n.t("dialog.elevate.cta")}
           ctaTone="neutral"
           onCancel={closeDialog}
           onConfirm={() => void onElevateConfirm()}
@@ -1875,18 +1900,24 @@ function App() {
       )}
       {dialog.kind === "sudo-op" && (
         <ConfirmDialog
-          title="Root permission required"
+          title={i18n.t("dialog.sudo.title")}
           body={
             <div>
-              {dialog.pending.op === "delete" ? "Deleting at" : "Writing to"}{" "}
-              <span className="break-all font-mono">
-                {elevatableDestPath(dialog.pending)}
-              </span>{" "}
-              on the remote needs root. Retry with{" "}
-              <span className="font-mono">sudo</span>?
+              <Trans
+                i18nKey={
+                  dialog.pending.op === "delete"
+                    ? "dialog.sudo.bodyDelete"
+                    : "dialog.sudo.bodyWrite"
+                }
+                values={{ path: elevatableDestPath(dialog.pending) }}
+                components={{
+                  1: <span className="break-all font-mono" />,
+                  3: <span className="font-mono" />,
+                }}
+              />
             </div>
           }
-          ctaLabel="Retry with sudo"
+          ctaLabel={i18n.t("dialog.sudo.cta")}
           ctaTone="neutral"
           onCancel={closeDialog}
           onConfirm={() => void onSudoRetry()}
@@ -1902,7 +1933,7 @@ function App() {
       )}
       {dialog.kind === "move-confirm" && (
         <CopyMoveConfirmDialog
-          title="Move"
+          title={i18n.t("dialog.transfer.move")}
           body={
             <CopyOrMovePlanBody
               count={dialog.plan.items.length}
@@ -1912,7 +1943,7 @@ function App() {
               strategy={dialog.plan.strategy}
             />
           }
-          ctaLabel="Move"
+          ctaLabel={i18n.t("dialog.transfer.move")}
           conflicts={dialog.plan.conflicts}
           onCancel={closeDialog}
           onConfirm={onMoveConfirm}
@@ -1956,21 +1987,22 @@ function CopyOrMovePlanBody({
   conflicts: number;
   strategy: CopyStrategy;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-1">
       <div>
-        {count} item(s), {formatSize(totalSize)} →
+        {t("dialog.transfer.summary", { count, size: formatSize(totalSize) })}
       </div>
       {/* 긴 목적지 경로가 모달 밖으로 넘치지 않게 — 한 줄 truncate + 전체경로 tooltip. */}
       <div className="truncate font-mono" title={dstPath}>
         {dstPath}
       </div>
       <div className="text-meta text-fg-muted">
-        Strategy: {strategyLabel(strategy)}
+        {t("dialog.transfer.strategy", { label: strategyLabel(strategy) })}
       </div>
       {conflicts > 0 && (
         <div className="text-meta text-danger">
-          {conflicts} conflict(s) at destination
+          {t("dialog.transfer.conflicts", { count: conflicts })}
         </div>
       )}
     </div>
@@ -1980,11 +2012,11 @@ function CopyOrMovePlanBody({
 function strategyLabel(s: CopyStrategy): string {
   switch (s.kind) {
     case "local_to_local":
-      return "local";
+      return i18n.t("dialog.transfer.strategyLocal");
     case "relay":
-      return "relay (via this PC)";
+      return i18n.t("dialog.transfer.strategyRelay");
     case "ssh_same_host":
-      return "same-host (fast, server-side)";
+      return i18n.t("dialog.transfer.strategySameHost");
   }
 }
 

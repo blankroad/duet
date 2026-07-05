@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { useTranslation, Trans } from "react-i18next";
 import { save } from "@tauri-apps/plugin-dialog";
 import * as Dialog from "@radix-ui/react-dialog";
 import { X, FolderGit2 } from "lucide-react";
@@ -12,7 +13,12 @@ import {
   type ComparePlan,
   type CompareStatus,
 } from "@/types/bindings";
-import { DIFF_STATUSES, strategyBadge, defaultDirection, isCreate } from "./compareView";
+import {
+  DIFF_STATUSES,
+  strategyBadge,
+  defaultDirection,
+  isCreate,
+} from "./compareView";
 import { CompareList } from "./CompareList";
 import { basename } from "@/lib/paths";
 import { CompareTree } from "./CompareTree";
@@ -40,6 +46,7 @@ export function CompareDialog({
   onMerge,
   onApply,
 }: CompareDialogProps) {
+  const { t } = useTranslation();
   // plan 은 규칙 변경 시 Re-compare 로 교체되므로 로컬 상태로 보유(seed=prop).
   const [plan, setPlan] = useState(initialPlan);
   const [recomparing, setRecomparing] = useState(false);
@@ -48,7 +55,12 @@ export function CompareDialog({
 
   const onRecompare = async (rules: CompareRules) => {
     setRecomparing(true);
-    const r = await commands.fsCompareDirs(plan.left, plan.right, rules, detectRenames);
+    const r = await commands.fsCompareDirs(
+      plan.left,
+      plan.right,
+      rules,
+      detectRenames,
+    );
     if (r.status === "ok") setPlan(r.data);
     setRecomparing(false);
   };
@@ -59,28 +71,37 @@ export function CompareDialog({
   const [verifying, setVerifying] = useState(false);
   const [verifyNote, setVerifyNote] = useState<string | null>(null);
   const onVerify = async () => {
-    const sameRels = plan.entries.filter((e) => e.status === "same").map((e) => e.rel);
+    const sameRels = plan.entries
+      .filter((e) => e.status === "same")
+      .map((e) => e.rel);
     if (sameRels.length === 0) return;
     setVerifying(true);
     setVerifyNote(null);
     const r = await commands.fsCompareVerify(plan.left, plan.right, sameRels);
     if (r.status === "ok") {
-      const differ = new Set(r.data.filter((v) => v.equal === false).map((v) => v.rel));
+      const differ = new Set(
+        r.data.filter((v) => v.equal === false).map((v) => v.rel),
+      );
       const unver = r.data.filter((v) => v.equal === null).length;
       if (differ.size > 0) {
         setPlan((p) => ({
           ...p,
           entries: p.entries.map((e) =>
-            differ.has(e.rel) && e.status === "same" ? { ...e, status: "differ" as const } : e,
+            differ.has(e.rel) && e.status === "same"
+              ? { ...e, status: "differ" as const }
+              : e,
           ),
         }));
       }
       setVerifyNote(
-        `Verified ${sameRels.length} — actually differ ${differ.size}` +
-          (unver > 0 ? `, unverifiable ${unver}` : ""),
+        t("dialog.compare.verified", {
+          count: sameRels.length,
+          differ: differ.size,
+        }) +
+          (unver > 0 ? t("dialog.compare.unverifiable", { count: unver }) : ""),
       );
     } else {
-      setVerifyNote(`Verify failed: ${r.error.kind}`);
+      setVerifyNote(t("dialog.compare.verifyFailed", { err: r.error.kind }));
     }
     setVerifying(false);
   };
@@ -97,7 +118,11 @@ export function CompareDialog({
     if (!dest) return;
     const format = dest.toLowerCase().endsWith(".json") ? "json" : "csv";
     const r = await commands.fsExportCompare(plan, dest, format);
-    setVerifyNote(r.status === "ok" ? `Exported: ${dest}` : `Export failed: ${r.error.kind}`);
+    setVerifyNote(
+      r.status === "ok"
+        ? t("dialog.compare.exported", { dest })
+        : t("dialog.compare.exportFailed", { err: r.error.kind }),
+    );
   };
 
   // 기본 필터: 차이만(same 숨김). unreadable 은 경고라 기본 표시.
@@ -111,11 +136,13 @@ export function CompareDialog({
   // 보기 모드 — 평면 목록(키보드 내비) / 디렉토리 트리(접기·롤업).
   const [view, setView] = useState<"list" | "tree">("list");
   // 행별 적용 방향(rel → dir) — 상태별 기본값으로 초기화.
-  const [decisions, setDecisions] = useState<Record<string, ApplyDirection>>(() => {
-    const d: Record<string, ApplyDirection> = {};
-    for (const e of plan.entries) d[e.rel] = defaultDirection(e.status);
-    return d;
-  });
+  const [decisions, setDecisions] = useState<Record<string, ApplyDirection>>(
+    () => {
+      const d: Record<string, ApplyDirection> = {};
+      for (const e of plan.entries) d[e.rel] = defaultDirection(e.status);
+      return d;
+    },
+  );
   const listRef = useRef<HTMLDivElement>(null);
 
   const dirOf = (rel: string, status: CompareStatus): ApplyDirection =>
@@ -140,7 +167,8 @@ export function CompareDialog({
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
     return plan.entries.filter(
-      (e) => active.has(e.status) && (q === "" || e.rel.toLowerCase().includes(q)),
+      (e) =>
+        active.has(e.status) && (q === "" || e.rel.toLowerCase().includes(q)),
     );
   }, [plan.entries, active, query]);
 
@@ -185,18 +213,21 @@ export function CompareDialog({
         >
           <div className="mb-2 flex items-start justify-between">
             <Dialog.Title className="flex items-center gap-1.5 text-title font-medium">
-              <FolderGit2 size={15} /> Compare folders
+              <FolderGit2 size={15} /> {t("dialog.compare.title")}
             </Dialog.Title>
             <div className="flex items-center gap-2">
               <span
-                className={clsx("rounded border px-1.5 py-0.5 text-meta", badge.tone)}
+                className={clsx(
+                  "rounded border px-1.5 py-0.5 text-meta",
+                  badge.tone,
+                )}
                 title={badge.title}
               >
                 {badge.label}
               </span>
               <Dialog.Close
                 className="rounded p-1 text-fg-muted hover:bg-border"
-                aria-label="Close"
+                aria-label={t("common.close")}
               >
                 <X size={14} />
               </Dialog.Close>
@@ -205,7 +236,7 @@ export function CompareDialog({
 
           <div className="mb-2 grid grid-cols-2 gap-2 text-meta">
             <div className="truncate">
-              <span className="text-fg-muted">left </span>
+              <span className="text-fg-muted">{t("dialog.compare.left")} </span>
               <span className="font-mono" title={String(plan.left.path)}>
                 {base(plan.left)}
               </span>
@@ -214,7 +245,10 @@ export function CompareDialog({
               <span className="font-mono" title={String(plan.right.path)}>
                 {base(plan.right)}
               </span>
-              <span className="text-fg-muted"> right</span>
+              <span className="text-fg-muted">
+                {" "}
+                {t("dialog.compare.right")}
+              </span>
             </div>
           </div>
 
@@ -234,9 +268,11 @@ export function CompareDialog({
               onClick={() => void onVerify()}
               disabled={counts.same === 0 || verifying}
               className="rounded border border-border px-2 py-0.5 hover:bg-subtle disabled:opacity-50"
-              title="Re-verify 'Same' items by hash/bytes (catch false Same). Same-host uses host-side sha256 (no PC download)."
+              title={t("dialog.compare.verifyTitle")}
             >
-              {verifying ? "Verifying…" : `Verify content (Same ${counts.same})`}
+              {verifying
+                ? t("dialog.compare.verifying")
+                : t("dialog.compare.verifyCta", { count: counts.same })}
             </button>
             <button
               type="button"
@@ -244,57 +280,65 @@ export function CompareDialog({
               aria-pressed={showPreview}
               className={clsx(
                 "rounded border px-2 py-0.5 hover:bg-subtle",
-                showPreview ? "border-border bg-subtle text-fg" : "border-border",
+                showPreview
+                  ? "border-border bg-subtle text-fg"
+                  : "border-border",
               )}
-              title="Compare the selected row's left/right content inline (text diff / image)"
+              title={t("dialog.compare.previewTitle")}
             >
-              Preview
+              {t("dialog.compare.preview")}
             </button>
             <button
               type="button"
               onClick={() => setView((v) => (v === "list" ? "tree" : "list"))}
               className="rounded border border-border px-2 py-0.5 hover:bg-subtle"
-              title="Toggle flat list (keyboard ↑↓←→) ↔ directory tree (collapse / rollup)"
+              title={t("dialog.compare.viewToggleTitle")}
             >
-              {view === "list" ? "Tree view" : "List view"}
+              {view === "list"
+                ? t("dialog.compare.treeView")
+                : t("dialog.compare.listView")}
             </button>
             <label
               className="flex items-center gap-1 text-fg-muted"
-              title="Detect move/rename (same content, different path) as a pair — prevents duplicate copies on merge. local · same-host. Apply via Re-compare."
+              title={t("dialog.compare.detectMovesTitle")}
             >
               <input
                 type="checkbox"
                 checked={detectRenames}
                 onChange={(e) => setDetectRenames(e.target.checked)}
               />
-              Detect moves
+              {t("dialog.compare.detectMoves")}
             </label>
             <button
               type="button"
               onClick={() => void onExport()}
               className="rounded border border-border px-2 py-0.5 hover:bg-subtle"
-              title="Export comparison results to a CSV/JSON file"
+              title={t("dialog.compare.exportTitle")}
             >
-              Export
+              {t("dialog.compare.export")}
             </button>
             {verifyNote && <span className="truncate">{verifyNote}</span>}
           </div>
 
           {counts.unreadable > 0 && (
             <div className="mb-2 rounded border border-danger/40 bg-danger/10 px-2 py-1 text-meta text-danger">
-              Could not read {counts.unreadable} director{counts.unreadable === 1 ? "y" : "ies"} — excluded from merge/sync.
+              {t("dialog.compare.unreadable", { count: counts.unreadable })}
             </div>
           )}
           {plan.truncated && (
             <div className="mb-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-meta text-amber-600">
-              Too many items — only some are shown (limit reached). Merge/apply is disabled.
+              {t("dialog.compare.truncated")}
             </div>
           )}
 
           {moves.length > 0 && (
             <div className="mb-2 max-h-20 overflow-auto rounded border border-border bg-subtle/40 px-2 py-1 text-meta">
               <div className="text-fg-muted">
-                ↔ Move/rename <b className="text-fg">{moves.length}</b> — not copied (avoids duplicates)
+                <Trans
+                  i18nKey="dialog.compare.moves"
+                  values={{ count: moves.length }}
+                  components={{ 1: <b className="text-fg" /> }}
+                />
               </div>
               {moves.map((m) => (
                 <div
@@ -309,7 +353,12 @@ export function CompareDialog({
           )}
 
           {view === "tree" ? (
-            <CompareTree rows={rows} dirOf={dirOf} setDir={setDir} onSelect={setSelectedEntry} />
+            <CompareTree
+              rows={rows}
+              dirOf={dirOf}
+              setDir={setDir}
+              onSelect={setSelectedEntry}
+            />
           ) : (
             <CompareList
               rows={rows}
@@ -322,7 +371,11 @@ export function CompareDialog({
           )}
 
           {showPreview && (
-            <CompareDiffPreview entry={selectedEntry} left={plan.left} right={plan.right} />
+            <CompareDiffPreview
+              entry={selectedEntry}
+              left={plan.left}
+              right={plan.right}
+            />
           )}
 
           <CompareFooter
@@ -336,7 +389,7 @@ export function CompareDialog({
             onApply={() => onApply(apply.payload)}
           />
           <Dialog.Description className="sr-only">
-            Recursive comparison of the two pane directories.
+            {t("dialog.compare.desc")}
           </Dialog.Description>
         </Dialog.Content>
       </Dialog.Portal>

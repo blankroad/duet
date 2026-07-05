@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import * as Dialog from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import type { Location } from "@/types/bindings";
@@ -10,6 +11,7 @@ export interface MkdirDialogProps {
 }
 
 export function MkdirDialog({ parent, onClose, onSubmit }: MkdirDialogProps) {
+  const { t } = useTranslation();
   const [name, setName] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -32,22 +34,27 @@ export function MkdirDialog({ parent, onClose, onSubmit }: MkdirDialogProps) {
           className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none"
         >
           <div className="mb-3 flex items-start justify-between">
-            <Dialog.Title className="text-title font-medium">New folder</Dialog.Title>
+            <Dialog.Title className="text-title font-medium">
+              {t("dialog.mkdir.title")}
+            </Dialog.Title>
             <Dialog.Close
               className="rounded p-1 text-fg-muted hover:bg-border"
-              aria-label="Close"
+              aria-label={t("common.close")}
             >
               <X size={14} />
             </Dialog.Close>
           </div>
-          <div className="mb-2 truncate text-meta text-fg-muted" title={parent.path}>
-            in {parent.path}
+          <div
+            className="mb-2 truncate text-meta text-fg-muted"
+            title={parent.path}
+          >
+            {t("dialog.mkdir.in", { path: parent.path })}
           </div>
           <input
             ref={inputRef}
             type="text"
             value={name}
-            placeholder="folder name"
+            placeholder={t("dialog.mkdir.placeholder")}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") submit();
@@ -61,7 +68,7 @@ export function MkdirDialog({ parent, onClose, onSubmit }: MkdirDialogProps) {
               onClick={onClose}
               className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
             >
-              Cancel
+              {t("common.cancel")}
             </button>
             <button
               type="button"
@@ -69,11 +76,11 @@ export function MkdirDialog({ parent, onClose, onSubmit }: MkdirDialogProps) {
               disabled={!name.trim()}
               className="rounded bg-accent px-3 py-1 text-base text-white disabled:opacity-50"
             >
-              Create
+              {t("dialog.mkdir.create")}
             </button>
           </div>
           <Dialog.Description className="sr-only">
-            Create new folder in {parent.path}
+            {t("dialog.mkdir.desc", { path: parent.path })}
           </Dialog.Description>
         </Dialog.Content>
       </Dialog.Portal>

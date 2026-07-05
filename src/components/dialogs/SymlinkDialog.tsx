@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import * as Dialog from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import type { Location } from "@/types/bindings";
@@ -13,7 +14,12 @@ export interface SymlinkDialogProps {
  * 심볼릭 링크 생성 — 링크 이름 + 대상 경로(상대/절대 그대로, 존재 검증 안 함 —
  * 의도적 dangling 링크 허용). undo 는 링크 제거.
  */
-export function SymlinkDialog({ parent, onClose, onSubmit }: SymlinkDialogProps) {
+export function SymlinkDialog({
+  parent,
+  onClose,
+  onSubmit,
+}: SymlinkDialogProps) {
+  const { t } = useTranslation();
   const [name, setName] = useState("");
   const [target, setTarget] = useState("");
   const nameRef = useRef<HTMLInputElement>(null);
@@ -36,22 +42,27 @@ export function SymlinkDialog({ parent, onClose, onSubmit }: SymlinkDialogProps)
           className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none"
         >
           <div className="mb-3 flex items-start justify-between">
-            <Dialog.Title className="text-title font-medium">New symlink</Dialog.Title>
+            <Dialog.Title className="text-title font-medium">
+              {t("dialog.symlink.title")}
+            </Dialog.Title>
             <Dialog.Close
               className="rounded p-1 text-fg-muted hover:bg-border"
-              aria-label="Close"
+              aria-label={t("common.close")}
             >
               <X size={14} />
             </Dialog.Close>
           </div>
-          <div className="mb-2 truncate text-meta text-fg-muted" title={String(parent.path)}>
-            in {String(parent.path)}
+          <div
+            className="mb-2 truncate text-meta text-fg-muted"
+            title={String(parent.path)}
+          >
+            {t("dialog.symlink.in", { path: String(parent.path) })}
           </div>
           <input
             ref={nameRef}
             type="text"
             value={name}
-            placeholder="link name"
+            placeholder={t("dialog.symlink.namePlaceholder")}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") submit();
@@ -62,7 +73,7 @@ export function SymlinkDialog({ parent, onClose, onSubmit }: SymlinkDialogProps)
           <input
             type="text"
             value={target}
-            placeholder="target path (relative or absolute)"
+            placeholder={t("dialog.symlink.targetPlaceholder")}
             spellCheck={false}
             onChange={(e) => setTarget(e.target.value)}
             onKeyDown={(e) => {
@@ -77,7 +88,7 @@ export function SymlinkDialog({ parent, onClose, onSubmit }: SymlinkDialogProps)
               onClick={onClose}
               className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
             >
-              Cancel
+              {t("common.cancel")}
             </button>
             <button
               type="button"
@@ -85,11 +96,11 @@ export function SymlinkDialog({ parent, onClose, onSubmit }: SymlinkDialogProps)
               disabled={!canSubmit}
               className="rounded bg-accent px-3 py-1 text-base text-white disabled:opacity-50"
             >
-              Create
+              {t("dialog.symlink.create")}
             </button>
           </div>
           <Dialog.Description className="sr-only">
-            Create a symbolic link in {String(parent.path)}
+            {t("dialog.symlink.desc", { path: String(parent.path) })}
           </Dialog.Description>
         </Dialog.Content>
       </Dialog.Portal>

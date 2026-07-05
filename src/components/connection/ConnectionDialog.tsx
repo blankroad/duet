@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Network, X } from "lucide-react";
 import { commands } from "@/types/bindings";
@@ -31,7 +32,12 @@ type DialogPhase =
   | { kind: "error"; error: DuetError }
   | { kind: "host-key"; info: HostKeyInfo };
 
-export function ConnectionDialog({ alias, onClose, onConnected }: ConnectionDialogProps) {
+export function ConnectionDialog({
+  alias,
+  onClose,
+  onConnected,
+}: ConnectionDialogProps) {
+  const { t } = useTranslation();
   const hosts = useConnections((s) => s.hosts);
   const upsertActive = useConnections((s) => s.upsertActive);
 
@@ -56,7 +62,12 @@ export function ConnectionDialog({ alias, onClose, onConnected }: ConnectionDial
     if (!host) return;
     setPhase({ kind: "connecting" });
     const pw = password ? password : null;
-    const result = await commands.connectionOpen(host.alias, pw, trust, replaceChanged);
+    const result = await commands.connectionOpen(
+      host.alias,
+      pw,
+      trust,
+      replaceChanged,
+    );
     if (result.status === "ok") {
       setPassword(""); // 성공 — 즉시 clear (CLAUDE.md §5)
       const dto = result.data;
@@ -88,10 +99,12 @@ export function ConnectionDialog({ alias, onClose, onConnected }: ConnectionDial
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50 data-[state=open]:animate-in data-[state=open]:fade-in-0" />
         <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95">
           <div className="mb-3 flex items-start justify-between gap-2">
-            <Dialog.Title className="text-title font-medium">Connect to {alias}</Dialog.Title>
+            <Dialog.Title className="text-title font-medium">
+              {t("dialog.connection.title", { alias })}
+            </Dialog.Title>
             <Dialog.Close
               className="rounded p-1 text-fg-muted hover:bg-border"
-              aria-label="Close"
+              aria-label={t("common.close")}
             >
               <X size={14} />
             </Dialog.Close>
@@ -100,16 +113,28 @@ export function ConnectionDialog({ alias, onClose, onConnected }: ConnectionDial
           {host && <HostInfo host={host} />}
 
           <div className="mt-4">
-            <div className="text-meta text-fg-muted">Open in pane</div>
+            <div className="text-meta text-fg-muted">
+              {t("dialog.connection.openInPane")}
+            </div>
             <div className="mt-1 flex gap-2">
-              <PaneRadio value="left" current={target} onChange={setTarget} label="Left" />
-              <PaneRadio value="right" current={target} onChange={setTarget} label="Right" />
+              <PaneRadio
+                value="left"
+                current={target}
+                onChange={setTarget}
+                label={t("dialog.connection.paneLeft")}
+              />
+              <PaneRadio
+                value="right"
+                current={target}
+                onChange={setTarget}
+                label={t("dialog.connection.paneRight")}
+              />
             </div>
           </div>
 
           <div className="mt-3">
             <label htmlFor="conn-pw" className="block text-meta text-fg-muted">
-              Password (optional — fallback if key/agent fails)
+              {t("dialog.connection.passwordLabel")}
             </label>
             <input
               id="conn-pw"
@@ -138,7 +163,7 @@ export function ConnectionDialog({ alias, onClose, onConnected }: ConnectionDial
                 onClick={onClose}
                 className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
               >
-                Cancel
+                {t("common.cancel")}
               </button>
               <button
                 type="button"
@@ -146,13 +171,15 @@ export function ConnectionDialog({ alias, onClose, onConnected }: ConnectionDial
                 disabled={phase.kind === "connecting"}
                 className="rounded bg-accent px-3 py-1 text-base text-white disabled:opacity-50"
               >
-                {phase.kind === "connecting" ? "Connecting…" : "Connect"}
+                {phase.kind === "connecting"
+                  ? t("dialog.connection.connecting")
+                  : t("dialog.connection.connect")}
               </button>
             </div>
           )}
 
           <Dialog.Description className="sr-only">
-            Open a new SSH connection to {alias} and attach it to a pane.
+            {t("dialog.connection.desc", { alias })}
           </Dialog.Description>
         </Dialog.Content>
       </Dialog.Portal>
@@ -161,17 +188,18 @@ export function ConnectionDialog({ alias, onClose, onConnected }: ConnectionDial
 }
 
 function HostInfo({ host }: { host: Host }) {
+  const { t } = useTranslation();
   return (
     <dl className="grid grid-cols-[5rem_1fr] gap-x-3 gap-y-1 text-base">
-      <dt className="text-fg-muted">Host</dt>
+      <dt className="text-fg-muted">{t("dialog.connection.host")}</dt>
       <dd className="font-mono">
         {host.user}@{host.hostname}:{host.port}
       </dd>
       {host.has_proxy_jump && (
         <>
-          <dt className="text-fg-muted">Proxy</dt>
+          <dt className="text-fg-muted">{t("dialog.connection.proxy")}</dt>
           <dd className="flex items-center gap-1 text-fg-muted">
-            <Network size={12} /> via jump host (1-hop)
+            <Network size={12} /> {t("dialog.connection.viaJump")}
           </dd>
         </>
       )}
@@ -208,6 +236,7 @@ function PaneRadio({
 }
 
 function ErrorBox({ error }: { error: DuetError }) {
+  const { t } = useTranslation();
   const message = formatError(error);
   const isAuth = error.kind === "AuthFailed";
   return (
@@ -216,7 +245,7 @@ function ErrorBox({ error }: { error: DuetError }) {
       <div className="text-fg-muted">{message}</div>
       {isAuth && (
         <div className="mt-1 text-fg-muted">
-          Key/agent + (if entered) password all failed. Check the password and retry.
+          {t("dialog.connection.authFailedHint")}
         </div>
       )}
     </div>
@@ -224,5 +253,7 @@ function ErrorBox({ error }: { error: DuetError }) {
 }
 
 function formatError(error: DuetError): string {
-  return "message" in error && typeof error.message === "string" ? error.message : error.kind;
+  return "message" in error && typeof error.message === "string"
+    ? error.message
+    : error.kind;
 }

@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Lock, X } from "lucide-react";
 
@@ -34,9 +35,10 @@ export function PasswordPromptDialog({
   onClose,
   wrongPassword,
 }: PasswordPromptDialogProps) {
+  const { t } = useTranslation();
   const [pw, setPw] = useState("");
   const [error, setError] = useState<string | null>(
-    wrongPassword ? "Wrong password — try again" : null,
+    wrongPassword ? t("dialog.passwordPrompt.wrong") : null,
   );
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -52,7 +54,7 @@ export function PasswordPromptDialog({
       onClose();
       return;
     }
-    setError("Wrong password — try again");
+    setError(t("dialog.passwordPrompt.wrong"));
     inputRef.current?.focus();
   };
 
@@ -71,11 +73,11 @@ export function PasswordPromptDialog({
           <div className="mb-3 flex items-start justify-between gap-2">
             <Dialog.Title className="flex items-center gap-2 text-title font-medium">
               <Lock size={14} />
-              Password required
+              {t("dialog.passwordPrompt.title")}
             </Dialog.Title>
             <Dialog.Close
               className="rounded p-1 text-fg-muted hover:bg-border"
-              aria-label="Close"
+              aria-label={t("common.close")}
             >
               <X size={14} />
             </Dialog.Close>
@@ -85,7 +87,7 @@ export function PasswordPromptDialog({
             className="mb-3 truncate text-meta text-fg-muted"
             title={archiveName}
           >
-            {archiveName} is encrypted. Enter its password to continue.
+            {t("dialog.passwordPrompt.body", { name: archiveName })}
           </p>
 
           <input
@@ -98,7 +100,7 @@ export function PasswordPromptDialog({
               if (e.key === "Enter") void run();
               else if (e.key === "Escape") onClose();
             }}
-            placeholder="Archive password"
+            placeholder={t("dialog.passwordPrompt.placeholder")}
             className="w-full rounded border border-border bg-subtle px-2 py-1 font-mono text-base focus:border-accent focus:outline-none"
           />
 
@@ -114,7 +116,7 @@ export function PasswordPromptDialog({
               onClick={onClose}
               className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
             >
-              Cancel
+              {t("common.cancel")}
             </button>
             <button
               type="button"
@@ -122,12 +124,12 @@ export function PasswordPromptDialog({
               disabled={busy || !pw}
               className="rounded bg-accent px-3 py-1 text-base text-white disabled:opacity-50"
             >
-              {busy ? "…" : "Continue"}
+              {busy ? "…" : t("dialog.passwordPrompt.cta")}
             </button>
           </div>
 
           <Dialog.Description className="sr-only">
-            Enter the password for the encrypted archive {archiveName}.
+            {t("dialog.passwordPrompt.desc", { name: archiveName })}
           </Dialog.Description>
         </Dialog.Content>
       </Dialog.Portal>
