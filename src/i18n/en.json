@@ -410,7 +410,8 @@
     "maximize": "Maximize",
     "restore": "Restore",
     "closeWindow": "Close",
-    "singlePane": "Toggle single pane ({{key}})"
+    "singlePane": "Toggle single pane ({{key}})",
+    "dropTray": "Drop tray ({{key}}) — floating shelf for drag & drop"
   },
   "toolbar": {
     "newFolder": "New folder (F7)",
@@ -753,7 +754,8 @@
       "details": "View: Details",
       "grid": "View: Grid",
       "tiles": "View: Tiles",
-      "singlePane": "Toggle single pane"
+      "singlePane": "Toggle single pane",
+      "dropTray": "Toggle drop tray"
     },
     "sort": {
       "byName": "Sort by name",
@@ -840,5 +842,12 @@
     "folders_one": "1 folder",
     "folders_other": "{{count}} folders",
     "empty": "empty"
+  },
+  "droptray": {
+    "title": "Drop tray",
+    "emptyHint": "Drop files here, then drag them out to any app. Stays on top.",
+    "dragAll": "Drag all out",
+    "clear": "Clear all",
+    "remove": "Remove"
   }
 }

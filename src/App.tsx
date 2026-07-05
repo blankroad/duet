@@ -46,6 +46,7 @@ import { useContextMenu, type MenuEntry } from "@/stores/contextMenu";
 import { openShellMenu, onShellMenuClose } from "@/lib/shellMenu";
 import { buildEntryMenu, buildEmptyMenu, folderName } from "@/lib/entryMenu";
 import { calcDirSizes } from "@/lib/dirSize";
+import { toggleDropTray } from "@/lib/dropTray";
 import {
   childLocation,
   parentPath,
@@ -723,6 +724,7 @@ function App() {
       togglePreview: () => togglePreview(),
       toggleSyncBrowse: () => useUI.getState().toggleSyncBrowse(),
       toggleSinglePane: () => useUI.getState().toggleSinglePane(),
+      toggleDropTray: () => void toggleDropTray(),
       quickLook: () => useUI.getState().toggleQuickLook(),
       viewDetails: () =>
         usePanes

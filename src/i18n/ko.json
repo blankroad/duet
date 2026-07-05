@@ -407,7 +407,8 @@
     "maximize": "최대화",
     "restore": "이전 크기로",
     "closeWindow": "닫기",
-    "singlePane": "단일 패널 토글 ({{key}})"
+    "singlePane": "단일 패널 토글 ({{key}})",
+    "dropTray": "드롭 트레이 ({{key}}) — 드래그 앤 드롭용 플로팅 셸프"
   },
   "toolbar": {
     "newFolder": "새 폴더 (F7)",
@@ -749,7 +750,8 @@
       "details": "보기: 상세",
       "grid": "보기: 그리드",
       "tiles": "보기: 타일",
-      "singlePane": "단일 패널 토글"
+      "singlePane": "단일 패널 토글",
+      "dropTray": "드롭 트레이 토글"
     },
     "sort": {
       "byName": "이름순 정렬",
@@ -877,5 +879,12 @@
       "java": "Java 소스",
       "sh": "셸 스크립트"
     }
+  },
+  "droptray": {
+    "title": "드롭 트레이",
+    "emptyHint": "파일을 여기에 떨궈 두고, 아무 앱으로나 끌어다 놓으세요. 항상 위에 떠 있습니다.",
+    "dragAll": "전부 드래그",
+    "clear": "모두 비우기",
+    "remove": "제거"
   }
 }

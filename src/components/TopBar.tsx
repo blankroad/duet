@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { PanelLeft, PanelRight, Search, Command, Settings, FolderGit2, Undo2, Columns2 } from "lucide-react";
+import { PanelLeft, PanelRight, Search, Command, Settings, FolderGit2, Undo2, Columns2, Inbox } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useTranslation } from "react-i18next";
 import clsx from "clsx";
@@ -11,6 +11,7 @@ import { useUIDialogs } from "@/stores/ui-dialogs";
 import { useToast } from "@/stores/toast";
 import { displayKey } from "@/lib/keyDisplay";
 import { triggerCompare, triggerUndo } from "@/lib/fileActions";
+import { toggleDropTray } from "@/lib/dropTray";
 import { AppLauncherStrip } from "@/components/AppLauncherStrip";
 
 /**
@@ -77,6 +78,12 @@ export function TopBar() {
         onClick={toggleSinglePane}
       >
         <Columns2 size={15} />
+      </IconBtn>
+      <IconBtn
+        label={t("topbar.dropTray", { key: displayKey("Ctrl+Shift+Y") })}
+        onClick={() => void toggleDropTray()}
+      >
+        <Inbox size={15} />
       </IconBtn>
       <IconBtn
         label={t("topbar.compareFolders")}

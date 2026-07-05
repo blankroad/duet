@@ -1,10 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "duet 기본 capability — core 이벤트/윈도우 + dialog/os/drag 플러그인",
-  "windows": ["main"],
+  "description": "duet 기본 capability — core 이벤트/윈도우 + dialog/os/drag 플러그인. shelf = 플로팅 드롭 트레이 창.",
+  "windows": ["main", "shelf"],
   "permissions": [
     "core:default",
+    "core:webview:allow-create-webview-window",
     "core:event:default",
     "core:window:default",
     "core:window:allow-start-dragging",

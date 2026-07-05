@@ -61,6 +61,8 @@ export interface BuiltinDeps {
   toggleSyncBrowse: () => void;
   /** 단일 패널 모드 토글 — 활성 패널만 전체 폭 (외부 DnD 시 창 축소용). */
   toggleSinglePane: () => void;
+  /** 플로팅 드롭 트레이 창 토글 (Yoink 식 항상-위 중계 셸프). */
+  toggleDropTray: () => void;
   quickLook: () => void;
   viewDetails: () => void;
   viewGrid: () => void;
@@ -230,6 +232,13 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
       category: "View",
       defaultKey: "Ctrl+Shift+D",
       action: deps.toggleSinglePane,
+    },
+    {
+      id: "view.dropTray",
+      label: "Toggle drop tray",
+      category: "View",
+      defaultKey: "Ctrl+Shift+Y",
+      action: deps.toggleDropTray,
     },
     {
       id: "view.details",
