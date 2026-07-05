@@ -8,7 +8,7 @@
 //! §5: sudo 비번은 stdin 전용(cmdline `ps` 노출 X, 로그 X, 사용 직후 zero-fill —
 //! `SshFs::sudo_run`). §9: russh exec, 시스템 ssh 바이너리 X. v1: 복사만, undo 없음.
 
-use crate::core::copy_strategy::shell_escape_path;
+use crate::core::copy_strategy::{shell_escape_path, shell_escape_str};
 use crate::core::elevate::ElevatedOp;
 use crate::core::ops::ConflictPolicy;
 use crate::fs::{FileSystem, SshFs};
@@ -40,9 +40,37 @@ fn is_auth_failure(stderr: &str) -> bool {
         || s.contains("sorry, try")
 }
 
+/// KeepBoth 대상의 `stem (n)ext` 셸 표현식 — root 권한 셸에서 `$n` 을 증가시키며 가용
+/// 이름을 찾도록 조립한다. 인접한 quoted 토큰이 이어붙어 한 단어(`dir/stem (N)ext`)가 됨.
+/// 일반 경로 `dedup_dst_name` 과 동일한 확장자 분리 규칙(선두·끝 dot 은 확장자 아님).
+fn keepboth_target_expr(dst: &Path) -> Result<String, DuetError> {
+    let parent = dst
+        .parent()
+        .ok_or_else(|| DuetError::Io("dst has no parent".into()))?;
+    let name = dst
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| DuetError::Io("dst has no file name".into()))?;
+    let (stem, ext) = match name.rfind('.') {
+        Some(i) if i > 0 && i < name.len() - 1 => (&name[..i], &name[i..]),
+        _ => (name, ""),
+    };
+    let dir_q = shell_escape_path(parent)?; // '/etc/app'
+    let head_q = shell_escape_str(&format!("/{stem} ("))?; // '/stem ('
+    let tail_q = shell_escape_str(&format!("){ext}"))?; // ')ext'
+    Ok(format!("{dir_q}{head_q}\"$n\"{tail_q}"))
+}
+
 /// `/bin/sh -c` 로 실행할 op 스크립트 — 경로 shell-escape, 비번은 **포함 안 함**(stdin).
 /// Copy=`cp -a`, Move/Trash=`mv`(Trash 는 dst=휴지통경로), Delete=`rm -rf`.
-/// Skip=`[ -e dst ] ||`. KeepBoth 는 v1 에서 Overwrite 로 취급.
+///
+/// 충돌 정책(§3/§4 — 일반·로컬승격 경로와 동일 안전 불변식):
+/// - Skip: `[ -e dst ] ||` 로 기존 보존.
+/// - KeepBoth: root 셸에서 `stem (n)ext` 가용 이름을 찾아 새 항목만 기록(기존 보존).
+///   (비-root SFTP stat 은 보호 디렉토리의 root 소유 파일을 못 봐 Rust 에서 미리 못 정함.)
+/// - Replace: 기존을 임시백업(`.duet-sudobak`)으로 옮긴 뒤 복사/이동 → 성공 시 백업삭제,
+///   실패 시 원본 복원 후 abort. `cp -a` 가 중간 실패해도 목적지가 부분 덮어써진 채 남지
+///   않음(§4 fail-safe). Replace 덮어쓰기는 undo 불가(2026-06 예외)이나 실패 안전은 보장.
 fn build_script(
     op: ElevatedOp,
     items: &[(PathBuf, Option<PathBuf>)],
@@ -69,7 +97,27 @@ fn build_script(
         };
         match conflict {
             ConflictPolicy::Skip => s.push_str(&format!("[ -e {dq} ] || {verb} -- {sq} {dq}\n")),
-            _ => s.push_str(&format!("{verb} -- {sq} {dq}\n")),
+            ConflictPolicy::KeepBoth => {
+                let target = keepboth_target_expr(dst)?;
+                s.push_str(&format!(
+                    "n=1\nwhile [ -e {target} ]; do n=$((n+1)); done\n{verb} -- {sq} {target}\n"
+                ));
+            }
+            ConflictPolicy::Replace => {
+                // 실패 안전 덮어쓰기: 기존→임시백업→복사/이동→성공시 백업삭제 / 실패시 롤백.
+                let mut bak_os = dst.as_os_str().to_owned();
+                bak_os.push(".duet-sudobak");
+                let bq = shell_escape_path(Path::new(&bak_os))?;
+                s.push_str(&format!(
+                    "if [ -e {dq} ]; then\n\
+                     mv -- {dq} {bq}\n\
+                     if {verb} -- {sq} {dq}; then rm -rf -- {bq}\n\
+                     else mv -- {bq} {dq}; exit 1\n\
+                     fi\n\
+                     else {verb} -- {sq} {dq}\n\
+                     fi\n"
+                ));
+            }
         }
     }
     Ok(s)
@@ -216,6 +264,53 @@ mod tests {
         )
         .unwrap();
         assert!(rm.contains("rm -rf -- '/etc/x'"));
+    }
+
+    #[test]
+    fn replace_uses_temp_backup_and_rollback() {
+        // §4: Replace 덮어쓰기는 실패 안전이어야 — 기존을 임시백업으로 옮기고, 실패 시
+        // 롤백. 목적지가 부분 덮어써진 채 백업 없이 남는 상황을 방지.
+        let s = build_script(
+            ElevatedOp::Copy,
+            &[(PathBuf::from("/a/x"), Some(PathBuf::from("/etc/x")))],
+            ConflictPolicy::Replace,
+        )
+        .unwrap();
+        assert!(s.contains("if [ -e '/etc/x' ]; then"));
+        // 기존 → 임시백업.
+        assert!(s.contains("mv -- '/etc/x' '/etc/x.duet-sudobak'"));
+        // 성공 시 백업 삭제.
+        assert!(s.contains("if cp -a -- '/a/x' '/etc/x'; then rm -rf -- '/etc/x.duet-sudobak'"));
+        // 실패 시 원본 복원 + abort.
+        assert!(s.contains("else mv -- '/etc/x.duet-sudobak' '/etc/x'; exit 1"));
+    }
+
+    #[test]
+    fn keepboth_finds_free_name_instead_of_overwriting() {
+        // KeepBoth 는 기존을 절대 덮어쓰지 않고 `stem (n)ext` 가용 이름을 찾아 새 항목만 기록.
+        let s = build_script(
+            ElevatedOp::Copy,
+            &[(PathBuf::from("/a/app.conf"), Some(PathBuf::from("/etc/app.conf")))],
+            ConflictPolicy::KeepBoth,
+        )
+        .unwrap();
+        let target = r#"'/etc''/app ('"$n"').conf'"#;
+        assert!(s.contains(&format!("while [ -e {target} ]; do n=$((n+1)); done")));
+        assert!(s.contains(&format!("cp -a -- '/a/app.conf' {target}")));
+        // 무조건 덮어쓰기(`cp -a -- src dst` 단독)로 붕괴하지 않아야.
+        assert!(!s.contains("cp -a -- '/a/app.conf' '/etc/app.conf'\n"));
+    }
+
+    #[test]
+    fn keepboth_no_extension() {
+        // 확장자 없는 이름(및 선두 dot)은 확장자 분리 안 함.
+        let s = build_script(
+            ElevatedOp::Copy,
+            &[(PathBuf::from("/a/README"), Some(PathBuf::from("/etc/README")))],
+            ConflictPolicy::KeepBoth,
+        )
+        .unwrap();
+        assert!(s.contains(r#"'/etc''/README ('"$n"')'"#));
     }
 
     #[test]
