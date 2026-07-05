@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "gen:bindings": "cargo run --manifest-path src-tauri/Cargo.toml --bin export_bindings",
+    "build": "pnpm gen:bindings && tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
     "lint": "eslint . --ext .ts,.tsx",
