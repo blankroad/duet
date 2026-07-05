@@ -107,6 +107,10 @@ impl SecretVault {
     }
 
     /// alias 로 저장된 비밀번호 조회. Locked 상태면 Err.
+    ///
+    /// 평문을 반환하므로 **IPC 로 프론트에 노출하지 않는다**(§5, 2026-07) — backend
+    /// 내부 재사용(접속 시 vault 에서 꺼내 직접 사용) 전용. 프론트는 [`Self::has`] 로
+    /// 존재만 확인한다.
     pub async fn get(&self, alias: &str) -> Result<Option<String>, DuetError> {
         let inner = self.inner.read().await;
         let map = inner
@@ -114,6 +118,16 @@ impl SecretVault {
             .as_ref()
             .ok_or_else(|| DuetError::Io("vault locked".into()))?;
         Ok(map.get(alias).cloned())
+    }
+
+    /// alias 에 저장된 비밀번호가 **있는지만** 반환(평문 노출 없음). Locked 면 `false`.
+    /// UI 힌트("저장된 비밀번호 사용")용 — 프론트에 안전하게 노출 가능.
+    pub async fn has(&self, alias: &str) -> bool {
+        let inner = self.inner.read().await;
+        inner
+            .map
+            .as_ref()
+            .is_some_and(|m| m.contains_key(alias))
     }
 
     /// alias 에 비밀번호 저장 후 disk flush. Locked 상태면 Err.

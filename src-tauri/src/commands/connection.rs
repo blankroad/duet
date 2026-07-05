@@ -26,6 +26,7 @@ use tauri_specta::Event;
 use crate::services::connection_events::{ConnectionStateChange, ConnectionStateEvent};
 use crate::services::connection_pool::{ActiveConnection, ConnectionPool};
 use crate::services::connection_supervisor::spawn_supervisor;
+use crate::services::secret_vault::SecretVault;
 use crate::ssh::config::{load_ssh_hosts, SshHostEntry};
 use crate::ssh::connection::{connect, connect_with_password, SshSession};
 use crate::types::{ConnectionId, DuetError};
@@ -161,6 +162,24 @@ async fn open_and_register(
 /// `password` 가 `Some` 이면 키/agent 실패 시 마지막 fallback. ProxyJump
 /// 호스트는 password fallback 시 jump 단계 인증은 키/agent 만 — target 단만
 /// password 시도 (jump 호스트 password 는 미지원).
+/// 접속에 쓸 비밀번호 결정 — 사용자가 방금 입력한 평문(§5 완화)이 최우선, 없으면
+/// `saved_password_alias` 로 vault 에 저장된 항목을 **backend 내부에서** 꺼내 쓴다
+/// (평문을 프론트로 되돌리지 않음 — §5 2026-07). vault locked/미저장이면 None →
+/// 키/agent 인증만으로 진행.
+async fn resolve_password(
+    explicit: Option<String>,
+    saved_password_alias: Option<&str>,
+    vault: &SecretVault,
+) -> Option<String> {
+    if explicit.is_some() {
+        return explicit;
+    }
+    match saved_password_alias {
+        Some(a) => vault.get(a).await.ok().flatten(),
+        None => None,
+    }
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn connection_open(
@@ -196,20 +215,41 @@ pub async fn connection_open(
 /// `key_path` 가 None 이면 SSH agent 시도. `password` 가 Some 이면 키/agent
 /// 둘 다 실패 시 fallback. 모두 실패면 `AuthFailed`.
 /// `proxy_jump` 미지원 — config 기반 alias 가 필요.
+/// Ad-hoc 연결 입력값 묶음 — specta command 인자 arity 상한을 넘지 않도록 struct 로 전달.
+#[derive(Debug, Clone, serde::Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AdhocConnectParams {
+    pub host: String,
+    pub port: u16,
+    pub user: String,
+    pub key_path: Option<PathBuf>,
+    /// 사용자가 방금 입력한 평문(§5 완화). 있으면 최우선.
+    pub password: Option<String>,
+    /// 저장된 비번을 쓸 vault alias — password 가 없을 때 backend 가 vault 에서 직접
+    /// 꺼내 쓴다(평문을 프론트로 되돌리지 않음, §5 2026-07).
+    pub saved_password_alias: Option<String>,
+    pub trust_host_key: bool,
+    pub replace_changed_host_key: bool,
+}
+
 #[tauri::command]
 #[specta::specta]
-#[allow(clippy::too_many_arguments)] // IPC command — 인자는 ad-hoc 연결 입력값 그대로.
 pub async fn connection_open_adhoc(
-    host: String,
-    port: u16,
-    user: String,
-    key_path: Option<PathBuf>,
-    password: Option<String>,
-    trust_host_key: bool,
-    replace_changed_host_key: bool,
+    params: AdhocConnectParams,
     pool: tauri::State<'_, Arc<ConnectionPool>>,
+    vault: tauri::State<'_, Arc<SecretVault>>,
     app: tauri::AppHandle,
 ) -> Result<ConnectionDto, DuetError> {
+    let AdhocConnectParams {
+        host,
+        port,
+        user,
+        key_path,
+        password,
+        saved_password_alias,
+        trust_host_key,
+        replace_changed_host_key,
+    } = params;
     if host.trim().is_empty() {
         return Err(DuetError::Io("host required".into()));
     }
@@ -224,6 +264,8 @@ pub async fn connection_open_adhoc(
         identity_files: key_path.into_iter().collect(),
         proxy_jump: vec![],
     };
+    let password =
+        resolve_password(password, saved_password_alias.as_deref(), vault.inner()).await;
     open_and_register(
         entry,
         &[],

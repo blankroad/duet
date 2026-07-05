@@ -45,9 +45,14 @@ export async function vaultSet(alias: string, password: string): Promise<boolean
   return false;
 }
 
-export async function vaultGet(alias: string): Promise<string | null> {
-  const r = await commands.vaultGet(alias);
-  return r.status === "ok" ? r.data : null;
+/**
+ * alias 에 저장된 비밀번호가 **있는지만** 확인(평문 노출 없음, §5 2026-07).
+ * 실제 비번은 backend 가 접속 command 안에서 vault 에서 직접 꺼내 쓴다 —
+ * 프론트로 평문을 되돌리지 않는다.
+ */
+export async function vaultHas(alias: string): Promise<boolean> {
+  const r = await commands.vaultHas(alias);
+  return r.status === "ok" ? r.data : false;
 }
 
 export async function vaultRemove(alias: string): Promise<void> {

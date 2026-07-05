@@ -44,14 +44,16 @@ pub async fn vault_lock(vault: tauri::State<'_, Arc<SecretVault>>) -> Result<(),
     Ok(())
 }
 
-/// alias 에 저장된 비밀번호를 반환한다. Locked 이면 Err.
+/// alias 에 저장된 비밀번호가 **있는지만** 반환한다(평문 노출 없음, §5 2026-07).
+/// 저장된 비번의 실제 재사용은 backend 가 접속 command 안에서 vault 에서 직접 꺼내 쓴다 —
+/// 평문을 프론트로 되돌리지 않는다.
 #[tauri::command]
 #[specta::specta]
-pub async fn vault_get(
+pub async fn vault_has(
     alias: String,
     vault: tauri::State<'_, Arc<SecretVault>>,
-) -> Result<Option<String>, DuetError> {
-    vault.get(&alias).await
+) -> Result<bool, DuetError> {
+    Ok(vault.has(&alias).await)
 }
 
 /// alias 에 비밀번호를 저장하고 disk 에 flush. Locked 이면 Err.

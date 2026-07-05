@@ -82,7 +82,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::secret_vault::vault_status,
             commands::secret_vault::vault_unlock,
             commands::secret_vault::vault_lock,
-            commands::secret_vault::vault_get,
+            commands::secret_vault::vault_has,
             commands::secret_vault::vault_set,
             commands::secret_vault::vault_remove,
             commands::search::search_global,

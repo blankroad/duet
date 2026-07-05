@@ -11,7 +11,7 @@ import type {
 } from "@/types/bindings";
 import { useConnections } from "@/stores/connections";
 import { saveHost } from "@/stores/savedHosts";
-import { useVault, vaultGet, vaultSet } from "@/stores/vault";
+import { useVault, vaultHas, vaultSet } from "@/stores/vault";
 import type { PaneId } from "@/stores/panes";
 import { formatErr } from "@/lib/error";
 import { MasterPasswordDialog } from "@/components/dialogs/MasterPasswordDialog";
@@ -58,6 +58,9 @@ export function AdHocConnectDialog({
   const [save, setSave] = useState(false);
   const [savePassword, setSavePassword] = useState(false);
   const [alias, setAlias] = useState("");
+  // 저장된 비밀번호 존재 여부(평문 아님, §5 2026-07) — 접속 시 backend 가 vault 에서
+  // 직접 꺼내 쓴다. 여기선 UI 힌트/전달 여부 판단에만 사용.
+  const [hasSavedPassword, setHasSavedPassword] = useState(false);
 
   // master-pw dialog 상태. mode === "post-unlock" 시 unlock 후 자동 fetch.
   const [masterDialog, setMasterDialog] = useState<
@@ -80,11 +83,9 @@ export function AdHocConnectDialog({
       setAlias(prefill.alias);
       setSave(false); // 이미 저장된 호스트 — 재저장 default off
       setSavePassword(false);
-      // vault 가 unlocked 면 저장된 password 가져와서 prefill.
+      // vault 가 unlocked 면 저장된 password '존재 여부'만 확인(평문 안 가져옴, §5).
       if (vault.unlocked) {
-        void vaultGet(prefill.alias).then((pw) => {
-          if (pw) setPassword(pw);
-        });
+        void vaultHas(prefill.alias).then(setHasSavedPassword);
       }
     }
   }, [open, prefill, vault.unlocked]);
@@ -100,14 +101,14 @@ export function AdHocConnectDialog({
     setSave(false);
     setSavePassword(false);
     setAlias("");
+    setHasSavedPassword(false);
     setMasterDialog({ open: false });
   };
 
-  /** 저장된 password 를 vault 에서 가져와서 password input 에 채움. vault unlocked 가정. */
-  const fetchSavedPassword = async () => {
+  /** unlock 후 저장된 password '존재 여부' 재확인(평문 안 가져옴, §5). */
+  const refreshHasSavedPassword = async () => {
     if (!prefill) return;
-    const pw = await vaultGet(prefill.alias);
-    if (pw) setPassword(pw);
+    setHasSavedPassword(await vaultHas(prefill.alias));
   };
 
   const handleClose = () => {
@@ -143,15 +144,20 @@ export function AdHocConnectDialog({
     setPhase({ kind: "connecting" });
     // password 는 호출 인자로만 전달, store/localStorage 에 저장 안 함 (CLAUDE.md §5).
     const pw = password ? password : null;
-    const r = await commands.connectionOpenAdhoc(
-      host.trim(),
-      portNum,
-      user.trim(),
-      keyPath.trim() ? keyPath.trim() : null,
-      pw,
-      trust,
-      replaceChanged,
-    );
+    // 사용자가 비번을 안 쳤고 이 호스트에 저장된 비번이 있으면, 평문을 프론트로 가져오지
+    // 않고 alias 만 넘겨 backend 가 vault 에서 직접 꺼내 쓰게 한다 (§5 2026-07).
+    const savedPasswordAlias =
+      !pw && prefill && hasSavedPassword && vault.unlocked ? prefill.alias : null;
+    const r = await commands.connectionOpenAdhoc({
+      host: host.trim(),
+      port: portNum,
+      user: user.trim(),
+      keyPath: keyPath.trim() ? keyPath.trim() : null,
+      password: pw,
+      savedPasswordAlias,
+      trustHostKey: trust,
+      replaceChangedHostKey: replaceChanged,
+    });
     if (r.status !== "ok") {
       if (r.error.kind === "HostKeyUnverified") {
         // 호스트키 검증 실패 — password 는 신뢰 재시도 위해 유지(component-local, §5).
@@ -286,7 +292,11 @@ export function AdHocConnectDialog({
               autoComplete="off"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder={t("dialog.adhoc.pwPlaceholder")}
+              placeholder={
+                hasSavedPassword && !password
+                  ? t("dialog.adhoc.savedPwAvailable")
+                  : t("dialog.adhoc.pwPlaceholder")
+              }
               className="rounded border border-border bg-subtle px-2 py-1 font-mono focus:border-accent focus:outline-none"
             />
           </div>
@@ -317,7 +327,7 @@ export function AdHocConnectDialog({
               type="button"
               onClick={() => {
                 saveAfterUnlock.current = async () => {
-                  await fetchSavedPassword();
+                  await refreshHasSavedPassword();
                 };
                 setMasterDialog({ open: true, mode: "unlock", after: "fetch" });
               }}
