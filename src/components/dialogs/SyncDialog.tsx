@@ -130,7 +130,7 @@ export function SyncDialog({
                   tone={prune ? "text-danger" : "text-fg-muted"}
                 />
                 {preview.truncated && (
-                  <div className="text-amber-600">
+                  <div className="text-warning">
                     {t("dialog.sync.truncated")}
                   </div>
                 )}
@@ -171,7 +171,7 @@ export function SyncDialog({
           )}
 
           {prune && (
-            <div className="mt-2 flex items-start gap-1.5 rounded border border-amber-500/40 bg-amber-500/10 p-2 text-meta text-amber-600">
+            <div className="mt-2 flex items-start gap-1.5 rounded border border-warning/40 bg-warning/10 p-2 text-meta text-warning">
               <AlertTriangle size={13} className="mt-0.5 shrink-0" />
               <span>{t("dialog.sync.pruneWarn")}</span>
             </div>

@@ -59,10 +59,14 @@ export function TasksBar() {
 function TaskRow({ task }: { task: TaskDto }) {
   const { t } = useTranslation();
   const pct = task.progress?.percent ?? 0;
+  // 현재 파일명 우선(사이드바 TasksSection 통합분) — 없으면 task title.
+  const label = task.progress?.current_file || task.title;
   return (
     <div className="flex flex-1 items-center gap-2">
       <Loader size={11} className="shrink-0 animate-spin text-fg-muted" />
-      <span className="truncate text-fg">{task.title}</span>
+      <span className="truncate text-fg" title={label}>
+        {label}
+      </span>
       {task.progress && (
         <>
           <div className="h-1 w-24 shrink-0 overflow-hidden rounded bg-border">
@@ -75,6 +79,9 @@ function TaskRow({ task }: { task: TaskDto }) {
             {formatSize(task.progress.bytes_done)}
             {task.progress.bytes_total
               ? ` / ${formatSize(task.progress.bytes_total)}`
+              : ""}
+            {task.progress.speed_bps
+              ? ` · ${formatSize(task.progress.speed_bps)}/s`
               : ""}
           </span>
         </>

@@ -326,7 +326,7 @@ export function CompareDialog({
             </div>
           )}
           {plan.truncated && (
-            <div className="mb-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-meta text-amber-600">
+            <div className="mb-2 rounded border border-warning/40 bg-warning/10 px-2 py-1 text-meta text-warning">
               {t("dialog.compare.truncated")}
             </div>
           )}

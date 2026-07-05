@@ -20,8 +20,6 @@ import {
   RefreshCw,
   ArrowUpFromLine,
   Monitor,
-  Loader,
-  ArrowRightLeft,
 } from "lucide-react";
 import { useEffect, Fragment, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -65,7 +63,6 @@ import {
 import { usePanes, activeTab, type PaneId } from "@/stores/panes";
 import { useContextMenu, type MenuEntry } from "@/stores/contextMenu";
 import { useToast } from "@/stores/toast";
-import { useTasks, selectActive } from "@/stores/tasks";
 import { useReorderable } from "@/hooks/useReorderable";
 import { ShelfSection } from "@/components/ShelfSection";
 import { useHostNicknames, setHostNickname } from "@/stores/hostNicknames";
@@ -81,8 +78,6 @@ import {
   favTagKey,
 } from "@/stores/tags";
 import { useTagFilter } from "@/stores/tagFilter";
-import { commands } from "@/types/bindings";
-import { formatSize } from "@/lib/format";
 import type {
   SavedHost,
   Bookmark as BookmarkType,
@@ -91,7 +86,6 @@ import type {
   Location,
   Place,
   SourceId,
-  TaskDto,
   Volume,
 } from "@/types/bindings";
 import clsx from "clsx";
@@ -141,7 +135,7 @@ export function Sidebar({
 
   return (
     <aside className="flex w-48 min-h-0 flex-col overflow-y-auto border-r border-border bg-subtle text-base">
-      <TasksSection />
+      {/* 태스크 진행은 TasksBar(하단, 사이드바 접힘과 무관)로 일원화 — 중복 제거. */}
       <TagBar />
       <PlacesSection
         onOpenLocation={onOpenLocation}
@@ -227,93 +221,6 @@ function DropLine() {
 
 const rowClass =
   "group flex cursor-default items-center gap-1 rounded px-2 py-0.5 hover:bg-border";
-
-// ─────────────────────────── Tasks (background ops) ───────────────────────────
-
-// i18n 키 매핑 — 렌더 시 t() 로 해석 (언어 변경 즉시 반영).
-const TASK_VERB_KEY: Record<TaskDto["kind"], string> = {
-  copy: "sidebar.taskVerb.copy",
-  move: "sidebar.taskVerb.move",
-  extract: "sidebar.taskVerb.extract",
-  compress: "sidebar.taskVerb.compress",
-  sync: "sidebar.taskVerb.sync",
-  delete: "sidebar.taskVerb.delete",
-};
-
-/**
- * 진행 중 백그라운드 작업(복사/이동/압축 등) 상태 — 활성 task 있을 때만 사이드바 최상단에
- * 표시. 각 행: 동사 + 현재 파일명 + 진행 바 + 바이트/속도 + 취소(X). 모달을 백그라운드로
- * 보내도 여기서 진행을 계속 본다. (데이터: useTasks — TasksBar 와 동일 소스.)
- */
-function TasksSection() {
-  const { t } = useTranslation();
-  const tasks = useTasks((s) => s.tasks);
-  const active = selectActive(tasks);
-  if (active.length === 0) return null;
-  return (
-    <div className="border-b border-border bg-base px-2 py-1.5">
-      <div className="mb-1 flex items-center gap-1 text-meta text-fg-muted">
-        <ArrowRightLeft size={12} />
-        <span>{t("sidebar.tasks")}</span>
-        <span className="ml-auto opacity-50">{active.length}</span>
-      </div>
-      <div className="space-y-1.5">
-        {active.map((t) => (
-          <SidebarTaskRow key={t.id} task={t} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function SidebarTaskRow({ task }: { task: TaskDto }) {
-  const { t } = useTranslation();
-  const p = task.progress;
-  const indeterminate = !p || p.percent == null;
-  const pct = p?.percent ?? 0;
-  // 현재 파일명 우선, 없으면 task title.
-  const label = p?.current_file || task.title;
-  return (
-    <div className="text-meta">
-      <div className="flex items-center gap-1">
-        <Loader size={11} className="shrink-0 animate-spin text-accent" />
-        <span className="truncate text-fg" title={label}>
-          {label}
-        </span>
-        <button
-          type="button"
-          onClick={() => commands.taskCancel(task.id)}
-          className="ml-auto shrink-0 rounded p-0.5 text-fg-muted hover:bg-border hover:text-danger"
-          aria-label={t("sidebar.cancelTask")}
-          title={t("common.cancel")}
-        >
-          <X size={11} />
-        </button>
-      </div>
-      <div className="mt-1 h-1 w-full overflow-hidden rounded bg-subtle">
-        {indeterminate ? (
-          <div className="h-full w-1/3 animate-indeterminate rounded bg-accent" />
-        ) : (
-          <div
-            className="h-full bg-accent transition-all"
-            style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
-          />
-        )}
-      </div>
-      {p && (
-        <div className="mt-0.5 flex justify-between text-fg-muted">
-          <span>
-            {t(TASK_VERB_KEY[task.kind])}
-            {p.bytes_total
-              ? ` ${formatSize(p.bytes_done)}/${formatSize(p.bytes_total)}`
-              : ` ${formatSize(p.bytes_done)}`}
-          </span>
-          <span>{p.speed_bps ? `${formatSize(p.speed_bps)}/s` : ""}</span>
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ─────────────────────────── Local anchor (This PC) ───────────────────────────
 
@@ -1153,7 +1060,7 @@ function FavoriteGroup({
         <span
           className={clsx(
             "h-1.5 w-1.5 shrink-0 rounded-full",
-            connected ? "bg-green-500" : "bg-fg-muted/30",
+            connected ? "bg-success" : "bg-fg-muted/30",
           )}
         />
         <span className="truncate">{aliasLabel(alias, nicks)}</span>
@@ -1373,9 +1280,9 @@ function HostItem({
 function StateDot({ state }: { state: ConnectionState }) {
   const { t } = useTranslation();
   const cls = {
-    connected: "bg-green-500",
-    connecting: "bg-yellow-500 animate-pulse",
-    error: "bg-red-500",
+    connected: "bg-success",
+    connecting: "bg-warning animate-pulse",
+    error: "bg-danger",
     disconnected: "bg-fg-muted/30",
   }[state.kind];
   const label =
@@ -1441,7 +1348,7 @@ function DeleteBtn({ label, onClick }: { label: string; onClick: () => void }) {
         e.stopPropagation();
         onClick();
       }}
-      className="ml-auto shrink-0 rounded p-0.5 text-fg-muted opacity-0 hover:bg-border hover:text-danger group-hover:opacity-100"
+      className="ml-auto shrink-0 rounded p-0.5 text-fg-muted opacity-0 hover:bg-border hover:text-danger focus:opacity-100 group-hover:opacity-100"
       aria-label={label}
       title={t("sidebar.remove")}
     >

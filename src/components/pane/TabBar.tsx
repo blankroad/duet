@@ -42,7 +42,7 @@ export function TabBar({ id }: { id: PaneId }) {
                 closeTab(id, i);
               }}
               className={clsx(
-                "rounded p-0.5 opacity-0 hover:bg-border group-hover:opacity-100",
+                "rounded p-0.5 opacity-0 hover:bg-border focus:opacity-100 group-hover:opacity-100",
                 tabs.length <= 1 && "pointer-events-none opacity-30",
               )}
               aria-label={tr("tabs.closeTab")}

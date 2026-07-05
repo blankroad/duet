@@ -27,8 +27,8 @@ const TONE: Record<ThreeWayStatus, string> = {
   left_added: "text-accent",
   right_added: "text-accent",
   add_conflict: "text-danger",
-  left_deleted: "text-amber-500",
-  right_deleted: "text-amber-500",
+  left_deleted: "text-warning",
+  right_deleted: "text-warning",
   delete_conflict: "text-danger",
 };
 
@@ -138,7 +138,7 @@ export function ThreeWayDialog({
           </div>
 
           {plan.truncated && (
-            <div className="mb-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-meta text-amber-600">
+            <div className="mb-2 rounded border border-warning/40 bg-warning/10 px-2 py-1 text-meta text-warning">
               {t("dialog.threeWay.truncated")}
             </div>
           )}

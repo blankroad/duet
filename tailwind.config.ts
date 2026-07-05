@@ -19,6 +19,9 @@ const config: Config = {
         },
         accent: "hsl(var(--accent) / <alpha-value>)",
         danger: "hsl(var(--danger) / <alpha-value>)",
+        // 상태/경고 시맨틱 — 연결 점·경고 배너 전용 (globals.css 스코프 팔레트).
+        success: "hsl(var(--success) / <alpha-value>)",
+        warning: "hsl(var(--warning) / <alpha-value>)",
         border: "hsl(var(--border) / <alpha-value>)",
         // 파일 종류 구분 색역 (globals.css --icon-*). text-icon-* 로 사용.
         // UI 강조색이 아닌 "정보 전달용 스코프 팔레트" — DESIGN.md 색상 절.

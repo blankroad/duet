@@ -36,8 +36,8 @@ export const LABEL: Record<CompareStatus, string> = {
 export const TONE: Record<CompareStatus, string> = {
   left_only: "text-accent",
   right_only: "text-accent",
-  newer_left: "text-amber-500",
-  newer_right: "text-amber-500",
+  newer_left: "text-warning",
+  newer_right: "text-warning",
   differ: "text-danger",
   same: "text-fg-muted",
   unreadable: "text-danger",
@@ -72,7 +72,7 @@ export function strategyBadge(s: CopyStrategy): StrategyBadge {
     case "relay":
       return {
         label: "↔ Via your PC",
-        tone: "border-amber-500/40 bg-amber-500/10 text-amber-600",
+        tone: "border-warning/40 bg-warning/10 text-warning",
         title: "Files are copied through your PC (cross-host)",
       };
     case "local_to_local":
