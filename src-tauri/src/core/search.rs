@@ -349,7 +349,9 @@ impl SearchBackend for SshFilenameSearch {
         use crate::ssh::remote_exec::exec;
 
         let root_arg = shell_escape_path(root)?;
-        let pat_escaped = pattern.replace('\\', "\\\\").replace('\'', "\\'");
+        // POSIX single-quote 안에서는 backslash 이스케이프가 무효(작은따옴표가 항상
+        // 문자열을 종료) — 내용검색과 동일한 `sq_escape`(`'` → `'\''`)로 안전하게 임베드.
+        let pat_escaped = sq_escape(pattern);
         let name_flag = if opts.case_sensitive {
             "-name"
         } else {
