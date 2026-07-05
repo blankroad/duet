@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { PanelLeft, PanelRight, Search, Command, Settings, FolderGit2, Undo2 } from "lucide-react";
+import { PanelLeft, PanelRight, Search, Command, Settings, FolderGit2, Undo2, Columns2 } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useTranslation } from "react-i18next";
 import clsx from "clsx";
@@ -27,6 +27,8 @@ export function TopBar() {
   const previewOpen = useUI((s) => s.previewOpen);
   const toggleSidebar = useUI((s) => s.toggleSidebar);
   const togglePreview = useUI((s) => s.togglePreview);
+  const singlePane = useUI((s) => s.singlePane);
+  const toggleSinglePane = useUI((s) => s.toggleSinglePane);
 
   const openSearch = () => {
     const id = usePanes.getState().activePane;
@@ -68,6 +70,13 @@ export function TopBar() {
       </IconBtn>
       <IconBtn label={t("topbar.togglePreview")} active={previewOpen} onClick={togglePreview}>
         <PanelRight size={15} />
+      </IconBtn>
+      <IconBtn
+        label={t("topbar.singlePane", { key: displayKey("Ctrl+Shift+D") })}
+        active={singlePane}
+        onClick={toggleSinglePane}
+      >
+        <Columns2 size={15} />
       </IconBtn>
       <IconBtn
         label={t("topbar.compareFolders")}

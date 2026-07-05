@@ -680,6 +680,10 @@ function App() {
   const togglePreview = useUI((s) => s.togglePreview);
   const previewOpen = useUI((s) => s.previewOpen);
   const quickLookOpen = useUI((s) => s.quickLookOpen);
+  // 단일 패널 모드 — 활성 패널만 렌더. 숨긴 쪽 상태는 panes store 에 보존되고
+  // Tab(활성 패널 전환)이 곧 "보이는 패널 교체"가 된다.
+  const singlePane = useUI((s) => s.singlePane);
+  const visiblePane = usePanes((s) => s.activePane);
 
   useEffect(() => {
     const builtins = buildBuiltins({
@@ -718,6 +722,7 @@ function App() {
       toggleSidebar: () => toggleSidebar(),
       togglePreview: () => togglePreview(),
       toggleSyncBrowse: () => useUI.getState().toggleSyncBrowse(),
+      toggleSinglePane: () => useUI.getState().toggleSinglePane(),
       quickLook: () => useUI.getState().toggleQuickLook(),
       viewDetails: () =>
         usePanes
@@ -1558,33 +1563,37 @@ function App() {
           onTrashActivate={onTrashActivate}
           onEject={onEject}
         />
-        <Pane
-          id="left"
-          onNavigate={navigate}
-          onActivate={onActivate}
-          onRefresh={onRefresh}
-          onBack={onBack}
-          onForward={onForward}
-          onUp={onUp}
-          onEntryContextMenu={onEntryContextMenu}
-          onEmptyContextMenu={onEmptyContextMenu}
-          onUpdateArchive={onUpdateArchive}
-          onReconnect={onPaneReconnect}
-        />
-        <SwapPanesButton />
-        <Pane
-          id="right"
-          onNavigate={navigate}
-          onActivate={onActivate}
-          onRefresh={onRefresh}
-          onBack={onBack}
-          onForward={onForward}
-          onUp={onUp}
-          onEntryContextMenu={onEntryContextMenu}
-          onEmptyContextMenu={onEmptyContextMenu}
-          onUpdateArchive={onUpdateArchive}
-          onReconnect={onPaneReconnect}
-        />
+        {(!singlePane || visiblePane === "left") && (
+          <Pane
+            id="left"
+            onNavigate={navigate}
+            onActivate={onActivate}
+            onRefresh={onRefresh}
+            onBack={onBack}
+            onForward={onForward}
+            onUp={onUp}
+            onEntryContextMenu={onEntryContextMenu}
+            onEmptyContextMenu={onEmptyContextMenu}
+            onUpdateArchive={onUpdateArchive}
+            onReconnect={onPaneReconnect}
+          />
+        )}
+        {!singlePane && <SwapPanesButton />}
+        {(!singlePane || visiblePane === "right") && (
+          <Pane
+            id="right"
+            onNavigate={navigate}
+            onActivate={onActivate}
+            onRefresh={onRefresh}
+            onBack={onBack}
+            onForward={onForward}
+            onUp={onUp}
+            onEntryContextMenu={onEntryContextMenu}
+            onEmptyContextMenu={onEmptyContextMenu}
+            onUpdateArchive={onUpdateArchive}
+            onReconnect={onPaneReconnect}
+          />
+        )}
         {previewOpen && <PreviewPane />}
       </main>
 

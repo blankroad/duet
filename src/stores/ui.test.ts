@@ -6,6 +6,14 @@ describe("ui store", () => {
     useUI.setState({ sidebarOpen: true, previewOpen: false, collapsed: {} });
   });
 
+  it("toggleSinglePane flips singlePane and persists nothing else", () => {
+    useUI.setState({ singlePane: false });
+    useUI.getState().toggleSinglePane();
+    expect(useUI.getState().singlePane).toBe(true);
+    useUI.getState().toggleSinglePane();
+    expect(useUI.getState().singlePane).toBe(false);
+  });
+
   it("togglePreview flips previewOpen", () => {
     expect(useUI.getState().previewOpen).toBe(false);
     useUI.getState().togglePreview();

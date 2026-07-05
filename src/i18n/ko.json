@@ -406,7 +406,8 @@
     "minimize": "최소화",
     "maximize": "최대화",
     "restore": "이전 크기로",
-    "closeWindow": "닫기"
+    "closeWindow": "닫기",
+    "singlePane": "단일 패널 토글 ({{key}})"
   },
   "toolbar": {
     "newFolder": "새 폴더 (F7)",
@@ -747,7 +748,8 @@
       "syncBrowse": "동기화 브라우징 토글",
       "details": "보기: 상세",
       "grid": "보기: 그리드",
-      "tiles": "보기: 타일"
+      "tiles": "보기: 타일",
+      "singlePane": "단일 패널 토글"
     },
     "sort": {
       "byName": "이름순 정렬",

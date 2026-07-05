@@ -409,7 +409,8 @@
     "minimize": "Minimize",
     "maximize": "Maximize",
     "restore": "Restore",
-    "closeWindow": "Close"
+    "closeWindow": "Close",
+    "singlePane": "Toggle single pane ({{key}})"
   },
   "toolbar": {
     "newFolder": "New folder (F7)",
@@ -751,7 +752,8 @@
       "syncBrowse": "Toggle synchronized browsing",
       "details": "View: Details",
       "grid": "View: Grid",
-      "tiles": "View: Tiles"
+      "tiles": "View: Tiles",
+      "singlePane": "Toggle single pane"
     },
     "sort": {
       "byName": "Sort by name",

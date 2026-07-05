@@ -59,6 +59,8 @@ export interface BuiltinDeps {
   toggleSidebar: () => void;
   togglePreview: () => void;
   toggleSyncBrowse: () => void;
+  /** 단일 패널 모드 토글 — 활성 패널만 전체 폭 (외부 DnD 시 창 축소용). */
+  toggleSinglePane: () => void;
   quickLook: () => void;
   viewDetails: () => void;
   viewGrid: () => void;
@@ -221,6 +223,13 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
       label: "Toggle synchronized browsing",
       category: "View",
       action: deps.toggleSyncBrowse,
+    },
+    {
+      id: "view.singlePane",
+      label: "Toggle single pane",
+      category: "View",
+      defaultKey: "Ctrl+Shift+D",
+      action: deps.toggleSinglePane,
     },
     {
       id: "view.details",

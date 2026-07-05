@@ -10,6 +10,7 @@ const COLLAPSE_KEY = "duet.sidebar.collapsed";
 const SPLITEXT_KEY = "duet.view.splitExt";
 const SYNCBROWSE_KEY = "duet.view.syncBrowse";
 const DENSITY_KEY = "duet.view.density";
+const SINGLEPANE_KEY = "duet.view.singlePane";
 
 /** 목록 밀도 — 행 높이/셀 크기만 바뀌고 폰트는 유지 (TC 식 compact). */
 export type Density = "normal" | "compact";
@@ -107,6 +108,13 @@ interface UIState {
   /** 목록 밀도 (행 높이). 비민감 UI 설정 — localStorage 영속. */
   density: Density;
   setDensity: (d: Density) => void;
+  /**
+   * 단일 패널 모드 — 활성 패널만 전체 폭으로 표시 (Opus F6/TC 100% 대응).
+   * 숨긴 패널의 상태(탭/경로/선택)는 panes store 에 그대로 살아 있어
+   * F5/F6(반대 패널로 복사/이동)이 계속 동작하고, Tab 은 "보이는 패널 교체"가 된다.
+   */
+  singlePane: boolean;
+  toggleSinglePane: () => void;
 }
 
 export const useUI = create<UIState>((set) => ({
@@ -163,4 +171,11 @@ export const useUI = create<UIState>((set) => ({
     }
     set({ density: d });
   },
+  singlePane: loadBool(SINGLEPANE_KEY),
+  toggleSinglePane: () =>
+    set((s) => {
+      const singlePane = !s.singlePane;
+      saveBool(SINGLEPANE_KEY, singlePane);
+      return { singlePane };
+    }),
 }));
