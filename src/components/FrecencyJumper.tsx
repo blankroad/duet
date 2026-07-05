@@ -117,7 +117,10 @@ export function FrecencyJumper({
                     {String(entry.location.path)}
                   </span>
                   <span className="shrink-0 text-meta text-fg-muted">
-                    {sourceLabel(entry.location)}
+                    {/* React key 는 raw sourceLabel — 표시만 번역 (로컬). */}
+                    {entry.location.source.kind === "local"
+                      ? t("sidebar.local")
+                      : sourceLabel(entry.location)}
                   </span>
                 </button>
               ))

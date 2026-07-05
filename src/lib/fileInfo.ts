@@ -1,3 +1,4 @@
+import i18n from "@/i18n";
 import type { Entry } from "@/types/bindings";
 
 /** 확장자 → 사람-친화 종류 라벨. 없으면 "<EXT> file" / "File". */
@@ -76,15 +77,26 @@ export function extOf(name: string): string {
   return name.slice(dot + 1).toLowerCase();
 }
 
-/** entry 의 종류 라벨 (Folder / 확장자 기반 / Symlink 등). */
+/** entry 의 종류 라벨 (Folder / 확장자 기반 / Symlink 등).
+ *  i18n: ko.json 의 fileKind.* 에 번역이 있으면 사용, 없으면 영어 원문
+ *  (defaultValue) — 기술 용어(JSON/TypeScript 등)는 번역 없이 그대로. */
 export function kindLabel(entry: Entry): string {
-  if (entry.kind === "dir") return "Folder";
-  if (entry.kind === "symlink") return "Alias (symlink)";
-  if (entry.kind === "other") return "Special file";
+  if (entry.kind === "dir")
+    return i18n.t("fileKind.folder", { defaultValue: "Folder" });
+  if (entry.kind === "symlink")
+    return i18n.t("fileKind.symlink", { defaultValue: "Alias (symlink)" });
+  if (entry.kind === "other")
+    return i18n.t("fileKind.special", { defaultValue: "Special file" });
   const dot = entry.name.lastIndexOf(".");
   const ext = dot > 0 ? entry.name.slice(dot + 1).toLowerCase() : "";
-  if (EXT_LABEL[ext]) return EXT_LABEL[ext];
-  return ext ? `${ext.toUpperCase()} file` : "File";
+  if (EXT_LABEL[ext])
+    return i18n.t(`fileKind.ext.${ext}`, { defaultValue: EXT_LABEL[ext] });
+  return ext
+    ? i18n.t("fileKind.extFile", {
+        ext: ext.toUpperCase(),
+        defaultValue: `${ext.toUpperCase()} file`,
+      })
+    : i18n.t("fileKind.file", { defaultValue: "File" });
 }
 
 /** Unix mode(8진) → `rw-r--r-- · 644`. null(예: Windows)이면 "—". */
@@ -116,9 +128,9 @@ export function summarizeEntries(entries: Entry[]): {
 /** {files, folders} → "12 files, 3 folders" / "12 files" / "3 folders" / "empty". */
 export function countLabel(files: number, folders: number): string {
   const parts: string[] = [];
-  if (files) parts.push(`${files} file${files === 1 ? "" : "s"}`);
-  if (folders) parts.push(`${folders} folder${folders === 1 ? "" : "s"}`);
-  return parts.length ? parts.join(", ") : "empty";
+  if (files) parts.push(i18n.t("fileKind.files", { count: files }));
+  if (folders) parts.push(i18n.t("fileKind.folders", { count: folders }));
+  return parts.length ? parts.join(", ") : i18n.t("fileKind.empty");
 }
 
 /** epoch ms → 전체 날짜시간 (인스펙터용). null 이면 "—". */

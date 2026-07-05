@@ -77,7 +77,9 @@ export function ShelfSection() {
               {it.name}
             </span>
             <span className="shrink-0 text-meta opacity-50" title="source">
-              {sourceLabel(it)}
+              {it.location.source.kind === "local"
+                ? t("sidebar.local")
+                : sourceLabel(it)}
             </span>
             <button
               type="button"

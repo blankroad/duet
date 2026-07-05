@@ -301,6 +301,10 @@
       "strategyRelay": "릴레이 (이 PC 경유)",
       "strategySameHost": "동일 호스트 (빠름, 서버측)",
       "conflicts": "대상에 {{count}}개 충돌"
+    },
+    "keyAuth": {
+      "title": "비밀번호 없는 로그인",
+      "confirm": "다음부터 비밀번호 없이 로그인하도록 이 호스트에 SSH 공개키를 설치할까요?"
     }
   },
   "history": {
@@ -823,5 +827,53 @@
     "Settings": "설정",
     "Help": "도움말",
     "User": "사용자"
+  },
+  "fileKind": {
+    "files_other": "파일 {{count}}개",
+    "folders_other": "폴더 {{count}}개",
+    "empty": "비어 있음",
+    "folder": "폴더",
+    "symlink": "별칭 (심볼릭 링크)",
+    "special": "특수 파일",
+    "file": "파일",
+    "extFile": "{{ext}} 파일",
+    "ext": {
+      "pdf": "PDF 문서",
+      "png": "PNG 이미지",
+      "jpg": "JPEG 이미지",
+      "jpeg": "JPEG 이미지",
+      "gif": "GIF 이미지",
+      "webp": "WebP 이미지",
+      "avif": "AVIF 이미지",
+      "svg": "SVG 이미지",
+      "bmp": "비트맵 이미지",
+      "ico": "아이콘",
+      "mp4": "MP4 비디오",
+      "m4v": "MP4 비디오",
+      "webm": "WebM 비디오",
+      "mov": "QuickTime 비디오",
+      "mkv": "Matroska 비디오",
+      "mp3": "MP3 오디오",
+      "m4a": "AAC 오디오",
+      "aac": "AAC 오디오",
+      "wav": "WAV 오디오",
+      "ogg": "Ogg 오디오",
+      "opus": "Opus 오디오",
+      "flac": "FLAC 오디오",
+      "zip": "ZIP 아카이브",
+      "tar": "Tar 아카이브",
+      "gz": "Gzip 아카이브",
+      "tgz": "Tar.gz 아카이브",
+      "txt": "일반 텍스트",
+      "log": "로그",
+      "rs": "Rust 소스",
+      "py": "Python 소스",
+      "go": "Go 소스",
+      "c": "C 소스",
+      "h": "C 헤더",
+      "cpp": "C++ 소스",
+      "java": "Java 소스",
+      "sh": "셸 스크립트"
+    }
   }
 }

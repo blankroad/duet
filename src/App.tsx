@@ -824,10 +824,9 @@ function App() {
         }
         void (async () => {
           // window.confirm 은 Tauri 웹뷰에서 동작 안 함 → plugin-dialog 의 native confirm.
-          const ok = await tauriConfirm(
-            "Install your SSH public key on this host for passwordless login next time?",
-            { title: "Passwordless login" },
-          );
+          const ok = await tauriConfirm(i18n.t("dialog.keyAuth.confirm"), {
+            title: i18n.t("dialog.keyAuth.title"),
+          });
           if (!ok) return;
           const r = await commands.sshSetupKeyAuth(src.connection_id);
           showToast(
