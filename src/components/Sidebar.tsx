@@ -24,6 +24,8 @@ import {
   ArrowRightLeft,
 } from "lucide-react";
 import { useEffect, Fragment, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+import i18n from "@/i18n";
 import { useUI } from "@/stores/ui";
 import {
   useConnections,
@@ -208,8 +210,14 @@ function openMenu(e: React.MouseEvent, items: MenuEntry[]): void {
 function copyText(text: string): void {
   void navigator.clipboard
     .writeText(text)
-    .then(() => useToast.getState().show(`Copied: ${text}`, "success"))
-    .catch(() => useToast.getState().show("Clipboard unavailable", "error"));
+    .then(() =>
+      useToast
+        .getState()
+        .show(i18n.t("sidebar.copiedText", { text }), "success"),
+    )
+    .catch(() =>
+      useToast.getState().show(i18n.t("toast.clipboardUnavailable"), "error"),
+    );
 }
 
 /** 드래그 삽입 위치 표시 라인. */
@@ -222,13 +230,14 @@ const rowClass =
 
 // ─────────────────────────── Tasks (background ops) ───────────────────────────
 
-const TASK_VERB: Record<TaskDto["kind"], string> = {
-  copy: "Copying",
-  move: "Moving",
-  extract: "Extracting",
-  compress: "Compressing",
-  sync: "Syncing",
-  delete: "Deleting",
+// i18n 키 매핑 — 렌더 시 t() 로 해석 (언어 변경 즉시 반영).
+const TASK_VERB_KEY: Record<TaskDto["kind"], string> = {
+  copy: "sidebar.taskVerb.copy",
+  move: "sidebar.taskVerb.move",
+  extract: "sidebar.taskVerb.extract",
+  compress: "sidebar.taskVerb.compress",
+  sync: "sidebar.taskVerb.sync",
+  delete: "sidebar.taskVerb.delete",
 };
 
 /**
@@ -237,6 +246,7 @@ const TASK_VERB: Record<TaskDto["kind"], string> = {
  * 보내도 여기서 진행을 계속 본다. (데이터: useTasks — TasksBar 와 동일 소스.)
  */
 function TasksSection() {
+  const { t } = useTranslation();
   const tasks = useTasks((s) => s.tasks);
   const active = selectActive(tasks);
   if (active.length === 0) return null;
@@ -244,7 +254,7 @@ function TasksSection() {
     <div className="border-b border-border bg-base px-2 py-1.5">
       <div className="mb-1 flex items-center gap-1 text-meta text-fg-muted">
         <ArrowRightLeft size={12} />
-        <span>Tasks</span>
+        <span>{t("sidebar.tasks")}</span>
         <span className="ml-auto opacity-50">{active.length}</span>
       </div>
       <div className="space-y-1.5">
@@ -257,6 +267,7 @@ function TasksSection() {
 }
 
 function SidebarTaskRow({ task }: { task: TaskDto }) {
+  const { t } = useTranslation();
   const p = task.progress;
   const indeterminate = !p || p.percent == null;
   const pct = p?.percent ?? 0;
@@ -273,8 +284,8 @@ function SidebarTaskRow({ task }: { task: TaskDto }) {
           type="button"
           onClick={() => commands.taskCancel(task.id)}
           className="ml-auto shrink-0 rounded p-0.5 text-fg-muted hover:bg-border hover:text-danger"
-          aria-label="Cancel task"
-          title="Cancel"
+          aria-label={t("sidebar.cancelTask")}
+          title={t("common.cancel")}
         >
           <X size={11} />
         </button>
@@ -292,7 +303,7 @@ function SidebarTaskRow({ task }: { task: TaskDto }) {
       {p && (
         <div className="mt-0.5 flex justify-between text-fg-muted">
           <span>
-            {TASK_VERB[task.kind]}
+            {t(TASK_VERB_KEY[task.kind])}
             {p.bytes_total
               ? ` ${formatSize(p.bytes_done)}/${formatSize(p.bytes_total)}`
               : ` ${formatSize(p.bytes_done)}`}
@@ -345,6 +356,7 @@ function PlacesSection({
   onTrashActivate: (pane?: PaneId) => void;
   onEject: (volume: Volume) => void;
 }) {
+  const { t } = useTranslation();
   const source = useActiveSource();
   const places =
     usePlaces((s) => s.bySource[sourceKey(source)]?.places) ?? EMPTY_PLACES;
@@ -367,7 +379,7 @@ function PlacesSection({
   return (
     <Section
       sectionKey="places"
-      title="Places"
+      title={t("sidebar.places")}
       icon={<Folder size={14} />}
       count={places.length + volumes.length}
       action={
@@ -375,8 +387,8 @@ function PlacesSection({
           type="button"
           onClick={rescan}
           className="rounded p-0.5 text-fg-muted hover:bg-border hover:text-fg"
-          title="Rescan volumes"
-          aria-label="Rescan volumes"
+          title={t("sidebar.rescanVolumes")}
+          aria-label={t("sidebar.rescanVolumes")}
         >
           <RefreshCw size={11} />
         </button>
@@ -388,11 +400,11 @@ function PlacesSection({
           onClick={(e) =>
             onOpenLocation(localLocation(localHome), targetPane(e))
           }
-          title="Switch this pane to your local machine (⌘/Ctrl-click: other pane)"
+          title={t("sidebar.thisPcTitle")}
           className={clsx(rowClass, "w-full text-left font-medium text-accent")}
         >
           <Monitor size={11} className="shrink-0" />
-          <span className="truncate">This PC (Local)</span>
+          <span className="truncate">{t("sidebar.thisPc")}</span>
         </button>
       )}
       {places.map((p) => (
@@ -404,7 +416,7 @@ function PlacesSection({
         />
       ))}
       <TrashItem onTrashActivate={onTrashActivate} />
-      {volumes.length > 0 && <SubLabel>Volumes</SubLabel>}
+      {volumes.length > 0 && <SubLabel>{t("sidebar.volumes")}</SubLabel>}
       {volumes.map((v) => (
         <VolumeItem
           key={String(v.path)}
@@ -427,11 +439,12 @@ function PlaceItem({
   source: SourceId;
   onOpenLocation: (location: Location, pane: PaneId) => void;
 }) {
+  const { t } = useTranslation();
   const path = String(place.path);
   const menu: MenuEntry[] = [
     {
       id: "open",
-      label: "Open",
+      label: t("menu.open"),
       onSelect: () =>
         onOpenLocation(
           locationForSource(source, path),
@@ -440,11 +453,15 @@ function PlaceItem({
     },
     {
       id: "open-other",
-      label: "Open in other pane",
+      label: t("menu.openInOtherPane"),
       onSelect: () =>
         onOpenLocation(locationForSource(source, path), otherPane()),
     },
-    { id: "copy-path", label: "Copy path", onSelect: () => copyText(path) },
+    {
+      id: "copy-path",
+      label: t("menu.copyPath"),
+      onSelect: () => copyText(path),
+    },
   ];
   return (
     <button
@@ -467,15 +484,16 @@ function TrashItem({
 }: {
   onTrashActivate: (pane?: PaneId) => void;
 }) {
+  const { t } = useTranslation();
   const menu: MenuEntry[] = [
     {
       id: "open",
-      label: "Open",
+      label: t("menu.open"),
       onSelect: () => onTrashActivate(usePanes.getState().activePane),
     },
     {
       id: "open-other",
-      label: "Open in other pane",
+      label: t("menu.openInOtherPane"),
       onSelect: () => onTrashActivate(otherPane()),
     },
   ];
@@ -484,11 +502,11 @@ function TrashItem({
       type="button"
       onClick={(e) => onTrashActivate(targetPane(e))}
       onContextMenu={(e) => openMenu(e, menu)}
-      title="Browse trash (deleted items)"
+      title={t("sidebar.trashTitle")}
       className={clsx(rowClass, "w-full text-left")}
     >
       <Trash2 size={11} className="shrink-0 text-fg-muted" />
-      <span className="truncate">Trash</span>
+      <span className="truncate">{t("sidebar.trash")}</span>
     </button>
   );
 }
@@ -504,11 +522,12 @@ function VolumeItem({
   onOpenLocation: (location: Location, pane: PaneId) => void;
   onEject: (volume: Volume) => void;
 }) {
+  const { t } = useTranslation();
   const path = String(volume.path);
   const menu: MenuEntry[] = [
     {
       id: "open",
-      label: "Open",
+      label: t("menu.open"),
       onSelect: () =>
         onOpenLocation(
           locationForSource(source, path),
@@ -517,18 +536,22 @@ function VolumeItem({
     },
     {
       id: "open-other",
-      label: "Open in other pane",
+      label: t("menu.openInOtherPane"),
       onSelect: () =>
         onOpenLocation(locationForSource(source, path), otherPane()),
     },
-    { id: "copy-path", label: "Copy path", onSelect: () => copyText(path) },
+    {
+      id: "copy-path",
+      label: t("menu.copyPath"),
+      onSelect: () => copyText(path),
+    },
     // eject 는 ejectable 볼륨만 (부트/시스템 볼륨·원격 마운트 제외 — backend 가 판정).
     ...(volume.ejectable
       ? ([
           { kind: "separator" },
           {
             id: "eject",
-            label: "Eject",
+            label: t("sidebar.eject"),
             danger: true,
             onSelect: () => onEject(volume),
           },
@@ -554,8 +577,8 @@ function VolumeItem({
             onEject(volume);
           }}
           className="ml-auto shrink-0 rounded p-0.5 text-fg-muted opacity-0 hover:bg-border hover:text-accent group-hover:opacity-100 focus:opacity-100"
-          aria-label={`Eject ${volume.name}`}
-          title="Eject"
+          aria-label={t("sidebar.ejectName", { name: volume.name })}
+          title={t("sidebar.eject")}
         >
           <ArrowUpFromLine size={11} />
         </button>
@@ -573,12 +596,13 @@ function RecentSection({
   onOpenLocation: (location: Location, pane: PaneId) => void;
   onOpenHostPath: (hostAlias: string, path: string, pane: PaneId) => void;
 }) {
+  const { t } = useTranslation();
   const items = useRecents((s) => s.items);
   const clear = useRecents((s) => s.clear);
   return (
     <Section
       sectionKey="recent"
-      title="Recent"
+      title={t("sidebar.recent")}
       icon={<Clock size={14} />}
       count={items.length}
       action={
@@ -587,8 +611,8 @@ function RecentSection({
             type="button"
             onClick={clear}
             className="rounded p-0.5 text-fg-muted hover:bg-border hover:text-fg"
-            title="Clear recents"
-            aria-label="Clear recents"
+            title={t("sidebar.clearRecents")}
+            aria-label={t("sidebar.clearRecents")}
           >
             <X size={11} />
           </button>
@@ -596,7 +620,7 @@ function RecentSection({
       }
     >
       {items.length === 0 ? (
-        <Item label="(no recent folders)" muted />
+        <Item label={t("sidebar.noRecent")} muted />
       ) : (
         items.map((r, i) => (
           <RecentItem
@@ -620,6 +644,7 @@ function RecentItem({
   onOpenLocation: (location: Location, pane: PaneId) => void;
   onOpenHostPath: (hostAlias: string, path: string, pane: PaneId) => void;
 }) {
+  const { t } = useTranslation();
   const open = (pane: PaneId) => {
     if (entry.source === "ssh") onOpenHostPath(entry.alias, entry.path, pane);
     else onOpenLocation(localLocation(entry.path), pane);
@@ -629,17 +654,17 @@ function RecentItem({
   const menu: MenuEntry[] = [
     {
       id: "open",
-      label: "Open",
+      label: t("menu.open"),
       onSelect: () => open(usePanes.getState().activePane),
     },
     {
       id: "open-other",
-      label: "Open in other pane",
+      label: t("menu.openInOtherPane"),
       onSelect: () => open(otherPane()),
     },
     {
       id: "copy-path",
-      label: "Copy path",
+      label: t("menu.copyPath"),
       onSelect: () => copyText(entry.path),
     },
   ];
@@ -679,6 +704,7 @@ function SavedHostsBody({
   onActivate: (host: SavedHost) => void;
   hideAliases: Set<string>;
 }) {
+  const { t } = useTranslation();
   const rawHosts = useSavedHosts((s) => s.hosts);
   const byKey = useTags((s) => s.byKey);
   const active = useTagFilter((s) => s.active);
@@ -702,7 +728,7 @@ function SavedHostsBody({
   if (allHosts.length === 0) return null;
   return (
     <>
-      <SubLabel>Saved</SubLabel>
+      <SubLabel>{t("sidebar.saved")}</SubLabel>
       {groups.map((g, gi) => (
         <HostGroupFolder
           key={g.id}
@@ -754,9 +780,9 @@ function moveToGroupEntry(
   const children: MenuEntry[] = [
     {
       id: "new-group",
-      label: "New group…",
+      label: i18n.t("sidebar.newGroup"),
       onSelect: () => {
-        const name = window.prompt("New group name");
+        const name = window.prompt(i18n.t("sidebar.newGroupPrompt"));
         if (name && name.trim()) void createGroup(name.trim(), host.alias);
       },
     },
@@ -776,11 +802,11 @@ function moveToGroupEntry(
     children.push({ kind: "separator" });
     children.push({
       id: "ungroup",
-      label: "Remove from group",
+      label: i18n.t("sidebar.removeFromGroup"),
       onSelect: () => void assignToGroup(host.alias, null),
     });
   }
-  return { id: "move-group", label: "Move to group", children };
+  return { id: "move-group", label: i18n.t("sidebar.moveToGroup"), children };
 }
 
 function HostGroupFolder({
@@ -798,33 +824,34 @@ function HostGroupFolder({
   isFirst: boolean;
   isLast: boolean;
 }) {
+  const { t } = useTranslation();
   const collapsed = useUI((s) => s.collapsed[`hostgroup:${group.id}`]);
   const toggle = useUI((s) => s.toggleSection);
   const menu: MenuEntry[] = [
     {
       id: "rename",
-      label: "Rename…",
+      label: t("sidebar.renameGroup"),
       onSelect: () => {
-        const n = window.prompt("Group name", group.name);
+        const n = window.prompt(t("sidebar.groupNamePrompt"), group.name);
         if (n && n.trim()) void renameGroup(group.id, n.trim());
       },
     },
     {
       id: "up",
-      label: "Move up",
+      label: t("sidebar.moveUp"),
       disabled: isFirst,
       onSelect: () => void moveGroup(group.id, -1),
     },
     {
       id: "down",
-      label: "Move down",
+      label: t("sidebar.moveDown"),
       disabled: isLast,
       onSelect: () => void moveGroup(group.id, 1),
     },
     { kind: "separator" },
     {
       id: "delete",
-      label: "Delete group",
+      label: t("sidebar.deleteGroup"),
       danger: true,
       onSelect: () => void deleteGroup(group.id),
     },
@@ -871,21 +898,25 @@ function SavedHostItem({
   onActivate: (host: SavedHost) => void;
   reorder?: { dragging: boolean; onMouseDown: (e: React.MouseEvent) => void };
 }) {
+  const { t } = useTranslation();
   const nickname = useHostNicknames((s) => s.byAlias)[host.alias];
-  const tags = tagsFor(useTags((s) => s.byKey), hostTagKey(host.alias));
+  const tags = tagsFor(
+    useTags((s) => s.byKey),
+    hostTagKey(host.alias),
+  );
   const display = nickname ?? host.alias;
   const menu: MenuEntry[] = [
     {
       id: "connect",
-      label: "Connect / Edit…",
+      label: t("sidebar.connectEdit"),
       onSelect: () => onActivate(host),
     },
     {
       id: "rename",
-      label: "Set display name…",
+      label: t("sidebar.setDisplayName"),
       onSelect: () => {
         const next = window.prompt(
-          `Display name for "${host.alias}" (empty = reset):`,
+          t("sidebar.displayNamePrompt", { alias: host.alias }),
           nickname ?? "",
         );
         if (next !== null) void setHostNickname(host.alias, next);
@@ -893,14 +924,14 @@ function SavedHostItem({
     },
     {
       id: "tags",
-      label: "Edit tags…",
+      label: t("sidebar.editTags"),
       onSelect: () => editTagsPrompt(hostTagKey(host.alias), tags),
     },
     moveToGroupEntry(host, currentGroupId, groups),
     { kind: "separator" },
     {
       id: "remove",
-      label: "Remove",
+      label: t("sidebar.remove"),
       danger: true,
       onSelect: () => void removeSavedHost(host.alias),
     },
@@ -925,7 +956,7 @@ function SavedHostItem({
       )}
       <InlineTags tags={tags} />
       <DeleteBtn
-        label={`Remove saved host ${host.alias}`}
+        label={t("sidebar.removeSavedHost", { alias: host.alias })}
         onClick={() => void removeSavedHost(host.alias)}
       />
     </div>
@@ -947,6 +978,7 @@ function BookmarksSection({
   onAdd: () => void;
   onOpenHostPath: (hostAlias: string, path: string, pane: PaneId) => void;
 }) {
+  const { t } = useTranslation();
   const allItems = useBookmarks((s) => s.items);
   const allFav = useHostFavorites((s) => s.items);
   const byKey = useTags((s) => s.byKey);
@@ -976,18 +1008,18 @@ function BookmarksSection({
   return (
     <Section
       sectionKey="bookmarks"
-      title="Bookmarks"
+      title={t("sidebar.bookmarks")}
       icon={<Star size={14} />}
       count={totalAll}
-      action={<AddBtn label="Bookmark active tab" onClick={onAdd} />}
+      action={<AddBtn label={t("sidebar.bookmarkActiveTab")} onClick={onAdd} />}
     >
       {totalAll === 0 ? (
-        <Item label="(none — + to bookmark active tab)" muted />
+        <Item label={t("sidebar.noBookmarks")} muted />
       ) : total === 0 ? (
-        <Item label="(no items match the tag filter)" muted />
+        <Item label={t("sidebar.noTagMatch")} muted />
       ) : (
         <>
-          {items.length > 0 && <SubLabel>Local</SubLabel>}
+          {items.length > 0 && <SubLabel>{t("sidebar.local")}</SubLabel>}
           {items.map((b) => (
             <Fragment key={b.id}>
               {dragKey && insertBeforeKey === b.id && <DropLine />}
@@ -1000,7 +1032,7 @@ function BookmarksSection({
             </Fragment>
           ))}
           {dragKey && insertBeforeKey === null && <DropLine />}
-          {favKeys.length > 0 && <SubLabel>Remote</SubLabel>}
+          {favKeys.length > 0 && <SubLabel>{t("sidebar.remote")}</SubLabel>}
           {favKeys.map((alias) => (
             <FavoriteGroup
               key={alias}
@@ -1027,33 +1059,37 @@ function BookmarkItem({
   dragging: boolean;
   onMouseDown: (e: React.MouseEvent) => void;
 }) {
+  const { t } = useTranslation();
   const sshPrefix = bookmark.location.source.kind === "ssh" ? "ssh:" : "";
-  const tags = tagsFor(useTags((s) => s.byKey), bmTagKey(bookmark.id));
+  const tags = tagsFor(
+    useTags((s) => s.byKey),
+    bmTagKey(bookmark.id),
+  );
   const menu: MenuEntry[] = [
     {
       id: "open",
-      label: "Open",
+      label: t("menu.open"),
       onSelect: () => onOpen(bookmark.location, usePanes.getState().activePane),
     },
     {
       id: "open-other",
-      label: "Open in other pane",
+      label: t("menu.openInOtherPane"),
       onSelect: () => onOpen(bookmark.location, otherPane()),
     },
     {
       id: "copy-path",
-      label: "Copy path",
+      label: t("menu.copyPath"),
       onSelect: () => copyText(String(bookmark.location.path)),
     },
     {
       id: "tags",
-      label: "Edit tags…",
+      label: t("sidebar.editTags"),
       onSelect: () => editTagsPrompt(bmTagKey(bookmark.id), tags),
     },
     { kind: "separator" },
     {
       id: "remove",
-      label: "Remove",
+      label: t("sidebar.remove"),
       danger: true,
       onSelect: () => void removeBookmark(bookmark.id),
     },
@@ -1072,7 +1108,7 @@ function BookmarkItem({
       <span className="truncate">{bookmark.name}</span>
       <InlineTags tags={tags} />
       <DeleteBtn
-        label="Remove bookmark"
+        label={t("sidebar.removeBookmark")}
         onClick={() => void removeBookmark(bookmark.id)}
       />
     </div>
@@ -1092,6 +1128,7 @@ function FavoriteGroup({
   connected: boolean;
   onOpen: (hostAlias: string, path: string, pane: PaneId) => void;
 }) {
+  const { t } = useTranslation();
   const collapsed = useUI((s) => s.collapsed[`fav:${alias}`]);
   const toggle = useUI((s) => s.toggleSection);
   const nicks = useHostNicknames((s) => s.byAlias);
@@ -1108,8 +1145,8 @@ function FavoriteGroup({
         className="flex w-full items-center gap-1 px-2 text-meta text-fg-muted hover:text-fg"
         title={
           connected
-            ? `${alias} (connected)`
-            : `${alias} (click an item to connect)`
+            ? t("sidebar.hostConnectedTitle", { alias })
+            : t("sidebar.hostClickConnectTitle", { alias })
         }
       >
         {collapsed ? <ChevronRight size={10} /> : <ChevronDown size={10} />}
@@ -1150,30 +1187,38 @@ function FavoriteItem({
   dragging: boolean;
   onMouseDown: (e: React.MouseEvent) => void;
 }) {
+  const { t } = useTranslation();
   const path = String(fav.path);
-  const tags = tagsFor(useTags((s) => s.byKey), favTagKey(fav.id));
+  const tags = tagsFor(
+    useTags((s) => s.byKey),
+    favTagKey(fav.id),
+  );
   const menu: MenuEntry[] = [
     {
       id: "open",
-      label: "Open (connect if needed)",
+      label: t("sidebar.openConnect"),
       onSelect: () =>
         onOpen(fav.host_alias, path, usePanes.getState().activePane),
     },
     {
       id: "open-other",
-      label: "Open in other pane",
+      label: t("menu.openInOtherPane"),
       onSelect: () => onOpen(fav.host_alias, path, otherPane()),
     },
-    { id: "copy-path", label: "Copy path", onSelect: () => copyText(path) },
+    {
+      id: "copy-path",
+      label: t("menu.copyPath"),
+      onSelect: () => copyText(path),
+    },
     {
       id: "tags",
-      label: "Edit tags…",
+      label: t("sidebar.editTags"),
       onSelect: () => editTagsPrompt(favTagKey(fav.id), tags),
     },
     { kind: "separator" },
     {
       id: "remove",
-      label: "Remove",
+      label: t("sidebar.remove"),
       danger: true,
       onSelect: () => void removeHostFavorite(fav.id),
     },
@@ -1192,7 +1237,7 @@ function FavoriteItem({
       <span className="truncate">{fav.name}</span>
       <InlineTags tags={tags} />
       <DeleteBtn
-        label="Remove favorite"
+        label={t("sidebar.removeFavorite")}
         onClick={() => void removeHostFavorite(fav.id)}
       />
     </div>
@@ -1214,6 +1259,7 @@ function HostsSection({
   onAdHocOpen: () => void;
   onSavedActivate: (host: SavedHost) => void;
 }) {
+  const { t } = useTranslation();
   const allHosts = useConnections((s) => s.hosts);
   const stateByAlias = useConnections((s) => s.stateByAlias)();
   const savedCount = useSavedHosts((s) => s.hosts.length);
@@ -1228,13 +1274,13 @@ function HostsSection({
   return (
     <Section
       sectionKey="hosts"
-      title="Hosts"
+      title={t("sidebar.hosts")}
       icon={<Server size={14} />}
       count={allHosts.length + savedCount}
-      action={<AddBtn label="Connect to host…" onClick={onAdHocOpen} />}
+      action={<AddBtn label={t("dialog.adhoc.title")} onClick={onAdHocOpen} />}
     >
       {allHosts.length === 0 && savedCount === 0 ? (
-        <Item label="(no hosts — Connect to host…)" muted />
+        <Item label={t("sidebar.noHosts")} muted />
       ) : (
         <>
           {hosts.length > 0 && <SubLabel>~/.ssh/config</SubLabel>}
@@ -1265,6 +1311,7 @@ function HostItem({
   state: ConnectionState;
   onActivate: () => void;
 }) {
+  const { t } = useTranslation();
   const nicks = useHostNicknames((s) => s.byAlias);
   const byKey = useTags((s) => s.byKey);
   const tags = tagsFor(byKey, hostTagKey(host.alias));
@@ -1274,7 +1321,7 @@ function HostItem({
   // 별명 설정/해제 — config alias 키로 저장. 패널·상태바도 이 별명을 따른다.
   const promptName = () => {
     const next = window.prompt(
-      `Display name for "${host.alias}" (empty = reset):`,
+      t("sidebar.displayNamePrompt", { alias: host.alias }),
       nickname ?? "",
     );
     if (next === null) return;
@@ -1282,18 +1329,18 @@ function HostItem({
   };
 
   const menu: MenuEntry[] = [
-    { id: "connect", label: "Connect…", onSelect: onActivate },
-    { id: "rename", label: "Set display name…", onSelect: promptName },
+    { id: "connect", label: t("sidebar.connect"), onSelect: onActivate },
+    { id: "rename", label: t("sidebar.setDisplayName"), onSelect: promptName },
     {
       id: "tags",
-      label: "Edit tags…",
+      label: t("sidebar.editTags"),
       onSelect: () => editTagsPrompt(hostTagKey(host.alias), tags),
     },
   ];
   if (nickname) {
     menu.push({
       id: "reset-name",
-      label: "Reset display name",
+      label: t("sidebar.resetDisplayName"),
       onSelect: () => void setHostNickname(host.alias, ""),
     });
   }
@@ -1324,13 +1371,15 @@ function HostItem({
 }
 
 function StateDot({ state }: { state: ConnectionState }) {
+  const { t } = useTranslation();
   const cls = {
     connected: "bg-green-500",
     connecting: "bg-yellow-500 animate-pulse",
     error: "bg-red-500",
     disconnected: "bg-fg-muted/30",
   }[state.kind];
-  const label = state.kind === "error" ? state.message : state.kind;
+  const label =
+    state.kind === "error" ? state.message : t(`sidebar.state.${state.kind}`);
   return (
     <span
       aria-label={label}
@@ -1384,6 +1433,7 @@ function Section({
 
 /** 삭제(X) 버튼 — hover 시 노출. */
 function DeleteBtn({ label, onClick }: { label: string; onClick: () => void }) {
+  const { t } = useTranslation();
   return (
     <button
       type="button"
@@ -1393,7 +1443,7 @@ function DeleteBtn({ label, onClick }: { label: string; onClick: () => void }) {
       }}
       className="ml-auto shrink-0 rounded p-0.5 text-fg-muted opacity-0 hover:bg-border hover:text-danger group-hover:opacity-100"
       aria-label={label}
-      title="Remove"
+      title={t("sidebar.remove")}
     >
       <X size={11} />
     </button>
