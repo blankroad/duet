@@ -79,7 +79,10 @@ pub struct Conflict {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ConflictPolicy {
-    /// 기존을 .bak 으로 백업 후 교체 (undo 가능 — §4). 충돌 없으면 그냥 복사.
+    /// 충돌 시 기존을 교체. 충돌 없으면 그냥 복사. copy/move 에서는 **영구 덮어쓰기라
+    /// undo 불가**(2026-06 사용자 승인 §4 예외) — 실패 안전을 위해 임시백업→복사→성공 시
+    /// 백업 영구삭제/실패 시 롤백하지만 성공 후 복원은 안 함. (sync/repack/three-way 의
+    /// Replace 는 .bak 보존 + undo 가능 — 이 예외는 copy/move 한정.)
     #[default]
     Replace,
     /// 충돌 항목은 복사/이동 안 함 (기존 그대로).
@@ -487,12 +490,23 @@ async fn copy_execute_relay(
             match copy_result {
                 Ok(()) => {
                     if let Some(b) = replaced_backup.take() {
-                        dst_fs.remove(&b).await?;
+                        // 복사는 이미 성공 — 백업 정리 실패는 치명적이지 않다(가시적 `.bak`
+                        // 잔여물만 남음). 여기서 `?` 로 실패하면 '완료된 복사'가 에러로
+                        // 보고되고 journal 미기록→undo 불가가 되므로, 정리 실패는 무시하고
+                        // 성공을 그대로 진행한다.
+                        let _ = dst_fs.remove(&b).await;
                     }
                 }
                 Err(e) => {
                     if let Some(b) = replaced_backup.take() {
-                        let _ = dst_fs.rename(&b, &dst_path).await;
+                        // 롤백(백업→원위치) 실패 시 원본이 백업 경로에만 남으므로, 그 위치를
+                        // 에러에 실어 사용자가 복구할 수 있게 한다(조용히 삼키지 않음).
+                        if let Err(re) = dst_fs.rename(&b, &dst_path).await {
+                            return Err(DuetError::Io(format!(
+                                "copy failed ({e}); original preserved at backup {} (rollback failed: {re})",
+                                b.display()
+                            )));
+                        }
                     }
                     return Err(e);
                 }
@@ -726,12 +740,22 @@ pub async fn move_execute(
             match move_result {
                 Ok(()) => {
                     if let Some(b) = replaced_backup.take() {
-                        dst_fs.remove(&b).await?;
+                        // 이동은 이미 성공 — 백업 정리 실패는 치명적이지 않다(가시적 `.bak`
+                        // 잔여물만). `?` 로 실패하면 '완료된 이동'이 에러로 보고되고 journal
+                        // 미기록→undo 불가가 되므로, 정리 실패는 무시하고 성공을 진행한다.
+                        let _ = dst_fs.remove(&b).await;
                     }
                 }
                 Err(e) => {
                     if let Some(b) = replaced_backup.take() {
-                        let _ = dst_fs.rename(&b, &dst_path).await;
+                        // 롤백 실패 시 원본이 백업 경로에만 남으므로 그 위치를 에러에 실어
+                        // 사용자가 복구할 수 있게 한다(조용히 삼키지 않음).
+                        if let Err(re) = dst_fs.rename(&b, &dst_path).await {
+                            return Err(DuetError::Io(format!(
+                                "move failed ({e}); original preserved at backup {} (rollback failed: {re})",
+                                b.display()
+                            )));
+                        }
                     }
                     return Err(e);
                 }
