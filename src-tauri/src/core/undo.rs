@@ -311,6 +311,7 @@ pub async fn execute_undo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
             left_created,
             right_source,
             right_created,
+            ..
         } => {
             // 양쪽에 새로 복사된 것만 제거(충돌은 안 건드렸으니 복원할 백업 없음).
             let mut refresh = std::collections::HashSet::<(SourceId, PathBuf)>::new();
@@ -417,6 +418,7 @@ pub async fn execute_undo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
             right_created,
             left_backups,
             right_backups,
+            ..
         } => {
             let mut refresh = std::collections::HashSet::<(SourceId, PathBuf)>::new();
             for (source, created, backups) in [
@@ -816,9 +818,103 @@ pub async fn execute_redo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
             }
             ok_with_locs(dst_source, refresh)
         }
-        // Merge/CompareApply/ThreeWayApply/Symlink/Trash/Irreversible —
+        UndoAction::UndoBidirMerge {
+            left_source,
+            right_source,
+            left_pairs,
+            right_pairs,
+            ..
+        } => {
+            // 구버전 entry(쌍 미기록)는 미지원. 머지는 충돌을 안 건드리므로 항상 추가형.
+            if left_pairs.is_empty() && right_pairs.is_empty() {
+                return skipped(UNSUPPORTED);
+            }
+            redo_pair_copies(
+                pool,
+                // left_pairs: from=right 측 → to=left 측 / right_pairs 는 반대.
+                &[
+                    (right_source, left_source, left_pairs),
+                    (left_source, right_source, right_pairs),
+                ],
+            )
+            .await
+        }
+        UndoAction::UndoCompareApply {
+            left_source,
+            right_source,
+            left_backups,
+            right_backups,
+            left_pairs,
+            right_pairs,
+            ..
+        } => {
+            // 덮어쓰기 동반 적용은 undo 가 백업을 복원했으므로 재적용 충돌 — 미지원.
+            if !left_backups.is_empty() || !right_backups.is_empty() {
+                return skipped(UNSUPPORTED);
+            }
+            if left_pairs.is_empty() && right_pairs.is_empty() {
+                return skipped(UNSUPPORTED);
+            }
+            redo_pair_copies(
+                pool,
+                &[
+                    (right_source, left_source, left_pairs),
+                    (left_source, right_source, right_pairs),
+                ],
+            )
+            .await
+        }
+        // ThreeWayApply/Symlink/Trash/Irreversible —
         // 소스 경로·타깃 미기록 또는 재실행 시 journal 데이터가 스테일해짐.
         _ => skipped(UNSUPPORTED),
+    }
+}
+
+/// (from_source, to_source, pairs) 그룹들을 재복사 — merge/compare-apply redo 공용.
+/// 이미 존재하는 대상은 항목 단위 skip (재적용 후 redo 안전).
+async fn redo_pair_copies(
+    pool: &Arc<ConnectionPool>,
+    groups: &[(
+        &SourceId,
+        &SourceId,
+        &Vec<crate::services::journal::RedoCopyPair>,
+    )],
+) -> UndoOutcome {
+    let mut refresh = std::collections::HashSet::<(SourceId, PathBuf)>::new();
+    for (from_source, to_source, pairs) in groups {
+        if pairs.is_empty() {
+            continue;
+        }
+        let from_fs = match fs_for(from_source, pool).await {
+            Ok(f) => f,
+            Err(e) => return error("source unreachable", e),
+        };
+        let to_fs = match fs_for(to_source, pool).await {
+            Ok(f) => f,
+            Err(e) => return error("source unreachable", e),
+        };
+        for p in pairs.iter() {
+            if from_fs.metadata(&p.from).await.is_err() {
+                return skipped("Source item no longer exists — redo skipped");
+            }
+            if to_fs.metadata(&p.to).await.is_ok() {
+                continue;
+            }
+            if let Err(e) = copy_relay(&*from_fs, &p.from, &*to_fs, &p.to).await {
+                return error("copy forward", e);
+            }
+            if let Some(par) = p.to.parent() {
+                refresh.insert(((*to_source).clone(), par.to_path_buf()));
+            }
+        }
+    }
+    UndoOutcome {
+        kind: UndoKind::Ok,
+        message: None,
+        refreshed_locations: refresh
+            .into_iter()
+            .map(|(s, p)| Location { source: s, path: p })
+            .collect(),
     }
 }
 
@@ -1014,6 +1110,72 @@ mod tests {
             backups_to_restore: vec![],
             src_source: None,
             copied_from: vec![],
+        });
+        let outcome = execute_redo(&entry, &pool).await;
+        assert!(matches!(outcome.kind, UndoKind::Skipped));
+    }
+
+    #[tokio::test]
+    async fn redo_merge_recopies_pairs_and_old_format_skipped() {
+        let dir = TempDir::new().unwrap();
+        let left = dir.path().join("L");
+        let right = dir.path().join("R");
+        tokio::fs::create_dir(&left).await.unwrap();
+        tokio::fs::create_dir(&right).await.unwrap();
+        // undo 직후 상태: 원본만 존재 (left 의 a.txt → right 로 머지됐다가 되돌림).
+        tokio::fs::write(left.join("a.txt"), b"m").await.unwrap();
+        let pool = ConnectionPool::new();
+        let entry = mk_entry(UndoAction::UndoBidirMerge {
+            left_source: SourceId::Local,
+            left_created: vec![],
+            right_source: SourceId::Local,
+            right_created: vec![right.join("a.txt")],
+            left_pairs: vec![],
+            right_pairs: vec![crate::services::journal::RedoCopyPair {
+                from: left.join("a.txt"),
+                to: right.join("a.txt"),
+            }],
+        });
+        let outcome = execute_redo(&entry, &pool).await;
+        assert!(
+            matches!(outcome.kind, UndoKind::Ok),
+            "{:?}",
+            outcome.message
+        );
+        assert_eq!(tokio::fs::read(right.join("a.txt")).await.unwrap(), b"m");
+        // 구버전 entry(쌍 미기록) — 미지원 안내.
+        let entry = mk_entry(UndoAction::UndoBidirMerge {
+            left_source: SourceId::Local,
+            left_created: vec![],
+            right_source: SourceId::Local,
+            right_created: vec![right.join("a.txt")],
+            left_pairs: vec![],
+            right_pairs: vec![],
+        });
+        let outcome = execute_redo(&entry, &pool).await;
+        assert!(matches!(outcome.kind, UndoKind::Skipped));
+    }
+
+    #[tokio::test]
+    async fn redo_compare_apply_requires_no_backups() {
+        let dir = TempDir::new().unwrap();
+        let pool = ConnectionPool::new();
+        // 덮어쓰기(백업) 동반 적용은 미지원.
+        let entry = mk_entry(UndoAction::UndoCompareApply {
+            left_source: SourceId::Local,
+            right_source: SourceId::Local,
+            left_created: vec![],
+            right_created: vec![],
+            left_backups: vec![crate::services::journal::BackupRestore {
+                backup_path: dir.path().join("x.bak"),
+                original_path: dir.path().join("x"),
+            }],
+            right_backups: vec![],
+            left_pairs: vec![crate::services::journal::RedoCopyPair {
+                from: dir.path().join("y"),
+                to: dir.path().join("x"),
+            }],
+            right_pairs: vec![],
         });
         let outcome = execute_redo(&entry, &pool).await;
         assert!(matches!(outcome.kind, UndoKind::Skipped));

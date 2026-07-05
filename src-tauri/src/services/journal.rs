@@ -182,6 +182,12 @@ pub enum UndoAction {
         left_created: Vec<PathBuf>,
         right_source: SourceId,
         right_created: Vec<PathBuf>,
+        /// redo 용 성공 복사 쌍 — created 와 달리 partial 정리 항목 제외.
+        /// left_pairs = 왼쪽에 생성(from 은 right 측 경로). 구버전 라인은 빈 벡터.
+        #[serde(default)]
+        left_pairs: Vec<RedoCopyPair>,
+        #[serde(default)]
+        right_pairs: Vec<RedoCopyPair>,
     },
     /// 단방향 sync 되돌리기 — 새로 복사 제거 + 덮어쓴 백업 복원 + prune 삭제분 휴지통 복원.
     /// (휴지통 복원은 best-effort — macOS 로컬은 NotSupported 라 수동 복원 필요.)
@@ -206,6 +212,11 @@ pub enum UndoAction {
         right_created: Vec<PathBuf>,
         left_backups: Vec<BackupRestore>,
         right_backups: Vec<BackupRestore>,
+        /// redo 용 성공 복사 쌍 (신규 생성만 — 덮어쓰기 행 제외). 구버전은 빈 벡터.
+        #[serde(default)]
+        left_pairs: Vec<RedoCopyPair>,
+        #[serde(default)]
+        right_pairs: Vec<RedoCopyPair>,
     },
     /// 3-way 적용 되돌리기 — 생성분 제거 + 덮어쓴 백업 복원 + 삭제(휴지통)분 복원.
     UndoThreeWayApply {
@@ -248,6 +259,13 @@ pub struct BackupRestore {
 pub struct MoveItem {
     pub src_original: PathBuf,
     pub dst_now: PathBuf,
+}
+
+/// redo 용 (원본 → 대상) 복사 쌍 — merge/compare-apply 의 성공한 복사만 기록.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct RedoCopyPair {
+    pub from: PathBuf,
+    pub to: PathBuf,
 }
 
 /// batch rename 의 항목별 (현재 경로 → 원래 경로) — undo 시 단일 그룹으로 복원.

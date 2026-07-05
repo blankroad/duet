@@ -313,7 +313,7 @@
   "history": {
     "title": "Operation history",
     "empty": "No operations recorded yet",
-    "redoNote": "Redo re-applies the last undone operation. Sync/merge, archives and deletes can't be redone.",
+    "redoNote": "Redo re-applies the last undone operation. Overwrites, archives and deletes can't be redone.",
     "undoLast": "Undo last ({{key}})",
     "redoLast": "Redo ({{key}})",
     "next": "next {{key}}",

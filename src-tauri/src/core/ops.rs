@@ -6,8 +6,8 @@
 use crate::core::copy_strategy::{decide as decide_strategy, CopyStrategy};
 use crate::fs::FileSystem;
 use crate::services::journal::{
-    BackupRestore, ChmodItem, Journal, JournalEntry, MoveItem, OpKind, RenamePair, TrashItem,
-    UndoAction,
+    BackupRestore, ChmodItem, Journal, JournalEntry, MoveItem, OpKind, RedoCopyPair, RenamePair,
+    TrashItem, UndoAction,
 };
 use crate::services::settings::SettingsStore;
 use crate::types::{DeleteMode, DuetError, EntryRef, Location, SourceId, TrashLocation};
@@ -1603,6 +1603,8 @@ async fn push_merge_journal(
     right: Location,
     left_created: Vec<PathBuf>,
     right_created: Vec<PathBuf>,
+    left_pairs: Vec<RedoCopyPair>,
+    right_pairs: Vec<RedoCopyPair>,
 ) -> Result<JournalEntry, DuetError> {
     let op = OpKind::Merge {
         left: left.clone(),
@@ -1615,6 +1617,8 @@ async fn push_merge_journal(
         left_created,
         right_source: right.source,
         right_created,
+        left_pairs,
+        right_pairs,
     };
     ctx.journal.push(op, undo).await
 }
@@ -1636,6 +1640,8 @@ async fn merge_relay(
     let mut done = 0u64;
     let mut left_created = Vec::new();
     let mut right_created = Vec::new();
+    let mut left_pairs: Vec<RedoCopyPair> = Vec::new();
+    let mut right_pairs: Vec<RedoCopyPair> = Vec::new();
     // 조기 반환 금지 — 실패/취소여도 그때까지 생성분을 journal 에 남겨 undo 가능(§4).
     let mut outcome: Result<(), DuetError> = Ok(());
     for (status, rel) in &work {
@@ -1655,6 +1661,13 @@ async fn merge_relay(
                 } else {
                     // 실패해도 부분 산출물 정리를 위해 dst 를 created 에 기록.
                     let r = crate::fs::copy_relay(left_fs, &s, right_fs, &d).await;
+                    if r.is_ok() {
+                        // redo 용 — 성공 복사만 (partial 정리 항목과 분리).
+                        right_pairs.push(RedoCopyPair {
+                            from: s,
+                            to: d.clone(),
+                        });
+                    }
                     right_created.push(d);
                     r
                 }
@@ -1667,6 +1680,12 @@ async fn merge_relay(
                     Ok(())
                 } else {
                     let r = crate::fs::copy_relay(right_fs, &s, left_fs, &d).await;
+                    if r.is_ok() {
+                        left_pairs.push(RedoCopyPair {
+                            from: s,
+                            to: d.clone(),
+                        });
+                    }
                     left_created.push(d);
                     r
                 }
@@ -1680,7 +1699,16 @@ async fn merge_relay(
         done += 1;
         emit_merge_progress(&progress, done, total);
     }
-    let entry = push_merge_journal(ctx, left, right, left_created, right_created).await?;
+    let entry = push_merge_journal(
+        ctx,
+        left,
+        right,
+        left_created,
+        right_created,
+        left_pairs,
+        right_pairs,
+    )
+    .await?;
     outcome?;
     Ok(entry)
 }
@@ -1722,6 +1750,8 @@ async fn merge_same_host(
     let mut done = 0u64;
     let mut left_created = Vec::new();
     let mut right_created = Vec::new();
+    let mut left_pairs: Vec<RedoCopyPair> = Vec::new();
+    let mut right_pairs: Vec<RedoCopyPair> = Vec::new();
     // 조기 반환 금지 — 실패/취소여도 부분 생성분(통째 복사 디렉토리 포함)을 journal 에
     // 남겨 Ctrl+Z 로 정리 가능(§4). 실패 항목의 dst 도 partial 트리 청소 위해 기록.
     let mut outcome: Result<(), DuetError> = Ok(());
@@ -1737,6 +1767,10 @@ async fn merge_same_host(
                 let d = remote_join(&right.path, rel);
                 match host_side_copy_one(pool, left_conn, &s, &d).await {
                     Ok(true) => {
+                        right_pairs.push(RedoCopyPair {
+                            from: s,
+                            to: d.clone(),
+                        });
                         right_created.push(d);
                         Ok(())
                     }
@@ -1745,7 +1779,7 @@ async fn merge_same_host(
                         Ok(())
                     }
                     Err(e) => {
-                        right_created.push(d); // partial 트리 정리용
+                        right_created.push(d); // partial 트리 정리용 (redo 쌍엔 제외)
                         Err(e)
                     }
                 }
@@ -1755,6 +1789,10 @@ async fn merge_same_host(
                 let d = remote_join(&left.path, rel);
                 match host_side_copy_one(pool, right_conn, &s, &d).await {
                     Ok(true) => {
+                        left_pairs.push(RedoCopyPair {
+                            from: s,
+                            to: d.clone(),
+                        });
                         left_created.push(d);
                         Ok(())
                     }
@@ -1777,7 +1815,16 @@ async fn merge_same_host(
         done += 1;
         emit_merge_progress(&progress, done, total);
     }
-    let entry = push_merge_journal(ctx, left, right, left_created, right_created).await?;
+    let entry = push_merge_journal(
+        ctx,
+        left,
+        right,
+        left_created,
+        right_created,
+        left_pairs,
+        right_pairs,
+    )
+    .await?;
     outcome?;
     Ok(entry)
 }
@@ -1884,6 +1931,9 @@ struct ApplyState {
     right_created: Vec<PathBuf>,
     left_backups: Vec<BackupRestore>,
     right_backups: Vec<BackupRestore>,
+    /// redo 용 성공 복사 쌍 (신규 생성만 — 덮어쓰기/실패 행 제외).
+    left_pairs: Vec<RedoCopyPair>,
+    right_pairs: Vec<RedoCopyPair>,
 }
 
 /// 비교창에서 고른 행별 방향을 적용 — 생성은 추적, 덮어쓰기는 `.bak` 백업 후 복사.
@@ -1947,6 +1997,8 @@ async fn push_compare_apply_journal(
         right_created: st.right_created,
         left_backups: st.left_backups,
         right_backups: st.right_backups,
+        left_pairs: st.left_pairs,
+        right_pairs: st.right_pairs,
     };
     ctx.journal.push(op, undo).await
 }
@@ -1979,6 +2031,7 @@ async fn apply_one_relay(
         ),
         ApplyDirection::Skip => return Ok(()),
     };
+    let mut created = false;
     if dst_fs.metadata(&dst_path).await.is_ok() {
         let parent = dst_path
             .parent()
@@ -2000,10 +2053,25 @@ async fn apply_one_relay(
         }
     } else if dst_is_left {
         st.left_created.push(dst_path.clone());
+        created = true;
     } else {
         st.right_created.push(dst_path.clone());
+        created = true;
     }
-    crate::fs::copy_relay(src_fs, &src_path, dst_fs, &dst_path).await
+    let res = crate::fs::copy_relay(src_fs, &src_path, dst_fs, &dst_path).await;
+    if res.is_ok() && created {
+        // redo 용 — 성공한 신규 생성만 (덮어쓰기 행은 백업 복원과 얽혀 제외).
+        let pair = RedoCopyPair {
+            from: src_path.clone(),
+            to: dst_path.clone(),
+        };
+        if dst_is_left {
+            st.left_pairs.push(pair);
+        } else {
+            st.right_pairs.push(pair);
+        }
+    }
+    res
 }
 
 /// in-Rust relay 적용 (로컬·cross-host). 실패/취소여도 부분 진행분을 journal 에 기록(§4).
@@ -2129,6 +2197,7 @@ async fn apply_one_same_host(
     };
     // dst 존재면 SFTP rename 으로 백업 → dst 부재화(이후 host_side_copy_one 이 복사).
     let dst_fs = crate::fs::SshFs::new(pool.get(dst_conn).await?);
+    let mut created = false;
     if dst_fs.metadata(&dst_path).await.is_ok() {
         let parent = dst_path
             .parent()
@@ -2150,11 +2219,24 @@ async fn apply_one_same_host(
         }
     } else if dst_is_left {
         st.left_created.push(dst_path.clone());
+        created = true;
     } else {
         st.right_created.push(dst_path.clone());
+        created = true;
     }
     // dst 부재 보장됨 → host_side_copy_one 은 실제 복사(Ok(true)) 후 반환.
     host_side_copy_one(pool, src_conn, &src_path, &dst_path).await?;
+    if created {
+        let pair = RedoCopyPair {
+            from: src_path.clone(),
+            to: dst_path.clone(),
+        };
+        if dst_is_left {
+            st.left_pairs.push(pair);
+        } else {
+            st.right_pairs.push(pair);
+        }
+    }
     Ok(())
 }
 
