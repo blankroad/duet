@@ -412,6 +412,7 @@ async fn copy_execute_relay(
     };
 
     let mut copied = Vec::new();
+    let mut copied_from: Vec<PathBuf> = Vec::new();
     let mut skipped = 0u32;
     let mut outcome: Result<(), DuetError> = Ok(());
     for (idx, it) in plan.items.iter().enumerate() {
@@ -497,6 +498,7 @@ async fn copy_execute_relay(
                 }
             }
             copied.push(dst_path);
+            copied_from.push(src_path.clone());
             Ok(false) // false = 실제 복사함(skip 아님)
         }
         .await;
@@ -526,6 +528,8 @@ async fn copy_execute_relay(
         copied,
         // Replace 덮어쓰기는 복원하지 않음(사용자 승인 §4 예외) — 항상 비어 있음.
         backups_to_restore: Vec::new(),
+        src_source: Some(plan.src_source.clone()),
+        copied_from,
     };
     let op = OpKind::Copy {
         count,
@@ -3201,6 +3205,7 @@ async fn copy_execute_same_host(
 
     let mut backups = Vec::new();
     let mut copied = Vec::new();
+    let mut copied_from: Vec<PathBuf> = Vec::new();
     let mut outcome: Result<(), DuetError> = Ok(());
     for it in &plan.items {
         // 항목 경계 cancel check (backup pre-loop)
@@ -3340,6 +3345,7 @@ async fn copy_execute_same_host(
                 )));
             }
             copied.push(dst_path);
+            copied_from.push(src_path.clone());
             Ok(())
         }
         .await;
@@ -3360,6 +3366,8 @@ async fn copy_execute_same_host(
         target_source: plan.dst.source.clone(),
         copied,
         backups_to_restore: backups,
+        src_source: Some(plan.src_source.clone()),
+        copied_from,
     };
     let op = OpKind::Copy {
         count,

@@ -127,6 +127,7 @@ pub async fn execute_undo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
             target_source,
             copied,
             backups_to_restore,
+            ..
         } => {
             let fs = match fs_for(target_source, pool).await {
                 Ok(f) => f,
@@ -715,7 +716,56 @@ pub async fn execute_redo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
                     .collect(),
             }
         }
-        // Copy/Sync/Merge/CompareApply/ThreeWayApply/Symlink/Trash/Irreversible —
+        UndoAction::UndoCopy {
+            target_source,
+            copied,
+            backups_to_restore,
+            src_source,
+            copied_from,
+        } => {
+            // 덮어쓰기 동반 복사는 undo 가 백업을 복원했으므로 재복사가 충돌 — 미지원.
+            if !backups_to_restore.is_empty() {
+                return skipped(UNSUPPORTED);
+            }
+            // 2단계에서 기록 시작 — 구버전 entry/아카이브 추출은 src 미기록.
+            let Some(src_source) = src_source else {
+                return skipped(UNSUPPORTED);
+            };
+            if copied_from.len() != copied.len() || copied.is_empty() {
+                return skipped(UNSUPPORTED);
+            }
+            let src_fs_r = fs_for(src_source, pool).await;
+            let dst_fs_r = fs_for(target_source, pool).await;
+            let (src_fs, dst_fs) = match (src_fs_r, dst_fs_r) {
+                (Ok(a), Ok(b)) => (a, b),
+                _ => {
+                    return UndoOutcome {
+                        kind: UndoKind::Error,
+                        message: Some("source unreachable".into()),
+                        refreshed_locations: vec![],
+                    }
+                }
+            };
+            for (src, dst) in copied_from.iter().zip(copied.iter()) {
+                if src_fs.metadata(src).await.is_err() {
+                    return skipped("Source item no longer exists — redo skipped");
+                }
+                if dst_fs.metadata(dst).await.is_ok() {
+                    return skipped("An item already exists at the destination — redo skipped");
+                }
+                if let Err(e) = copy_relay(&*src_fs, src, &*dst_fs, dst).await {
+                    return error("copy forward", e);
+                }
+            }
+            let mut refresh = std::collections::HashSet::<PathBuf>::new();
+            for dst in copied {
+                if let Some(p) = dst.parent() {
+                    refresh.insert(p.to_path_buf());
+                }
+            }
+            ok_with_locs(target_source, refresh)
+        }
+        // Sync/Merge/CompareApply/ThreeWayApply/Symlink/Trash/Irreversible —
         // 소스 경로·타깃 미기록 또는 재실행 시 journal 데이터가 스테일해짐.
         _ => skipped(UNSUPPORTED),
     }
@@ -839,6 +889,41 @@ mod tests {
                 backup_path: dir.path().join("x.bak"),
                 original_path: dir.path().join("x"),
             }],
+        });
+        let outcome = execute_redo(&entry, &pool).await;
+        assert!(matches!(outcome.kind, UndoKind::Skipped));
+    }
+
+    #[tokio::test]
+    async fn redo_copy_recopies_from_recorded_sources() {
+        let dir = TempDir::new().unwrap();
+        let src = dir.path().join("a.txt");
+        let dst = dir.path().join("dst").join("a.txt");
+        tokio::fs::create_dir(dir.path().join("dst")).await.unwrap();
+        tokio::fs::write(&src, b"data").await.unwrap();
+        let pool = ConnectionPool::new();
+        // undo 직후 상태: dst 는 제거됨, src 만 존재.
+        let entry = mk_entry(UndoAction::UndoCopy {
+            target_source: SourceId::Local,
+            copied: vec![dst.clone()],
+            backups_to_restore: vec![],
+            src_source: Some(SourceId::Local),
+            copied_from: vec![src.clone()],
+        });
+        let outcome = execute_redo(&entry, &pool).await;
+        assert!(
+            matches!(outcome.kind, UndoKind::Ok),
+            "{:?}",
+            outcome.message
+        );
+        assert_eq!(tokio::fs::read(&dst).await.unwrap(), b"data");
+        // src 미기록(구버전/아카이브) entry 는 미지원 안내.
+        let entry = mk_entry(UndoAction::UndoCopy {
+            target_source: SourceId::Local,
+            copied: vec![dst.clone()],
+            backups_to_restore: vec![],
+            src_source: None,
+            copied_from: vec![],
         });
         let outcome = execute_redo(&entry, &pool).await;
         assert!(matches!(outcome.kind, UndoKind::Skipped));

@@ -201,10 +201,13 @@ pub async fn extract_execute(
     }
 
     // undo = 생성된 dest_dir 제거 + backup 복원 (UndoCopy 재사용).
+    // 아카이브 추출은 파일 원본이 없어 redo 불가 — src 기록 생략.
     let undo = UndoAction::UndoCopy {
         target_source: plan.source.clone(),
         copied: vec![plan.dest_dir.clone()],
         backups_to_restore: backups,
+        src_source: None,
+        copied_from: Vec::new(),
     };
     let op = OpKind::Extract {
         archive: Location {
@@ -812,10 +815,13 @@ pub async fn compress_execute(
         }
     }
 
+    // 압축 결과물 재생성은 원본 항목 목록만으론 불충분 — redo 미지원(src 생략).
     let undo = UndoAction::UndoCopy {
         target_source: plan.source.clone(),
         copied: vec![plan.dest_path.clone()],
         backups_to_restore: backups,
+        src_source: None,
+        copied_from: Vec::new(),
     };
     let op = OpKind::Compress {
         count: plan.item_names.len() as u32,

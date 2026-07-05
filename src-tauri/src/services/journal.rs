@@ -149,6 +149,12 @@ pub enum UndoAction {
         target_source: SourceId,
         copied: Vec<PathBuf>,
         backups_to_restore: Vec<BackupRestore>,
+        /// redo 용 원본 소스 — 구버전 journal 라인엔 없음(default → redo 불가).
+        #[serde(default)]
+        src_source: Option<SourceId>,
+        /// `copied[i]` 의 원본 경로(병렬 배열). 구버전/아카이브 추출은 빈 벡터.
+        #[serde(default)]
+        copied_from: Vec<PathBuf>,
     },
     UndoMove {
         src_source: SourceId,
@@ -449,6 +455,33 @@ mod tests {
         j.push(mk_op(), mk_undo()).await.unwrap();
         let h = j.history(10).await;
         assert_eq!(h.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn undo_copy_old_format_line_parses_with_defaults() {
+        // 2단계에서 추가된 src_source/copied_from 이 없는 구버전 journal 라인 —
+        // serde(default) 로 파싱돼야 기존 사용자 journal 이 안 깨진다.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("j.jsonl");
+        let line = format!(
+            r#"{{"type":"Push","id":"{}","timestamp":"2026-01-01T00:00:00Z","op":{{"kind":"copy","count":1,"src":{{"source":{{"kind":"local"}},"path":"/a"}},"dst":{{"source":{{"kind":"local"}},"path":"/b"}}}},"undo":{{"kind":"undo_copy","target_source":{{"kind":"local"}},"copied":["/b/x"],"backups_to_restore":[]}},"undone":false}}"#,
+            Uuid::now_v7()
+        );
+        tokio::fs::write(&path, format!("{line}\n")).await.unwrap();
+        let j = Journal::load_from(&path).await.unwrap();
+        let h = j.history(10).await;
+        assert_eq!(h.len(), 1);
+        match &h[0].undo {
+            UndoAction::UndoCopy {
+                src_source,
+                copied_from,
+                ..
+            } => {
+                assert!(src_source.is_none());
+                assert!(copied_from.is_empty());
+            }
+            other => panic!("wrong variant: {other:?}"),
+        }
     }
 
     #[tokio::test]
