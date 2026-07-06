@@ -264,7 +264,8 @@ pub async fn open_path(
     settings: tauri::State<'_, Arc<SettingsStore>>,
 ) -> Result<(), DuetError> {
     let target = match &location.source {
-        SourceId::Local => location.path.clone(),
+        // 간헐적 드라이브(C:) 누락 방어 — 이미 절대면 no-op (§ shell_menu 와 동일).
+        SourceId::Local => crate::platform::local_abs(location.path.clone()),
         SourceId::Ssh { .. } => download_to_temp(&location, pool.inner()).await?,
     };
     // 확장자별 연결 프로그램 override (소문자 확장자, 점 없음). 없으면 OS 기본.
@@ -337,7 +338,7 @@ pub async fn ssh_edit_open(
 pub async fn reveal_path(location: Location) -> Result<(), DuetError> {
     match location.source {
         SourceId::Local => {
-            let path = location.path;
+            let path = crate::platform::local_abs(location.path);
             tokio::task::spawn_blocking(move || opener::reveal(&path))
                 .await
                 .map_err(|e| DuetError::Io(format!("reveal task join: {e}")))?
@@ -645,7 +646,7 @@ pub async fn eject_volume(path: PathBuf) -> Result<(), DuetError> {
 pub async fn open_terminal(location: Location) -> Result<(), DuetError> {
     match location.source {
         SourceId::Local => {
-            let dir = location.path;
+            let dir = crate::platform::local_abs(location.path);
             if dir.as_os_str().is_empty() {
                 return Err(DuetError::Io("open terminal: empty path".into()));
             }
