@@ -414,7 +414,7 @@
     "restore": "Restore",
     "closeWindow": "Close",
     "singlePane": "Toggle single pane ({{key}})",
-    "dropTray": "Drop tray ({{key}}) — floating shelf for drag & drop"
+    "dropTray": "Drop tray ({{key}}) — always-on-top stash to drag files out to other apps"
   },
   "toolbar": {
     "newFolder": "New folder (F7)",

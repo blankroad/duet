@@ -411,7 +411,7 @@
     "restore": "이전 크기로",
     "closeWindow": "닫기",
     "singlePane": "단일 패널 토글 ({{key}})",
-    "dropTray": "드롭 트레이 ({{key}}) — 드래그 앤 드롭용 플로팅 셸프"
+    "dropTray": "드롭 트레이 ({{key}}) — 파일을 다른 앱으로 빼는 항상-위 임시함"
   },
   "toolbar": {
     "newFolder": "새 폴더 (F7)",
