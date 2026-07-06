@@ -1,5 +1,5 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type CSSProperties } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import clsx from "clsx";
 import type { Entry } from "@/types/bindings";
@@ -20,6 +20,10 @@ import { useEntryDrag } from "@/hooks/useEntryDrag";
 import { useDragState } from "@/stores/dragState";
 import { normRect, rowsInRect } from "@/lib/marquee";
 import { EntryRow } from "./EntryRow";
+import { useColumnWidths, type ColKey } from "@/stores/columnWidths";
+
+/** 리사이즈 폭 clamp (store 와 동일 범위). */
+const clampCol = (px: number) => Math.max(40, Math.min(600, Math.round(px)));
 
 interface EntryListProps {
   id: PaneId;
@@ -122,11 +126,47 @@ export function EntryList({
     ]);
   };
 
+  // 컬럼 폭(Ext/Size/Modified) — 헤더 경계 드래그로 조절. CSS 변수(--col-*)로 헤더·행이
+  // 공유해 항상 정렬. 드래그 중엔 변수만 직접 갱신(리렌더 X), 놓을 때 store 커밋(영속).
+  const outerRef = useRef<HTMLDivElement>(null);
+  const colExt = useColumnWidths((s) => s.ext);
+  const colSize = useColumnWidths((s) => s.size);
+  const colMtime = useColumnWidths((s) => s.mtime);
+  const setColWidth = useColumnWidths((s) => s.setWidth);
+  const startResize = (col: ColKey, e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation(); // 헤더 정렬 클릭 방지
+    const startX = e.clientX;
+    const startW = useColumnWidths.getState()[col];
+    // 왼쪽 경계를 잡고 드래그 — 왼쪽으로 끌면 그 컬럼이 넓어짐(Name 이 흡수).
+    const width = (ev: PointerEvent) => clampCol(startW + (startX - ev.clientX));
+    const move = (ev: PointerEvent) =>
+      outerRef.current?.style.setProperty(`--col-${col}`, `${width(ev)}px`);
+    const up = (ev: PointerEvent) => {
+      setColWidth(col, width(ev));
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      document.body.style.cursor = "";
+    };
+    document.body.style.cursor = "col-resize";
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
   return (
-    <div className="flex flex-1 min-h-0 flex-col">
-      {/* 컬럼 폭·간격은 EntryRow 와 **정확히 일치**해야 헤더/셀이 정렬됨:
-          컨테이너 gap-2 px-2, Name flex-1, Ext w-16, Size/Modified w-20(우측정렬).
-          우측 컬럼은 flex 라 text-right 가 무효 → justify-end 로 라벨을 오른쪽에. */}
+    <div
+      ref={outerRef}
+      className="flex flex-1 min-h-0 flex-col"
+      style={
+        {
+          "--col-ext": `${colExt}px`,
+          "--col-size": `${colSize}px`,
+          "--col-mtime": `${colMtime}px`,
+        } as CSSProperties
+      }
+    >
+      {/* 컬럼 폭은 CSS 변수(--col-*)로 헤더·행이 공유 → 항상 정렬. 간격 gap-2 px-2 동일.
+          Name flex-1, Ext/Size/Modified 는 var 폭(드래그 조절). 우측 컬럼은 justify-end. */}
       <div
         className="flex h-6 shrink-0 items-center gap-2 border-b border-border bg-subtle px-2 text-meta text-fg-muted"
         onContextMenu={onHeaderContextMenu}
@@ -146,7 +186,9 @@ export function EntryList({
             current={sortKey}
             order={sortOrder}
             onClick={onSortClick}
-            className="w-16"
+            className="w-[var(--col-ext)]"
+            resizeCol="ext"
+            onResizeStart={startResize}
           />
         )}
         <ColumnHeader
@@ -155,7 +197,9 @@ export function EntryList({
           current={sortKey}
           order={sortOrder}
           onClick={onSortClick}
-          className="w-20 justify-end"
+          className="w-[var(--col-size)] justify-end"
+          resizeCol="size"
+          onResizeStart={startResize}
         />
         <ColumnHeader
           label="Modified"
@@ -163,7 +207,9 @@ export function EntryList({
           current={sortKey}
           order={sortOrder}
           onClick={onSortClick}
-          className="w-20 justify-end"
+          className="w-[var(--col-mtime)] justify-end"
+          resizeCol="mtime"
+          onResizeStart={startResize}
         />
       </div>
       <div
@@ -276,6 +322,8 @@ function ColumnHeader({
   order,
   onClick,
   className,
+  resizeCol,
+  onResizeStart,
 }: {
   label: string;
   col: SortKey;
@@ -283,14 +331,25 @@ function ColumnHeader({
   order: SortOrder;
   onClick: (key: SortKey) => void;
   className: string;
+  /** 지정 시 왼쪽 경계에 드래그 리사이즈 핸들을 렌더 — 이 컬럼 폭을 조절. */
+  resizeCol?: ColKey;
+  onResizeStart?: (col: ColKey, e: React.PointerEvent) => void;
 }) {
   const active = col === current;
   return (
     <button
       type="button"
       onClick={() => onClick(col)}
-      className={`flex h-6 items-center gap-1 hover:text-fg ${className} ${active ? "text-fg" : ""}`}
+      className={`relative flex h-6 items-center gap-1 hover:text-fg ${className} ${active ? "text-fg" : ""}`}
     >
+      {resizeCol && onResizeStart && (
+        <div
+          onPointerDown={(e) => onResizeStart(resizeCol, e)}
+          onClick={(e) => e.stopPropagation()}
+          className="absolute left-0 top-0 z-10 h-full w-1.5 -translate-x-1/2 cursor-col-resize hover:bg-accent/50"
+          title="Drag to resize column"
+        />
+      )}
       <span>{label}</span>
       {active &&
         (order === "asc" ? <ChevronUp size={11} /> : <ChevronDown size={11} />)}

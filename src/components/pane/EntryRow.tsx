@@ -102,14 +102,14 @@ export function EntryRow({
         )}
       </span>
       {splitExt && (
-        <span className="font-mono w-16 truncate text-meta text-fg-muted">
+        <span className="font-mono w-[var(--col-ext)] truncate text-meta text-fg-muted">
           {ext}
         </span>
       )}
-      <span className="font-mono w-20 text-right text-meta text-fg-muted">
+      <span className="font-mono w-[var(--col-size)] text-right text-meta text-fg-muted">
         {formatSize(dirSize ?? entry.size)}
       </span>
-      <span className="font-mono w-20 text-right text-meta text-fg-muted">
+      <span className="font-mono w-[var(--col-mtime)] text-right text-meta text-fg-muted">
         {formatTime(entry.modified_ms)}
       </span>
     </div>
