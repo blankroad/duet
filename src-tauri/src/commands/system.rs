@@ -690,6 +690,9 @@ pub async fn shell_menu_open(
             .map(|h| h.0 as isize)
             .unwrap_or(0);
         let token = registry.alloc_token();
+        // FE 가 간헐적으로 드라이브(C:) 없는 경로를 보내면 셸(IContextMenu)이 항목을 못
+        // 잡아 빈 메뉴("(none)")가 된다 — COM 직전에 절대경로화(local_abs: 이미 절대면 no-op).
+        let path = crate::platform::local_abs(path);
         let items = registry.worker().build(token, hwnd, path, scope).await;
         Ok(crate::platform::ShellMenu { token, items })
     }
