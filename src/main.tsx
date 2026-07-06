@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { DropTray } from "./windows/DropTray";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import "./i18n"; // App 보다 먼저 — useTranslation 사용 컴포넌트 대비
 import "./styles/globals.css";
 
@@ -11,5 +12,7 @@ const isShelf =
   new URLSearchParams(window.location.search).get("window") === "shelf";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>{isShelf ? <DropTray /> : <App />}</React.StrictMode>,
+  <React.StrictMode>
+    <ErrorBoundary>{isShelf ? <DropTray /> : <App />}</ErrorBoundary>
+  </React.StrictMode>,
 );
