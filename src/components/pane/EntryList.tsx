@@ -124,8 +124,11 @@ export function EntryList({
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
+      {/* 컬럼 폭·간격은 EntryRow 와 **정확히 일치**해야 헤더/셀이 정렬됨:
+          컨테이너 gap-2 px-2, Name flex-1, Ext w-16, Size/Modified w-20(우측정렬).
+          우측 컬럼은 flex 라 text-right 가 무효 → justify-end 로 라벨을 오른쪽에. */}
       <div
-        className="flex h-6 shrink-0 items-center border-b border-border bg-subtle text-meta text-fg-muted"
+        className="flex h-6 shrink-0 items-center gap-2 border-b border-border bg-subtle px-2 text-meta text-fg-muted"
         onContextMenu={onHeaderContextMenu}
       >
         <ColumnHeader
@@ -134,7 +137,7 @@ export function EntryList({
           current={sortKey}
           order={sortOrder}
           onClick={onSortClick}
-          className="flex-1 px-2"
+          className="min-w-0 flex-1"
         />
         {splitExt && (
           <ColumnHeader
@@ -143,7 +146,7 @@ export function EntryList({
             current={sortKey}
             order={sortOrder}
             onClick={onSortClick}
-            className="w-16 px-2"
+            className="w-16"
           />
         )}
         <ColumnHeader
@@ -152,7 +155,7 @@ export function EntryList({
           current={sortKey}
           order={sortOrder}
           onClick={onSortClick}
-          className="w-20 px-2 text-right"
+          className="w-20 justify-end"
         />
         <ColumnHeader
           label="Modified"
@@ -160,15 +163,7 @@ export function EntryList({
           current={sortKey}
           order={sortOrder}
           onClick={onSortClick}
-          className="w-32 px-2 text-right"
-        />
-        <ColumnHeader
-          label="Type"
-          col="kind"
-          current={sortKey}
-          order={sortOrder}
-          onClick={onSortClick}
-          className="w-16 px-2"
+          className="w-20 justify-end"
         />
       </div>
       <div
