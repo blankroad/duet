@@ -49,7 +49,9 @@ export function useGlobalShortcuts() {
       let commandId = binding?.command_id;
 
       if (!commandId) {
-        const cmd = commands.find((c) => c.defaultKey === keystr);
+        const cmd = commands.find(
+          (c) => c.defaultKey === keystr || c.altKeys?.includes(keystr),
+        );
         commandId = cmd?.id;
       }
 

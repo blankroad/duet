@@ -36,6 +36,9 @@ export interface Command {
   label: string;
   category: CommandCategory;
   defaultKey?: string;
+  /** 보조 단축키 — `defaultKey` 외에 추가로 이 커맨드를 트리거(예: 필터의 `/`).
+   *  keymap 재바인딩(사용자 override)이 없을 때만 폴백으로 동작. */
+  altKeys?: string[];
   action: () => void;
   /** input/textarea 안에서도 핸들러 동작? 디폴트 false. */
   allowInInput?: boolean;
@@ -305,6 +308,7 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
       label: "Focus filter",
       category: "Filter",
       defaultKey: "Ctrl+F",
+      altKeys: ["/"], // vim/less 식 빠른 찾기 (입력창에선 자동 무시 — allowInInput 없음)
       action: deps.focusFilter,
     },
     {
