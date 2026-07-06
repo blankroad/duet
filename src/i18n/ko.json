@@ -432,8 +432,14 @@
     "copy": "복사",
     "moveHere": "여기로 이동 (활성 패널)",
     "move": "이동",
-    "clear": "선반 비우기",
-    "remove": "선반에서 제거"
+    "clear": "섹션 비우기",
+    "remove": "선반에서 제거",
+    "newSection": "새 섹션",
+    "deleteSection": "섹션 삭제",
+    "setTarget": "새 항목이 담기는 섹션(타깃)",
+    "moveToTarget": "타깃 섹션으로 이동",
+    "sectionName": "섹션 이름",
+    "sectionN": "섹션 {{n}}"
   },
   "selectPattern": {
     "select": "선택",

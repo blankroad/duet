@@ -435,8 +435,14 @@
     "copy": "Copy",
     "moveHere": "Move here (active pane)",
     "move": "Move",
-    "clear": "Clear shelf",
-    "remove": "Remove from shelf"
+    "clear": "Clear section",
+    "remove": "Remove from shelf",
+    "newSection": "New section",
+    "deleteSection": "Delete section",
+    "setTarget": "New items go here (target section)",
+    "moveToTarget": "Move to target section",
+    "sectionName": "Section name",
+    "sectionN": "Section {{n}}"
   },
   "selectPattern": {
     "select": "Select",

@@ -16,7 +16,7 @@ import { formatErr } from "@/lib/error";
 import { rememberExtract } from "@/lib/extractPending";
 import { basename } from "@/lib/paths";
 import { useClipboard } from "@/stores/clipboard";
-import { useShelf } from "@/stores/shelf";
+import { useShelf, shelfSectionItems } from "@/stores/shelf";
 import { useUI } from "@/stores/ui";
 import { promptText } from "@/stores/promptDialog";
 
@@ -403,7 +403,9 @@ export function addSelectionToShelf(showToast: ToastFn): void {
     return;
   }
   const n = useShelf.getState().add(targets);
-  const total = useShelf.getState().items.length;
+  const total = useShelf
+    .getState()
+    .sections.reduce((a, s) => a + s.items.length, 0);
   showToast(
     n === 0
       ? i18n.t("toast.alreadyOnShelf")
@@ -420,8 +422,9 @@ export async function applyShelfTo(
   mode: "copy" | "move",
   open: OpenFn,
   showToast: ToastFn,
+  sectionId?: string,
 ): Promise<void> {
-  const items = useShelf.getState().items;
+  const items = shelfSectionItems(sectionId);
   if (items.length === 0) {
     showToast(i18n.t("toast.shelfEmpty"));
     return;

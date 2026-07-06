@@ -1,4 +1,14 @@
-import { Layers, X, Copy, FolderInput, Trash2 } from "lucide-react";
+import {
+  Layers,
+  X,
+  Copy,
+  FolderInput,
+  Trash2,
+  Plus,
+  ArrowRight,
+  Circle,
+  CircleDot,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useShelf, shelfKey } from "@/stores/shelf";
 import { useConnections } from "@/stores/connections";
@@ -18,81 +28,152 @@ function sourceLabel(ref: EntryRef): string {
 }
 
 /**
- * Drop Stack / Shelf 사이드바 섹션 — 모은 항목 + 활성 패널로 일괄 복사/이동.
- * 비었으면 렌더 안 함(항목이 생기면 자동 노출).
+ * Shelf 사이드바 섹션 — 항목을 **영역(섹션)으로 나눠** 담고 섹션 단위로 활성 패널에
+ * 복사/이동. 새 항목은 타깃 섹션(◉)으로. 비었으면(기본 섹션 1개+무항목) 렌더 안 함.
  */
 export function ShelfSection() {
   const { t } = useTranslation();
-  const items = useShelf((s) => s.items);
-  const remove = useShelf((s) => s.remove);
-  const clear = useShelf((s) => s.clear);
+  const sections = useShelf((s) => s.sections);
+  const targetId = useShelf((s) => s.targetId);
   const open = useUIDialogs((s) => s.open);
   const showToast = useToast((s) => s.show);
 
-  if (items.length === 0) return null;
+  const total = sections.reduce((n, s) => n + s.items.length, 0);
+  const hasContent = total > 0 || sections.length > 1;
+  if (!hasContent) return null;
+
+  const st = () => useShelf.getState();
 
   return (
     <div className="border-b border-border px-2 py-1">
       <div className="flex items-center gap-1 text-meta text-fg-muted">
         <Layers size={12} />
         <span className="truncate">{t("shelf.title")}</span>
-        <span className="ml-auto opacity-50">{items.length}</span>
-      </div>
-
-      <div className="mt-1 flex items-center gap-1">
+        <span className="ml-auto opacity-50">{total}</span>
         <button
           type="button"
-          onClick={() => void applyShelfTo("copy", open, showToast)}
-          className="flex flex-1 items-center justify-center gap-1 rounded-panel border border-border py-0.5 text-meta hover:bg-border"
-          title={t("shelf.copyHere")}
+          onClick={() =>
+            st().newSection(t("shelf.sectionN", { n: sections.length + 1 }))
+          }
+          className="rounded p-0.5 hover:bg-border hover:text-fg"
+          aria-label={t("shelf.newSection")}
+          title={t("shelf.newSection")}
         >
-          <Copy size={11} /> {t("shelf.copy")}
-        </button>
-        <button
-          type="button"
-          onClick={() => void applyShelfTo("move", open, showToast)}
-          className="flex flex-1 items-center justify-center gap-1 rounded-panel border border-border py-0.5 text-meta hover:bg-border"
-          title={t("shelf.moveHere")}
-        >
-          <FolderInput size={11} /> {t("shelf.move")}
-        </button>
-        <button
-          type="button"
-          onClick={() => clear()}
-          className="rounded-panel p-1 text-fg-muted hover:bg-border hover:text-danger"
-          aria-label={t("shelf.clear")}
-          title={t("shelf.clear")}
-        >
-          <Trash2 size={11} />
+          <Plus size={12} />
         </button>
       </div>
 
-      <ul className="mt-1 space-y-0.5">
-        {items.map((it) => (
-          <li
-            key={shelfKey(it)}
-            className="group flex items-center gap-1 rounded px-1 py-0.5 hover:bg-border/50"
-          >
-            <span className="min-w-0 flex-1 truncate font-mono" title={it.name}>
-              {it.name}
-            </span>
-            <span className="shrink-0 text-meta opacity-50" title="source">
-              {it.location.source.kind === "local"
-                ? t("sidebar.local")
-                : sourceLabel(it)}
-            </span>
+      {sections.map((sec) => (
+        <div key={sec.id} className="mt-1.5">
+          {/* 섹션 헤더 */}
+          <div className="group/sec flex items-center gap-1">
             <button
               type="button"
-              onClick={() => remove(shelfKey(it))}
-              className="shrink-0 rounded p-0.5 text-fg-muted opacity-0 hover:bg-border hover:text-danger focus:opacity-100 group-hover:opacity-100"
-              aria-label={t("shelf.remove")}
-              title={t("shelf.remove")}
+              onClick={() => st().setTarget(sec.id)}
+              className="shrink-0 text-fg-muted hover:text-accent"
+              title={t("shelf.setTarget")}
+              aria-label={t("shelf.setTarget")}
             >
-              <X size={11} />
+              {sec.id === targetId ? (
+                <CircleDot size={12} className="text-accent" />
+              ) : (
+                <Circle size={12} />
+              )}
             </button>
-          </li>
-        ))}
-      </ul>
+            <input
+              value={sec.name}
+              onChange={(e) => st().renameSection(sec.id, e.target.value)}
+              className="min-w-0 flex-1 truncate bg-transparent text-meta text-fg-muted focus:text-fg focus:outline-none"
+              aria-label={t("shelf.sectionName")}
+            />
+            <span className="shrink-0 text-meta opacity-50">{sec.items.length}</span>
+            <button
+              type="button"
+              disabled={sec.items.length === 0}
+              onClick={() => void applyShelfTo("copy", open, showToast, sec.id)}
+              className="shrink-0 rounded p-0.5 hover:bg-border disabled:opacity-30"
+              title={t("shelf.copyHere")}
+              aria-label={t("shelf.copyHere")}
+            >
+              <Copy size={11} />
+            </button>
+            <button
+              type="button"
+              disabled={sec.items.length === 0}
+              onClick={() => void applyShelfTo("move", open, showToast, sec.id)}
+              className="shrink-0 rounded p-0.5 hover:bg-border disabled:opacity-30"
+              title={t("shelf.moveHere")}
+              aria-label={t("shelf.moveHere")}
+            >
+              <FolderInput size={11} />
+            </button>
+            {sec.items.length > 0 && (
+              <button
+                type="button"
+                onClick={() => st().clearSection(sec.id)}
+                className="shrink-0 rounded p-0.5 text-fg-muted opacity-0 hover:bg-border hover:text-danger group-hover/sec:opacity-100"
+                title={t("shelf.clear")}
+                aria-label={t("shelf.clear")}
+              >
+                <Trash2 size={11} />
+              </button>
+            )}
+            {sections.length > 1 && (
+              <button
+                type="button"
+                onClick={() => st().deleteSection(sec.id)}
+                className="shrink-0 rounded p-0.5 text-fg-muted opacity-0 hover:bg-border hover:text-danger group-hover/sec:opacity-100"
+                title={t("shelf.deleteSection")}
+                aria-label={t("shelf.deleteSection")}
+              >
+                <X size={11} />
+              </button>
+            )}
+          </div>
+
+          {/* 항목 */}
+          <ul className="mt-0.5 space-y-0.5 pl-4">
+            {sec.items.map((it) => (
+              <li
+                key={shelfKey(it)}
+                className="group flex items-center gap-1 rounded px-1 py-0.5 hover:bg-border/50"
+              >
+                <span
+                  className="min-w-0 flex-1 truncate font-mono"
+                  title={it.name}
+                >
+                  {it.name}
+                </span>
+                <span className="shrink-0 text-meta opacity-50" title="source">
+                  {it.location.source.kind === "local"
+                    ? t("sidebar.local")
+                    : sourceLabel(it)}
+                </span>
+                {sec.id !== targetId && (
+                  <button
+                    type="button"
+                    onClick={() => st().moveItem(shelfKey(it), targetId)}
+                    className="shrink-0 rounded p-0.5 text-fg-muted opacity-0 hover:bg-border hover:text-accent focus:opacity-100 group-hover:opacity-100"
+                    title={t("shelf.moveToTarget")}
+                    aria-label={t("shelf.moveToTarget")}
+                  >
+                    <ArrowRight size={11} />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => st().remove(shelfKey(it))}
+                  className="shrink-0 rounded p-0.5 text-fg-muted opacity-0 hover:bg-border hover:text-danger focus:opacity-100 group-hover:opacity-100"
+                  aria-label={t("shelf.remove")}
+                  title={t("shelf.remove")}
+                >
+                  <X size={11} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
     </div>
   );
 }
