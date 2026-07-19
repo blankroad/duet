@@ -10,8 +10,8 @@ import { childLocation } from "@/lib/entryDnd";
  * 미리보기 패널이 닫혀 있으면 set 자체를 생략(불필요한 fetch/리렌더 회피).
  */
 interface HoverState {
-  target: { entry: Entry; location: Location } | null;
-  set: (t: { entry: Entry; location: Location } | null) => void;
+  target: { entry: Entry; location: Location; paneId: PaneId } | null;
+  set: (t: { entry: Entry; location: Location; paneId: PaneId } | null) => void;
 }
 
 export const usePreviewHover = create<HoverState>((set) => ({
@@ -27,10 +27,13 @@ export function setHoverEntry(id: PaneId, entry: Entry): void {
     return;
   }
   const loc = activeTab(usePanes.getState(), id).location;
-  usePreviewHover.getState().set({ entry, location: childLocation(loc, entry.name) });
+  usePreviewHover
+    .getState()
+    .set({ entry, location: childLocation(loc, entry.name), paneId: id });
 }
 
 /** 호버 해제 (리스트 벗어남) → 커서 항목으로 복귀. */
 export function clearHover(): void {
-  if (usePreviewHover.getState().target !== null) usePreviewHover.getState().set(null);
+  if (usePreviewHover.getState().target !== null)
+    usePreviewHover.getState().set(null);
 }

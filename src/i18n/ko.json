@@ -725,6 +725,8 @@
     "selectItem": "파일 또는 폴더를 선택하세요",
     "loading": "불러오는 중…",
     "counting": "세는 중…",
+    "calcSize": "계산",
+    "calculating": "계산 중…",
     "itemCount_other": "{{count}}개",
     "kind": "종류",
     "items": "항목",

@@ -728,6 +728,8 @@
     "selectItem": "Select a file or folder",
     "loading": "Loading…",
     "counting": "Counting…",
+    "calcSize": "Calculate",
+    "calculating": "Calculating…",
     "itemCount_one": "{{count}} item",
     "itemCount_other": "{{count}} items",
     "kind": "Kind",

@@ -3,14 +3,24 @@ import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 import { commands } from "@/types/bindings";
 import type { Entry, Location, PreviewData } from "@/types/bindings";
-import { usePanes, activeTab, selectDisplayedEntries } from "@/stores/panes";
+import {
+  usePanes,
+  activeTab,
+  selectDisplayedEntries,
+  type PaneId,
+} from "@/stores/panes";
 import { useUI } from "@/stores/ui";
 import { usePreviewHover } from "@/stores/previewHover";
 import { formatErr } from "@/lib/error";
 import { PreviewView, Centered } from "@/components/pane/PreviewView";
 import { PreviewInspector } from "@/components/pane/PreviewInspector";
 
-export type PreviewTarget = { entry: Entry; location: Location };
+export type PreviewTarget = {
+  entry: Entry;
+  location: Location;
+  /** 항목이 속한 패널 — 인스펙터가 그 탭의 폴더 크기 캐시를 읽는 데 사용. */
+  paneId: PaneId;
+};
 
 /** 활성 패널 cursor 항목(종류 무관, ".." 제외) + 그 Location. 없으면 null. */
 export function cursorTarget(): PreviewTarget | null {
@@ -24,6 +34,7 @@ export function cursorTarget(): PreviewTarget | null {
   return {
     location: { source: tab.location.source, path: base + sep + entry.name },
     entry,
+    paneId: s.activePane,
   };
 }
 
@@ -145,7 +156,11 @@ export function PreviewPane() {
           <Centered>{t("preview.selectItem")}</Centered>
         ) : (
           <>
-            <PreviewInspector entry={target.entry} location={target.location} />
+            <PreviewInspector
+              entry={target.entry}
+              location={target.location}
+              paneId={target.paneId}
+            />
             {target.entry.kind === "file" && <PreviewBody state={state} />}
           </>
         )}
