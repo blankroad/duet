@@ -366,22 +366,28 @@ async fn copy_execute_relay(
     }
     // 누적 바이트 진행률 — plan 전체 크기 대비. chunk 마다 호출되되 ~150ms throttle.
     let total = plan.total_size_bytes;
-    let done = std::sync::atomic::AtomicU64::new(0);
+    // done/last 는 항목 시작 emit(emit_item_start)과 공유 — Arc.
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
     // (직전 emit 시각, 직전 emit 바이트) — throttle + 순간속도 계산.
-    let last = std::sync::Mutex::new((std::time::Instant::now(), 0u64));
+    let last = std::sync::Arc::new(std::sync::Mutex::new((std::time::Instant::now(), 0u64)));
     let files_total = plan.items.len() as u32;
     // 현재 처리 중인 (실제 파일명, top-level 항목 idx) — on_file 이 파일명, 루프가 idx 갱신.
     let cur = std::sync::Arc::new(std::sync::Mutex::new((String::new(), 0u32)));
     let cur_cb = cur.clone();
+    let done_cb = done.clone();
+    let last_cb = last.clone();
+    let progress_cb = progress.clone();
     let on_bytes = move |delta: u64| {
         use std::sync::atomic::Ordering::Relaxed;
-        let d = done.fetch_add(delta, Relaxed) + delta;
-        let Some(p) = progress.as_ref() else { return };
+        let d = done_cb.fetch_add(delta, Relaxed) + delta;
+        let Some(p) = progress_cb.as_ref() else {
+            return;
+        };
         // total==0(폴더 등 총량 미상) 이면 "완료" 판정을 바이트로 못 하므로 throttle 만.
         let complete = total > 0 && d >= total;
-        let speed = if let Ok(mut l) = last.lock() {
+        let speed = if let Ok(mut l) = last_cb.lock() {
             let now = std::time::Instant::now();
-            if !complete && now.duration_since(l.0) < std::time::Duration::from_millis(150) {
+            if !complete && now.duration_since(l.0) < PROGRESS_THROTTLE {
                 return;
             }
             let s = calc_speed(l.1, l.0, d);
@@ -428,6 +434,15 @@ async fn copy_execute_relay(
         if let Ok(mut g) = cur.lock() {
             *g = (it.name.clone(), idx as u32);
         }
+        emit_item_start(
+            progress.as_ref(),
+            &last,
+            &done,
+            idx as u32,
+            &it.name,
+            total,
+            files_total,
+        );
         // 한 항목 처리 — 내부 ?/return 은 이 async 블록만 빠져나와 아래 outcome 으로 잡힘.
         let step: Result<bool, DuetError> = async {
             let src_path = src_fs.join(&it.location.path, &it.name);
@@ -599,22 +614,25 @@ pub async fn move_execute(
     // cross-fs 이동(=copy+trash)은 바이트 진행률을 emit — copy 와 동일 메커니즘.
     // (same-fs rename 은 atomic·즉시라 항목 완료마다만 갱신.)
     let total = plan.total_size_bytes;
-    let done = std::sync::atomic::AtomicU64::new(0);
-    let last = std::sync::Mutex::new((std::time::Instant::now(), 0u64));
+    // done/last 는 항목 시작 emit(emit_item_start)과 공유 — Arc.
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let last = std::sync::Arc::new(std::sync::Mutex::new((std::time::Instant::now(), 0u64)));
     let files_total = plan.items.len() as u32;
     let cur = std::sync::Arc::new(std::sync::Mutex::new((String::new(), 0u32)));
     let cur_cb = cur.clone();
+    let done_cb = done.clone();
+    let last_cb = last.clone();
     let progress_cb = progress.clone();
     let on_bytes = move |delta: u64| {
         use std::sync::atomic::Ordering::Relaxed;
-        let d = done.fetch_add(delta, Relaxed) + delta;
+        let d = done_cb.fetch_add(delta, Relaxed) + delta;
         let Some(p) = progress_cb.as_ref() else {
             return;
         };
         let complete = total > 0 && d >= total;
-        let speed = if let Ok(mut l) = last.lock() {
+        let speed = if let Ok(mut l) = last_cb.lock() {
             let now = std::time::Instant::now();
-            if !complete && now.duration_since(l.0) < std::time::Duration::from_millis(150) {
+            if !complete && now.duration_since(l.0) < PROGRESS_THROTTLE {
                 return;
             }
             let s = calc_speed(l.1, l.0, d);
@@ -659,6 +677,17 @@ pub async fn move_execute(
         if let Ok(mut g) = cur.lock() {
             *g = (it.name.clone(), idx as u32);
         }
+        // same-fs rename 은 바이트가 안 흘러 on_bytes 가 아예 안 불린다 — 이동에서
+        // 파일명이 보이는 유일한 경로.
+        emit_item_start(
+            progress.as_ref(),
+            &last,
+            &done,
+            idx as u32,
+            &it.name,
+            total,
+            files_total,
+        );
         // 한 항목 처리 — 내부 ?/return 은 이 async 블록만 빠져나와 아래 outcome 으로 잡힘.
         let step: Result<bool, DuetError> = async {
             let src_path = src_fs.join(&it.location.path, &it.name);
@@ -1550,6 +1579,63 @@ pub async fn merge_bidir(
             .await
         }
     }
+}
+
+/// 진행률 emit 최소 간격 — 바이트 진행률과 항목 시작 emit 이 공유한다.
+const PROGRESS_THROTTLE: std::time::Duration = std::time::Duration::from_millis(150);
+
+/// 항목 시작 emit 을 내보내도 되는지 판정 + 통과 시 throttle 시각을 선점(갱신).
+///
+/// 첫 항목(`idx == 0`)은 무조건 통과 — 모달이 뜨자마자 파일명이 보여야 한다.
+/// 이후 항목은 바이트 emit 과 같은 `last` 를 공유하므로, 항목이 수천 개여도
+/// 이벤트는 150ms 에 한 번으로 묶인다. 순수 함수로 분리해 테스트 가능하게 둠
+/// (ProgressEmitter 는 AppHandle 을 들고 있어 유닛 테스트에서 만들 수 없음).
+fn claim_item_emit(
+    last: &std::sync::Mutex<(std::time::Instant, u64)>,
+    idx: u32,
+    done: u64,
+) -> bool {
+    let Ok(mut l) = last.lock() else { return false };
+    let now = std::time::Instant::now();
+    if idx == 0 || now.duration_since(l.0) >= PROGRESS_THROTTLE {
+        *l = (now, done);
+        true
+    } else {
+        false
+    }
+}
+
+/// 항목 시작 시점의 진행률 emit (copy/move 공용).
+///
+/// `on_bytes` 는 실제 바이트가 흐른 뒤에야 불리므로 이것 없이는 파일명이 안 보인다:
+/// - same-fs 이동은 `rename` 이라 바이트가 0 → `on_bytes` 가 아예 안 불림
+/// - 150ms(throttle) 안에 끝나는 짧은 복사도 emit 없이 종료
+///
+/// 첫 항목은 무조건 emit(모달이 뜨자마자 이름이 보이도록), 이후 항목은 바이트
+/// emit 과 같은 throttle 을 공유해 항목이 수천 개일 때 이벤트 폭주를 막는다.
+fn emit_item_start(
+    progress: Option<&crate::services::task_queue::ProgressEmitter>,
+    last: &std::sync::Mutex<(std::time::Instant, u64)>,
+    done: &std::sync::atomic::AtomicU64,
+    idx: u32,
+    name: &str,
+    total: u64,
+    files_total: u32,
+) {
+    let Some(p) = progress else { return };
+    let d = done.load(std::sync::atomic::Ordering::Relaxed);
+    if !claim_item_emit(last, idx, d) {
+        return;
+    }
+    // 속도는 None — 이 시점엔 새 바이트가 흐르지 않아 순간속도를 추정할 근거가 없다.
+    p.emit(byte_progress(
+        d,
+        total,
+        None,
+        Some(name.to_string()),
+        idx,
+        files_total,
+    ));
 }
 
 /// 바이트 진행률 → ProgressInfo (copy/move 공용). `total==0`(폴더 등 총량 미상)이면
@@ -4279,6 +4365,34 @@ mod tests {
     }
 
     // === batch rename ===
+
+    /// 첫 항목은 throttle 을 무시하고 통과 — 모달이 뜨자마자 파일명이 보여야 한다.
+    /// (same-fs 이동은 rename 이라 바이트가 안 흘러 on_bytes 가 아예 안 불린다.)
+    #[test]
+    fn claim_item_emit_always_passes_first_item() {
+        let last = std::sync::Mutex::new((std::time::Instant::now(), 0u64));
+        assert!(claim_item_emit(&last, 0, 0));
+    }
+
+    /// 이후 항목은 150ms throttle 공유 — 항목 수천 개에서 이벤트 폭주 방지.
+    #[test]
+    fn claim_item_emit_throttles_later_items() {
+        let last = std::sync::Mutex::new((std::time::Instant::now(), 0u64));
+        assert!(!claim_item_emit(&last, 1, 10), "직후 재emit 은 막혀야 함");
+        assert!(!claim_item_emit(&last, 7, 20));
+    }
+
+    /// throttle 이 지나면 다시 통과하고, 통과 시 (시각, 바이트) 를 선점 갱신한다.
+    #[test]
+    fn claim_item_emit_passes_after_throttle_and_updates() {
+        let past =
+            std::time::Instant::now() - PROGRESS_THROTTLE - std::time::Duration::from_millis(10);
+        let last = std::sync::Mutex::new((past, 0u64));
+        assert!(claim_item_emit(&last, 3, 4096));
+        // 선점됐으므로 바로 뒤이은 같은 항목 emit 은 막힌다.
+        assert!(!claim_item_emit(&last, 3, 4096));
+        assert_eq!(last.lock().unwrap().1, 4096, "직전 emit 바이트 갱신");
+    }
 
     #[test]
     fn apply_rule_prefix_suffix_preserves_ext() {
