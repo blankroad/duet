@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { basename, pathSegments } from "@/lib/paths";
+import { basename, pathSegments, shortenPath } from "@/lib/paths";
 
 describe("basename", () => {
   it("POSIX 경로의 마지막 세그먼트", () => {
@@ -23,6 +23,39 @@ describe("basename", () => {
     expect(basename("/")).toBe("/");
     expect(basename("", "archive")).toBe("archive");
     expect(basename("\\", "archive")).toBe("archive");
+  });
+});
+
+describe("shortenPath", () => {
+  it("max 이하면 그대로", () => {
+    expect(shortenPath("/a/b/c", 44)).toBe("/a/b/c");
+  });
+
+  it("가운데를 접고 말단(파일명)은 반드시 남긴다", () => {
+    const p = "/Users/ctmctm/Desktop/01_PROJECT/duet/src/assets/report.pdf";
+    const out = shortenPath(p, 44);
+    expect(out.length).toBeLessThanOrEqual(44);
+    expect(out).toContain("…");
+    expect(out.endsWith("report.pdf")).toBe(true);
+    expect(out.startsWith("/Users")).toBe(true);
+  });
+
+  it("여유가 있으면 뒤 세그먼트를 더 채운다", () => {
+    const p = "/Users/ctmctm/Desktop/01_PROJECT/duet/src/assets/report.pdf";
+    expect(shortenPath(p, 44)).toBe("/Users/…/duet/src/assets/report.pdf");
+  });
+
+  it("말단 세그먼트 자체가 max 보다 길면 문자 단위 가운데 생략", () => {
+    const long = "/dir/" + "x".repeat(80) + ".bin";
+    const out = shortenPath(long, 30);
+    expect(out.length).toBeLessThanOrEqual(31); // keep*2 + '…'
+    expect(out).toContain("…");
+  });
+
+  it("Windows 경로도 말단을 남긴다", () => {
+    const out = shortenPath("D:\\work\\projects\\duet\\src\\report.pdf", 28);
+    expect(out).toContain("…");
+    expect(out.endsWith("report.pdf")).toBe(true);
   });
 });
 

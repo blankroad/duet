@@ -34,7 +34,7 @@ export function TasksBar() {
       <div className="flex h-7 items-center gap-2 px-3 text-meta">
         <Loader size={11} className="animate-spin text-fg-muted" />
         <span className="truncate text-fg" title={active[0]!.title}>
-          {active[0]!.title}
+          {taskLabel(active[0]!, t)}
         </span>
         <button
           type="button"
@@ -58,15 +58,26 @@ export function TasksBar() {
   );
 }
 
+/**
+ * 작업 표시 라벨 — 현재 파일명 우선, 없으면 kind 로 만든 현지화 라벨.
+ *
+ * backend 의 `task.title` 은 "Copying foo.zip → /very/long/dst" 형태라 좁은
+ * 바에서 truncate 되면 정작 파일명이 잘려 나간다(+ 하드코딩 영어). 전체 문자열은
+ * tooltip 으로만 남긴다.
+ */
+function taskLabel(task: TaskDto, t: (k: string) => string): string {
+  return task.progress?.current_file || t(`tasks.kind.${task.kind}`);
+}
+
 function TaskRow({ task }: { task: TaskDto }) {
   const { t } = useTranslation();
   const pct = task.progress?.percent ?? 0;
-  // 현재 파일명 우선(사이드바 TasksSection 통합분) — 없으면 task title.
-  const label = task.progress?.current_file || task.title;
+  const label = taskLabel(task, t);
   return (
     <div className="flex flex-1 items-center gap-2">
       <Loader size={11} className="shrink-0 animate-spin text-fg-muted" />
-      <span className="truncate text-fg" title={label}>
+      {/* tooltip 은 backend 전체 요약(출발→목적지) — 라벨보다 정보가 많다. */}
+      <span className="truncate text-fg" title={task.title}>
         {label}
       </span>
       {task.progress && (

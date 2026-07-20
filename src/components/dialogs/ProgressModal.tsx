@@ -3,9 +3,23 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { useTranslation } from "react-i18next";
 import { Loader, X } from "lucide-react";
 import { formatSize } from "@/lib/format";
+import { shortenPath } from "@/lib/paths";
 import { useTasks } from "@/stores/tasks";
 import { commands } from "@/types/bindings";
-import type { ProgressInfo } from "@/types/bindings";
+import type { ProgressInfo, TaskDto } from "@/types/bindings";
+
+/**
+ * 복사/이동/동기화의 "받는 위치". commands 레이어가 enqueue 시
+ * `affected_locations[0]` 에 목적지를 넣는다 (fs_ops.rs:245/791/1101).
+ * 그 외 kind(삭제·압축 등)는 목적지 개념이 없어 표시하지 않는다.
+ */
+function destPath(task: TaskDto | undefined): string | null {
+  if (!task) return null;
+  if (task.kind !== "copy" && task.kind !== "move" && task.kind !== "sync")
+    return null;
+  const dst = task.affected_locations[0];
+  return dst ? String(dst.path) : null;
+}
 
 export function ProgressModal({
   title,
@@ -48,7 +62,11 @@ export function ProgressModal({
             </button>
           </div>
 
-          {progress ? <ProgressBody p={progress} /> : <SpinnerBody />}
+          {progress ? (
+            <ProgressBody p={progress} dst={destPath(task)} />
+          ) : (
+            <SpinnerBody dst={destPath(task)} />
+          )}
 
           <div className="mt-4 flex justify-end gap-2">
             <button
@@ -76,38 +94,61 @@ export function ProgressModal({
   );
 }
 
-function SpinnerBody() {
+function SpinnerBody({ dst }: { dst: string | null }) {
   const { t } = useTranslation();
   return (
-    <div className="mt-3 flex items-center gap-2 text-base text-fg-muted">
-      <Loader size={14} className="animate-spin" />
-      <span>{t("common.working")}</span>
+    <div className="mt-3 space-y-2">
+      <div className="flex items-center gap-2 text-base text-fg-muted">
+        <Loader size={14} className="animate-spin" />
+        <span>{t("common.working")}</span>
+      </div>
+      <DestRow dst={dst} />
     </div>
   );
 }
 
-function ProgressBody({ p }: { p: ProgressInfo }) {
+/**
+ * 받는 위치 — 파일명과 **한 줄에 섞지 않는다**. 경로를 파일명 뒤에 이어붙이면
+ * truncate 가 정작 파일명을 지운다. 경로는 가운데 생략(shortenPath)으로 말단을
+ * 남기고, 전체 경로는 tooltip 으로.
+ */
+function DestRow({ dst }: { dst: string | null }) {
+  const { t } = useTranslation();
+  if (!dst) return null;
+  return (
+    <div className="flex items-baseline gap-2 text-meta text-fg-muted">
+      <span className="shrink-0">{t("dialog.progress.dest")}</span>
+      <span className="min-w-0 flex-1 truncate font-mono" title={dst}>
+        {shortenPath(dst)}
+      </span>
+    </div>
+  );
+}
+
+function ProgressBody({ p, dst }: { p: ProgressInfo; dst: string | null }) {
+  const { t } = useTranslation();
   // percent==null = 총량 미상(폴더 등) → 게이지를 0% 고정 대신 "진행 중" 애니메이션.
   const indeterminate = p.percent == null;
   const pct = p.percent ?? 0;
   return (
     <div className="mt-3 space-y-2">
-      {/* 현재 파일 + 항목 카운트 (탐색기/TC 식 "지금 뭘 하는지"). */}
+      {/* 현재 파일 = 이 모달의 주인공. 크기/굵기로 경로·수치보다 위계를 높인다. */}
       {(p.current_file || p.files_total > 0) && (
-        <div className="flex items-baseline justify-between gap-2 text-base">
+        <div className="flex items-baseline justify-between gap-3">
           <span
-            className="min-w-0 flex-1 truncate font-mono text-fg"
+            className="min-w-0 flex-1 truncate font-mono text-base font-medium text-fg"
             title={p.current_file ?? undefined}
           >
             {p.current_file ?? "…"}
           </span>
           {p.files_total > 0 && (
-            <span className="shrink-0 text-meta text-fg-muted">
+            <span className="shrink-0 tabular-nums text-meta text-fg-muted">
               {Math.min(p.files_done + 1, p.files_total)} / {p.files_total}
             </span>
           )}
         </div>
       )}
+      <DestRow dst={dst} />
       <div className="h-2 w-full overflow-hidden rounded bg-subtle">
         {indeterminate ? (
           <div className="h-full w-1/3 animate-indeterminate rounded bg-accent" />
@@ -118,15 +159,20 @@ function ProgressBody({ p }: { p: ProgressInfo }) {
           />
         )}
       </div>
-      <div className="flex justify-between text-meta text-fg-muted">
-        <span>
+      {/* 수치는 tabular-nums — 빠르게 갱신될 때 자릿수 흔들림으로 읽기 어려워짐 방지. */}
+      <div className="flex justify-between gap-3 tabular-nums text-meta text-fg-muted">
+        <span className="truncate">
           {formatSize(p.bytes_done)}
-          {p.bytes_total ? ` / ${formatSize(p.bytes_total)}` : " copied"}
+          {p.bytes_total
+            ? ` / ${formatSize(p.bytes_total)}`
+            : ` ${t("dialog.progress.done")}`}
           {p.percent != null ? ` · ${p.percent}%` : ""}
         </span>
-        <span>
+        <span className="shrink-0">
           {p.speed_bps ? `${formatSize(p.speed_bps)}/s` : ""}
-          {p.eta_sec != null ? ` · ETA ${formatEta(p.eta_sec)}` : ""}
+          {p.eta_sec != null
+            ? ` · ${t("dialog.progress.eta", { time: formatEta(p.eta_sec) })}`
+            : ""}
         </span>
       </div>
     </div>

@@ -36,7 +36,10 @@
       "merging": "Merging…",
       "applying": "Applying…",
       "applying3way": "Applying 3-way…",
-      "updatingArchive": "Updating archive…"
+      "updatingArchive": "Updating archive…",
+      "dest": "To",
+      "done": "copied",
+      "eta": "ETA {{time}}"
     },
     "mkdir": {
       "title": "New folder",
@@ -634,7 +637,15 @@
     }
   },
   "tasks": {
-    "count": "{{count}} tasks"
+    "count": "{{count}} tasks",
+    "kind": {
+      "copy": "Copying…",
+      "move": "Moving…",
+      "extract": "Extracting…",
+      "compress": "Compressing…",
+      "sync": "Syncing…",
+      "delete": "Deleting…"
+    }
   },
   "statusbar": {
     "selected": "{{count}} selected"

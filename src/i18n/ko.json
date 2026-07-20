@@ -36,7 +36,10 @@
       "merging": "병합 중…",
       "applying": "적용 중…",
       "applying3way": "3-way 적용 중…",
-      "updatingArchive": "아카이브 업데이트 중…"
+      "updatingArchive": "아카이브 업데이트 중…",
+      "dest": "받는 위치",
+      "done": "완료",
+      "eta": "{{time}} 남음"
     },
     "mkdir": {
       "title": "새 폴더",
@@ -631,7 +634,15 @@
     }
   },
   "tasks": {
-    "count": "작업 {{count}}개"
+    "count": "작업 {{count}}개",
+    "kind": {
+      "copy": "복사 중…",
+      "move": "이동 중…",
+      "extract": "압축 푸는 중…",
+      "compress": "압축하는 중…",
+      "sync": "동기화 중…",
+      "delete": "삭제 중…"
+    }
   },
   "statusbar": {
     "selected": "{{count}}개 선택됨"
