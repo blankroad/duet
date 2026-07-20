@@ -44,7 +44,6 @@ interface EntryGridProps {
   onRenamed: () => void;
 }
 
-
 /**
  * Grid / Tiles 뷰 — 가상 스크롤.
  * - grid: 폭 기반 N 컬럼, 큰 아이콘 + 파일명. 썸네일은 후속(아이콘 기반).
@@ -388,6 +387,8 @@ function GridCell({
       )}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
+      // 이름은 2줄에서 잘리므로(line-clamp-2) 셀 전체에 tooltip.
+      title={entry.name}
     >
       {/* 드래그 핸들 = 아이콘+이름. 셀 여백/간격은 마키 시작 영역. */}
       <span data-drag-handle className="flex flex-col items-center gap-1">
@@ -470,6 +471,7 @@ function TileRow({
       )}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
+      title={entry.name}
     >
       {/* 드래그 핸들 = 아이콘+이름/메타. 행 우측 여백은 마키 시작 영역. */}
       <span data-drag-handle className="flex min-w-0 items-center gap-3">

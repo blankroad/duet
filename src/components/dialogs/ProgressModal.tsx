@@ -95,7 +95,10 @@ function ProgressBody({ p }: { p: ProgressInfo }) {
       {/* 현재 파일 + 항목 카운트 (탐색기/TC 식 "지금 뭘 하는지"). */}
       {(p.current_file || p.files_total > 0) && (
         <div className="flex items-baseline justify-between gap-2 text-base">
-          <span className="min-w-0 flex-1 truncate font-mono text-fg">
+          <span
+            className="min-w-0 flex-1 truncate font-mono text-fg"
+            title={p.current_file ?? undefined}
+          >
             {p.current_file ?? "…"}
           </span>
           {p.files_total > 0 && (

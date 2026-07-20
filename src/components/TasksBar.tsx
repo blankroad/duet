@@ -33,7 +33,9 @@ export function TasksBar() {
     <div className="border-t border-border bg-subtle">
       <div className="flex h-7 items-center gap-2 px-3 text-meta">
         <Loader size={11} className="animate-spin text-fg-muted" />
-        <span className="truncate text-fg">{active[0]!.title}</span>
+        <span className="truncate text-fg" title={active[0]!.title}>
+          {active[0]!.title}
+        </span>
         <button
           type="button"
           onClick={() => setExpanded(!expanded)}

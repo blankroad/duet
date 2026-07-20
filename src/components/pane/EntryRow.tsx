@@ -79,6 +79,8 @@ export function EntryRow({
       )}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
+      // 긴 이름은 truncate 되므로 행 전체에 tooltip — stem/ext 컬럼을 한 번에 덮는다.
+      title={entry.name}
     >
       {/* 드래그 핸들 = 아이콘+이름 (항목 이동). 우측 메타 컬럼은 마키 시작 영역. */}
       <span data-drag-handle className="flex min-w-0 flex-1 items-center gap-2">

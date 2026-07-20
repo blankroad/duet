@@ -52,7 +52,9 @@ export function QuickLook() {
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex h-9 shrink-0 items-center justify-between border-b border-border px-3">
-          <span className="truncate text-meta text-fg-muted">{title}</span>
+          <span className="truncate text-meta text-fg-muted" title={title}>
+            {title}
+          </span>
           <button
             type="button"
             onClick={close}

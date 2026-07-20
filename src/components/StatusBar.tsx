@@ -76,7 +76,9 @@ export function StatusBar() {
       <span className="min-w-0 flex-1 truncate text-center">
         {focused && focusedMeta && (
           <>
-            <span className="font-mono text-fg">{focused.name}</span>
+            <span className="font-mono text-fg" title={focused.name}>
+              {focused.name}
+            </span>
             {" — "}
             {focusedMeta}
           </>

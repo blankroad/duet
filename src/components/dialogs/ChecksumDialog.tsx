@@ -121,7 +121,10 @@ export function ChecksumDialog({ targets, onClose }: ChecksumDialogProps) {
                   className="rounded border border-border px-2 py-1.5"
                 >
                   <div className="flex items-center gap-2">
-                    <span className="min-w-0 flex-1 truncate font-mono text-base">
+                    <span
+                      className="min-w-0 flex-1 truncate font-mono text-base"
+                      title={tgt.name}
+                    >
                       {tgt.name}
                     </span>
                     {st.status === "pending" && (

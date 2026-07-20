@@ -256,11 +256,17 @@ export function BatchRenameDialog({
                         : "even:bg-subtle/40"
                     }
                   >
-                    <td className="truncate px-2 py-0.5 font-mono text-fg-muted">
+                    <td
+                      className="truncate px-2 py-0.5 font-mono text-fg-muted"
+                      title={it.old_name}
+                    >
                       {it.old_name}
                     </td>
                     <td className="px-1 text-fg-muted">→</td>
-                    <td className="truncate px-2 py-0.5 font-mono">
+                    <td
+                      className="truncate px-2 py-0.5 font-mono"
+                      title={it.new_name}
+                    >
                       {it.collision && (
                         <AlertTriangle size={10} className="mr-1 inline" />
                       )}
