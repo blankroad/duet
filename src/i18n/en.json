@@ -304,7 +304,7 @@
     "transfer": {
       "copy": "Copy",
       "move": "Move",
-      "summary": "{{count}} item(s), {{size}} →",
+      "summary": "{{count}} item(s) · {{size}}",
       "strategy": "Strategy: {{label}}",
       "strategyLocal": "local",
       "strategyRelay": "relay (via this PC)",

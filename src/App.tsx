@@ -20,6 +20,7 @@ import { PasswordPromptDialog } from "@/components/dialogs/PasswordPromptDialog"
 import { ArgsDialog } from "@/components/dialogs/ArgsDialog";
 import { ConfirmDialog } from "@/components/dialogs/ConfirmDialog";
 import { CopyMoveConfirmDialog } from "@/components/dialogs/CopyMoveConfirmDialog";
+import { CopyOrMovePlanBody } from "@/components/dialogs/CopyOrMovePlanBody";
 import { DangerConfirmDialog } from "@/components/dialogs/DangerConfirmDialog";
 import { SudoPasswordDialog } from "@/components/dialogs/SudoPasswordDialog";
 import {
@@ -126,7 +127,7 @@ import { useKeymapEvents } from "@/hooks/useKeymapEvents";
 import { useTaskEvents } from "@/hooks/useTaskEvents";
 import { useIndexProgressEvents } from "@/hooks/useIndexProgressEvents";
 import i18n from "@/i18n";
-import { useTranslation, Trans } from "react-i18next";
+import { Trans } from "react-i18next";
 import { formatErr } from "@/lib/error";
 import { formatSize } from "@/lib/format";
 import { platform } from "@tauri-apps/plugin-os";
@@ -136,7 +137,6 @@ import type {
   CompressFormat,
   ConnectionDto,
   CopyPlan,
-  CopyStrategy,
   MovePlan,
   Entry,
   EntryRef,
@@ -1872,7 +1872,7 @@ function App() {
           title={i18n.t("dialog.transfer.copy")}
           body={
             <CopyOrMovePlanBody
-              count={dialog.plan.items.length}
+              items={dialog.plan.items}
               totalSize={dialog.plan.total_size_bytes}
               dstPath={dialog.plan.dst.path}
               conflicts={dialog.plan.conflicts.length}
@@ -1948,7 +1948,7 @@ function App() {
           title={i18n.t("dialog.transfer.move")}
           body={
             <CopyOrMovePlanBody
-              count={dialog.plan.items.length}
+              items={dialog.plan.items}
               totalSize={dialog.plan.total_size_bytes}
               dstPath={dialog.plan.dst.path}
               conflicts={dialog.plan.conflicts.length}
@@ -1985,52 +1985,6 @@ function App() {
       <DragGhost />
     </div>
   );
-}
-
-function CopyOrMovePlanBody({
-  count,
-  totalSize,
-  dstPath,
-  conflicts,
-  strategy,
-}: {
-  count: number;
-  totalSize: number;
-  dstPath: string;
-  conflicts: number;
-  strategy: CopyStrategy;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div className="space-y-1">
-      <div>
-        {t("dialog.transfer.summary", { count, size: formatSize(totalSize) })}
-      </div>
-      {/* 긴 목적지 경로가 모달 밖으로 넘치지 않게 — 한 줄 truncate + 전체경로 tooltip. */}
-      <div className="truncate font-mono" title={dstPath}>
-        {dstPath}
-      </div>
-      <div className="text-meta text-fg-muted">
-        {t("dialog.transfer.strategy", { label: strategyLabel(strategy) })}
-      </div>
-      {conflicts > 0 && (
-        <div className="text-meta text-danger">
-          {t("dialog.transfer.conflicts", { count: conflicts })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function strategyLabel(s: CopyStrategy): string {
-  switch (s.kind) {
-    case "local_to_local":
-      return i18n.t("dialog.transfer.strategyLocal");
-    case "relay":
-      return i18n.t("dialog.transfer.strategyRelay");
-    case "ssh_same_host":
-      return i18n.t("dialog.transfer.strategySameHost");
-  }
 }
 
 export default App;

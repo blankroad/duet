@@ -301,7 +301,7 @@
     "transfer": {
       "copy": "복사",
       "move": "이동",
-      "summary": "{{count}}개, {{size}} →",
+      "summary": "{{count}}개 · {{size}}",
       "strategy": "전략: {{label}}",
       "strategyLocal": "로컬",
       "strategyRelay": "릴레이 (이 PC 경유)",
