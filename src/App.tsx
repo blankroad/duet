@@ -45,7 +45,7 @@ import { FrecencyJumper } from "@/components/FrecencyJumper";
 import { useFrecency } from "@/stores/frecency";
 import { ContextMenu } from "@/components/ContextMenu";
 import { useContextMenu, type MenuEntry } from "@/stores/contextMenu";
-import { openShellMenu, onShellMenuClose } from "@/lib/shellMenu";
+import { takeShellMenu, onShellMenuClosed } from "@/lib/shellPrewarm";
 import { buildEntryMenu, buildEmptyMenu, folderName } from "@/lib/entryMenu";
 import { calcDirSizes } from "@/lib/dirSize";
 import { toggleDropTray } from "@/lib/dropTray";
@@ -125,6 +125,7 @@ import { useOsFileDrop } from "@/hooks/useOsFileDrop";
 import { useJournalEvents } from "@/hooks/useJournalEvents";
 import { useKeymapEvents } from "@/hooks/useKeymapEvents";
 import { useTaskEvents } from "@/hooks/useTaskEvents";
+import { useShellPrewarm } from "@/hooks/useShellPrewarm";
 import { useIndexProgressEvents } from "@/hooks/useIndexProgressEvents";
 import i18n from "@/i18n";
 import { Trans } from "react-i18next";
@@ -514,9 +515,9 @@ function App() {
       ) {
         const child = childLocation(tab.location, entry.name);
         const scope: ShellScope = entry.kind === "dir" ? "directory" : "file";
-        // 우클릭 즉시 백그라운드로 셸 메뉴 빌드 시작(prefetch) — "More options" 펼칠 때
-        // COM 열거를 새로 안 기다려 지연 최소화. 미선택 시 onClose 가 세션 정리.
-        const shellPromise = openShellMenu(String(child.path), scope);
+        // 커서-멈춤 예열이 이미 빌드해 뒀으면 즉시 재사용, 아니면 지금 빌드(=기존 동작).
+        // "More options" 펼칠 때 COM 열거를 새로 안 기다린다. onClose 가 세션 수명 관리.
+        const shellPromise = takeShellMenu(String(child.path), scope);
         items.push(
           { kind: "separator" },
           {
@@ -528,11 +529,7 @@ function App() {
             },
           },
         );
-        onClose = () => {
-          void shellPromise.then((shell) => {
-            if (shell) onShellMenuClose(shell.token);
-          });
-        };
+        onClose = onShellMenuClosed;
       }
       useContextMenu.getState().openAt(cx, cy, items, onClose);
     },
@@ -564,8 +561,8 @@ function App() {
       let onClose: (() => void) | undefined;
       if (platform() === "windows" && tab.location.source.kind === "local") {
         const bgPath = String(tab.location.path);
-        // 우클릭 즉시 백그라운드로 빌드(prefetch). 미선택 시 onClose 가 세션 정리.
-        const shellPromise = openShellMenu(bgPath, "background");
+        // 커서-멈춤 예열이 이미 빌드해 뒀으면 재사용, 아니면 지금 빌드. onClose 가 수명 관리.
+        const shellPromise = takeShellMenu(bgPath, "background");
         items.push(
           { kind: "separator" },
           {
@@ -577,11 +574,7 @@ function App() {
             },
           },
         );
-        onClose = () => {
-          void shellPromise.then((shell) => {
-            if (shell) onShellMenuClose(shell.token);
-          });
-        };
+        onClose = onShellMenuClosed;
       }
       useContextMenu.getState().openAt(cx, cy, items, onClose);
     },
@@ -675,6 +668,7 @@ function App() {
   );
 
   useTaskEvents();
+  useShellPrewarm();
 
   const setBuiltins = useCommands((s) => s.setBuiltins);
   const openPalette = usePalette((s) => s.open);
