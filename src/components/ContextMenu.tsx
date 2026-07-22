@@ -30,15 +30,26 @@ function hasSubmenu(item: MenuItem): boolean {
 }
 
 /** 항목의 자식 — 정적이면 배열, 지연이면 캐시 상태("loading"/"empty"/배열), 없으면 null. */
-function childrenOf(item: MenuItem, loaded: Loaded): MenuEntry[] | "loading" | "empty" | null {
+function childrenOf(
+  item: MenuItem,
+  loaded: Loaded,
+): MenuEntry[] | "loading" | "empty" | null {
   if (item.children && item.children.length > 0) return item.children;
   if (item.loadChildren) return loaded[item.id] ?? "loading";
   return null;
 }
 
+/** 플라이아웃을 뷰포트 안으로 되돌리는 여백(px). */
+const FLYOUT_MARGIN = 4;
+
 /**
- * 서브메뉴 플라이아웃 — 부모 항목 옆(좌/우)으로 펼치되, 화면 아래로 넘치면 그만큼 위로
- * 끌어올려(clamp) 항상 보이게. 화면보다 긴 메뉴(셸 More Actions 등)는 스크롤.
+ * 서브메뉴 플라이아웃 — 부모 항목 옆(좌/우)으로 펼치되, 뷰포트 밖으로 넘치면 그만큼 안으로
+ * 끌어당겨(clamp) 항상 보이게. 화면보다 긴 메뉴(셸 More Actions 등)는 스크롤.
+ *
+ * 보정은 **양축·자기치유**: 매 렌더마다 현재 transform 을 제거한 '자연 위치'에서 다시
+ * 계산해 위/아래/좌/우 어디로 넘쳐도 화면 안으로 되돌린다. (과거엔 아래 넘침만 위로
+ * 올렸고 되돌림이 없어, 순간적으로 잘못 측정된 rect 하나에 flyout 이 화면 구석에 박혀
+ * 고정되는 버그가 있었다 — loadChildren 이 캐시로 즉시 resolve 되며 드러남.)
  */
 function Flyout({
   flipLeft,
@@ -48,19 +59,38 @@ function Flyout({
   children: React.ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [shiftY, setShiftY] = useState(0);
+  const [t, setT] = useState({ x: 0, y: 0 });
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+    // 자연 위치(부모 옆 기본) 측정을 위해 transform 초기화 후 rect 측정 → 누적/편류 방지.
+    // (t 를 빼서 역산하지 않는다: 실측값이 transform 을 반영하지 않는 환경에서도 안전.)
+    el.style.transform = "translate(0px, 0px)";
     const r = el.getBoundingClientRect();
-    const over = r.bottom - (window.innerHeight - 4);
-    if (over > 0) setShiftY((y) => y - over);
+    const m = FLYOUT_MARGIN;
+    // 세로: 아래로 넘치면 올리고, 그래도 위로 넘치면 위를 우선(top 은 항상 ≥ m → 화면 안).
+    let dy = 0;
+    if (r.bottom > window.innerHeight - m)
+      dy = window.innerHeight - m - r.bottom;
+    if (r.top + dy < m) dy = m - r.top;
+    // 가로: 부모 옆 기본 위치가 화면 밖이면 안으로(구석행 방지). left 는 항상 ≥ m.
+    let dx = 0;
+    if (r.right > window.innerWidth - m) dx = window.innerWidth - m - r.right;
+    if (r.left + dx < m) dx = m - r.left;
+    // 페인트 전 즉시 적용(깜빡임 없음) + React 상태 동기화(다음 렌더 style 일치).
+    el.style.transform = `translate(${dx}px, ${dy}px)`;
+    setT((prev) => (prev.x === dx && prev.y === dy ? prev : { x: dx, y: dy }));
   }, [children]);
   return (
     <div
       ref={ref}
       className={clsx("absolute", flipLeft ? "right-full" : "left-full")}
-      style={{ top: shiftY, maxHeight: "calc(100vh - 8px)", overflowY: "auto" }}
+      style={{
+        top: 0,
+        transform: `translate(${t.x}px, ${t.y}px)`,
+        maxHeight: "calc(100vh - 8px)",
+        overflowY: "auto",
+      }}
     >
       {children}
     </div>
@@ -192,14 +222,21 @@ export function ContextMenu() {
 
   if (!open) return null;
 
-  const renderPanel = (level: number, entries: MenuEntry[]): React.ReactNode => {
+  const renderPanel = (
+    level: number,
+    entries: MenuEntry[],
+  ): React.ReactNode => {
     const sel = selectable(entries);
     const activeId = sel[cursor[level] ?? 0]?.id;
     return (
       <div
         ref={level === 0 ? panelRef : undefined}
         className="min-w-44 rounded-panel border border-border bg-base py-1 shadow-panel"
-        style={level === 0 ? { position: "fixed", left: pos.x, top: pos.y, zIndex: 61 } : undefined}
+        style={
+          level === 0
+            ? { position: "fixed", left: pos.x, top: pos.y, zIndex: 61 }
+            : undefined
+        }
         onContextMenu={(e) => e.preventDefault()}
       >
         {entries.map((entry, i) =>
@@ -209,7 +246,10 @@ export function ContextMenu() {
             <Row
               key={entry.id}
               item={entry}
-              active={path[level] === entry.id || (path.length === level && activeId === entry.id)}
+              active={
+                path[level] === entry.id ||
+                (path.length === level && activeId === entry.id)
+              }
               onMouseEnter={() => {
                 const idx = sel.findIndex((s) => s.id === entry.id);
                 if (idx >= 0) setCursorAt(level, idx);
@@ -273,7 +313,8 @@ function Row({
   onClick: () => void;
   children?: React.ReactNode;
 }) {
-  const hasKids = (!!item.children && item.children.length > 0) || !!item.loadChildren;
+  const hasKids =
+    (!!item.children && item.children.length > 0) || !!item.loadChildren;
   return (
     <div className="relative px-1" onMouseEnter={onMouseEnter}>
       <button
@@ -288,14 +329,18 @@ function Row({
           item.danger && !item.disabled && "text-danger",
         )}
       >
-        {item.icon && <span className="shrink-0 text-fg-muted">{item.icon}</span>}
+        {item.icon && (
+          <span className="shrink-0 text-fg-muted">{item.icon}</span>
+        )}
         <span className="flex-1 truncate">{item.label}</span>
         {item.shortcut && (
           <span className="shrink-0 text-meta text-fg-muted">
             {displayKey(item.shortcut)}
           </span>
         )}
-        {hasKids && <ChevronRight size={12} className="shrink-0 text-fg-muted" />}
+        {hasKids && (
+          <ChevronRight size={12} className="shrink-0 text-fg-muted" />
+        )}
       </button>
       {children}
     </div>
