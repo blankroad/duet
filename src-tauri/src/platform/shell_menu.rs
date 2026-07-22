@@ -37,26 +37,34 @@ use crate::platform::{ShellMenuItem, ShellScope};
 const ID_FIRST: u32 = 1;
 const ID_LAST: u32 = 0x7FFF;
 const MAX_DEPTH: u32 = 6;
-/// 보관 중인 열린 메뉴 상한 — 정상엔 1개지만, Close 누락 대비 누수 방지(초과 시 오래된 것 파기).
-const MAX_OPEN: usize = 8;
+/// 캐시에 보관하는 빌드된 메뉴 상한 — 초과 시 오래된 것부터 파기(COM 객체 누수 방지).
+const MAX_OPEN: usize = 16;
+/// 캐시 안전망 TTL — 이보다 오래된 캐시는 Open 시 재빌드. 신선도는 주로 FE 의 재-warm
+/// (커서 이동/폴더 변경)이 관리하고, 이건 "오래 방치된 메뉴를 무한정 재사용" 방지용.
+const CACHE_TTL: Duration = Duration::from_secs(300);
 
 /// 워커로 보내는 요청.
 enum Req {
-    Build {
-        token: u64,
+    /// 실제 우클릭 — 캐시 있으면 즉시, 없으면 빌드. **절대 supersede 로 skip 되지 않는다**
+    /// (표시되는 메뉴라 항상 실제 결과를 돌려줘야 함). 워커가 token 을 발급/재사용해 반환.
+    Open {
         hwnd: isize,
         path: PathBuf,
         scope: ShellScope,
-        reply: tokio::sync::oneshot::Sender<Vec<ShellMenuItem>>,
-        /// enqueue 시각 — 워커 큐 대기시간 계측(직렬 워커라 앞선 빌드에 밀릴 수 있음).
+        reply: tokio::sync::oneshot::Sender<(u64, Vec<ShellMenuItem>)>,
+        /// enqueue 시각 — 워커 큐 대기시간 계측(직렬 워커라 앞선 작업에 밀릴 수 있음).
         queued_at: Instant,
+    },
+    /// 백그라운드 캐시 채움(커서 멈춤/변경 시) — best-effort. 이미 신선하면 skip, 여러 개면
+    /// 마지막 것만. Open 을 절대 밀어내지 않는다(그래서 렌더가 안 깨진다).
+    Warm {
+        hwnd: isize,
+        path: PathBuf,
+        scope: ShellScope,
     },
     Invoke {
         token: u64,
         cmd_id: u32,
-    },
-    Close {
-        token: u64,
     },
     /// 핸들러 예열 — 메뉴를 만들었다 바로 버린다(셸 확장 COM 을 메모리에 로드만).
     Prewarm {
@@ -64,6 +72,19 @@ enum Req {
         path: PathBuf,
     },
 }
+
+/// 캐시된 빌드 결과 — COM 객체(cm/hmenu)는 이 STA 스레드에만 affinity. invoke 까지 살아 있어야.
+struct Cached {
+    token: u64,
+    cm: IContextMenu,
+    hmenu: HMENU,
+    hwnd: isize,
+    items: Vec<ShellMenuItem>,
+    built_at: Instant,
+}
+
+/// (path, scope) 캐시 키.
+type Key = (PathBuf, ShellScope);
 
 /// 핫 COM 스레드 핸들 — 명령 레이어가 Build/Invoke/Close 를 보낸다. 첫 사용 시 lazy 생성.
 pub struct Worker {
@@ -78,19 +99,18 @@ impl Worker {
         Worker { tx }
     }
 
-    /// token 으로 메뉴 빌드 요청 후 enumerate 된 항목을 받는다(채널 끊기면 빈 벡터).
-    pub async fn build(
+    /// 우클릭 — 캐시 있으면 즉시, 없으면 빌드. (token, items) 반환(채널 끊기면 빈 결과).
+    /// token 은 워커가 발급/재사용 — invoke 는 이 token 으로 그 파일의 IContextMenu 를 찾는다.
+    pub async fn open(
         &self,
-        token: u64,
         hwnd: isize,
         path: PathBuf,
         scope: ShellScope,
-    ) -> Vec<ShellMenuItem> {
+    ) -> (u64, Vec<ShellMenuItem>) {
         let (reply, rx) = tokio::sync::oneshot::channel();
         if self
             .tx
-            .send(Req::Build {
-                token,
+            .send(Req::Open {
                 hwnd,
                 path,
                 scope,
@@ -99,17 +119,18 @@ impl Worker {
             })
             .is_err()
         {
-            return Vec::new();
+            return (0, Vec::new());
         }
-        rx.await.unwrap_or_default()
+        rx.await.unwrap_or((0, Vec::new()))
+    }
+
+    /// 백그라운드 캐시 채움(커서 멈춤/변경 시) — fire-and-forget.
+    pub fn warm(&self, hwnd: isize, path: PathBuf, scope: ShellScope) {
+        let _ = self.tx.send(Req::Warm { hwnd, path, scope });
     }
 
     pub fn invoke(&self, token: u64, cmd_id: u32) {
         let _ = self.tx.send(Req::Invoke { token, cmd_id });
-    }
-
-    pub fn close(&self, token: u64) {
-        let _ = self.tx.send(Req::Close { token });
     }
 
     /// 시작 시 호출 — 셸 핸들러를 백그라운드로 예열(첫 우클릭도 빠르게).
@@ -118,22 +139,116 @@ impl Worker {
     }
 }
 
+/// 워커 상태 — 경로 캐시(STA 스레드 소유). COM 객체는 이 스레드에만 affinity.
+#[derive(Default)]
+struct State {
+    /// (path, scope) → 빌드된 메뉴. Open 이 여기서 즉시 서빙, Warm 이 채운다.
+    cache: HashMap<Key, Cached>,
+    /// token → key — Invoke 가 token 으로 그 파일의 세션을 찾는 역인덱스.
+    by_token: HashMap<u64, Key>,
+    /// 삽입 순서(오래된 것부터) — MAX_OPEN 초과 시 앞에서 파기.
+    order: VecDeque<Key>,
+    next_token: u64,
+}
+
+impl State {
+    fn fresh(&self, key: &Key) -> bool {
+        self.cache
+            .get(key)
+            .is_some_and(|c| c.built_at.elapsed() < CACHE_TTL)
+    }
+
+    /// 캐시 엔트리 하나 파기 — HMENU DestroyMenu, cm 은 drop 시 Release(이 스레드).
+    fn drop_entry(&mut self, key: &Key) {
+        if let Some(c) = self.cache.remove(key) {
+            self.by_token.remove(&c.token);
+            // SAFETY: 우리가 만든 HMENU 파기. cm 은 이 함수 끝 drop 에서 Release(STA 스레드).
+            unsafe {
+                let _ = DestroyMenu(c.hmenu);
+            }
+        }
+        self.order.retain(|k| k != key);
+    }
+
+    /// (path, scope) 메뉴를 빌드해 캐시에 넣고 (token, items) 반환. 기존 엔트리는 교체.
+    /// 빌드 실패 시 새 token + 빈 items(세션 없음 → invoke 는 no-op).
+    fn build_and_cache(
+        &mut self,
+        hwnd: isize,
+        path: PathBuf,
+        scope: ShellScope,
+        wait_ms: u64,
+    ) -> (u64, Vec<ShellMenuItem>) {
+        let key: Key = (path.clone(), scope);
+        self.drop_entry(&key); // 같은 경로 재빌드면 오래된 COM 객체 먼저 파기.
+
+        let token = self.next_token;
+        self.next_token = self.next_token.wrapping_add(1);
+
+        let t_build = Instant::now();
+        // SAFETY: 셸 객체 생성/열거는 이 스레드에서만.
+        match unsafe { build_menu(HWND(hwnd as *mut _), &path, scope) } {
+            Ok((cm, hmenu, phases)) => {
+                let build_ms = t_build.elapsed().as_millis() as u64;
+                let mut stats = EnumStats::default();
+                let t_enum = Instant::now();
+                let items = unsafe { enumerate(hmenu, 0, &mut stats) };
+                tracing::info!(
+                    token,
+                    wait_ms,
+                    build_ms,
+                    parse_ms = phases.parse_ms,
+                    query_ms = phases.query_ms,
+                    enum_ms = t_enum.elapsed().as_millis() as u64,
+                    items = stats.items,
+                    icons = stats.icons,
+                    icon_ms = stats.icon_time.as_millis() as u64,
+                    "shell menu build"
+                );
+                // 진단(C): 어떤 셸 확장이 메뉴에 끼어드는지 최상위 라벨을 남긴다.
+                let labels: Vec<&str> = items
+                    .iter()
+                    .filter(|i| !i.separator && !i.label.is_empty())
+                    .map(|i| i.label.as_str())
+                    .collect();
+                tracing::info!(token, query_ms = phases.query_ms, labels = %labels.join(" | "), "shell menu items");
+
+                self.cache.insert(
+                    key.clone(),
+                    Cached {
+                        token,
+                        cm,
+                        hmenu,
+                        hwnd,
+                        items: items.clone(),
+                        built_at: Instant::now(),
+                    },
+                );
+                self.by_token.insert(token, key.clone());
+                self.order.push_back(key);
+                while self.order.len() > MAX_OPEN {
+                    if let Some(old) = self.order.pop_front() {
+                        self.drop_entry(&old);
+                    }
+                }
+                (token, items)
+            }
+            Err(e) => {
+                tracing::warn!(token, wait_ms, error = %e, "shell menu build failed");
+                (token, Vec::new())
+            }
+        }
+    }
+}
+
 /// 워커 루프 — COM 한 번 초기화(끝까지 유지), 요청을 직렬 처리. IContextMenu 는 이 스레드에만.
 fn worker_loop(rx: mpsc::Receiver<Req>) {
     // SAFETY: 이 스레드용 STA COM 초기화. CoUninitialize 안 함(핸들러 warm 유지가 목적).
     let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
 
-    // token → (IContextMenu, HMENU, owner hwnd). cm 은 invoke 까지 살아 있어야 함.
-    let mut open: HashMap<u64, (IContextMenu, HMENU, isize)> = HashMap::new();
-    let mut order: VecDeque<u64> = VecDeque::new();
-
-    let destroy = |open: &mut HashMap<u64, (IContextMenu, HMENU, isize)>, token: u64| {
-        if let Some((_cm, hmenu, _)) = open.remove(&token) {
-            // SAFETY: 우리가 만든 HMENU 파기. cm 은 drop 시 Release(이 스레드).
-            unsafe {
-                let _ = DestroyMenu(hmenu);
-            }
-        }
+    let mut st = State {
+        next_token: 1,
+        ..Default::default()
     };
 
     loop {
@@ -141,116 +256,96 @@ fn worker_loop(rx: mpsc::Receiver<Req>) {
             Ok(r) => r,
             Err(_) => break,
         };
-        // 밀린 요청을 한 번에 끌어와 정리 — QueryContextMenu 가 느린 머신(수 초)에서
-        // 직렬 큐가 증폭되는 걸 막는다. 컨텍스트 메뉴는 UI 에 하나뿐이므로:
-        // - Build 는 마지막 것만 실제 빌드(앞선 것들은 이미 닫힌 메뉴용 — 빈 응답으로 skip)
-        // - Prewarm 은 배치 끝으로(실제 우클릭이 예열보다 우선)
+        // 밀린 요청을 한 번에 끌어와 정리(직렬 워커 큐 증폭 방지). 종류별로 나눠 처리:
+        // - Open(우클릭)은 마지막 것만 빌드하되 **절대 Warm 에 밀려 skip 되지 않는다**
+        // - Warm(예열)은 마지막 하나만, 캐시가 신선하지 않을 때만 — Open 을 못 밀어냄
+        // - Prewarm(핸들러 예열)은 맨 끝(실제 작업 우선)
         let mut batch = vec![first];
         while let Ok(r) = rx.try_recv() {
             batch.push(r);
         }
-        let (mut work, prewarms): (Vec<Req>, Vec<Req>) = batch
-            .into_iter()
-            .partition(|r| !matches!(r, Req::Prewarm { .. }));
-        work.extend(prewarms);
-        let last_build = work.iter().rposition(|r| matches!(r, Req::Build { .. }));
-        for (i, req) in work.into_iter().enumerate() {
-            match req {
-                Req::Build {
-                    token,
+
+        let mut opens: Vec<(isize, PathBuf, ShellScope, OpenReply, Instant)> = Vec::new();
+        let mut warms: Vec<(isize, PathBuf, ShellScope)> = Vec::new();
+        let mut invokes: Vec<(u64, u32)> = Vec::new();
+        let mut prewarms: Vec<(isize, PathBuf)> = Vec::new();
+        for r in batch {
+            match r {
+                Req::Open {
                     hwnd,
                     path,
                     scope,
                     reply,
                     queued_at,
-                } => {
-                    if Some(i) != last_build {
-                        // 더 새 Build 가 대기 중 — 이 메뉴는 이미 닫혔다. FE 는 빈 items 를
-                        // null 처리(openShellMenu)하므로 세션 정리도 자연히 no-op.
-                        tracing::info!(token, "shell menu build skipped (superseded)");
-                        let _ = reply.send(Vec::new());
-                        continue;
+                } => opens.push((hwnd, path, scope, reply, queued_at)),
+                Req::Warm { hwnd, path, scope } => warms.push((hwnd, path, scope)),
+                Req::Invoke { token, cmd_id } => invokes.push((token, cmd_id)),
+                Req::Prewarm { hwnd, path } => prewarms.push((hwnd, path)),
+            }
+        }
+
+        // 1) Invoke — 캐시된 세션의 IContextMenu 로 실행 후 그 엔트리 파기(상태가 변할 수 있음).
+        for (token, cmd_id) in invokes {
+            if let Some(key) = st.by_token.get(&token).cloned() {
+                if let Some(c) = st.cache.get(&key) {
+                    if (ID_FIRST..=ID_LAST).contains(&cmd_id) {
+                        // SAFETY: cm 은 이 스레드에서 만든 살아있는 IContextMenu.
+                        let _ = unsafe { invoke(&c.cm, HWND(c.hwnd as *mut _), cmd_id) };
                     }
-                    let wait_ms = queued_at.elapsed().as_millis() as u64;
-                    let t_build = Instant::now();
-                    // SAFETY: 셸 객체 생성/열거는 이 스레드에서만.
-                    let items = match unsafe { build_menu(HWND(hwnd as *mut _), &path, scope) } {
-                        Ok((cm, hmenu, phases)) => {
-                            let build_ms = t_build.elapsed().as_millis() as u64;
-                            let mut stats = EnumStats::default();
-                            let t_enum = Instant::now();
-                            let items = unsafe { enumerate(hmenu, 0, &mut stats) };
-                            tracing::info!(
-                                token,
-                                wait_ms,
-                                build_ms,
-                                parse_ms = phases.parse_ms,
-                                query_ms = phases.query_ms,
-                                enum_ms = t_enum.elapsed().as_millis() as u64,
-                                items = stats.items,
-                                icons = stats.icons,
-                                icon_ms = stats.icon_time.as_millis() as u64,
-                                "shell menu build"
-                            );
-                            // 진단(C): 어떤 셸 확장이 메뉴에 끼어드는지 최상위 라벨을 남긴다.
-                            // query_ms 가 큰 빌드에서 이 목록을 보면 느린 핸들러 후보를 좁힐 수 있다.
-                            let labels: Vec<&str> = items
-                                .iter()
-                                .filter(|i| !i.separator && !i.label.is_empty())
-                                .map(|i| i.label.as_str())
-                                .collect();
-                            tracing::info!(token, query_ms = phases.query_ms, labels = %labels.join(" | "), "shell menu items");
-                            open.insert(token, (cm, hmenu, hwnd));
-                            order.push_back(token);
-                            while order.len() > MAX_OPEN {
-                                if let Some(old) = order.pop_front() {
-                                    destroy(&mut open, old);
-                                }
-                            }
-                            items
-                        }
-                        Err(e) => {
-                            tracing::warn!(token, wait_ms, error = %e, "shell menu build failed");
-                            Vec::new()
-                        }
-                    };
-                    let _ = reply.send(items);
                 }
-                Req::Invoke { token, cmd_id } => {
-                    if let Some((cm, _, hwnd)) = open.get(&token) {
-                        if (ID_FIRST..=ID_LAST).contains(&cmd_id) {
-                            // SAFETY: cm 은 이 스레드에서 만든 살아있는 IContextMenu.
-                            let _ = unsafe { invoke(cm, HWND(*hwnd as *mut _), cmd_id) };
-                        }
-                    }
-                    order.retain(|t| *t != token);
-                    destroy(&mut open, token);
+                st.drop_entry(&key);
+            }
+        }
+
+        // 2) Open — 마지막 것만 필요 시 빌드(앞선 것은 이미 닫힌 메뉴). 캐시 hit 은 즉시.
+        let last_open = opens.len().saturating_sub(1);
+        for (i, (hwnd, path, scope, reply, queued_at)) in opens.into_iter().enumerate() {
+            let key: Key = (path.clone(), scope);
+            if st.fresh(&key) {
+                if let Some(c) = st.cache.get(&key) {
+                    let _ = reply.send((c.token, c.items.clone()));
                 }
-                Req::Close { token } => {
-                    order.retain(|t| *t != token);
-                    destroy(&mut open, token);
-                }
-                Req::Prewarm { hwnd, path } => {
-                    let t = Instant::now();
-                    // 메뉴를 만들었다 즉시 버린다 — 핸들러 COM 만 메모리에 로드(warm).
-                    // SAFETY: 셸 객체 생성/파기 전부 이 스레드에서.
-                    if let Ok((_cm, hmenu, _)) =
-                        unsafe { build_menu(HWND(hwnd as *mut _), &path, scope_dir()) }
-                    {
-                        unsafe {
-                            let _ = DestroyMenu(hmenu);
-                        }
-                    }
-                    tracing::info!(
-                        elapsed_ms = t.elapsed().as_millis() as u64,
-                        path = %path.display(),
-                        "shell menu prewarm"
-                    );
+            } else if i == last_open {
+                let wait_ms = queued_at.elapsed().as_millis() as u64;
+                let out = st.build_and_cache(hwnd, path, scope, wait_ms);
+                let _ = reply.send(out);
+            } else {
+                // 더 새 Open 존재 — 이 메뉴는 이미 닫힘. 빈 응답(FE 는 null 처리).
+                tracing::info!("shell menu open skipped (superseded)");
+                let _ = reply.send((0, Vec::new()));
+            }
+        }
+
+        // 3) Warm — 마지막 것만, 캐시가 신선하지 않을 때만 빌드(백그라운드 캐시 채움).
+        if let Some((hwnd, path, scope)) = warms.into_iter().next_back() {
+            let key: Key = (path.clone(), scope);
+            if !st.fresh(&key) {
+                let _ = st.build_and_cache(hwnd, path, scope, 0);
+            }
+        }
+
+        // 4) Prewarm(시작 시 핸들러 예열) — 만들고 즉시 버림.
+        for (hwnd, path) in prewarms {
+            let t = Instant::now();
+            // SAFETY: 셸 객체 생성/파기 전부 이 스레드에서.
+            if let Ok((_cm, hmenu, _)) =
+                unsafe { build_menu(HWND(hwnd as *mut _), &path, scope_dir()) }
+            {
+                unsafe {
+                    let _ = DestroyMenu(hmenu);
                 }
             }
+            tracing::info!(
+                elapsed_ms = t.elapsed().as_millis() as u64,
+                path = %path.display(),
+                "shell menu prewarm"
+            );
         }
     }
 }
+
+/// Open 응답 채널 타입 별칭 — (token, items).
+type OpenReply = tokio::sync::oneshot::Sender<(u64, Vec<ShellMenuItem>)>;
 
 /// prewarm 용 더미 scope (build_menu 는 scope 를 안 쓰지만 시그니처상 필요).
 fn scope_dir() -> ShellScope {

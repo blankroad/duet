@@ -690,11 +690,11 @@ pub async fn shell_menu_open(
             .and_then(|w| w.hwnd().ok())
             .map(|h| h.0 as isize)
             .unwrap_or(0);
-        let token = registry.alloc_token();
         // FE 가 간헐적으로 드라이브(C:) 없는 경로를 보내면 셸(IContextMenu)이 항목을 못
         // 잡아 빈 메뉴("(none)")가 된다 — COM 직전에 절대경로화(local_abs: 이미 절대면 no-op).
         let path = crate::platform::local_abs(path);
-        let items = registry.worker().build(token, hwnd, path, scope).await;
+        // 캐시 있으면 즉시, 없으면 빌드. token 은 워커가 발급/재사용(invoke 대상).
+        let (token, items) = registry.worker().open(hwnd, path, scope).await;
         Ok(crate::platform::ShellMenu { token, items })
     }
     #[cfg(not(windows))]
@@ -708,7 +708,36 @@ pub async fn shell_menu_open(
     }
 }
 
-/// 셸 메뉴에서 선택한 항목 실행(핫 워커가 보관 중인 IContextMenu 로 InvokeCommand).
+/// 셸 메뉴 백그라운드 예열 — 커서가 파일/폴더에 멈추거나 폴더가 바뀔 때 호출. 그 경로의
+/// 메뉴를 미리 빌드해 캐시에 채운다(fire-and-forget). 우클릭 시 캐시에서 즉시 서빙되어
+/// QueryContextMenu(제3자 셸 확장, cold 수 초)를 임계경로에서 치운다. Windows 전용.
+#[tauri::command]
+#[specta::specta]
+pub async fn shell_menu_warm(
+    app: tauri::AppHandle,
+    path: PathBuf,
+    scope: crate::platform::ShellScope,
+    registry: tauri::State<'_, std::sync::Arc<crate::platform::ShellMenuRegistry>>,
+) -> Result<(), DuetError> {
+    #[cfg(windows)]
+    {
+        use tauri::Manager;
+        let hwnd = app
+            .get_webview_window("main")
+            .and_then(|w| w.hwnd().ok())
+            .map(|h| h.0 as isize)
+            .unwrap_or(0);
+        let path = crate::platform::local_abs(path);
+        registry.worker().warm(hwnd, path, scope);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (app, path, scope, registry);
+    }
+    Ok(())
+}
+
+/// 셸 메뉴에서 선택한 항목 실행(핫 워커가 캐시 중인 IContextMenu 로 InvokeCommand).
 #[tauri::command]
 #[specta::specta]
 pub async fn shell_menu_invoke(
@@ -721,22 +750,6 @@ pub async fn shell_menu_invoke(
     #[cfg(not(windows))]
     {
         let _ = (token, cmd_id, registry);
-    }
-    Ok(())
-}
-
-/// 셸 메뉴 닫힘(선택 없음) — 보관 중인 메뉴 정리.
-#[tauri::command]
-#[specta::specta]
-pub async fn shell_menu_close(
-    token: u64,
-    registry: tauri::State<'_, std::sync::Arc<crate::platform::ShellMenuRegistry>>,
-) -> Result<(), DuetError> {
-    #[cfg(windows)]
-    registry.worker().close(token);
-    #[cfg(not(windows))]
-    {
-        let _ = (token, registry);
     }
     Ok(())
 }

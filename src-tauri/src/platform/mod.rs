@@ -35,11 +35,11 @@ pub struct ShellMenu {
     pub items: Vec<ShellMenuItem>,
 }
 
-/// 셸 메뉴 핫-스레드 레지스트리 — Tauri state. token 발급 + (Windows) lazy COM 워커 보유.
+/// 셸 메뉴 핫-스레드 레지스트리 — Tauri state. (Windows) lazy COM 워커 보유.
 /// 워커는 앱 수명 내내 살아 셸 핸들러를 warm 하게 유지(탐색기처럼 둘째 클릭부터 빠름).
+/// token 발급·경로 캐시는 워커(STA 스레드) 내부에서 관리한다.
 #[derive(Default)]
 pub struct ShellMenuRegistry {
-    next: std::sync::atomic::AtomicU64,
     #[cfg(windows)]
     worker: std::sync::OnceLock<shell_menu::Worker>,
 }
@@ -47,10 +47,6 @@ pub struct ShellMenuRegistry {
 impl ShellMenuRegistry {
     pub fn new() -> std::sync::Arc<Self> {
         std::sync::Arc::new(Self::default())
-    }
-    #[cfg_attr(not(windows), allow(dead_code))]
-    pub fn alloc_token(&self) -> u64 {
-        self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     }
     /// 핫 COM 워커 (첫 사용 시 spawn, 이후 재사용 — 핸들러 warm).
     #[cfg(windows)]
@@ -377,7 +373,8 @@ unsafe fn hbitmap_to_jpeg(
 }
 
 /// 우클릭 대상 종류 — 스캔할 레지스트리 shell 루트를 결정.
-#[derive(Debug, Clone, Copy, Deserialize, Type)]
+/// (PartialEq/Eq/Hash: (path, scope) 경로 캐시의 HashMap 키로 쓰인다.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Type)]
 #[serde(rename_all = "lowercase")]
 pub enum ShellScope {
     /// 파일 항목 — `*`, `AllFilesystemObjects`, 확장자 ProgID 등.
