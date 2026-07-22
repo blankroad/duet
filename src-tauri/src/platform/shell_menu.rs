@@ -192,6 +192,14 @@ fn worker_loop(rx: mpsc::Receiver<Req>) {
                                 icon_ms = stats.icon_time.as_millis() as u64,
                                 "shell menu build"
                             );
+                            // 진단(C): 어떤 셸 확장이 메뉴에 끼어드는지 최상위 라벨을 남긴다.
+                            // query_ms 가 큰 빌드에서 이 목록을 보면 느린 핸들러 후보를 좁힐 수 있다.
+                            let labels: Vec<&str> = items
+                                .iter()
+                                .filter(|i| !i.separator && !i.label.is_empty())
+                                .map(|i| i.label.as_str())
+                                .collect();
+                            tracing::info!(token, query_ms = phases.query_ms, labels = %labels.join(" | "), "shell menu items");
                             open.insert(token, (cm, hmenu, hwnd));
                             order.push_back(token);
                             while order.len() > MAX_OPEN {
