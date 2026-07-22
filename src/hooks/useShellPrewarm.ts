@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 import { platform } from "@tauri-apps/plugin-os";
 import { usePanes, activeTab, selectDisplayedEntries } from "@/stores/panes";
-import { useContextMenu } from "@/stores/contextMenu";
 import { childLocation } from "@/lib/entryDnd";
 import { prewarmShellMenu, resetShellPrewarm } from "@/lib/shellPrewarm";
 import type { ShellScope } from "@/types/bindings";
@@ -14,12 +13,6 @@ const SETTLE_MS = 250;
  * 컨텍스트 메뉴("More options")를 백그라운드로 미리 빌드해 둔다. 우클릭 시점엔 이미
  * 완성돼 있어 cold ~800ms(측정치) 지연이 사라진다. 비용 근거·수명 관리는 shellPrewarm.
  *
- * **컨텍스트 메뉴가 열려 있는 동안은 절대 예열하지 않는다.** 백엔드 워커는 "마지막
- * Build 만 실제 빌드, 앞선 것은 닫힌 메뉴로 간주해 skip"(shell_menu.rs) 규칙이라,
- * 예열 Build 가 실제 우클릭 Build 뒤에 끼면 실제 메뉴를 supersede 해 "(none)" 으로
- * 렌더가 깨진다. 그래서 (1) 메뉴가 열리면 대기 중 예열 예약을 취소하고 (2) settle 도
- * 메뉴가 열려 있으면 건너뛴다 → 실제 우클릭 Build 가 항상 마지막이 되게 한다.
- *
  * Windows 아니면 완전 no-op(구독조차 안 함). App 에서 1회 마운트.
  */
 export function useShellPrewarm(): void {
@@ -30,8 +23,6 @@ export function useShellPrewarm(): void {
     let lastKey = "";
 
     const settle = () => {
-      // 메뉴가 열려 있으면 예열 금지 — 실제 우클릭 Build 를 supersede 하지 않게.
-      if (useContextMenu.getState().open) return;
       const s = usePanes.getState();
       const tab = activeTab(s, s.activePane);
       // 로컬 패널의 단일 커서 항목만 대상 — 원격/다중선택/부모(..)는 제외.
@@ -55,16 +46,9 @@ export function useShellPrewarm(): void {
       timer = setTimeout(settle, SETTLE_MS);
     });
 
-    // 컨텍스트 메뉴가 열리는 순간 대기 중 예열 예약을 취소 — 우클릭 Build 뒤에 예열
-    // Build 가 끼어 supersede 하는 것을 원천 차단.
-    const unsubMenu = useContextMenu.subscribe((m) => {
-      if (m.open) clearTimeout(timer);
-    });
-
     return () => {
       clearTimeout(timer);
       unsub();
-      unsubMenu();
       resetShellPrewarm();
     };
   }, []);
