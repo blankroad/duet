@@ -10,6 +10,7 @@ vi.mock("@/lib/shellMenu", () => ({
 
 const { usePanes } = await import("@/stores/panes");
 const { useContextMenu } = await import("@/stores/contextMenu");
+const { setHoverEntry } = await import("@/stores/previewHover");
 const { useShellWarm } = await import("./useShellWarm");
 
 const FILE: Entry = {
@@ -69,5 +70,46 @@ describe("useShellWarm", () => {
     useContextMenu.setState({ open: true });
     vi.advanceTimersByTime(250);
     expect(warmShellMenu).not.toHaveBeenCalled();
+  });
+
+  // 마우스 우클릭 경로의 유일한 lead time — 커서 예열은 우클릭과 같은 tick 에 취소된다.
+  it("행에 호버해 멈추면 미리보기 패널과 무관하게 예열한다", () => {
+    renderHook(() => useShellWarm());
+    setCursor("cursor.pdf");
+    setHoverEntry("left", { ...FILE, name: "hovered.pdf" });
+    vi.advanceTimersByTime(150); // 커서 settle(250) 전 — 호버 예열만 발화
+    expect(warmShellMenu).toHaveBeenCalledTimes(1);
+    expect(warmShellMenu).toHaveBeenCalledWith("C:/work/hovered.pdf", "file");
+  });
+
+  it("부모(..) 호버는 예열하지 않는다", () => {
+    renderHook(() => useShellWarm());
+    setCursor("x.pdf");
+    setHoverEntry("left", { ...FILE, name: "..", kind: "dir" });
+    vi.advanceTimersByTime(150);
+    expect(warmShellMenu).not.toHaveBeenCalled();
+  });
+
+  it("폴더가 바뀌면 빈 영역(background) 메뉴도 예열한다", () => {
+    renderHook(() => useShellWarm());
+    setCursor("d.pdf");
+    vi.advanceTimersByTime(250);
+    expect(warmShellMenu).toHaveBeenCalledWith("C:/work", "background");
+  });
+
+  // 메뉴를 닫고 같은 행에 다시 호버하면 재예열돼야 한다 — 취소된 예약의 키가 남아 있으면
+  // "같은 대상"으로 걸러져 영영 예열이 안 걸린다.
+  it("메뉴 닫힘 후 같은 항목을 다시 호버하면 재예열한다", () => {
+    renderHook(() => useShellWarm());
+    setCursor("e.pdf");
+    setHoverEntry("left", { ...FILE, name: "same.pdf" });
+    vi.advanceTimersByTime(150);
+    expect(warmShellMenu).toHaveBeenCalledTimes(1);
+
+    useContextMenu.setState({ open: true });
+    useContextMenu.setState({ open: false });
+    setHoverEntry("left", { ...FILE, name: "same.pdf" });
+    vi.advanceTimersByTime(150);
+    expect(warmShellMenu).toHaveBeenCalledTimes(2);
   });
 });

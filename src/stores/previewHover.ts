@@ -3,6 +3,7 @@ import type { Entry, Location } from "@/types/bindings";
 import { usePanes, activeTab, type PaneId } from "@/stores/panes";
 import { useUI } from "@/stores/ui";
 import { childLocation } from "@/lib/entryDnd";
+import { emitHoverEntry } from "@/lib/hoverSignal";
 
 /**
  * 호버 미리보기 — 마우스가 올라간 항목으로 미리보기/인스펙터 패널을 갱신.
@@ -21,6 +22,9 @@ export const usePreviewHover = create<HoverState>((set) => ({
 
 /** 패널이 열려 있을 때만, 호버한 항목(`..` 제외)을 대상으로 설정. */
 export function setHoverEntry(id: PaneId, entry: Entry): void {
+  // 호버 신호는 미리보기와 무관하게 항상 발화(셸 메뉴 예열 구독자용) — 아래 early
+  // return 보다 먼저.
+  emitHoverEntry(id, entry);
   if (!useUI.getState().previewOpen) return;
   if (entry.name === "..") {
     usePreviewHover.getState().set(null);

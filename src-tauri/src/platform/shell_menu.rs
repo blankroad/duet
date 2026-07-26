@@ -9,12 +9,16 @@
 //! 를 만들어 token 으로 보관(COM 객체는 이 스레드에 affinity), Build 응답으로 enumerate 한
 //! items 를 돌려준다. 프론트가 항목 클릭 시 Invoke(token, id), 메뉴 닫힘 시 Close(token).
 //!
+//! **스냅샷 캐시**: 빌드 결과의 (token, items) 는 워커 밖 `Mutex` 맵에도 복사해 둔다. 우클릭
+//! (Open)이 캐시 히트면 채널을 아예 안 거치고 명령 스레드에서 즉시 응답 — 진행 중인 예열
+//! 빌드(수 초)가 STA 를 점유하고 있어도 안 밀린다. COM 객체는 여전히 워커 스레드 전용.
+//!
 //! 모든 COM 호출은 unsafe — platform/ 한정(§8). 의존성 `windows`(§6 승인).
 
 use std::collections::{HashMap, VecDeque};
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use windows::core::{PCSTR, PCWSTR};
@@ -86,27 +90,50 @@ struct Cached {
 /// (path, scope) 캐시 키.
 type Key = (PathBuf, ShellScope);
 
+/// 워커 밖(명령 스레드)에서 읽는 빌드 결과 복사본 — 캐시 히트를 STA 큐에 안 태우기 위함.
+/// COM 객체는 워커 스레드 affinity 라 여기 두지 않는다. token 만 들고 있다가 invoke 시
+/// 워커가 그 token 으로 자기 세션을 찾는다. 워커 캐시와 항상 같이 갱신/파기된다.
+struct Snapshot {
+    token: u64,
+    items: Vec<ShellMenuItem>,
+    built_at: Instant,
+}
+
+/// 스냅샷 맵 — 워커 스레드와 명령 스레드가 공유. 잠금 구간은 맵 조회/복사뿐(COM 호출 없음).
+type SharedCache = Arc<Mutex<HashMap<Key, Snapshot>>>;
+
 /// 핫 COM 스레드 핸들 — 명령 레이어가 Build/Invoke/Close 를 보낸다. 첫 사용 시 lazy 생성.
 pub struct Worker {
     tx: mpsc::Sender<Req>,
+    shared: SharedCache,
 }
 
 impl Worker {
     /// COM STA 워커 스레드 spawn (앱 수명 내내 유지). 한 번만 호출(레지스트리 OnceLock).
     pub fn start() -> Worker {
         let (tx, rx) = mpsc::channel::<Req>();
-        std::thread::spawn(move || worker_loop(rx));
-        Worker { tx }
+        let shared: SharedCache = Arc::new(Mutex::new(HashMap::new()));
+        let (worker_shared, self_tx) = (shared.clone(), tx.clone());
+        std::thread::spawn(move || worker_loop(rx, worker_shared, self_tx));
+        Worker { tx, shared }
     }
 
     /// 우클릭 — 캐시 있으면 즉시, 없으면 빌드. (token, items) 반환(채널 끊기면 빈 결과).
     /// token 은 워커가 발급/재사용 — invoke 는 이 token 으로 그 파일의 IContextMenu 를 찾는다.
+    ///
+    /// 캐시 히트는 **채널을 안 거친다** — 진행 중인 예열 빌드(최대 수 초)가 STA 를 점유해도
+    /// 우클릭이 그 뒤에 줄 서지 않게. TTL 지난 stale 스냅샷도 그대로 즉시 서빙한다: COM
+    /// 세션은 살아 있어 invoke 는 정확하고, 갱신은 다음 warm(호버/커서 정지)이 맡는다.
+    /// (여기서 재빌드를 걸면 지금 열리는 메뉴의 세션을 파기해 클릭이 무시될 수 있다.)
     pub async fn open(
         &self,
         hwnd: isize,
         path: PathBuf,
         scope: ShellScope,
     ) -> (u64, Vec<ShellMenuItem>) {
+        if let Some(hit) = self.snapshot(&(path.clone(), scope)) {
+            return hit;
+        }
         let (reply, rx) = tokio::sync::oneshot::channel();
         if self
             .tx
@@ -124,8 +151,24 @@ impl Worker {
         rx.await.unwrap_or((0, Vec::new()))
     }
 
-    /// 백그라운드 캐시 채움(커서 멈춤/변경 시) — fire-and-forget.
+    /// 스냅샷 조회 — 있으면 (token, items) 복사본. 잠금 실패(poison)면 미스로 취급.
+    fn snapshot(&self, key: &Key) -> Option<(u64, Vec<ShellMenuItem>)> {
+        let map = self.shared.lock().ok()?;
+        let s = map.get(key)?;
+        Some((s.token, s.items.clone()))
+    }
+
+    /// 백그라운드 캐시 채움(커서/호버 멈춤, 폴더 변경 시) — fire-and-forget.
+    /// 이미 신선하면 채널조차 안 건드린다(호버 예열이 자주 불려도 큐가 안 쌓이게).
     pub fn warm(&self, hwnd: isize, path: PathBuf, scope: ShellScope) {
+        let key: Key = (path.clone(), scope);
+        let fresh = self.shared.lock().ok().is_some_and(|m| {
+            m.get(&key)
+                .is_some_and(|s| s.built_at.elapsed() < CACHE_TTL)
+        });
+        if fresh {
+            return;
+        }
         let _ = self.tx.send(Req::Warm { hwnd, path, scope });
     }
 
@@ -140,7 +183,6 @@ impl Worker {
 }
 
 /// 워커 상태 — 경로 캐시(STA 스레드 소유). COM 객체는 이 스레드에만 affinity.
-#[derive(Default)]
 struct State {
     /// (path, scope) → 빌드된 메뉴. Open 이 여기서 즉시 서빙, Warm 이 채운다.
     cache: HashMap<Key, Cached>,
@@ -149,6 +191,8 @@ struct State {
     /// 삽입 순서(오래된 것부터) — MAX_OPEN 초과 시 앞에서 파기.
     order: VecDeque<Key>,
     next_token: u64,
+    /// 명령 스레드가 읽는 스냅샷 맵 — `cache` 와 항상 함께 갱신/파기(세션 없는 token 금지).
+    shared: SharedCache,
 }
 
 impl State {
@@ -159,6 +203,7 @@ impl State {
     }
 
     /// 캐시 엔트리 하나 파기 — HMENU DestroyMenu, cm 은 drop 시 Release(이 스레드).
+    /// 스냅샷도 같이 지운다 — 세션 없는 token 을 프론트에 주면 invoke 가 조용히 no-op 된다.
     fn drop_entry(&mut self, key: &Key) {
         if let Some(c) = self.cache.remove(key) {
             self.by_token.remove(&c.token);
@@ -166,6 +211,9 @@ impl State {
             unsafe {
                 let _ = DestroyMenu(c.hmenu);
             }
+        }
+        if let Ok(mut m) = self.shared.lock() {
+            m.remove(key);
         }
         self.order.retain(|k| k != key);
     }
@@ -213,6 +261,7 @@ impl State {
                     .collect();
                 tracing::info!(token, query_ms = phases.query_ms, labels = %labels.join(" | "), "shell menu items");
 
+                let built_at = Instant::now();
                 self.cache.insert(
                     key.clone(),
                     Cached {
@@ -221,9 +270,20 @@ impl State {
                         hmenu,
                         hwnd,
                         items: items.clone(),
-                        built_at: Instant::now(),
+                        built_at,
                     },
                 );
+                // 명령 스레드가 채널 없이 읽어갈 복사본 — 우클릭 히트가 STA 큐를 안 타게.
+                if let Ok(mut m) = self.shared.lock() {
+                    m.insert(
+                        key.clone(),
+                        Snapshot {
+                            token,
+                            items: items.clone(),
+                            built_at,
+                        },
+                    );
+                }
                 self.by_token.insert(token, key.clone());
                 self.order.push_back(key);
                 while self.order.len() > MAX_OPEN {
@@ -242,13 +302,19 @@ impl State {
 }
 
 /// 워커 루프 — COM 한 번 초기화(끝까지 유지), 요청을 직렬 처리. IContextMenu 는 이 스레드에만.
-fn worker_loop(rx: mpsc::Receiver<Req>) {
+///
+/// `self_tx` 는 워커가 스스로에게 후속 작업(invoke 후 재예열)을 예약하는 채널. 이 클론을
+/// 들고 있으므로 채널은 끊기지 않고, 스레드는 앱 수명 내내 산다(원래 의도한 수명).
+fn worker_loop(rx: mpsc::Receiver<Req>, shared: SharedCache, self_tx: mpsc::Sender<Req>) {
     // SAFETY: 이 스레드용 STA COM 초기화. CoUninitialize 안 함(핸들러 warm 유지가 목적).
     let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
 
     let mut st = State {
+        cache: HashMap::new(),
+        by_token: HashMap::new(),
+        order: VecDeque::new(),
         next_token: 1,
-        ..Default::default()
+        shared,
     };
 
     loop {
@@ -287,13 +353,27 @@ fn worker_loop(rx: mpsc::Receiver<Req>) {
         // 1) Invoke — 캐시된 세션의 IContextMenu 로 실행 후 그 엔트리 파기(상태가 변할 수 있음).
         for (token, cmd_id) in invokes {
             if let Some(key) = st.by_token.get(&token).cloned() {
+                let mut hwnd_of = None;
                 if let Some(c) = st.cache.get(&key) {
+                    hwnd_of = Some(c.hwnd);
                     if (ID_FIRST..=ID_LAST).contains(&cmd_id) {
                         // SAFETY: cm 은 이 스레드에서 만든 살아있는 IContextMenu.
                         let _ = unsafe { invoke(&c.cm, HWND(c.hwnd as *mut _), cmd_id) };
                     }
                 }
                 st.drop_entry(&key);
+                // 실행 직후 같은 경로를 백그라운드 재예열 — 안 그러면 방금 쓴 항목의 다음
+                // 우클릭이 다시 cold 다. self-send 라 이번 배치의 Open 을 늦추지 않는다.
+                // (실행이 대상을 없앴을 수 있으니 아직 존재할 때만 — 빌드 실패 로그 방지.)
+                if let Some(hwnd) = hwnd_of {
+                    if key.0.exists() {
+                        let _ = self_tx.send(Req::Warm {
+                            hwnd,
+                            path: key.0.clone(),
+                            scope: key.1,
+                        });
+                    }
+                }
             }
         }
 
@@ -316,8 +396,19 @@ fn worker_loop(rx: mpsc::Receiver<Req>) {
             }
         }
 
-        // 3) Warm — 마지막 것만, 캐시가 신선하지 않을 때만 빌드(백그라운드 캐시 채움).
-        if let Some((hwnd, path, scope)) = warms.into_iter().next_back() {
+        // 3) Warm — **scope 별로** 마지막 것만, 캐시가 신선하지 않을 때만 빌드.
+        // scope 별로 나누는 이유: 항목(file/directory) 예열과 빈 영역(background) 예열이
+        // 한 배치에 같이 오면 예전엔 뒤엣것 하나만 살아 남아, 폴더 진입 시 둘 중 하나는
+        // 영영 cold 였다. 같은 scope 안에서는 여전히 마지막 하나만(호버 폭주 흡수).
+        let mut last_by_scope: Vec<(ShellScope, (isize, PathBuf))> = Vec::new();
+        for (hwnd, path, scope) in warms {
+            if let Some(slot) = last_by_scope.iter_mut().find(|(s, _)| *s == scope) {
+                slot.1 = (hwnd, path);
+            } else {
+                last_by_scope.push((scope, (hwnd, path)));
+            }
+        }
+        for (scope, (hwnd, path)) in last_by_scope {
             let key: Key = (path.clone(), scope);
             if !st.fresh(&key) {
                 let _ = st.build_and_cache(hwnd, path, scope, 0);
