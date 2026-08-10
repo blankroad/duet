@@ -58,6 +58,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::system::default_folder_handler_get,
             commands::system::default_folder_handler_set,
             commands::system::local_abs_paths,
+            commands::system::set_os_file_clipboard,
             commands::connection::ssh_config_hosts,
             commands::connection::connection_open,
             commands::connection::connection_open_adhoc,

@@ -12,8 +12,19 @@ use std::path::Path;
 #[cfg(target_os = "macos")]
 mod macos;
 
+mod file_clipboard;
+
 #[cfg(windows)]
 pub mod shell_menu;
+
+/// 파일 경로들을 **OS 클립보드**에 올린다 — Finder/탐색기, 그리고 클립보드 동기화 도구가
+/// "복사된 파일"로 인식한다. 인앱 클립보드(Ctrl+C 큐)와 함께 갱신해 두 세계를 일치시킨다.
+///
+/// 미지원 환경(Linux 에 wl-copy/xclip 없음 등)은 `NotSupported` — 호출부는 인앱 복사를
+/// 취소하지 말고 무시해야 한다(OS 반영은 부가 기능).
+pub fn set_file_clipboard(paths: &[std::path::PathBuf]) -> Result<(), DuetError> {
+    file_clipboard::set(paths)
+}
 
 /// 셸 컨텍스트 메뉴 항목(재귀 트리) — IContextMenu 가 채운 HMENU 를 열거한 결과(Tier 2).
 #[derive(Debug, Clone, Serialize, Type)]

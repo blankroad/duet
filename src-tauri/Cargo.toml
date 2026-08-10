@@ -123,6 +123,10 @@ tauri-plugin-single-instance = "2"
 # 없어 COM 에 부적합, raw FFI 는 COM 에 비현실적.
 windows = { version = "0.58", features = [
     "Win32_Foundation",
+    # CF_HDROP 파일 클립보드 쓰기(Ctrl+C 를 OS 클립보드에도 반영) — 기존 크레이트에 피처만 추가.
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
     "Win32_System_Com",
     "Win32_UI_Shell",
     "Win32_UI_Shell_Common",

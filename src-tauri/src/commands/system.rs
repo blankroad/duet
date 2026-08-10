@@ -834,19 +834,35 @@ pub async fn default_folder_handler_set(enabled: bool) -> Result<bool, DuetError
     .map_err(|e| DuetError::Io(format!("registry task join: {e}")))?
 }
 
+/// 로컬 항목 → 절대경로. SSH 항목이 섞여 있으면 `NotSupported`(원격은 로컬 경로가 없다).
+fn local_paths_of(items: &[EntryRef], what: &str) -> Result<Vec<PathBuf>, DuetError> {
+    let mut out = Vec::with_capacity(items.len());
+    for it in items {
+        if !matches!(it.location.source, SourceId::Local) {
+            return Err(DuetError::NotSupported(format!(
+                "{what} supports local files only"
+            )));
+        }
+        out.push(it.location.path.join(&it.name));
+    }
+    Ok(out)
+}
+
 /// 로컬 항목들의 절대경로 — OS 드래그-아웃(파일 export)용. 경로 결합은 `Path`(§7).
 /// SSH 항목은 로컬 경로가 없어 `NotSupported` (원격 드래그-아웃은 후속 — 임시 다운로드 필요).
 #[tauri::command]
 #[specta::specta]
 pub async fn local_abs_paths(items: Vec<EntryRef>) -> Result<Vec<PathBuf>, DuetError> {
-    let mut out = Vec::with_capacity(items.len());
-    for it in &items {
-        if !matches!(it.location.source, SourceId::Local) {
-            return Err(DuetError::NotSupported(
-                "drag-out supports local files only".into(),
-            ));
-        }
-        out.push(it.location.path.join(&it.name));
-    }
-    Ok(out)
+    local_paths_of(&items, "drag-out")
+}
+
+/// 선택 항목을 **OS 클립보드**에 "복사된 파일"로 올린다 — Ctrl+C 시 인앱 큐와 함께 호출한다.
+///
+/// 경로는 프론트에서 받지 않고 백엔드가 EntryRef 에서 만든다(§1/§7). 원격(SSH) 항목은
+/// 로컬 경로가 없어 `NotSupported` — 호출부는 무시하고 인앱 복사만 유지하면 된다.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_os_file_clipboard(items: Vec<EntryRef>) -> Result<(), DuetError> {
+    let paths = local_paths_of(&items, "os clipboard")?;
+    crate::platform::set_file_clipboard(&paths)
 }

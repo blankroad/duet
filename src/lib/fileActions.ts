@@ -173,8 +173,19 @@ export async function copySelectionNames(showToast: ToastFn): Promise<void> {
 }
 
 // ── 파일 클립보드 (Ctrl+C / Ctrl+X / Ctrl+V) ─────────────────────────────────
-// OS 클립보드가 아니라 인앱 큐. 붙여넣기는 planTransferTo 로 — 기존 복사/이동 확인
-// 다이얼로그 + journal(§4) 을 그대로 탄다.
+// 인앱 큐가 주(主) — 붙여넣기는 planTransferTo 로 기존 복사/이동 확인 다이얼로그 +
+// journal(§4) 을 그대로 탄다. 여기에 더해 **OS 클립보드에도 같은 파일을 올린다**(mirrorToOs):
+// Finder/탐색기와 클립보드 동기화 도구가 duet 의 복사를 인식하게 하기 위함.
+
+/**
+ * OS 클립보드에 선택 파일을 올린다 — 실패는 무시(부가 기능).
+ *
+ * 원격(SSH) 항목은 로컬 경로가 없어 백엔드가 NotSupported 를 준다. 인앱 복사는 이미
+ * 끝났으므로 토스트로 방해하지 않고 조용히 넘긴다.
+ */
+function mirrorToOsClipboard(targets: EntryRef[]): void {
+  void commands.setOsFileClipboard(targets).catch(() => {});
+}
 
 /** Ctrl+C — 활성 패널 선택을 'copy' 로 클립보드에 담는다(원본 유지). */
 export function clipCopy(showToast: ToastFn): void {
@@ -184,6 +195,7 @@ export function clipCopy(showToast: ToastFn): void {
     return;
   }
   useClipboard.getState().set(targets, "copy");
+  mirrorToOsClipboard(targets);
   showToast(i18n.t("toast.copiedItems", { count: targets.length }), "success");
 }
 
@@ -195,6 +207,9 @@ export function clipCut(showToast: ToastFn): void {
     return;
   }
   useClipboard.getState().set(targets, "move");
+  // 잘라내기도 OS 쪽에는 "복사"로만 올라간다 — 파일 pasteboard 에 잘라내기 개념이 없다.
+  // duet 내부 move 의미는 인앱 큐가 계속 담당한다.
+  mirrorToOsClipboard(targets);
   showToast(i18n.t("toast.cutItems", { count: targets.length }), "success");
 }
 
