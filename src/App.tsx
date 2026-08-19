@@ -131,6 +131,7 @@ import i18n from "@/i18n";
 import { Trans } from "react-i18next";
 import { formatErr } from "@/lib/error";
 import { formatSize } from "@/lib/format";
+import { findSavedHostForAlias, prefillFromAlias } from "@/lib/hostAlias";
 import { platform } from "@tauri-apps/plugin-os";
 import { confirm as tauriConfirm } from "@tauri-apps/plugin-dialog";
 import { commands } from "@/types/bindings";
@@ -144,6 +145,7 @@ import type {
   HostFavorite,
   ConflictPolicy,
   Location,
+  SavedHost,
   SearchHit,
   ShellScope,
   UserAlias,
@@ -1283,8 +1285,58 @@ function App() {
   // 연결 성공 후 이동할 (alias, path) — 호스트-인식 북마크/즐겨찾기 클릭이 세팅.
   const pendingNav = useRef<{ alias: string; path: string } | null>(null);
 
+  // ad-hoc connect 다이얼로그 (Sidebar + 버튼, saved host 더블클릭, alias 폴백)
+  const [adHocOpen, setAdHocOpen] = useState(false);
+  const [adHocPrefill, setAdHocPrefill] = useState<SavedHost | null>(null);
+
+  const onAdHocOpen = useCallback(() => {
+    setAdHocPrefill(null);
+    setAdHocOpen(true);
+  }, []);
+
+  const onSavedActivate = useCallback((host: SavedHost) => {
+    setAdHocPrefill(host);
+    setAdHocOpen(true);
+  }, []);
+
   /**
-   * 호스트 경로로 이동 — 연결돼 있으면 지정 pane 으로 바로, 아니면 연결 다이얼로그 →
+   * alias 로 연결 흐름 열기 — 즐겨찾기/북마크/배너 Reconnect 공용.
+   *
+   * - `~/.ssh/config` 의 alias → ConnectionDialog
+   * - 저장된 호스트 (alias 그대로 또는 `user@host:port` 가 일치) → 프리필 ad-hoc
+   * - 저장은 안 됐지만 `user@host:port` 형식 → 그 값으로 프리필한 ad-hoc
+   * - 그 외 → 빈 ad-hoc
+   *
+   * ConnectionDialog 는 ssh-config 호스트가 아니면 **열리지 않기** 때문에
+   * (`ConnectionDialog` 의 `open = host !== undefined`), ad-hoc 으로 접속해
+   * 만든 즐겨찾기는 이 라우팅이 없으면 더블클릭해도 무반응이었다.
+   */
+  const connectToAlias = useCallback(
+    (alias: string) => {
+      if (useConnections.getState().hosts.some((h) => h.alias === alias)) {
+        setDialogAlias(alias);
+        return;
+      }
+      const saved = findSavedHostForAlias(
+        alias,
+        useSavedHosts.getState().hosts,
+      );
+      if (saved) {
+        onSavedActivate(saved);
+        return;
+      }
+      const prefill = prefillFromAlias(alias);
+      if (prefill) {
+        onSavedActivate(prefill);
+        return;
+      }
+      onAdHocOpen();
+    },
+    [onSavedActivate, onAdHocOpen],
+  );
+
+  /**
+   * 호스트 경로로 이동 — 연결돼 있으면 지정 pane 으로 바로, 아니면 연결 흐름 →
    * 성공 시 그 경로로 이동(onConnected 가 pendingNav 처리). 호스트-인식 북마크/즐겨찾기 핵심.
    *
    * 연결 조회는 반드시 `liveByAlias` — 재연결 포기로 백엔드 pool 에서 사라진
@@ -1307,9 +1359,9 @@ function App() {
         return;
       }
       pendingNav.current = { alias: hostAlias, path };
-      setDialogAlias(hostAlias);
+      connectToAlias(hostAlias);
     },
-    [navigateTo],
+    [navigateTo, connectToAlias],
   );
 
   const onAliasExecute = useCallback(
@@ -1336,53 +1388,24 @@ function App() {
     void bookmarkLocation(tab.location, folderName(tab.location));
   }, []);
 
-  // ad-hoc connect 다이얼로그 (Sidebar + 버튼 또는 saved host 더블클릭)
-  const [adHocOpen, setAdHocOpen] = useState(false);
-  const [adHocPrefill, setAdHocPrefill] = useState<
-    import("@/types/bindings").SavedHost | null
-  >(null);
-
   const onHostActivate = useCallback((alias: string) => {
     setDialogAlias(alias);
   }, []);
 
-  const onAdHocOpen = useCallback(() => {
-    setAdHocPrefill(null);
-    setAdHocOpen(true);
-  }, []);
-
-  const onSavedActivate = useCallback(
-    (host: import("@/types/bindings").SavedHost) => {
-      setAdHocPrefill(host);
-      setAdHocOpen(true);
-    },
-    [],
-  );
-
   /**
-   * SSH 배너 Reconnect — ssh-config 호스트면 ConnectionDialog(연결 후 같은
-   * 경로로 복귀, onOpenHostPath 의 pendingNav), 저장된 호스트면 프리필 ad-hoc,
-   * 둘 다 모르면 빈 ad-hoc 다이얼로그.
+   * SSH 배너 Reconnect — 같은 경로로 복귀시키므로 onOpenHostPath 에 맡긴다
+   * (연결 흐름 라우팅 + pendingNav 로 경로 복원). alias 를 모르면 빈 ad-hoc.
    */
   const onPaneReconnect = useCallback(
     (alias: string | null, paneId: PaneId) => {
-      const path = String(activeTab(usePanes.getState(), paneId).location.path);
-      if (alias) {
-        if (useConnections.getState().hosts.some((h) => h.alias === alias)) {
-          onOpenHostPath(alias, path, paneId);
-          return;
-        }
-        const saved = useSavedHosts
-          .getState()
-          .hosts.find((h) => h.alias === alias);
-        if (saved) {
-          onSavedActivate(saved);
-          return;
-        }
+      if (!alias) {
+        onAdHocOpen();
+        return;
       }
-      onAdHocOpen();
+      const path = String(activeTab(usePanes.getState(), paneId).location.path);
+      onOpenHostPath(alias, path, paneId);
     },
-    [onOpenHostPath, onSavedActivate, onAdHocOpen],
+    [onOpenHostPath, onAdHocOpen],
   );
 
   // 팔레트/동적 커맨드용 — 활성 패널 기준 래퍼.
