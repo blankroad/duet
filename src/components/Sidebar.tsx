@@ -899,8 +899,12 @@ function BookmarksSection({
   const allFav = useHostFavorites((s) => s.items);
   const byKey = useTags((s) => s.byKey);
   const tagFilter = useTagFilter((s) => s.active);
+  // 살아있는(connected) 연결만 — 재연결 포기로 죽은 entry 도 배너용으로 store 에
+  // 남아 있어서, 그대로 세면 끊긴 호스트가 "연결됨" 초록 점으로 보인다.
   const activeAliases = new Set(
-    Object.values(useConnections((s) => s.active)).map((c) => c.alias),
+    Object.values(useConnections((s) => s.active))
+      .filter((c) => c.state.kind === "connected")
+      .map((c) => c.alias),
   );
   // 태그 필터 — 로컬 북마크는 bm:<id>, 원격 즐겨찾기는 fav:<id> 키.
   const items = allItems.filter((b) =>

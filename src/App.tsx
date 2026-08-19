@@ -1286,12 +1286,14 @@ function App() {
   /**
    * 호스트 경로로 이동 — 연결돼 있으면 지정 pane 으로 바로, 아니면 연결 다이얼로그 →
    * 성공 시 그 경로로 이동(onConnected 가 pendingNav 처리). 호스트-인식 북마크/즐겨찾기 핵심.
+   *
+   * 연결 조회는 반드시 `liveByAlias` — 재연결 포기로 백엔드 pool 에서 사라진
+   * 연결도 배너용으로 store 엔 error 상태로 남아 있어서, alias 만 보고 고르면
+   * 죽은 id 로 이동해 `no connection` 으로 실패한다.
    */
   const onOpenHostPath = useCallback(
     (hostAlias: string, path: string, pane: PaneId) => {
-      const conn = Object.values(useConnections.getState().active).find(
-        (c) => c.alias === hostAlias,
-      );
+      const conn = useConnections.getState().liveByAlias(hostAlias);
       if (conn) {
         void navigateTo(pane, {
           source: {
@@ -1317,8 +1319,7 @@ function App() {
         void navigateTo(id, alias.kind.location);
       } else if (alias.kind.kind === "connect") {
         const targetAlias = alias.kind.saved_host_alias;
-        const conns = Object.values(useConnections.getState().active);
-        const conn = conns.find((c) => c.alias === targetAlias);
+        const conn = useConnections.getState().liveByAlias(targetAlias);
         if (!conn) {
           showToast(i18n.t("toast.connectFirst", { alias: targetAlias }));
           return;

@@ -60,6 +60,18 @@ interface ConnectionsState {
    * 같은 alias 로 여러 연결이 있으면 우선순위: connected > connecting > error > disconnected.
    */
   stateByAlias: () => Record<string, ConnectionState>;
+  /**
+   * alias 로 **재사용 가능한(살아있는)** 연결 찾기 — `connected` 상태만, 같은
+   * alias 로 여럿이면 가장 최근에 등록된 것.
+   *
+   * 백엔드는 재연결을 포기하면 pool 에서 연결을 지우지만(`connection_supervisor`
+   * 의 `final_failure`), 프론트 store 는 패널 배너("연결 끊김" + Reconnect) 를
+   * 위해 그 entry 를 `error` 상태로 남겨둔다. 그래서 alias 만 보고 고르면 이미
+   * 죽은 connection_id 를 집어 IPC 가 `no connection: <id>` 로 실패한다 —
+   * 즐겨찾기/호스트-인식 북마크 재접속이 이 방식으로 깨졌었다. alias 로 연결을
+   * 찾을 때는 반드시 이 셀렉터를 쓸 것.
+   */
+  liveByAlias: (alias: string) => ActiveConnection | undefined;
 }
 
 const statePriority = (s: ConnectionState): number => {
@@ -108,5 +120,15 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
       }
     }
     return out;
+  },
+
+  liveByAlias: (alias) => {
+    let found: ActiveConnection | undefined;
+    // 삽입 순서 = 등록 순서. 뒤에서 발견한 것으로 계속 덮어써 "가장 최근" 을 남긴다
+    // (재접속하면 새 연결이 뒤에 붙으므로, 앞의 죽은 entry 를 집지 않게).
+    for (const conn of Object.values(get().active)) {
+      if (conn.alias === alias && conn.state.kind === "connected") found = conn;
+    }
+    return found;
   },
 }));

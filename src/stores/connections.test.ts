@@ -73,4 +73,27 @@ describe("connections store", () => {
   it("stateByAlias returns empty for no active connections", () => {
     expect(useConnections.getState().stateByAlias()).toEqual({});
   });
+
+  it("liveByAlias skips dead connections (backend pool 에서 사라진 error entry)", () => {
+    // 재연결 포기 → store 엔 error 로 남지만 백엔드엔 없음. 이걸 고르면 no connection.
+    useConnections.getState().upsertActive(mkActive("a:1", "a", { kind: "error", message: "gave up" }));
+    expect(useConnections.getState().liveByAlias("a")).toBeUndefined();
+    // 같은 alias 로 새로 접속하면 그 살아있는 연결이 잡혀야 함 (죽은 게 앞에 있어도).
+    useConnections.getState().upsertActive(mkActive("a:2", "a"));
+    expect(useConnections.getState().liveByAlias("a")?.id).toBe("a:2");
+  });
+
+  it("liveByAlias prefers the most recent connected connection", () => {
+    useConnections.getState().upsertActive(mkActive("a:1", "a"));
+    useConnections.getState().upsertActive(mkActive("a:2", "a"));
+    useConnections.getState().upsertActive(mkActive("b:1", "b"));
+    expect(useConnections.getState().liveByAlias("a")?.id).toBe("a:2");
+    expect(useConnections.getState().liveByAlias("b")?.id).toBe("b:1");
+    expect(useConnections.getState().liveByAlias("nope")).toBeUndefined();
+  });
+
+  it("liveByAlias ignores connecting state (재연결 진행 중 세션은 재사용 불가)", () => {
+    useConnections.getState().upsertActive(mkActive("a:1", "a", { kind: "connecting" }));
+    expect(useConnections.getState().liveByAlias("a")).toBeUndefined();
+  });
 });
