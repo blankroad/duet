@@ -8,6 +8,7 @@ export type DialogState =
   // 단일 rename 은 인라인 편집(useUI.renameTarget)으로 대체 — 다이얼로그 없음.
   | { kind: "batch-rename"; targets: EntryRef[] }
   | { kind: "mkdir"; parent: Location }
+  | { kind: "new-file"; parent: Location }
   | { kind: "delete-confirm"; plan: DeletePlan }
   | { kind: "delete-danger"; plan: DeletePlan }
   | { kind: "copy-confirm"; plan: CopyPlan }

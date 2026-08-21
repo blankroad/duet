@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { buildEntryMenu } from "./entryMenu";
+import { buildEntryMenu, buildEmptyMenu } from "./entryMenu";
 import { isSeparator, type MenuEntry, type MenuItem } from "@/stores/contextMenu";
 import { useConnections } from "@/stores/connections";
 import type { Entry, Location } from "@/types/bindings";
@@ -44,6 +44,26 @@ describe("buildEntryMenu", () => {
     expect(ids(menu)).not.toContain("open-other");
     // 일반 파일은 압축 해제 항목 없음.
     expect(ids(menu)).not.toContain("extract");
+  });
+
+  it("offers both New folder and New file", () => {
+    const menu = buildEntryMenu({
+      paneId: "left",
+      entry: file,
+      location: localLoc,
+      selectedCount: 1,
+      onActivate: noop,
+      onOpenInOtherPane: noop,
+    });
+    expect(ids(menu)).toContain("mkdir");
+    expect(ids(menu)).toContain("new-file");
+    // 빈 공간 우클릭에도 동일하게 노출.
+    const empty = buildEmptyMenu({
+      paneId: "left",
+      location: localLoc,
+      onRefresh: noop,
+    });
+    expect(ids(empty)).toContain("new-file");
   });
 
   it("adds Extract only for an archive file", () => {

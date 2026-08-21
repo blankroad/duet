@@ -96,6 +96,30 @@ pub async fn execute_undo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
             }
             ok_with_locs(source, refresh)
         }
+        UndoAction::UndoNewFile { source, path } => {
+            let fs = match fs_for(source, pool).await {
+                Ok(f) => f,
+                Err(e) => return error("source unreachable", e),
+            };
+            // 만든 뒤 내용이 생겼으면 제거 = 데이터 손실 — 빈 파일일 때만 되돌린다.
+            match fs.symlink_metadata(path).await {
+                Ok(m) if matches!(m.kind, crate::types::EntryKind::File) => {
+                    if m.size.unwrap_or(0) > 0 {
+                        return skipped("File is no longer empty — undo skipped");
+                    }
+                }
+                Ok(_) => return skipped("Not a file anymore — undo skipped"),
+                Err(_) => return skipped("File already gone — undo skipped"),
+            }
+            if let Err(e) = fs.remove(path).await {
+                return error("remove file", e);
+            }
+            let mut refresh = std::collections::HashSet::new();
+            if let Some(p) = path.parent() {
+                refresh.insert(p.to_path_buf());
+            }
+            ok_with_locs(source, refresh)
+        }
         UndoAction::RestoreFromTrash { source, items } => {
             let fs = match fs_for(source, pool).await {
                 Ok(f) => f,
@@ -627,6 +651,24 @@ pub async fn execute_redo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
             }
             ok_with_locs(source, refresh)
         }
+        UndoAction::UndoNewFile { source, path } => {
+            let fs = match fs_for(source, pool).await {
+                Ok(f) => f,
+                Err(e) => return error("source unreachable", e),
+            };
+            // 자리에 뭔가 있으면 덮어쓰지 않는다 (write_full 은 truncate).
+            if fs.symlink_metadata(path).await.is_ok() {
+                return skipped("Item already exists — redo skipped");
+            }
+            if let Err(e) = fs.write_full(path, &[]).await {
+                return error("create file", e);
+            }
+            let mut refresh = std::collections::HashSet::new();
+            if let Some(p) = path.parent() {
+                refresh.insert(p.to_path_buf());
+            }
+            ok_with_locs(source, refresh)
+        }
         UndoAction::UndoChmod { source, items } => {
             // 재적용할 새 mode 는 op 에만 기록돼 있음 (undo 데이터는 old_mode).
             let mode = match &entry.op {
@@ -989,6 +1031,37 @@ mod tests {
         let outcome = execute_undo(&entry, &pool).await;
         assert!(matches!(outcome.kind, UndoKind::Ok));
         assert!(!target.exists());
+    }
+
+    /// 새 파일 undo — 빈 파일만 제거, 내용이 생겼으면 손실 없이 skip. redo 는 재생성.
+    #[tokio::test]
+    async fn undo_new_file_removes_only_empty_then_redo_recreates() {
+        let dir = TempDir::new().unwrap();
+        let pool = ConnectionPool::new();
+
+        let filled = dir.path().join("filled.txt");
+        tokio::fs::write(&filled, b"typed later").await.unwrap();
+        let entry = mk_entry(UndoAction::UndoNewFile {
+            source: SourceId::Local,
+            path: filled.clone(),
+        });
+        let outcome = execute_undo(&entry, &pool).await;
+        assert!(matches!(outcome.kind, UndoKind::Skipped));
+        assert!(filled.exists(), "내용이 있는 파일은 undo 로 지우지 않는다");
+
+        let empty = dir.path().join("empty.txt");
+        tokio::fs::write(&empty, b"").await.unwrap();
+        let entry = mk_entry(UndoAction::UndoNewFile {
+            source: SourceId::Local,
+            path: empty.clone(),
+        });
+        let outcome = execute_undo(&entry, &pool).await;
+        assert!(matches!(outcome.kind, UndoKind::Ok));
+        assert!(!empty.exists());
+
+        let outcome = execute_redo(&entry, &pool).await;
+        assert!(matches!(outcome.kind, UndoKind::Ok));
+        assert!(empty.is_file());
     }
 
     #[tokio::test]

@@ -105,6 +105,7 @@ export interface BuiltinDeps {
   move: () => void;
   rename: () => void;
   newFolder: () => void;
+  newFile: () => void;
   delete: () => void;
   deletePerm: () => void;
   copyPath: () => void;
@@ -431,6 +432,14 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
       category: "File",
       defaultKey: "F7",
       action: deps.newFolder,
+    },
+    {
+      id: "file.newFile",
+      label: "New file",
+      category: "File",
+      // Shift+F4 = TC 의 "새 파일" 관례 (TC 는 편집기까지 열지만 여기선 생성만).
+      defaultKey: "Shift+F4",
+      action: deps.newFile,
     },
     {
       id: "file.delete",

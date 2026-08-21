@@ -4,14 +4,24 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import type { Location } from "@/types/bindings";
 
-export interface MkdirDialogProps {
+export interface NewEntryDialogProps {
+  /** 만들 대상 — 제목/플레이스홀더만 갈리고 나머지 UI 는 동일. */
+  kind: "dir" | "file";
   parent: Location;
   onClose: () => void;
   onSubmit: (name: string) => void;
 }
 
-export function MkdirDialog({ parent, onClose, onSubmit }: MkdirDialogProps) {
+/** 활성 폴더에 새 폴더 / 새 빈 파일을 만드는 이름 입력 다이얼로그. */
+export function NewEntryDialog({
+  kind,
+  parent,
+  onClose,
+  onSubmit,
+}: NewEntryDialogProps) {
   const { t } = useTranslation();
+  // i18n 키 묶음만 교체 — 두 묶음의 하위 키(title/in/placeholder/create/desc) 동일.
+  const k = kind === "dir" ? "mkdir" : "newFile";
   const [name, setName] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -35,7 +45,7 @@ export function MkdirDialog({ parent, onClose, onSubmit }: MkdirDialogProps) {
         >
           <div className="mb-3 flex items-start justify-between">
             <Dialog.Title className="text-title font-medium">
-              {t("dialog.mkdir.title")}
+              {t(`dialog.${k}.title`)}
             </Dialog.Title>
             <Dialog.Close
               className="rounded p-1 text-fg-muted hover:bg-border"
@@ -48,13 +58,13 @@ export function MkdirDialog({ parent, onClose, onSubmit }: MkdirDialogProps) {
             className="mb-2 truncate text-meta text-fg-muted"
             title={parent.path}
           >
-            {t("dialog.mkdir.in", { path: parent.path })}
+            {t(`dialog.${k}.in`, { path: parent.path })}
           </div>
           <input
             ref={inputRef}
             type="text"
             value={name}
-            placeholder={t("dialog.mkdir.placeholder")}
+            placeholder={t(`dialog.${k}.placeholder`)}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") submit();
@@ -76,11 +86,11 @@ export function MkdirDialog({ parent, onClose, onSubmit }: MkdirDialogProps) {
               disabled={!name.trim()}
               className="rounded bg-accent px-3 py-1 text-base text-white disabled:opacity-50"
             >
-              {t("dialog.mkdir.create")}
+              {t(`dialog.${k}.create`)}
             </button>
           </div>
           <Dialog.Description className="sr-only">
-            {t("dialog.mkdir.desc", { path: parent.path })}
+            {t(`dialog.${k}.desc`, { path: parent.path })}
           </Dialog.Description>
         </Dialog.Content>
       </Dialog.Portal>

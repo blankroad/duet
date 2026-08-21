@@ -155,6 +155,8 @@ function opLabel(op: OpKind, t: TFunction): string {
       return t("history.op.batchRename", { count: op.count, loc: shortLoc(op.location) });
     case "mkdir":
       return t("history.op.mkdir", { name: basename(op.path, op.path) });
+    case "new_file":
+      return t("history.op.newFile", { name: basename(op.path, op.path) });
     case "extract":
       return t("history.op.extract", { name: basename(String(op.archive.path), "archive") });
     case "compress":

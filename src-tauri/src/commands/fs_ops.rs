@@ -1362,6 +1362,34 @@ pub async fn fs_mkdir(
     Ok(emit_pushed(&app, entry))
 }
 
+/// 빈 파일 생성 — `parent/name`. 자리에 이미 뭔가 있으면 에러(덮어쓰지 않음).
+/// undo = 여전히 빈 파일일 때만 제거.
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_create_file(
+    parent: Location,
+    name: String,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+    settings: tauri::State<'_, Arc<SettingsStore>>,
+    journal: tauri::State<'_, Arc<Journal>>,
+    app: tauri::AppHandle,
+) -> Result<JournalId, DuetError> {
+    let fs = fs_for(&parent.source, pool.inner()).await?;
+    let entry = ops::create_file(
+        &*fs,
+        parent,
+        name,
+        &ctx(
+            settings.inner().clone(),
+            journal.inner().clone(),
+            pool.inner().clone(),
+            app.clone(),
+        ),
+    )
+    .await?;
+    Ok(emit_pushed(&app, entry))
+}
+
 /// 권한(chmod) 변경 — mode 는 POSIX 비트(0o7777 마스크). 비재귀는 undo 가능,
 /// 재귀는 Irreversible(프론트가 경고 표시 후 호출 — §4 승인 흐름).
 #[tauri::command]

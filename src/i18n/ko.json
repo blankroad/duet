@@ -48,6 +48,13 @@
       "create": "만들기",
       "desc": "{{path}} 에 새 폴더 만들기"
     },
+    "newFile": {
+      "title": "새 파일",
+      "in": "위치: {{path}}",
+      "placeholder": "파일 이름",
+      "create": "만들기",
+      "desc": "{{path}} 에 새 빈 파일 만들기"
+    },
     "compress": {
       "title": "압축",
       "items_other": "{{count}}개 → 아카이브",
@@ -302,6 +309,7 @@
       "copy": "복사",
       "move": "이동",
       "summary": "{{count}}개 · {{size}}",
+      "summaryCountOnly": "{{count}}개",
       "strategy": "전략: {{label}}",
       "strategyLocal": "로컬",
       "strategyRelay": "릴레이 (이 PC 경유)",
@@ -328,6 +336,7 @@
       "rename": "이름 변경 {{from}} → {{to}}",
       "batchRename": "{{count}}개 일괄 이름변경 — {{loc}}",
       "mkdir": "새 폴더 — {{name}}",
+      "newFile": "새 파일 — {{name}}",
       "extract": "{{name}} 압축 해제",
       "compress": "{{count}}개 압축 → {{loc}}",
       "sync": "{{count}}개 동기화 → {{loc}}",
@@ -358,6 +367,7 @@
     "rename": "이름 변경",
     "batchRename": "일괄 이름변경…",
     "newFolder": "새 폴더",
+    "newFile": "새 파일",
     "addToBookmarks": "북마크에 추가",
     "addToHostFavorites": "호스트 즐겨찾기에 추가",
     "copyPath": "경로 복사",
@@ -545,6 +555,7 @@
     "keyAuthFailed": "설정 실패: {{err}}",
     "batchRenameFailed": "일괄 이름변경 실패: {{err}}",
     "mkdirFailed": "새 폴더 실패: {{err}}",
+    "newFileFailed": "새 파일 실패: {{err}}",
     "compressFailed": "압축 실패: {{err}}",
     "updateArchiveFailed": "아카이브 업데이트 실패: {{err}}",
     "deleteFailed": "삭제 실패: {{err}}",
@@ -814,6 +825,7 @@
       "move": "반대 패널로 이동",
       "rename": "이름 변경",
       "newFolder": "새 폴더",
+      "newFile": "새 파일",
       "delete": "삭제 (휴지통)",
       "deletePerm": "영구 삭제",
       "clipCopy": "복사",

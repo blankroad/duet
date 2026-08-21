@@ -5,6 +5,7 @@ import {
   FolderInput,
   Pencil,
   FolderPlus,
+  FilePlus,
   Star,
   Heart,
   ClipboardCopy,
@@ -59,6 +60,7 @@ import {
   triggerRename,
   triggerBatchRename,
   triggerMkdir,
+  triggerNewFile,
   triggerDelete,
   triggerExtract,
   triggerCompress,
@@ -352,6 +354,13 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
       onSelect: () => triggerMkdir(open),
     },
     {
+      id: "new-file",
+      label: i18n.t("menu.newFile"),
+      icon: <FilePlus size={ICON} />,
+      shortcut: "Shift+F4",
+      onSelect: () => triggerNewFile(open),
+    },
+    {
       id: "bookmark",
       label: i18n.t("menu.addToBookmarks"),
       icon: <Star size={ICON} />,
@@ -445,6 +454,13 @@ export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
       icon: <FolderPlus size={ICON} />,
       shortcut: "F7",
       onSelect: () => triggerMkdir(open),
+    },
+    {
+      id: "new-file",
+      label: i18n.t("menu.newFile"),
+      icon: <FilePlus size={ICON} />,
+      shortcut: "Shift+F4",
+      onSelect: () => triggerNewFile(open),
     },
     // 심볼릭 링크 — 원격 또는 로컬 unix (Windows 로컬은 권한 필요라 미지원).
     ...(location.source.kind === "ssh" || !isWindows()

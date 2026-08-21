@@ -3319,6 +3319,39 @@ pub async fn make_symlink(
         .await
 }
 
+/// 빈 파일 생성 — undo 는 (여전히 비어 있을 때만) 파일 제거.
+///
+/// 이미 뭔가 있는 자리면 에러 — `write_full` 은 truncate 라 기존 파일을 날릴 수
+/// 있으므로 생성 전 존재 확인이 필수다.
+pub async fn create_file(
+    fs: &dyn FileSystem,
+    parent: Location,
+    name: String,
+    ctx: &OpCtx,
+) -> Result<JournalEntry, DuetError> {
+    if name.is_empty() || name.contains('/') || name.contains('\\') {
+        return Err(DuetError::Io(format!("invalid name: {name}")));
+    }
+    let path = fs.join(&parent.path, &name);
+    // symlink_metadata — 깨진 심볼릭 링크가 있는 자리도 "이미 있음"으로 본다.
+    if fs.symlink_metadata(&path).await.is_ok() {
+        return Err(DuetError::Io(format!("already exists: {name}")));
+    }
+    fs.write_full(&path, &[]).await?;
+    ctx.journal
+        .push(
+            OpKind::NewFile {
+                path: path.clone(),
+                source: parent.source.clone(),
+            },
+            UndoAction::UndoNewFile {
+                source: parent.source,
+                path,
+            },
+        )
+        .await
+}
+
 // === Helpers ===
 
 /// backup 이름 선택 — 같은 timestamp 충돌 시 .<n> suffix retry.
@@ -3687,6 +3720,41 @@ mod tests {
         assert!(m.file_type().is_symlink());
         // 같은 이름 재생성 → 명시 에러.
         assert!(make_symlink(&fs, parent, "l".into(), "t.txt".into(), &ctx)
+            .await
+            .is_err());
+    }
+
+    /// 새 파일 — 빈 파일 생성 + UndoNewFile 기록, 기존 이름은 덮어쓰지 않고 거부.
+    #[tokio::test]
+    async fn create_file_journals_undo_and_rejects_existing() {
+        let (ctx, _keep) = mk_ctx().await;
+        let dir = TempDir::new().unwrap();
+        let fs = LocalFs::new();
+        let parent = Location {
+            source: SourceId::Local,
+            path: dir.path().to_path_buf(),
+        };
+        let entry = create_file(&fs, parent.clone(), "note.txt".into(), &ctx)
+            .await
+            .unwrap();
+        assert!(matches!(entry.undo, UndoAction::UndoNewFile { .. }));
+        let created = dir.path().join("note.txt");
+        assert!(created.is_file());
+        assert_eq!(tokio::fs::read(&created).await.unwrap().len(), 0);
+
+        // 기존 파일 이름으로 재생성 → 에러 (내용 보존, truncate 금지).
+        tokio::fs::write(dir.path().join("keep.txt"), b"data")
+            .await
+            .unwrap();
+        assert!(create_file(&fs, parent.clone(), "keep.txt".into(), &ctx)
+            .await
+            .is_err());
+        assert_eq!(
+            tokio::fs::read(dir.path().join("keep.txt")).await.unwrap(),
+            b"data"
+        );
+        // 경로 구분자가 섞인 이름은 거부 (§7 — 하위 경로 생성 방지).
+        assert!(create_file(&fs, parent, "a/b.txt".into(), &ctx)
             .await
             .is_err());
     }

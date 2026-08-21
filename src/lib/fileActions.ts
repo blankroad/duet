@@ -327,6 +327,12 @@ export function triggerMkdir(open: OpenFn): void {
   open({ kind: "mkdir", parent: tab.location });
 }
 
+/** Shift+F4 — 활성 패널 현재 디렉토리에 새 빈 파일. */
+export function triggerNewFile(open: OpenFn): void {
+  const { tab } = resolveActiveTargets();
+  open({ kind: "new-file", parent: tab.location });
+}
+
 /** 활성 폴더에 심볼릭 링크 생성 다이얼로그. (로컬 Windows 는 호출부에서 미노출.) */
 export function triggerNewSymlink(open: OpenFn): void {
   const { tab } = resolveActiveTargets();

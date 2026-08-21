@@ -136,6 +136,11 @@ pub enum OpKind {
         path: PathBuf,
         source: SourceId,
     },
+    /// 빈 파일 생성.
+    NewFile {
+        path: PathBuf,
+        source: SourceId,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -236,6 +241,11 @@ pub enum UndoAction {
     },
     /// 심볼릭 링크 생성 되돌리기 — 링크 자체만 제거(대상 불변).
     UndoSymlink {
+        source: SourceId,
+        path: PathBuf,
+    },
+    /// 빈 파일 생성 되돌리기 — 여전히 빈 파일일 때만 제거(내용이 생겼으면 skip).
+    UndoNewFile {
         source: SourceId,
         path: PathBuf,
     },

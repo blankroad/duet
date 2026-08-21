@@ -11,7 +11,7 @@ import { CompareDialog } from "@/components/dialogs/CompareDialog";
 import { CompareScanningDialog } from "@/components/dialogs/CompareScanningDialog";
 import { ThreeWayDialog } from "@/components/dialogs/ThreeWayDialog";
 import { SyncDialog } from "@/components/dialogs/SyncDialog";
-import { MkdirDialog } from "@/components/dialogs/MkdirDialog";
+import { NewEntryDialog } from "@/components/dialogs/NewEntryDialog";
 import { CompressDialog } from "@/components/dialogs/CompressDialog";
 import { ChecksumDialog } from "@/components/dialogs/ChecksumDialog";
 import { PermissionsDialog } from "@/components/dialogs/PermissionsDialog";
@@ -65,6 +65,7 @@ import {
   triggerMove,
   triggerDelete,
   triggerMkdir,
+  triggerNewFile,
   triggerRenameSmart,
   triggerUndo,
   triggerRedo,
@@ -800,6 +801,7 @@ function App() {
       move: () => void triggerMove(openDialog, showToast),
       rename: () => triggerRenameSmart(openDialog, showToast),
       newFolder: () => triggerMkdir(openDialog),
+      newFile: () => triggerNewFile(openDialog),
       delete: () => void triggerDelete("trash", openDialog, showToast),
       deletePerm: () => void triggerDelete("permanent", openDialog, showToast),
       copyPath: () => void copySelectionPaths(showToast),
@@ -878,6 +880,22 @@ function App() {
       else
         showToast(
           i18n.t("toast.mkdirFailed", { err: formatErr(r.error) }),
+          "error",
+        );
+    },
+    [dialog, closeDialog, refreshAffected, showToast],
+  );
+
+  const onNewFileSubmit = useCallback(
+    async (name: string) => {
+      if (dialog.kind !== "new-file") return;
+      const parent = dialog.parent;
+      closeDialog();
+      const r = await commands.fsCreateFile(parent, name);
+      if (r.status === "ok") refreshAffected([parent]);
+      else
+        showToast(
+          i18n.t("toast.newFileFailed", { err: formatErr(r.error) }),
           "error",
         );
     },
@@ -1638,10 +1656,19 @@ function App() {
         />
       )}
       {dialog.kind === "mkdir" && (
-        <MkdirDialog
+        <NewEntryDialog
+          kind="dir"
           parent={dialog.parent}
           onClose={closeDialog}
           onSubmit={onMkdirSubmit}
+        />
+      )}
+      {dialog.kind === "new-file" && (
+        <NewEntryDialog
+          kind="file"
+          parent={dialog.parent}
+          onClose={closeDialog}
+          onSubmit={onNewFileSubmit}
         />
       )}
       {dialog.kind === "compress" && (

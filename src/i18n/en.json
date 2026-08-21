@@ -48,6 +48,13 @@
       "create": "Create",
       "desc": "Create new folder in {{path}}"
     },
+    "newFile": {
+      "title": "New file",
+      "in": "in {{path}}",
+      "placeholder": "file name",
+      "create": "Create",
+      "desc": "Create new empty file in {{path}}"
+    },
     "compress": {
       "title": "Compress",
       "items_one": "{{count}} item → archive",
@@ -305,6 +312,7 @@
       "copy": "Copy",
       "move": "Move",
       "summary": "{{count}} item(s) · {{size}}",
+      "summaryCountOnly": "{{count}} item(s)",
       "strategy": "Strategy: {{label}}",
       "strategyLocal": "local",
       "strategyRelay": "relay (via this PC)",
@@ -331,6 +339,7 @@
       "rename": "Renamed {{from}} → {{to}}",
       "batchRename": "Batch renamed {{count}} item(s) — {{loc}}",
       "mkdir": "New folder — {{name}}",
+      "newFile": "New file — {{name}}",
       "extract": "Extracted {{name}}",
       "compress": "Compressed {{count}} item(s) → {{loc}}",
       "sync": "Synced {{count}} item(s) → {{loc}}",
@@ -361,6 +370,7 @@
     "rename": "Rename",
     "batchRename": "Batch rename…",
     "newFolder": "New folder",
+    "newFile": "New file",
     "addToBookmarks": "Add to bookmarks",
     "addToHostFavorites": "Add to host favorites",
     "copyPath": "Copy path",
@@ -548,6 +558,7 @@
     "keyAuthFailed": "Setup failed: {{err}}",
     "batchRenameFailed": "Batch rename failed: {{err}}",
     "mkdirFailed": "Mkdir failed: {{err}}",
+    "newFileFailed": "New file failed: {{err}}",
     "compressFailed": "Compress failed: {{err}}",
     "updateArchiveFailed": "Update archive failed: {{err}}",
     "deleteFailed": "Delete failed: {{err}}",
@@ -818,6 +829,7 @@
       "move": "Move to other panel",
       "rename": "Rename",
       "newFolder": "New folder",
+      "newFile": "New file",
       "delete": "Delete (to trash)",
       "deletePerm": "Delete permanently",
       "clipCopy": "Copy",
