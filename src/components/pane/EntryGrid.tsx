@@ -19,6 +19,7 @@ import { EntryIcon } from "@/lib/fileIcon";
 import { useAppSettings } from "@/stores/settings";
 import { thumbUrl } from "@/lib/previewUrl";
 import { childLocation } from "@/lib/entryDnd";
+import { useCutNames } from "@/hooks/useCutNames";
 import { useMarquee } from "@/hooks/useMarquee";
 import { useEntryDrag } from "@/hooks/useEntryDrag";
 import { useDragState } from "@/stores/dragState";
@@ -70,6 +71,8 @@ export function EntryGrid({
   const location = usePanes((s) => activeTab(s, id).location);
   // "크기 계산" 결과 — 타일 메타의 폴더 크기 표시.
   const dirSizes = usePanes((s) => activeTab(s, id).dirSizes);
+  // Ctrl+X 로 잘라내기 대기 중인 이름 — 해당 셀을 흐리게 표시.
+  const cutNames = useCutNames(location);
   const onEntryMouseDown = useEntryDrag(id);
   const dragActive = useDragState((s) => s.active);
   const overThisPane = useDragState((s) => s.overPane === id);
@@ -190,6 +193,7 @@ export function EntryGrid({
                   location,
                   isCursor,
                   isSelected,
+                  isCut: cutNames.has(entry.name),
                   dirSize: dirSizes[entry.name],
                   highlight: dragActive && overFolder === entry.name,
                   renameRef:
@@ -248,6 +252,8 @@ interface CellProps {
   location: Location;
   isCursor: boolean;
   isSelected: boolean;
+  /** Ctrl+X 로 잘라내기 대기 중 — 아이콘/이름을 흐리게 표시. */
+  isCut: boolean;
   /** "크기 계산" 결과(bytes) — 타일 메타의 크기 표시에 사용. */
   dirSize?: number | undefined;
   highlight: boolean;
@@ -339,6 +345,7 @@ function GridCell({
   location,
   isCursor,
   isSelected,
+  isCut,
   highlight,
   renameRef,
   onRenameDone,
@@ -391,7 +398,14 @@ function GridCell({
       title={entry.name}
     >
       {/* 드래그 핸들 = 아이콘+이름. 셀 여백/간격은 마키 시작 영역. */}
-      <span data-drag-handle className="flex flex-col items-center gap-1">
+      <span
+        data-drag-handle
+        className={clsx(
+          "flex flex-col items-center gap-1",
+          // 잘라낸 항목 — 내용만 흐리게(선택 배경/커서 테두리는 또렷하게).
+          isCut && "opacity-40",
+        )}
+      >
         <Thumb entry={entry} location={location} size={48} />
         {renameRef ? (
           <InlineRenameInput
@@ -420,6 +434,7 @@ function TileRow({
   location,
   isCursor,
   isSelected,
+  isCut,
   dirSize,
   highlight,
   renameRef,
@@ -474,7 +489,14 @@ function TileRow({
       title={entry.name}
     >
       {/* 드래그 핸들 = 아이콘+이름/메타. 행 우측 여백은 마키 시작 영역. */}
-      <span data-drag-handle className="flex min-w-0 items-center gap-3">
+      <span
+        data-drag-handle
+        className={clsx(
+          "flex min-w-0 items-center gap-3",
+          // 잘라낸 항목 — 내용만 흐리게(선택 배경/커서 바는 또렷하게).
+          isCut && "opacity-40",
+        )}
+      >
         <Thumb entry={entry} location={location} size={24} />
         <div className="flex min-w-0 flex-col">
           {renameRef ? (

@@ -15,6 +15,7 @@ import { childLocation } from "@/lib/entryDnd";
 import { setHoverEntry, clearHover } from "@/stores/previewHover";
 import { useUI, densityMetrics } from "@/stores/ui";
 import { useContextMenu } from "@/stores/contextMenu";
+import { useCutNames } from "@/hooks/useCutNames";
 import { useMarquee } from "@/hooks/useMarquee";
 import { useEntryDrag } from "@/hooks/useEntryDrag";
 import { useDragState } from "@/stores/dragState";
@@ -77,6 +78,8 @@ export function EntryList({
   const location = usePanes((s) => activeTab(s, id).location);
   // "크기 계산" 결과(name → bytes) — 폴더 행의 크기 컬럼 표시.
   const dirSizes = usePanes((s) => activeTab(s, id).dirSizes);
+  // Ctrl+X 로 잘라내기 대기 중인 이름 — 해당 행을 흐리게 표시.
+  const cutNames = useCutNames(location);
   const dragActive = useDragState((s) => s.active);
   const overThisPane = useDragState((s) => s.overPane === id);
   const overFolder = useDragState((s) =>
@@ -269,6 +272,7 @@ export function EntryList({
                   entry={entry}
                   isCursor={cursorIndex === vi.index}
                   isSelected={selected.has(entry.name)}
+                  isCut={cutNames.has(entry.name)}
                   splitExt={splitExt}
                   localPath={
                     location.source.kind === "local"

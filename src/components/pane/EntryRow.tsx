@@ -11,6 +11,8 @@ interface EntryRowProps {
   entry: Entry;
   isCursor: boolean;
   isSelected: boolean;
+  /** Ctrl+X 로 잘라내기 대기 중 — 흐리게(반투명) 표시. */
+  isCut: boolean;
   /** 확장자를 별도 컬럼으로 분리 (TC 식). */
   splitExt: boolean;
   /** OS 아이콘 조회용 로컬 절대경로 — 원격 패널이면 null(글리프). */
@@ -35,6 +37,7 @@ export function EntryRow({
   entry,
   isCursor,
   isSelected,
+  isCut,
   splitExt,
   localPath,
   dirSize,
@@ -83,7 +86,14 @@ export function EntryRow({
       title={entry.name}
     >
       {/* 드래그 핸들 = 아이콘+이름 (항목 이동). 우측 메타 컬럼은 마키 시작 영역. */}
-      <span data-drag-handle className="flex min-w-0 flex-1 items-center gap-2">
+      <span
+        data-drag-handle
+        className={clsx(
+          "flex min-w-0 flex-1 items-center gap-2",
+          // 잘라낸 항목은 내용만 흐리게 — 행 배경(선택)·커서 바는 또렷하게 남긴다.
+          isCut && "opacity-40",
+        )}
+      >
         <EntryIcon entry={entry} size={14} localPath={localPath} />
         {renameRef && onRenameDone ? (
           <InlineRenameInput
@@ -104,14 +114,29 @@ export function EntryRow({
         )}
       </span>
       {splitExt && (
-        <span className="font-mono w-[var(--col-ext)] truncate text-meta text-fg-muted">
+        <span
+          className={clsx(
+            "font-mono w-[var(--col-ext)] truncate text-meta text-fg-muted",
+            isCut && "opacity-40",
+          )}
+        >
           {ext}
         </span>
       )}
-      <span className="font-mono w-[var(--col-size)] text-right text-meta text-fg-muted">
+      <span
+        className={clsx(
+          "font-mono w-[var(--col-size)] text-right text-meta text-fg-muted",
+          isCut && "opacity-40",
+        )}
+      >
         {formatSize(dirSize ?? entry.size)}
       </span>
-      <span className="font-mono w-[var(--col-mtime)] text-right text-meta text-fg-muted">
+      <span
+        className={clsx(
+          "font-mono w-[var(--col-mtime)] text-right text-meta text-fg-muted",
+          isCut && "opacity-40",
+        )}
+      >
         {formatTime(entry.modified_ms)}
       </span>
     </div>
