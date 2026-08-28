@@ -58,7 +58,11 @@ export function CopyOrMovePlanBody({
         </span>
       </div>
       <div className="text-meta text-fg-muted">
-        {t("dialog.transfer.summary", { count, size: formatSize(totalSize) })}
+        {/* 총량 0 = 미상 — 같은 볼륨 이동은 rename 이라 크기를 미리 재지 않는다
+            (backend move_plan). "0 B" 로 보여주면 빈 폴더로 오해하므로 뺀다. */}
+        {totalSize > 0
+          ? t("dialog.transfer.summary", { count, size: formatSize(totalSize) })
+          : t("dialog.transfer.summaryCountOnly", { count })}
         {" · "}
         {t("dialog.transfer.strategy", { label: strategyLabel(strategy) })}
       </div>

@@ -201,31 +201,39 @@ pub async fn delete_execute(
     match plan.mode {
         DeleteMode::Trash => {
             let batch_id = crate::services::trash::new_batch_id();
-            let mut items = Vec::new();
-            let mut outcome: Result<(), DuetError> = Ok(());
-            for (idx, t) in plan.targets.iter().enumerate() {
-                if let Some(p) = progress.as_ref() {
-                    p.emit(count_progress(idx as u32, total, Some(t.name.clone())));
-                }
-                let p = fs.join(&t.location.path, &t.name);
-                match fs.trash(&p, &batch_id).await {
-                    Ok(loc) => {
-                        let trash_path = match &loc {
-                            TrashLocation::Local { trash_id } => trash_id.clone(),
-                            TrashLocation::Remote { trash_path } => {
-                                trash_path.to_string_lossy().into_owned()
-                            }
-                        };
-                        items.push(TrashItem {
-                            trash_path,
-                            original_path: p,
-                        });
-                    }
-                    Err(e) => {
-                        outcome = Err(e);
-                        break;
-                    }
-                }
+            // 배치 한 번 — 로컬(OS 휴지통)은 항목마다 부르면 휴지통 열거 비용이 N배로
+            // 붙는다. 원격은 기본 구현이 항목별 mv 를 순차 수행(동작 동일).
+            if let Some(p) = progress.as_ref() {
+                p.emit(count_progress(
+                    0,
+                    total,
+                    plan.targets.first().map(|t| t.name.clone()),
+                ));
+            }
+            let paths: Vec<PathBuf> = plan
+                .targets
+                .iter()
+                .map(|t| fs.join(&t.location.path, &t.name))
+                .collect();
+            let (moved, err) = fs.trash_many(&paths, &batch_id).await;
+            let outcome: Result<(), DuetError> = match err {
+                Some(e) => Err(e),
+                None => Ok(()),
+            };
+            let items: Vec<TrashItem> = moved
+                .into_iter()
+                .map(|(original_path, loc)| TrashItem {
+                    trash_path: match &loc {
+                        TrashLocation::Local { trash_id } => trash_id.clone(),
+                        TrashLocation::Remote { trash_path } => {
+                            trash_path.to_string_lossy().into_owned()
+                        }
+                    },
+                    original_path,
+                })
+                .collect();
+            if let Some(p) = progress.as_ref() {
+                p.emit(count_progress(items.len() as u32, total, None));
             }
             if items.is_empty() {
                 // 아무 것도 휴지통으로 못 옮김 — 복원할 게 없으니 phantom 엔트리 안 남김.
@@ -278,11 +286,37 @@ pub async fn delete_execute(
 
 // === Copy ===
 
+/// plan 단계에서 총 바이트 측정에 허용하는 시간. 넘기면 "미상"(0)으로 두고 확인
+/// 다이얼로그를 먼저 띄운다 — 사용자를 기다리게 하는 것보다 분모가 늦게 채워지는 게 낫다.
+const MEASURE_BUDGET: std::time::Duration = std::time::Duration::from_millis(400);
+/// execute 시작 시 분모를 채우는 재측정 예산 — 넘기면 분모 없이 바로 복사를 시작한다.
+/// (다이얼로그 때보다 넉넉하다: 이미 진행 모달이 떠 있어 "작업 중"으로 보인다.)
+const EXECUTE_MEASURE_BUDGET: std::time::Duration = std::time::Duration::from_secs(3);
+
 pub async fn copy_plan(
     src_fs: &dyn FileSystem,
     dst_fs: &dyn FileSystem,
     items: Vec<EntryRef>,
     dst: Location,
+) -> Result<CopyPlan, DuetError> {
+    plan_transfer(src_fs, dst_fs, items, dst, true).await
+}
+
+/// copy/move 공통 plan — 충돌 목록 + (선택적) 총 바이트.
+///
+/// `measure_total=false` 면 `dir_size` 재귀 스캔을 건너뛰고 총량을 0(=미상)으로 둔다.
+/// 스캔은 대용량 트리에서 확인 다이얼로그가 뜨기까지의 지연 그 자체라, 총량이 실제로
+/// 필요 없는 경우(same-fs 이동=rename)엔 치르지 않는다.
+///
+/// `measure_total=true` 여도 **시간 상자**(`MEASURE_BUDGET`) 안에서만 잰다 — 예산을
+/// 넘기면 미상(0)으로 두고 다이얼로그를 먼저 띄운다. 분모는 execute 가 시작할 때
+/// `measure_total_bytes` 로 채운다(진행 모달이 이미 떠 있는 시점).
+async fn plan_transfer(
+    src_fs: &dyn FileSystem,
+    dst_fs: &dyn FileSystem,
+    items: Vec<EntryRef>,
+    dst: Location,
+    measure_total: bool,
 ) -> Result<CopyPlan, DuetError> {
     if items.is_empty() {
         return Err(DuetError::Io("no items".into()));
@@ -313,9 +347,15 @@ pub async fn copy_plan(
                 src_modified_ms: src_meta.as_ref().and_then(|m| m.modified_ms),
             });
         }
-        // 디렉토리는 하위 전체 크기(dir_size: 로컬=재귀 walk, SSH=du -sb)로 합산 →
-        // 폴더 복사도 진행률 분모(총량)가 정확해져 "얼마 남았는지" 표시 가능. 실패 시 0.
-        total += src_fs.dir_size(&src_path).await.unwrap_or(0);
+    }
+
+    // 디렉토리는 하위 전체 크기(dir_size: 로컬=재귀 walk, SSH=du -sb)로 합산 →
+    // 진행률 분모가 정확해진다. 다만 파일이 아주 많은 트리에선 이 스캔이 곧 "다이얼로그가
+    // 안 뜨는 시간"이라, 예산을 넘기면 포기하고 미상(0)으로 넘긴다.
+    if measure_total {
+        total = tokio::time::timeout(MEASURE_BUDGET, measure_total_bytes(src_fs, &items))
+            .await
+            .unwrap_or(0);
     }
 
     let strategy = decide_strategy(&src_source, &dst.source);
@@ -365,7 +405,20 @@ async fn copy_execute_relay(
         return Err(DuetError::Io("plan has no items".into()));
     }
     // 누적 바이트 진행률 — plan 전체 크기 대비. chunk 마다 호출되되 ~150ms throttle.
-    let total = plan.total_size_bytes;
+    // plan 이 시간 예산 안에 못 잰 경우(0=미상)엔 여기서 한 번 잰다 — 확인 다이얼로그를
+    // 붙잡지 않고, 진행 모달이 뜬 상태에서 분모를 채운다.
+    let total = if plan.total_size_bytes > 0 {
+        plan.total_size_bytes
+    } else {
+        // 여기서도 무한정 재지 않는다 — 예산을 넘기면 분모 없이(=진행률 indeterminate,
+        // 파일 수/속도는 그대로 표시) 복사를 바로 시작한다.
+        tokio::time::timeout(
+            EXECUTE_MEASURE_BUDGET,
+            measure_total_bytes(src_fs, &plan.items),
+        )
+        .await
+        .unwrap_or(0)
+    };
     // done/last 는 항목 시작 emit(emit_item_start)과 공유 — Arc.
     let done = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
     // (직전 emit 시각, 직전 emit 바이트) — throttle + 순간속도 계산.
@@ -570,6 +623,17 @@ async fn copy_execute_relay(
     Ok(entry)
 }
 
+/// plan 항목들의 총 바이트 — 진행률 분모. 개별 실패는 0 으로 친다(전체를 못 재는 것보다
+/// 낫다). `dir_size` 는 로컬=재귀 walk, SSH=`du -sb`.
+pub(crate) async fn measure_total_bytes(src_fs: &dyn FileSystem, items: &[EntryRef]) -> u64 {
+    let mut total = 0u64;
+    for it in items {
+        let src_path = src_fs.join(&it.location.path, &it.name);
+        total = total.saturating_add(src_fs.dir_size(&src_path).await.unwrap_or(0));
+    }
+    total
+}
+
 // === Move ===
 
 pub async fn move_plan(
@@ -578,8 +642,17 @@ pub async fn move_plan(
     items: Vec<EntryRef>,
     dst: Location,
 ) -> Result<MovePlan, DuetError> {
-    let copy = copy_plan(src_fs, dst_fs, items, dst.clone()).await?;
-    let is_same_fs = copy.src_source == dst.source;
+    // same-fs 이동은 rename — 바이트가 흐르지 않아 총량이 진행률 분모로 쓰이지 않는다.
+    // 그런데도 미리 스캔하면 대용량 폴더에서 "확인 다이얼로그가 안 뜨는" 무반응 구간만
+    // 생기므로 건너뛴다. 같은 SourceId 라도 물리 드라이브가 다르면(C:↔D:) rename 이
+    // cross-device 로 거부돼 실제 복사가 되는데, 그땐 move_execute 가 그 시점에 한 번
+    // 총량을 잰다(measure_total_bytes) — 진행률·ETA 는 그대로 나온다.
+    let src_source = items
+        .first()
+        .map(|t| t.location.source.clone())
+        .ok_or_else(|| DuetError::Io("no items".into()))?;
+    let is_same_fs = src_source == dst.source;
+    let copy = plan_transfer(src_fs, dst_fs, items, dst.clone(), !is_same_fs).await?;
     Ok(MovePlan {
         src_source: copy.src_source,
         dst: copy.dst,
@@ -613,7 +686,13 @@ pub async fn move_execute(
 
     // cross-fs 이동(=copy+trash)은 바이트 진행률을 emit — copy 와 동일 메커니즘.
     // (same-fs rename 은 atomic·즉시라 항목 완료마다만 갱신.)
-    let total = plan.total_size_bytes;
+    //
+    // same-fs plan 은 총량을 재지 않고 0(=미상)으로 온다. rename 이 cross-device 로
+    // 거부돼 실제 복사로 넘어가는 순간에만 아래에서 한 번 재서 채운다 — 그래서 Atomic.
+    let total = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(plan.total_size_bytes));
+    // 총량을 이미 쟀는지 — cross-device 폴백이 항목마다 반복 측정하지 않게.
+    let total_measured = std::sync::atomic::AtomicBool::new(!plan.is_same_fs);
+    let total_cb = total.clone();
     // done/last 는 항목 시작 emit(emit_item_start)과 공유 — Arc.
     let done = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
     let last = std::sync::Arc::new(std::sync::Mutex::new((std::time::Instant::now(), 0u64)));
@@ -629,6 +708,7 @@ pub async fn move_execute(
         let Some(p) = progress_cb.as_ref() else {
             return;
         };
+        let total = total_cb.load(Relaxed);
         let complete = total > 0 && d >= total;
         let speed = if let Ok(mut l) = last_cb.lock() {
             let now = std::time::Instant::now();
@@ -685,7 +765,7 @@ pub async fn move_execute(
             &done,
             idx as u32,
             &it.name,
-            total,
+            total.load(std::sync::atomic::Ordering::Relaxed),
             files_total,
         );
         // 한 항목 처리 — 내부 ?/return 은 이 async 블록만 빠져나와 아래 outcome 으로 잡힘.
@@ -724,6 +804,13 @@ pub async fn move_execute(
                     true
                 };
                 if needs_copy {
+                    // rename 이 cross-device 로 거부된 경우 = plan 이 건너뛴 총량이 이제
+                    // 필요해졌다. 딱 한 번, 남은 전체 항목에 대해 잰다. 확인은 이미 끝났고
+                    // 진행 모달이 떠 있는 시점이라 이 지연은 "작업 중"으로 보인다.
+                    if !total_measured.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                        let sum = measure_total_bytes(src_fs, &plan.items).await;
+                        total.store(sum, std::sync::atomic::Ordering::Relaxed);
+                    }
                     // copy 본체(스트리밍 — 바이트 진행률 emit) — connection loss 면 1회 retry(재개).
                     match crate::fs::copy_relay_streaming(
                         src_fs,
@@ -4275,6 +4362,59 @@ mod tests {
         assert_eq!(plan.conflicts[0].src_size, Some(3));
         assert!(plan.conflicts[0].dst_modified_ms.is_some());
         assert!(plan.conflicts[0].src_modified_ms.is_some());
+    }
+
+    /// same-fs 이동 plan 은 총량 스캔(dir_size)을 건너뛴다 — rename 이라 분모로 쓰이지
+    /// 않는데 대용량 폴더에서 확인 다이얼로그를 몇 초씩 붙잡던 비용. 충돌 탐지는 그대로.
+    #[tokio::test]
+    async fn move_plan_same_fs_skips_size_scan_but_keeps_conflicts() {
+        let dir = TempDir::new().unwrap();
+        tokio::fs::create_dir_all(dir.path().join("d/sub"))
+            .await
+            .unwrap();
+        tokio::fs::write(dir.path().join("d/sub/big"), vec![0u8; 4096])
+            .await
+            .unwrap();
+        tokio::fs::create_dir_all(dir.path().join("dst/d"))
+            .await
+            .unwrap();
+
+        let local = LocalFs::new();
+        let item = mk_target(dir.path(), "d");
+        let dst = Location {
+            source: SourceId::Local,
+            path: dir.path().join("dst"),
+        };
+
+        let mv = move_plan(&local, &local, vec![item.clone()], dst.clone())
+            .await
+            .unwrap();
+        assert!(mv.is_same_fs);
+        // 총량 미상(0) — 스캔을 안 했다는 뜻. 진행률은 indeterminate 로 표시된다.
+        assert_eq!(mv.total_size_bytes, 0);
+        // 그래도 충돌은 잡는다 (dst/d 가 이미 있음).
+        assert_eq!(mv.conflicts.len(), 1);
+        assert_eq!(mv.conflicts[0].name, "d");
+
+        // 복사는 총량이 진행률 분모라 그대로 잰다.
+        let cp = copy_plan(&local, &local, vec![item], dst).await.unwrap();
+        assert_eq!(cp.total_size_bytes, 4096);
+    }
+
+    /// 지연 측정 헬퍼 — cross-device 폴백에서 분모를 채우는 데 쓴다.
+    #[tokio::test]
+    async fn measure_total_bytes_sums_items() {
+        let dir = TempDir::new().unwrap();
+        tokio::fs::create_dir(dir.path().join("d")).await.unwrap();
+        tokio::fs::write(dir.path().join("d/x"), vec![0u8; 300])
+            .await
+            .unwrap();
+        tokio::fs::write(dir.path().join("f"), vec![0u8; 12])
+            .await
+            .unwrap();
+        let local = LocalFs::new();
+        let items = vec![mk_target(dir.path(), "d"), mk_target(dir.path(), "f")];
+        assert_eq!(measure_total_bytes(&local, &items).await, 312);
     }
 
     #[tokio::test]

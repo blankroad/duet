@@ -81,6 +81,26 @@ describe("CopyOrMovePlanBody", () => {
     expect(text).toContain("local");
   });
 
+  /**
+   * 같은 볼륨 이동(rename)은 총량을 미리 재지 않는다 — 그 스캔이 대용량 폴더에서
+   * 확인 다이얼로그를 몇 초씩 붙잡던 원인. 미상(0)을 "0 B" 로 쓰면 빈 폴더로 읽힌다.
+   */
+  it("총량 미상(0)이면 크기를 표시하지 않는다", () => {
+    const { container } = render(
+      <CopyOrMovePlanBody
+        items={[ref("bigfolder")]}
+        totalSize={0}
+        dstPath={DST}
+        conflicts={0}
+        strategy={LOCAL}
+      />,
+    );
+
+    const text = container.textContent ?? "";
+    expect(text).toContain("1 item(s)");
+    expect(text).not.toContain("0 B");
+  });
+
   it("충돌이 있으면 경고를 덧붙인다", () => {
     render(
       <CopyOrMovePlanBody

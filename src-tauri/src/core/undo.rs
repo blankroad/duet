@@ -125,22 +125,26 @@ pub async fn execute_undo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
                 Ok(f) => f,
                 Err(e) => return error("source unreachable", e),
             };
+            // 배치 복원 — 로컬은 휴지통 목록 조회를 항목마다 하지 않고 1회로 끝낸다.
+            let batch: Vec<(TrashLocation, PathBuf)> = items
+                .iter()
+                .map(|item| {
+                    let loc = match source {
+                        SourceId::Local => TrashLocation::Local {
+                            trash_id: item.trash_path.clone(),
+                        },
+                        SourceId::Ssh { .. } => TrashLocation::Remote {
+                            trash_path: PathBuf::from(&item.trash_path),
+                        },
+                    };
+                    (loc, item.original_path.clone())
+                })
+                .collect();
+            if let Err(e) = fs.restore_many(&batch).await {
+                return error("restore failed", e);
+            }
             let mut refresh = std::collections::HashSet::<PathBuf>::new();
             for item in items {
-                let actual_loc = match source {
-                    SourceId::Local => TrashLocation::Local {
-                        trash_id: item.trash_path.clone(),
-                    },
-                    SourceId::Ssh { .. } => TrashLocation::Remote {
-                        trash_path: PathBuf::from(&item.trash_path),
-                    },
-                };
-                if let Err(e) = fs
-                    .restore_from_trash(&actual_loc, &item.original_path)
-                    .await
-                {
-                    return error("restore failed", e);
-                }
                 if let Some(parent) = item.original_path.parent() {
                     refresh.insert(parent.to_path_buf());
                 }

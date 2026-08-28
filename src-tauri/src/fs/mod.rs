@@ -61,6 +61,28 @@ pub trait FileSystem: Send + Sync {
         path: &Path,
         batch_id: &str,
     ) -> Result<crate::types::TrashLocation, DuetError>;
+    /// 여러 항목을 **한 번에** 휴지통으로. 반환값은 실제로 사라진 항목만(순서 유지) +
+    /// 첫 실패(있으면). 부분 성공도 호출자가 journal 에 남길 수 있어야 하므로 둘 다 준다.
+    ///
+    /// 기본 구현은 `trash` 를 순차 호출(원격은 mv 라 배치 이득이 없다). 로컬은 OS 휴지통
+    /// API 를 항목마다 부르는 비용이 커서 오버라이드한다.
+    async fn trash_many(
+        &self,
+        paths: &[std::path::PathBuf],
+        batch_id: &str,
+    ) -> (
+        Vec<(std::path::PathBuf, crate::types::TrashLocation)>,
+        Option<DuetError>,
+    ) {
+        let mut done = Vec::with_capacity(paths.len());
+        for p in paths {
+            match self.trash(p, batch_id).await {
+                Ok(loc) => done.push((p.clone(), loc)),
+                Err(e) => return (done, Some(e)),
+            }
+        }
+        (done, None)
+    }
     async fn remove(&self, path: &Path) -> Result<(), DuetError>;
     /// trash 의 역동작 — undo 용. local/remote 구분 필요.
     async fn restore_from_trash(
@@ -68,6 +90,17 @@ pub trait FileSystem: Send + Sync {
         location: &crate::types::TrashLocation,
         original_path: &Path,
     ) -> Result<(), DuetError>;
+    /// `restore_from_trash` 의 배치판 — undo 가 한 번에 여러 항목을 되돌릴 때.
+    /// 기본 구현은 순차 호출. 로컬은 휴지통 목록 조회를 배치당 1회로 줄이려고 오버라이드한다.
+    async fn restore_many(
+        &self,
+        items: &[(crate::types::TrashLocation, std::path::PathBuf)],
+    ) -> Result<(), DuetError> {
+        for (loc, original) in items {
+            self.restore_from_trash(loc, original).await?;
+        }
+        Ok(())
+    }
     /// 단일 파일 전체 읽기. 큰 파일은 메모리 폭주 위험 — 복사는 `open_read`/`open_write`
     /// 스트리밍 사용. 이건 작은 파일(설정/미리보기 등) 전용.
     async fn read_full(&self, path: &Path) -> Result<Vec<u8>, DuetError>;
@@ -213,6 +246,13 @@ where
 /// relay 스트리밍 복사 버퍼 — 한 번에 메모리에 올리는 최대 바이트.
 /// 전체 파일이 아니라 이 크기씩 흘려보내 큰 파일에서도 메모리 bounded.
 const RELAY_CHUNK: usize = 256 * 1024;
+/// 로컬→로컬 청크 — 네트워크가 아니라 왕복 지연이 없으니 크게 잡아 blocking 풀
+/// 왕복 횟수를 줄인다(256 KiB 로는 GB 단위 파일에서 왕복만 수천 번).
+const LOCAL_CHUNK: usize = 4 * 1024 * 1024;
+/// 이 크기 이하의 로컬→로컬 파일은 OS 복사 API 한 번으로 처리(중간 취소·진행률 없음).
+/// 작은 파일 다수가 느리던 주원인이 파일당 open/read/write/close 왕복이었다.
+/// 이보다 큰 파일은 청크 스트리밍 유지 — 중간 취소와 바이트 진행률이 더 중요하다.
+const NATIVE_COPY_MAX: u64 = 64 * 1024 * 1024;
 
 /// 본인 PC 통한 stream copy. local↔ssh 양방향 OK; ssh↔ssh 는 호출 전에
 /// `core::ops` 가 same-host 검사 하고 차단.
@@ -281,9 +321,66 @@ async fn copy_tree(
         // Symlink/Other 는 target 내용을 따라가 복사 (MVP-2).
         _ => {
             on_file(src); // 현재 복사 중인 실제 파일 알림(폴더 내부 개별 파일 포함)
+                          // 로컬→로컬 + 적당한 크기 = OS 복사 API 한 번(Windows CopyFileExW /
+                          // macOS fclonefileat·fcopyfile / Linux copy_file_range). 재개(resume)는
+                          // 네트워크 전용이라 여기 해당 없음.
+            if !resume
+                && both_local(src_fs, dst_fs)
+                && matches!(meta.kind, crate::types::EntryKind::File)
+                && meta.size.unwrap_or(u64::MAX) <= NATIVE_COPY_MAX
+            {
+                if cancel.is_cancelled() {
+                    return Err(DuetError::Cancelled);
+                }
+                return native_copy_file(dst_fs, src, dst, on_bytes).await;
+            }
             stream_copy_file(src_fs, src, dst_fs, dst, resume, cancel, on_bytes).await
         }
     }
+}
+
+/// 양쪽 모두 로컬 파일시스템인가 — OS 복사 API 를 쓸 수 있는 조건.
+fn both_local(src_fs: &dyn FileSystem, dst_fs: &dyn FileSystem) -> bool {
+    matches!(src_fs.source_id(), crate::types::SourceId::Local)
+        && matches!(dst_fs.source_id(), crate::types::SourceId::Local)
+}
+
+/// OS 파일 복사 API 로 한 번에 — `.part` 에 쓰고 rename 하는 실패-안전 규칙은 동일.
+/// 진행률은 파일 단위(완료 시 크기만큼 한 번). 중간 취소는 안 되므로 호출자가 크기로 거른다.
+async fn native_copy_file(
+    dst_fs: &dyn FileSystem,
+    src: &std::path::Path,
+    dst: &std::path::Path,
+    on_bytes: &(dyn Fn(u64) + Send + Sync),
+) -> Result<(), DuetError> {
+    let part = part_path(dst);
+    let (from, to) = (src.to_path_buf(), part.clone());
+    let written = tokio::task::spawn_blocking(move || {
+        let n = std::fs::copy(&from, &to)?;
+        // 원본 수정시각 보존 — 탐색기/TC 관례. 스트리밍 경로도 아래에서 같이 맞춘다.
+        copy_mtime(&from, &to);
+        Ok::<u64, std::io::Error>(n)
+    })
+    .await
+    .map_err(|e| DuetError::Io(format!("spawn_blocking: {e}")))?
+    .map_err(|e| DuetError::Io(format!("copy: {e}")))?;
+    on_bytes(written);
+    finalize_part(dst_fs, &part, dst).await
+}
+
+/// src 의 수정시각을 dst 에 반영 — 실패는 무시(내용은 이미 복사됨, 시각은 부가).
+/// 이게 없으면 복사 직후 dst 가 항상 "더 최신"이라 비교/동기화가 어긋난다.
+fn copy_mtime(src: &std::path::Path, dst: &std::path::Path) {
+    let Ok(meta) = std::fs::metadata(src) else {
+        return;
+    };
+    let Ok(mtime) = meta.modified() else {
+        return;
+    };
+    let Ok(f) = std::fs::File::options().write(true).open(dst) else {
+        return;
+    };
+    let _ = f.set_times(std::fs::FileTimes::new().set_modified(mtime));
 }
 
 /// `<dst>.duet-part` 임시 경로 — 완성 전까지 여기에 쓰고, 끝나면 dst 로 rename.
@@ -297,7 +394,7 @@ fn part_path(dst: &std::path::Path) -> std::path::PathBuf {
 /// 단일 파일을 고정 버퍼로 흘려 복사 — 전체를 메모리에 올리지 않음(대용량 안전).
 /// `<dst>.duet-part` 에 쓴 뒤 dst 로 rename(중단 시 반쪽 파일을 최종 이름에 안 남김).
 /// `resume=true` 면 기존 .part 크기부터 이어쓰기. chunk 경계마다 취소 검사 + `on_bytes`.
-async fn stream_copy_file(
+pub(crate) async fn stream_copy_file(
     src_fs: &dyn FileSystem,
     src: &std::path::Path,
     dst_fs: &dyn FileSystem,
@@ -321,7 +418,9 @@ async fn stream_copy_file(
     };
     let mut reader = src_fs.open_read(src, start).await?;
     let mut writer = dst_fs.open_write(&part, start).await?;
-    let mut buf = vec![0u8; RELAY_CHUNK];
+    // 로컬끼리는 큰 청크 — 네트워크 왕복이 없으니 청크당 blocking 풀 왕복만 줄이면 된다.
+    let local = both_local(src_fs, dst_fs);
+    let mut buf = vec![0u8; if local { LOCAL_CHUNK } else { RELAY_CHUNK }];
     loop {
         if cancel.is_cancelled() {
             return Err(DuetError::Cancelled);
@@ -347,6 +446,11 @@ async fn stream_copy_file(
         .shutdown()
         .await
         .map_err(|e| DuetError::Io(format!("copy close: {e}")))?;
+    // 로컬→로컬은 원본 수정시각 보존 — 네이티브 경로(native_copy_file)와 동일하게.
+    if local {
+        let (from, to) = (src.to_path_buf(), part.clone());
+        let _ = tokio::task::spawn_blocking(move || copy_mtime(&from, &to)).await;
+    }
     // 완성 — .part 를 최종 이름으로 교체.
     finalize_part(dst_fs, &part, dst).await
 }
