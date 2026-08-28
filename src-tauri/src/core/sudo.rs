@@ -290,7 +290,10 @@ mod tests {
         // KeepBoth 는 기존을 절대 덮어쓰지 않고 `stem (n)ext` 가용 이름을 찾아 새 항목만 기록.
         let s = build_script(
             ElevatedOp::Copy,
-            &[(PathBuf::from("/a/app.conf"), Some(PathBuf::from("/etc/app.conf")))],
+            &[(
+                PathBuf::from("/a/app.conf"),
+                Some(PathBuf::from("/etc/app.conf")),
+            )],
             ConflictPolicy::KeepBoth,
         )
         .unwrap();
@@ -306,7 +309,10 @@ mod tests {
         // 확장자 없는 이름(및 선두 dot)은 확장자 분리 안 함.
         let s = build_script(
             ElevatedOp::Copy,
-            &[(PathBuf::from("/a/README"), Some(PathBuf::from("/etc/README")))],
+            &[(
+                PathBuf::from("/a/README"),
+                Some(PathBuf::from("/etc/README")),
+            )],
             ConflictPolicy::KeepBoth,
         )
         .unwrap();

@@ -529,12 +529,12 @@ mod tests {
         // undo 진행 전엔 redo 없음.
         assert!(j.peek_redoable().await.unwrap().is_none());
         // undo 순서 B → A. redo 는 역순 A → B.
-        j.commit_undone(b.id.clone()).await.unwrap();
-        j.commit_undone(a.id.clone()).await.unwrap();
+        j.commit_undone(b.id).await.unwrap();
+        j.commit_undone(a.id).await.unwrap();
         assert_eq!(j.peek_redoable().await.unwrap().unwrap().id, a.id);
-        j.commit_redone(a.id.clone()).await.unwrap();
+        j.commit_redone(a.id).await.unwrap();
         assert_eq!(j.peek_redoable().await.unwrap().unwrap().id, b.id);
-        j.commit_redone(b.id.clone()).await.unwrap();
+        j.commit_redone(b.id).await.unwrap();
         assert!(j.peek_redoable().await.unwrap().is_none());
     }
 
@@ -544,12 +544,12 @@ mod tests {
         let path = dir.path().join("j.jsonl");
         let j = Journal::load_from(&path).await.unwrap();
         let a = j.push(mk_op(), mk_undo()).await.unwrap();
-        j.commit_undone(a.id.clone()).await.unwrap();
+        j.commit_undone(a.id).await.unwrap();
         // 새 push 가 끼면 마지막 entry 가 non-undone → redo 불가 (표준 관례).
         let b = j.push(mk_op(), mk_undo()).await.unwrap();
         assert!(j.peek_redoable().await.unwrap().is_none());
-        j.commit_undone(b.id.clone()).await.unwrap();
-        j.commit_redone(b.id.clone()).await.unwrap();
+        j.commit_undone(b.id).await.unwrap();
+        j.commit_redone(b.id).await.unwrap();
         // replay: MarkRedone 반영 — b 는 undone=false, a 는 여전히 undone.
         let j2 = Journal::load_from(&path).await.unwrap();
         let hist = j2.history(10).await;

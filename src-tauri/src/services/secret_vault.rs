@@ -124,10 +124,7 @@ impl SecretVault {
     /// UI 힌트("저장된 비밀번호 사용")용 — 프론트에 안전하게 노출 가능.
     pub async fn has(&self, alias: &str) -> bool {
         let inner = self.inner.read().await;
-        inner
-            .map
-            .as_ref()
-            .is_some_and(|m| m.contains_key(alias))
+        inner.map.as_ref().is_some_and(|m| m.contains_key(alias))
     }
 
     /// alias 에 비밀번호 저장 후 disk flush. Locked 상태면 Err.

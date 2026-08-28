@@ -264,8 +264,7 @@ pub async fn connection_open_adhoc(
         identity_files: key_path.into_iter().collect(),
         proxy_jump: vec![],
     };
-    let password =
-        resolve_password(password, saved_password_alias.as_deref(), vault.inner()).await;
+    let password = resolve_password(password, saved_password_alias.as_deref(), vault.inner()).await;
     open_and_register(
         entry,
         &[],
