@@ -339,6 +339,58 @@ async fn copy_tree(
     }
 }
 
+/// 파일명 한 칸(경로 컴포넌트)의 최대 길이.
+///
+/// NTFS·APFS·ext4 모두 255 다 — NTFS 는 UTF-16 단위, 나머지는 바이트 기준. UTF-16
+/// 단위 수는 항상 UTF-8 바이트 수 이하라서 **바이트로 재면 양쪽 모두 안전**하다.
+pub(crate) const MAX_COMPONENT: usize = 255;
+
+/// 이름 뒤에 접미사를 붙이되 `MAX_COMPONENT` 를 넘지 않게 한다.
+///
+/// 넘칠 것 같으면 이름 앞부분만 남기고 자르는데, 서로 다른 이름이 잘려서 같아지지 않도록
+/// 원래 이름의 짧은 해시를 끼운다. 해시는 **결정적**이어야 한다 — 중단된 복사를 재개할 때
+/// 같은 `.duet-part` 를 다시 찾아야 하므로 난수/시각을 쓰면 안 된다.
+///
+/// 이게 없으면 이름이 245자쯤 넘는 항목은 `.duet-part`(+10) 때문에 복사 자체가
+/// "File name too long" 으로 실패한다 — 목록은 멀쩡한데 복사만 안 되는 증상.
+pub(crate) fn suffixed_name(name: &str, suffix: &str) -> String {
+    if name.len() + suffix.len() <= MAX_COMPONENT {
+        return format!("{name}{suffix}");
+    }
+    let tag = format!("-{:08x}", fnv1a(name));
+    let budget = MAX_COMPONENT.saturating_sub(suffix.len() + tag.len());
+    let mut cut = budget.min(name.len());
+    // UTF-8 문자 중간에서 자르지 않는다.
+    while cut > 0 && !name.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    format!("{}{}{}", &name[..cut], tag, suffix)
+}
+
+/// FNV-1a 32bit — 잘린 이름의 구분자용(암호학적 용도 아님). 릴리스가 바뀌어도 값이
+/// 같아야 해서 표준 해셔(DefaultHasher, 안정성 미보장) 대신 직접 쓴다.
+fn fnv1a(s: &str) -> u32 {
+    let mut h: u32 = 0x811c_9dc5;
+    for b in s.as_bytes() {
+        h ^= *b as u32;
+        h = h.wrapping_mul(0x0100_0193);
+    }
+    h
+}
+
+/// `path` 의 파일명에 접미사를 붙인 형제 경로 — 길이 한계를 지킨다.
+/// 이름이 비-UTF8 이면 예전처럼 그냥 이어붙인다(길이 조정 불가, 흔치 않은 경우).
+pub(crate) fn sibling_with_suffix(path: &std::path::Path, suffix: &str) -> std::path::PathBuf {
+    match path.file_name().and_then(|n| n.to_str()) {
+        Some(name) => path.with_file_name(suffixed_name(name, suffix)),
+        None => {
+            let mut s = path.as_os_str().to_os_string();
+            s.push(suffix);
+            std::path::PathBuf::from(s)
+        }
+    }
+}
+
 /// 양쪽 모두 로컬 파일시스템인가 — OS 복사 API 를 쓸 수 있는 조건.
 fn both_local(src_fs: &dyn FileSystem, dst_fs: &dyn FileSystem) -> bool {
     matches!(src_fs.source_id(), crate::types::SourceId::Local)
@@ -386,9 +438,7 @@ fn copy_mtime(src: &std::path::Path, dst: &std::path::Path) {
 /// `<dst>.duet-part` 임시 경로 — 완성 전까지 여기에 쓰고, 끝나면 dst 로 rename.
 /// 중단되면 dst(최종 이름)는 안 생기고 .part 만 남아 재개에 쓰인다.
 fn part_path(dst: &std::path::Path) -> std::path::PathBuf {
-    let mut s = dst.as_os_str().to_os_string();
-    s.push(".duet-part");
-    std::path::PathBuf::from(s)
+    sibling_with_suffix(dst, ".duet-part")
 }
 
 /// 단일 파일을 고정 버퍼로 흘려 복사 — 전체를 메모리에 올리지 않음(대용량 안전).
@@ -466,11 +516,7 @@ async fn finalize_part(
 ) -> Result<(), DuetError> {
     if let Err(e) = dst_fs.rename(part, dst).await {
         if dst_fs.metadata(dst).await.is_ok() {
-            let backup = {
-                let mut s = dst.as_os_str().to_os_string();
-                s.push(".duet-old");
-                std::path::PathBuf::from(s)
-            };
+            let backup = sibling_with_suffix(dst, ".duet-old");
             dst_fs.rename(dst, &backup).await?; // dst → 백업 (원본 보존)
             dst_fs.rename(part, dst).await?; // part → dst
             let _ = dst_fs.remove(&backup).await; // 백업 정리 (실패는 비치명)
@@ -488,6 +534,47 @@ mod tests {
     use async_trait::async_trait;
     use std::path::Path;
     use std::pin::Pin;
+
+    /// 짧은 이름은 그대로 이어붙인다.
+    #[test]
+    fn suffixed_name_keeps_short_names_intact() {
+        assert_eq!(
+            super::suffixed_name("a.txt", ".duet-part"),
+            "a.txt.duet-part"
+        );
+    }
+
+    /// 긴 이름은 한계(255) 안으로 자르되 접미사는 온전히 남는다.
+    #[test]
+    fn suffixed_name_truncates_to_component_limit() {
+        let long = "n".repeat(250) + ".txt";
+        let got = super::suffixed_name(&long, ".duet-part");
+        assert!(got.len() <= super::MAX_COMPONENT, "len={}", got.len());
+        assert!(got.ends_with(".duet-part"));
+        // 결정적이어야 한다 — 재개가 같은 .part 를 다시 찾는다.
+        assert_eq!(got, super::suffixed_name(&long, ".duet-part"));
+    }
+
+    /// 앞부분이 같아도 잘린 결과가 겹치지 않는다(해시 태그).
+    #[test]
+    fn suffixed_name_distinguishes_names_with_same_prefix() {
+        let a = "x".repeat(250) + "-a.txt";
+        let b = "x".repeat(250) + "-b.txt";
+        assert_ne!(
+            super::suffixed_name(&a, ".duet-part"),
+            super::suffixed_name(&b, ".duet-part")
+        );
+    }
+
+    /// 멀티바이트 이름을 문자 중간에서 자르지 않는다(유효한 UTF-8 유지).
+    #[test]
+    fn suffixed_name_cuts_on_char_boundary() {
+        let long = "한글이름".repeat(30); // 4자 × 30 = 120자 / 360바이트
+        let got = super::suffixed_name(&long, ".duet-part");
+        assert!(got.len() <= super::MAX_COMPONENT);
+        assert!(got.ends_with(".duet-part"));
+        assert!(std::str::from_utf8(got.as_bytes()).is_ok());
+    }
 
     #[test]
     fn posix_join_preserves_name_backslash_and_uses_forward_slash() {

@@ -86,7 +86,7 @@ pub fn archive_stem(name: &str) -> String {
             }
         }
     }
-    format!("{name}.extracted")
+    crate::fs::suffixed_name(name, ".extracted")
 }
 
 // === Extract ===

@@ -330,13 +330,14 @@ fn remove_path(p: &Path) -> std::io::Result<()> {
 
 /// `<dst>.duet-elevbak` — Overwrite 임시백업 경로. 이미 있으면 숫자 suffix.
 fn backup_temp_path(dst: &Path) -> PathBuf {
-    let base = format!("{}.duet-elevbak", dst.to_string_lossy());
-    let cand = PathBuf::from(&base);
+    // 이름 길이 한계(255)를 넘기면 앞부분을 잘라 자리를 만든다 — 안 그러면 긴 이름의
+    // 항목에서 백업 자체가 실패해 덮어쓰기가 통째로 무산된다.
+    let cand = crate::fs::sibling_with_suffix(dst, ".duet-elevbak");
     if !cand.exists() {
         return cand;
     }
     for n in 1..10000 {
-        let c = PathBuf::from(format!("{base}.{n}"));
+        let c = crate::fs::sibling_with_suffix(dst, &format!(".duet-elevbak.{n}"));
         if !c.exists() {
             return c;
         }
@@ -356,7 +357,7 @@ fn unique_path(dst: &Path) -> PathBuf {
         .map(|s| format!(".{}", s.to_string_lossy()))
         .unwrap_or_default();
     for n in 1..10000 {
-        let cand = parent.join(format!("{stem} ({n}){ext}"));
+        let cand = parent.join(crate::fs::suffixed_name(&stem, &format!(" ({n}){ext}")));
         if !cand.exists() {
             return cand;
         }

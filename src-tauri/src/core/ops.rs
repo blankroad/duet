@@ -99,20 +99,26 @@ async fn dedup_dst_name(dst_fs: &dyn FileSystem, dir: &std::path::Path, name: &s
         _ => (name, ""),
     };
     for n in 1..=9999 {
-        let cand = format!("{stem} ({n}){ext}");
+        // 길이 한계를 넘으면 stem 을 잘라 자리를 만든다(§ suffixed_name).
+        let cand = crate::fs::suffixed_name(stem, &format!(" ({n}){ext}"));
         let path = dir.join(&cand);
         if dst_fs.metadata(&path).await.is_err() {
             return path;
         }
     }
     // 극단적 폴백 — timestamp 로 유일화.
-    dir.join(format!("{stem} ({}){ext}", backup_name("")))
+    dir.join(crate::fs::suffixed_name(
+        stem,
+        &format!(" ({}){ext}", backup_name("")),
+    ))
 }
 
 /// `name` → `name.bak.<ts>`. timestamp 충돌 시 .<n> suffix 는 호출자가 retry.
 pub fn backup_name(original: &str) -> String {
     let ts = chrono::Utc::now().format("%Y%m%d-%H%M%S");
-    format!("{original}.bak.{ts}")
+    // 이름이 길면 앞부분을 잘라 접미사 자리를 만든다 — 안 그러면 백업 rename 이
+    // "File name too long" 으로 실패해 덮어쓰기 복사 전체가 무산된다.
+    crate::fs::suffixed_name(original, &format!(".bak.{ts}"))
 }
 
 // === Delete ===
@@ -3455,7 +3461,7 @@ pub(crate) async fn pick_backup_path(
         return Ok(candidate);
     }
     for n in 2..=6 {
-        candidate = fs.join(parent, &format!("{base}.{n}"));
+        candidate = fs.join(parent, &crate::fs::suffixed_name(&base, &format!(".{n}")));
         if fs.metadata(&candidate).await.is_err() {
             return Ok(candidate);
         }
@@ -3844,6 +3850,67 @@ mod tests {
         assert!(create_file(&fs, parent, "a/b.txt".into(), &ctx)
             .await
             .is_err());
+    }
+
+    /// 사용자 시나리오 재현: 이름이 아주 긴 항목을 복사 — 충돌(Replace: 임시백업 rename)
+    /// 까지 포함해 끝까지 간다. 예전엔 `.duet-part`(+10)·`.bak.<ts>`(+20) 가 파일명
+    /// 한계를 넘겨 "File name too long" 으로 통째로 실패했다(탐색은 멀쩡한데 복사만 안 됨).
+    #[tokio::test]
+    async fn copy_long_named_item_over_existing_succeeds() {
+        let dir = TempDir::new().unwrap();
+        let src = dir.path().join("src");
+        let dst = dir.path().join("dst");
+        tokio::fs::create_dir_all(&src).await.unwrap();
+        tokio::fs::create_dir_all(&dst).await.unwrap();
+        let long = "가".repeat(80) + ".txt"; // 84자 / 244바이트 — OS 한계 바로 아래
+        tokio::fs::write(src.join(&long), b"NEW").await.unwrap();
+        tokio::fs::write(dst.join(&long), b"OLD").await.unwrap();
+
+        let local = LocalFs::new();
+        let items = vec![EntryRef {
+            location: Location {
+                source: SourceId::Local,
+                path: src.clone(),
+            },
+            name: long.clone(),
+        }];
+        let dst_loc = Location {
+            source: SourceId::Local,
+            path: dst.clone(),
+        };
+        let plan = copy_plan(&local, &local, items, dst_loc).await.unwrap();
+        assert_eq!(plan.conflicts.len(), 1, "덮어쓰기 충돌이 잡혀야 한다");
+        let (ctx, _keep) = mk_ctx().await;
+        copy_execute(
+            &local,
+            &local,
+            plan,
+            ConflictPolicy::Replace,
+            &ctx,
+            tokio_util::sync::CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(tokio::fs::read(dst.join(&long)).await.unwrap(), b"NEW");
+    }
+
+    /// 긴 이름의 백업/유니크 이름도 파일명 한계(255) 안에 들어와야 한다 —
+    /// 안 그러면 충돌 시 rename 이 실패해 복사/이동 전체가 무산된다.
+    #[tokio::test]
+    async fn long_names_stay_within_component_limit() {
+        let long = "n".repeat(250) + ".txt";
+        assert!(backup_name(&long).len() <= crate::fs::MAX_COMPONENT);
+
+        let dir = TempDir::new().unwrap();
+        tokio::fs::write(dir.path().join(&long), b"x")
+            .await
+            .unwrap();
+        let local = LocalFs::new();
+        let unique = dedup_dst_name(&local, dir.path(), &long).await;
+        let name = unique.file_name().unwrap().to_string_lossy();
+        assert!(name.len() <= crate::fs::MAX_COMPONENT, "len={}", name.len());
+        assert_ne!(name, long, "충돌 회피 이름은 원본과 달라야 한다");
     }
 
     #[tokio::test]

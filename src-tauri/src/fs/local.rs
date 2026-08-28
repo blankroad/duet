@@ -997,6 +997,21 @@ mod tests {
 
     /// 다중 chunk 파일(>256KB)을 스트리밍 복사 — chunk 경계 정확성 + 진행률 누적 확인.
     /// 전체를 메모리에 안 올리는 경로가 바이트 단위로 정확한지 검증.
+    /// 재현: 이름이 긴 파일 복사. `.duet-part` 접미(+10)가 파일명 한계(255)를 넘기면
+    /// 복사가 통째로 실패한다 — 목록/탐색은 멀쩡한데 복사만 안 되는 증상.
+    #[tokio::test]
+    async fn copy_file_with_very_long_name() {
+        let dir = TempDir::new().unwrap();
+        let name = "n".repeat(250) + ".txt"; // 254자 — OS 한계(255) 안
+        let src = dir.path().join(&name);
+        let dstdir = dir.path().join("out");
+        fs::create_dir(&dstdir).await.unwrap();
+        fs::write(&src, b"x").await.unwrap();
+        let local = LocalFs::new();
+        let r = crate::fs::copy_relay(&local, &src, &local, &dstdir.join(&name)).await;
+        assert!(r.is_ok(), "긴 이름 복사가 실패: {:?}", r.err());
+    }
+
     /// 로컬→로컬 파일 복사는 OS 복사 API 경로 — 내용·수정시각 보존, `.part` 잔여물 없음.
     #[tokio::test]
     async fn local_copy_preserves_mtime_and_leaves_no_part() {

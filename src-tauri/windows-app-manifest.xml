@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Windows 앱 매니페스트. tauri-build 기본값(Common-Controls 6 의존성)에
+  longPathAware 를 더한 것 — 그 외에는 기본과 동일하다.
+
+  longPathAware: MAX_PATH(260) 를 넘는 경로를 Win32/COM API 에 그대로 넘길 수 있게 한다.
+  duet 자체 파일 조작은 Rust std 가 `\\?\` 로 바꿔줘서 이미 되지만, 셸 API 를 쓰는
+  기능(휴지통 삭제/복원, 아이콘·썸네일, 우클릭 셸 메뉴, 열기/탐색기에서 보기)은 이
+  선언이 없으면 260자에서 실패한다. 단, 사용자 PC 의 레지스트리
+  HKLM\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled 도 1 이어야
+  실제로 켜진다(기본 꺼짐) — 꺼져 있으면 이 선언은 무해한 no-op.
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+        type="win32"
+        name="Microsoft.Windows.Common-Controls"
+        version="6.0.0.0"
+        processorArchitecture="*"
+        publicKeyToken="6595b64144ccf1df"
+        language="*"
+      />
+    </dependentAssembly>
+  </dependency>
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
+    </windowsSettings>
+  </application>
+</assembly>
