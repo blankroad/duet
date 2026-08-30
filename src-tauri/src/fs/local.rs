@@ -1245,3 +1245,114 @@ mod tests {
         assert_eq!(local.dir_size(&root).await.unwrap(), 500);
     }
 }
+
+// === OS 휴지통 가상 뷰 (Windows Recycle Bin / XDG Trash) — sync, spawn_blocking 안에서 호출 ===
+//
+// `trash::os_limited` 는 탐색기/파일 관리자가 쓰는 것과 같은 셸/XDG API 라 관리자 권한이
+// 필요 없다. 항목은 경로가 아니라 crate 의 `id` 로 식별한다 (Windows 는 셸 파싱 이름,
+// Linux 는 .trashinfo 경로).
+#[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
+impl LocalFs {
+    /// 휴지통 전체 목록. 종류(파일/폴더)·크기는 항목당 `metadata` 셸 호출로 얻는다.
+    pub fn trash_view_list() -> Result<Vec<crate::types::TrashItemDto>, DuetError> {
+        use crate::types::TrashItemDto;
+        use trash::{os_limited, TrashItemSize};
+        let listed = os_limited::list().map_err(|e| DuetError::Io(format!("trash list: {e}")))?;
+        Ok(listed
+            .into_iter()
+            .map(|it| {
+                let (kind, size) = match os_limited::metadata(&it) {
+                    Ok(m) => match m.size {
+                        TrashItemSize::Bytes(b) => (EntryKind::File, Some(b)),
+                        _ => (EntryKind::Dir, None),
+                    },
+                    Err(_) => (EntryKind::File, None),
+                };
+                TrashItemDto {
+                    id: it.id.to_string_lossy().into_owned(),
+                    name: it.name.to_string_lossy().into_owned(),
+                    kind,
+                    original_path: it.original_path(),
+                    deleted_ms: Some(it.time_deleted.saturating_mul(1000)),
+                    size,
+                }
+            })
+            .collect())
+    }
+
+    /// `ids` 에 해당하는 항목을 현재 휴지통 목록에서 고른다. 하나라도 없으면(그새 비워짐 등) 오류.
+    fn trash_view_pick(ids: &[String]) -> Result<Vec<trash::TrashItem>, DuetError> {
+        use std::collections::HashSet;
+        let want: HashSet<&str> = ids.iter().map(String::as_str).collect();
+        let listed =
+            trash::os_limited::list().map_err(|e| DuetError::Io(format!("trash list: {e}")))?;
+        let picked: Vec<trash::TrashItem> = listed
+            .into_iter()
+            .filter(|i| want.contains(i.id.to_string_lossy().as_ref()))
+            .collect();
+        if picked.len() != want.len() {
+            return Err(DuetError::Io(
+                "some trash items no longer exist — refresh the trash view".into(),
+            ));
+        }
+        Ok(picked)
+    }
+
+    /// 제자리 복원. 원래 위치에 같은 이름이 이미 있으면 덮어쓰지 않고 오류.
+    /// 반환: 복원된 항목들의 원래 부모 폴더 (새로고침용).
+    pub fn trash_view_put_back(ids: &[String]) -> Result<Vec<std::path::PathBuf>, DuetError> {
+        let picked = Self::trash_view_pick(ids)?;
+        for it in &picked {
+            let original = it.original_path();
+            if original.exists() {
+                return Err(DuetError::Io(format!(
+                    "restore target exists: {}",
+                    original.display()
+                )));
+            }
+        }
+        let parents = picked.iter().map(|i| i.original_parent.clone()).collect();
+        trash::os_limited::restore_all(picked)
+            .map_err(|e| DuetError::Io(format!("restore: {e:?}")))?;
+        Ok(parents)
+    }
+
+    /// 선택 항목 영구 삭제. 지운 개수 반환.
+    pub fn trash_view_purge(ids: &[String]) -> Result<u32, DuetError> {
+        let picked = Self::trash_view_pick(ids)?;
+        let n = picked.len() as u32;
+        trash::os_limited::purge_all(picked).map_err(|e| DuetError::Io(format!("purge: {e}")))?;
+        Ok(n)
+    }
+
+    /// 휴지통 비우기. 지운 개수 반환.
+    pub fn trash_view_purge_all() -> Result<u32, DuetError> {
+        let listed =
+            trash::os_limited::list().map_err(|e| DuetError::Io(format!("trash list: {e}")))?;
+        let n = listed.len() as u32;
+        trash::os_limited::purge_all(listed).map_err(|e| DuetError::Io(format!("purge: {e}")))?;
+        Ok(n)
+    }
+}
+
+/// macOS: trash crate 가 `os_limited`(목록/복원/purge)를 제공하지 않는다 — 명시 거부.
+#[cfg(not(any(target_os = "windows", all(unix, not(target_os = "macos")))))]
+impl LocalFs {
+    fn trash_view_unsupported<T>() -> Result<T, DuetError> {
+        Err(DuetError::NotSupported(
+            "trash view is not available on this OS".into(),
+        ))
+    }
+    pub fn trash_view_list() -> Result<Vec<crate::types::TrashItemDto>, DuetError> {
+        Self::trash_view_unsupported()
+    }
+    pub fn trash_view_put_back(_ids: &[String]) -> Result<Vec<std::path::PathBuf>, DuetError> {
+        Self::trash_view_unsupported()
+    }
+    pub fn trash_view_purge(_ids: &[String]) -> Result<u32, DuetError> {
+        Self::trash_view_unsupported()
+    }
+    pub fn trash_view_purge_all() -> Result<u32, DuetError> {
+        Self::trash_view_unsupported()
+    }
+}

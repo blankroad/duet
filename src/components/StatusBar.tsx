@@ -9,6 +9,7 @@ import {
 import type { Entry } from "@/types/bindings";
 import { formatSize } from "@/lib/format";
 import { useHostLabel } from "@/lib/hostLabel";
+import { isVirtualTrash, trashItemFor } from "@/lib/trashView";
 import {
   kindLabel,
   formatPerms,
@@ -65,6 +66,12 @@ export function StatusBar() {
           .join(" · ")
       : null;
 
+  // 가상 휴지통 — 상세 대신 원래 위치(어디서 지웠는지)가 더 중요하다.
+  const trashOriginal =
+    focused && isVirtualTrash(tab.location)
+      ? trashItemFor(focused.name)?.original_path
+      : undefined;
+
   return (
     <footer className="flex h-6 items-center gap-3 border-t border-border px-3 text-meta text-fg-muted">
       <span className="shrink-0">
@@ -80,7 +87,9 @@ export function StatusBar() {
               {focused.name}
             </span>
             {" — "}
-            {focusedMeta}
+            {trashOriginal
+              ? `${t("statusbar.originalPath")} ${trashOriginal}`
+              : focusedMeta}
           </>
         )}
       </span>

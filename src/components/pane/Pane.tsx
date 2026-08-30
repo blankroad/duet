@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Loader } from "lucide-react";
 import { TabBar } from "./TabBar";
 import { PathBar } from "./PathBar";
+import { isVirtualTrash } from "@/lib/trashView";
 import { PaneFilterBar } from "./PaneFilterBar";
 import { SelectPatternBar } from "./SelectPatternBar";
 import { ConnectionBanner } from "./ConnectionBanner";
@@ -132,6 +133,7 @@ export function Pane({
       <PathBar
         location={tab.location}
         archive={tab.archive}
+        trash={isVirtualTrash(tab.location)}
         canBack={tab.history.index > 0}
         canForward={tab.history.index < tab.history.stack.length - 1}
         onBack={() => onBack(id)}

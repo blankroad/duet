@@ -74,6 +74,7 @@ import {
   clipCut,
   clipPaste,
   addSelectionToShelf,
+  triggerEmptyTrash,
 } from "@/lib/fileActions";
 import { useClipboard } from "@/stores/clipboard";
 import type { MenuEntry } from "@/stores/contextMenu";
@@ -93,6 +94,8 @@ export interface EntryMenuDeps {
   selectedCount: number;
   /** 휴지통 탐색 중이면 true — "Put back" 항목 노출. */
   inTrash?: boolean;
+  /** Windows 가상 휴지통 뷰 — 전용 메뉴(복원/영구삭제/비우기)만 노출. */
+  inVirtualTrash?: boolean;
   onActivate: (id: PaneId, entry: Entry) => void;
   onOpenInOtherPane: (id: PaneId, entry: Entry) => void;
   /** 휴지통 항목 원위치 복원. */
@@ -132,7 +135,9 @@ async function revealEntry(target: Location): Promise<void> {
 async function openTerminalAt(target: Location): Promise<void> {
   const r = await commands.openTerminal(target);
   if (r.status === "error")
-    useToast.getState().show(`Open terminal failed: ${formatErr(r.error)}`, "error");
+    useToast
+      .getState()
+      .show(`Open terminal failed: ${formatErr(r.error)}`, "error");
 }
 
 /** 원격 파일을 에디터로 열고 변경 시 자동 재업로드(편집 라운드트립). */
@@ -150,6 +155,7 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
     location,
     selectedCount,
     inTrash,
+    inVirtualTrash,
     onActivate,
     onOpenInOtherPane,
     onPutBack,
@@ -162,6 +168,39 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
   const alias = sshAlias(location);
 
   const items: MenuEntry[] = [];
+
+  // 가상 휴지통(Windows Recycle Bin) — 실제 경로가 아니라 일반 파일 작업이 성립하지
+  // 않는다. 복원/영구삭제/비우기만.
+  if (inVirtualTrash) {
+    return [
+      {
+        id: "put-back",
+        label: i18n.t("menu.putBack"),
+        icon: <Undo2 size={ICON} />,
+        onSelect: () => onPutBack?.(),
+      },
+      {
+        id: "purge",
+        label: i18n.t("menu.deletePermanently"),
+        icon: <Trash2 size={ICON} />,
+        shortcut: "Del",
+        onSelect: () => void triggerDelete("trash", open, showToast),
+      },
+      sep(),
+      {
+        id: "empty-trash",
+        label: i18n.t("menu.emptyTrash"),
+        icon: <Trash size={ICON} />,
+        onSelect: () => triggerEmptyTrash(open),
+      },
+      {
+        id: "open-recycle-bin",
+        label: i18n.t("menu.openRecycleBin"),
+        icon: <FolderOpen size={ICON} />,
+        onSelect: () => void commands.openRecycleBin(),
+      },
+    ];
+  }
 
   // 휴지통 탐색 중 — 원위치 복원 우선 노출.
   if (inTrash && onPutBack) {
@@ -418,6 +457,8 @@ export interface EmptyMenuDeps {
   paneId: PaneId;
   location: Location;
   onRefresh: (id: PaneId) => void;
+  /** Windows 가상 휴지통 뷰 — 새로고침/비우기만. */
+  inVirtualTrash?: boolean;
 }
 
 const SORTS: { key: SortKey; label: string }[] = [
@@ -434,8 +475,32 @@ const VIEWS: { mode: ViewMode; label: string }[] = [
 ];
 
 export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
-  const { paneId, location, onRefresh } = deps;
+  const { paneId, location, onRefresh, inVirtualTrash } = deps;
   const open = useUIDialogs.getState().open;
+  if (inVirtualTrash) {
+    return [
+      {
+        id: "refresh",
+        label: i18n.t("menu.refresh"),
+        icon: <RotateCw size={ICON} />,
+        shortcut: "Ctrl+R",
+        onSelect: () => onRefresh(paneId),
+      },
+      sep(),
+      {
+        id: "empty-trash",
+        label: i18n.t("menu.emptyTrash"),
+        icon: <Trash size={ICON} />,
+        onSelect: () => triggerEmptyTrash(open),
+      },
+      {
+        id: "open-recycle-bin",
+        label: i18n.t("menu.openRecycleBin"),
+        icon: <FolderOpen size={ICON} />,
+        onSelect: () => void commands.openRecycleBin(),
+      },
+    ];
+  }
   const p = usePanes.getState();
   const alias = sshAlias(location);
 

@@ -17,5 +17,6 @@ pub mod settings;
 pub mod system;
 pub mod tags;
 pub mod tasks;
+pub mod trash;
 pub mod undo;
 pub mod user_aliases;

@@ -393,6 +393,13 @@
       "errShort": "Master password must be at least 8 characters",
       "errCreateFailed": "Failed to create vault",
       "errWrong": "Wrong master password"
+    },
+    "trashPurge": {
+      "title": "Permanently delete from trash?",
+      "emptyTitle": "Empty the trash?",
+      "body": "Items removed from the trash cannot be recovered.",
+      "cta": "Delete permanently",
+      "emptyCta": "Empty trash"
     }
   },
   "history": {
@@ -466,7 +473,9 @@
     "sortExt": "Extension",
     "viewDetails": "Details",
     "viewGrid": "Grid",
-    "viewTiles": "Tiles"
+    "viewTiles": "Tiles",
+    "emptyTrash": "Empty trash…",
+    "openRecycleBin": "Open Recycle Bin in Explorer"
   },
   "cheatsheet": {
     "title": "Keyboard shortcuts",
@@ -658,7 +667,11 @@
     "taskDone": "Completed: {{title}}",
     "taskDoneGeneric": "Task completed",
     "taskCancelled": "Cancelled: {{title}}",
-    "taskCancelledGeneric": "Task cancelled"
+    "taskCancelledGeneric": "Task cancelled",
+    "trashOpenHint": "Put the item back before opening it",
+    "trashOnlyPutBack": "Items in the trash can only be put back",
+    "purgeDone": "{{count}} item(s) permanently deleted",
+    "purgeFailed": "Permanent delete failed: {{err}}"
   },
   "sidebar": {
     "tasks": "Tasks",
@@ -733,7 +746,8 @@
     }
   },
   "statusbar": {
-    "selected": "{{count}} selected"
+    "selected": "{{count}} selected",
+    "originalPath": "Original location:"
   },
   "search": {
     "namePlaceholder": "Search filenames…",
@@ -803,7 +817,8 @@
     "bookmarkTitle": "Bookmark this folder (Ctrl+D)",
     "bookmarkedTitle": "Bookmarked (Ctrl+D)",
     "swapPanes": "Swap panels (left ↔ right)",
-    "swapPanesTitle": "Swap panels (left ↔ right) — Ctrl+U"
+    "swapPanesTitle": "Swap panels (left ↔ right) — Ctrl+U",
+    "trash": "Trash"
   },
   "tabs": {
     "newTab": "New tab",

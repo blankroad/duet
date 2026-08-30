@@ -21,6 +21,7 @@ import { ArgsDialog } from "@/components/dialogs/ArgsDialog";
 import { ConfirmDialog } from "@/components/dialogs/ConfirmDialog";
 import { CopyMoveConfirmDialog } from "@/components/dialogs/CopyMoveConfirmDialog";
 import { DeletePermanentDialog } from "@/components/dialogs/DeletePermanentDialog";
+import { TrashPurgeDialog } from "@/components/dialogs/TrashPurgeDialog";
 import { DeleteTrashDialog } from "@/components/dialogs/DeleteTrashDialog";
 import { SudoPasswordDialog } from "@/components/dialogs/SudoPasswordDialog";
 import {
@@ -135,6 +136,7 @@ import { findSavedHostForAlias, prefillFromAlias } from "@/lib/hostAlias";
 import { platform } from "@tauri-apps/plugin-os";
 import { confirm as tauriConfirm } from "@tauri-apps/plugin-dialog";
 import { commands } from "@/types/bindings";
+import { isVirtualTrash, loadTrashEntries, trashIdsFor } from "@/lib/trashView";
 import type {
   CompressFormat,
   ConnectionDto,
@@ -164,6 +166,13 @@ function App() {
   const { call: listDirectory } = useTauri("listDirectory");
   const showToast = useToast((s) => s.show);
 
+  /** 목록 로드 — 가상 휴지통(Windows Recycle Bin)은 경로가 아니라 trash 목록에서. */
+  const listEntries = useCallback(
+    (location: Location) =>
+      isVirtualTrash(location) ? loadTrashEntries() : listDirectory(location),
+    [listDirectory],
+  );
+
   const navigate = useCallback(
     async (id: PaneId, path: string, opts: { pushHistory?: boolean } = {}) => {
       const state = usePanes.getState();
@@ -172,16 +181,18 @@ function App() {
       // 오인되는 것 방지. setEntries 가 성공 시 자동 해제.
       state.setLoading(id, true);
       try {
-        const entries = await listDirectory(location);
+        const entries = await listEntries(location);
         state.setEntries(id, location, entries, {
           pushHistory: opts.pushHistory ?? true,
         });
         // navigate 성공 후 watcher 갱신. 실패는 silent — fs:changed 알림 안 옴
         // 정도의 영향. (사용자가 명시 새로고침으로 우회 가능.)
-        void commands.paneWatchSet(id, location);
+        if (!isVirtualTrash(location)) void commands.paneWatchSet(id, location);
         if (opts.pushHistory !== false) {
-          recordRecent(location);
-          void commands.frecencyRecord(location); // 점퍼(Ctrl+J) 랭킹용
+          if (!isVirtualTrash(location)) {
+            recordRecent(location);
+            void commands.frecencyRecord(location); // 점퍼(Ctrl+J) 랭킹용
+          }
         }
       } catch (e) {
         usePanes.getState().setLoading(id, false);
@@ -192,7 +203,7 @@ function App() {
         );
       }
     },
-    [listDirectory, showToast],
+    [listEntries, showToast],
   );
 
   /** location 전체를 받아 해당 패널을 이동 — Bookmark(SSH 포함) 에서 사용. */
@@ -204,14 +215,16 @@ function App() {
     ) => {
       usePanes.getState().setLoading(id, true);
       try {
-        const entries = await listDirectory(location);
+        const entries = await listEntries(location);
         usePanes.getState().setEntries(id, location, entries, {
           pushHistory: opts.pushHistory ?? true,
         });
-        void commands.paneWatchSet(id, location);
+        if (!isVirtualTrash(location)) void commands.paneWatchSet(id, location);
         if (opts.pushHistory !== false) {
-          recordRecent(location);
-          void commands.frecencyRecord(location); // 점퍼(Ctrl+J) 랭킹용
+          if (!isVirtualTrash(location)) {
+            recordRecent(location);
+            void commands.frecencyRecord(location); // 점퍼(Ctrl+J) 랭킹용
+          }
         }
       } catch (e) {
         usePanes.getState().setLoading(id, false);
@@ -224,7 +237,7 @@ function App() {
         );
       }
     },
-    [listDirectory, showToast],
+    [listEntries, showToast],
   );
 
   /** 로컬/SSH location 을 지정 패널로 이동 — 사이드바 Places/Volumes/Recent/Bookmarks 공용. */
@@ -242,7 +255,7 @@ function App() {
     (opposite: PaneId, target: Location) => {
       void (async () => {
         try {
-          const entries = await listDirectory(target);
+          const entries = await listEntries(target);
           usePanes
             .getState()
             .setEntries(opposite, target, entries, { pushHistory: true });
@@ -252,7 +265,7 @@ function App() {
         }
       })();
     },
-    [listDirectory],
+    [listEntries],
   );
 
   /** 활성 패널을 그 소스의 휴지통으로 이동 — 삭제 항목 보기/복구(복사·이동으로). */
@@ -261,17 +274,8 @@ function App() {
       const id = pane ?? usePanes.getState().activePane;
       const src = activeTab(usePanes.getState(), id).location.source;
       void (async () => {
-        // Windows 로컬 휴지통은 셸 가상폴더($I/$R)라 패널 탐색이 불가 →
-        // 시스템 휴지통(재활용 통)을 탐색기로 연다.
-        if (src.kind === "local" && platform() === "windows") {
-          const r = await commands.openRecycleBin();
-          if (r.status === "error")
-            showToast(
-              i18n.t("toast.recycleBinError", { err: formatErr(r.error) }),
-              "error",
-            );
-          return;
-        }
+        // Windows 로컬은 backend 가 가상 location(shell:RecycleBinFolder)을 반환 —
+        // navigateTo(listEntries)가 trash 목록으로 채운다.
         const r = await commands.trashLocation(src);
         if (r.status === "error") {
           showToast(
@@ -293,6 +297,25 @@ function App() {
       const id = usePanes.getState().activePane;
       const { targets } = resolveActiveTargets();
       if (targets.length === 0) return;
+      const tab = activeTab(usePanes.getState(), id);
+      // 가상 휴지통(Windows) — id 로 일괄 복원.
+      if (isVirtualTrash(tab.location)) {
+        const ids = trashIdsFor(targets.map((t) => t.name));
+        const r = await commands.trashPutBack(ids);
+        if (r.status === "error") {
+          showToast(
+            i18n.t("toast.putBackFailed", { err: formatErr(r.error) }),
+            "error",
+          );
+          return;
+        }
+        await navigateTo(id, tab.location, { pushHistory: false });
+        showToast(
+          i18n.t("toast.putBackDone", { count: ids.length }),
+          "success",
+        );
+        return;
+      }
       let ok = 0;
       for (const t of targets) {
         const r = await commands.trashRestore(t);
@@ -310,6 +333,31 @@ function App() {
       }
     })();
   }, [navigateTo, showToast]);
+
+  /** 가상 휴지통 영구 삭제/비우기 — 성공 시 휴지통 뷰 새로고침. */
+  const onTrashPurgeConfirm = useCallback(
+    async (word: string) => {
+      const dlg = useUIDialogs.getState().dialog;
+      if (dlg.kind !== "trash-purge") return;
+      useUIDialogs.getState().close();
+      const r = dlg.all
+        ? await commands.trashEmpty(word)
+        : await commands.trashPurge(trashIdsFor(dlg.names), word);
+      if (r.status === "error") {
+        showToast(
+          i18n.t("toast.purgeFailed", { err: formatErr(r.error) }),
+          "error",
+        );
+        return;
+      }
+      showToast(i18n.t("toast.purgeDone", { count: r.data }), "success");
+      const id = usePanes.getState().activePane;
+      const tab = activeTab(usePanes.getState(), id);
+      if (isVirtualTrash(tab.location))
+        await navigateTo(id, tab.location, { pushHistory: false });
+    },
+    [navigateTo, showToast],
+  );
 
   const onUp = useCallback(
     (id: PaneId) => {
@@ -340,6 +388,11 @@ function App() {
       // ".." 부모 행 — 위로(또는 아카이브 나가기).
       if (entry.name === "..") {
         onUp(id);
+        return;
+      }
+      // 가상 휴지통 — 실제 경로가 아니라 열 수 없음. 복원 후 열도록 안내.
+      if (isVirtualTrash(tab.location)) {
+        showToast(i18n.t("toast.trashOpenHint"));
         return;
       }
       if (entry.kind === "dir") {
@@ -503,6 +556,7 @@ function App() {
         location: tab.location,
         selectedCount,
         inTrash: tab.trashRoot !== undefined,
+        inVirtualTrash: isVirtualTrash(tab.location),
         onActivate,
         onOpenInOtherPane,
         onPutBack,
@@ -556,9 +610,14 @@ function App() {
         paneId: id,
         location: tab.location,
         onRefresh,
+        inVirtualTrash: isVirtualTrash(tab.location),
       });
       // Windows 로컬: 배경(빈 영역) 셸 메뉴를 "More options ▸" 지연 항목으로(펼칠 때만 조회).
-      if (platform() === "windows" && tab.location.source.kind === "local") {
+      if (
+        platform() === "windows" &&
+        tab.location.source.kind === "local" &&
+        !isVirtualTrash(tab.location)
+      ) {
         const bgPath = String(tab.location.path);
         // 캐시 있으면 백엔드가 즉시 서빙, 아니면 그때 빌드. 세션 수명은 백엔드 캐시가 관리.
         const shellPromise = openShellMenu(bgPath, "background");
@@ -1483,7 +1542,7 @@ function App() {
       for (const path of candidates) {
         const loc = { source: ssh, path };
         try {
-          const entries = await listDirectory(loc);
+          const entries = await listEntries(loc);
           state.setEntries(paneId, loc, entries);
           state.setActivePane(paneId);
           showToast(
@@ -1507,7 +1566,7 @@ function App() {
         );
       }
     },
-    [listDirectory, showToast],
+    [listEntries, showToast],
   );
 
   // 부트스트랩: 양쪽 패널 초기 로드 (home 디렉토리, Windows 호환) + saved hosts + bookmarks + hostFavorites
@@ -1893,6 +1952,14 @@ function App() {
           plan={dialog.plan}
           onCancel={closeDialog}
           onConfirm={onDeleteConfirm}
+        />
+      )}
+      {dialog.kind === "trash-purge" && (
+        <TrashPurgeDialog
+          names={dialog.names}
+          all={dialog.all}
+          onCancel={closeDialog}
+          onConfirm={(word) => void onTrashPurgeConfirm(word)}
         />
       )}
       {dialog.kind === "copy-confirm" && (

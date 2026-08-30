@@ -135,6 +135,21 @@ pub struct PreviewData {
     pub total_size: u64,
 }
 
+/// OS 휴지통 항목 (Windows Recycle Bin / XDG Trash 가상 뷰용). `id` 는 trash crate 의
+/// 시스템별 식별자 — put back / purge 에 그대로 돌려준다 (경로 아님).
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct TrashItemDto {
+    pub id: String,
+    pub name: String,
+    pub kind: EntryKind,
+    /// 삭제 전 원래 절대경로.
+    pub original_path: PathBuf,
+    /// 삭제 시각 (Unix epoch ms). 미상이면 None.
+    pub deleted_ms: Option<i64>,
+    /// 파일이면 바이트 크기. 폴더/미상은 None.
+    pub size: Option<u64>,
+}
+
 /// `trash()` 결과 — 어디로 갔는지. undo 시 복원 정보.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(tag = "kind", rename_all = "snake_case")]

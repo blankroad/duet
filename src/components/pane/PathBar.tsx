@@ -13,6 +13,7 @@ import {
   BookMarked,
   Folder,
   Plus,
+  Trash2,
 } from "lucide-react";
 import { platform } from "@tauri-apps/plugin-os";
 import type { Location } from "@/types/bindings";
@@ -61,6 +62,8 @@ interface PathBarProps {
   location: Location;
   /** 아카이브 내부 탐색 중이면 set — breadcrumb 를 archive.zip/sub 로 표시. */
   archive?: ArchiveBrowse | undefined;
+  /** 가상 휴지통 뷰 — breadcrumb 대신 "휴지통" 라벨. */
+  trash?: boolean | undefined;
   canBack: boolean;
   canForward: boolean;
   onBack: () => void;
@@ -86,6 +89,7 @@ interface PathBarProps {
 export function PathBar({
   location,
   archive,
+  trash,
   canBack,
   canForward,
   onBack,
@@ -114,7 +118,7 @@ export function PathBar({
   };
   // Ctrl+L 신호 — 이 패널이 대상(editActive)이면 편집 진입.
   useEffect(() => {
-    if (editActive && !archive) startEdit();
+    if (editActive && !archive && !trash) startEdit();
     // editNonce 증가만 트리거 (location 변경으로 재실행 안 함).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editNonce]);
@@ -233,7 +237,12 @@ export function PathBar({
       >
         <ArrowUp size={14} />
       </button>
-      {archive ? (
+      {trash ? (
+        <div className="ml-2 flex min-w-0 items-center gap-1.5 truncate">
+          <Trash2 size={13} className="shrink-0 text-fg-muted" />
+          <span className="text-base text-fg">{t("pathbar.trash")}</span>
+        </div>
+      ) : archive ? (
         <div className="ml-2 flex items-center gap-0.5 font-mono truncate">
           <FileArchive size={13} className="mr-1 shrink-0 text-accent" />
           <button

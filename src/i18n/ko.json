@@ -390,6 +390,13 @@
       "errShort": "마스터 비밀번호는 8자 이상이어야 합니다",
       "errCreateFailed": "비밀 저장소를 만들지 못했습니다",
       "errWrong": "마스터 비밀번호가 틀렸습니다"
+    },
+    "trashPurge": {
+      "title": "휴지통에서 영구 삭제할까요?",
+      "emptyTitle": "휴지통을 비울까요?",
+      "body": "휴지통에서 지우면 되돌릴 수 없습니다.",
+      "cta": "영구 삭제",
+      "emptyCta": "비우기"
     }
   },
   "history": {
@@ -463,7 +470,9 @@
     "sortExt": "확장자",
     "viewDetails": "상세",
     "viewGrid": "그리드",
-    "viewTiles": "타일"
+    "viewTiles": "타일",
+    "emptyTrash": "휴지통 비우기…",
+    "openRecycleBin": "탐색기에서 휴지통 열기"
   },
   "cheatsheet": {
     "title": "키보드 단축키",
@@ -655,7 +664,11 @@
     "taskDone": "완료: {{title}}",
     "taskDoneGeneric": "작업 완료",
     "taskCancelled": "취소됨: {{title}}",
-    "taskCancelledGeneric": "작업 취소됨"
+    "taskCancelledGeneric": "작업 취소됨",
+    "trashOpenHint": "휴지통 항목은 제자리로 복원한 뒤 열 수 있어요",
+    "trashOnlyPutBack": "휴지통에서는 제자리로 복원만 가능합니다",
+    "purgeDone": "{{count}}개 영구 삭제됨",
+    "purgeFailed": "영구 삭제 실패: {{err}}"
   },
   "sidebar": {
     "tasks": "작업",
@@ -730,7 +743,8 @@
     }
   },
   "statusbar": {
-    "selected": "{{count}}개 선택됨"
+    "selected": "{{count}}개 선택됨",
+    "originalPath": "원래 위치:"
   },
   "search": {
     "namePlaceholder": "파일 이름 검색…",
@@ -800,7 +814,8 @@
     "bookmarkTitle": "이 폴더 북마크 (Ctrl+D)",
     "bookmarkedTitle": "북마크됨 (Ctrl+D)",
     "swapPanes": "패널 교환 (왼쪽 ↔ 오른쪽)",
-    "swapPanesTitle": "패널 교환 (왼쪽 ↔ 오른쪽) — Ctrl+U"
+    "swapPanesTitle": "패널 교환 (왼쪽 ↔ 오른쪽) — Ctrl+U",
+    "trash": "휴지통"
   },
   "tabs": {
     "newTab": "새 탭",

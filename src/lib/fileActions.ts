@@ -13,6 +13,7 @@ import type { ToastFn } from "@/stores/toast";
 import i18n from "@/i18n";
 import { childLocation, sameLocation, sourceKey } from "@/lib/entryDnd";
 import { formatErr } from "@/lib/error";
+import { isVirtualTrash } from "@/lib/trashView";
 import { rememberExtract } from "@/lib/extractPending";
 import { basename } from "@/lib/paths";
 import { useClipboard } from "@/stores/clipboard";
@@ -225,6 +226,10 @@ export async function clipPaste(
   }
   const { tab } = resolveActiveTargets();
   const dst = tab.location;
+  if (isVirtualTrash(dst)) {
+    showToast(i18n.t("toast.trashOnlyPutBack"), "error");
+    return;
+  }
   // 같은 폴더로 잘라내기-붙여넣기는 의미 없음(no-op).
   if (
     clip.mode === "move" &&
@@ -470,8 +475,13 @@ export async function triggerCopy(
   open: OpenFn,
   showToast: ToastFn,
 ): Promise<void> {
-  const { opposite, targets } = resolveActiveTargets();
+  const { tab, opposite, targets } = resolveActiveTargets();
   const dst: Location = activeTab(usePanes.getState(), opposite).location;
+  // 가상 휴지통은 실제 경로가 아님 — 꺼내려면 제자리 복원(Put back)으로.
+  if (isVirtualTrash(tab.location) || isVirtualTrash(dst)) {
+    showToast(i18n.t("toast.trashOnlyPutBack"), "error");
+    return;
+  }
   await planTransferTo(targets, dst, "copy", open, showToast);
 }
 
@@ -480,8 +490,12 @@ export async function triggerMove(
   open: OpenFn,
   showToast: ToastFn,
 ): Promise<void> {
-  const { opposite, targets } = resolveActiveTargets();
+  const { tab, opposite, targets } = resolveActiveTargets();
   const dst: Location = activeTab(usePanes.getState(), opposite).location;
+  if (isVirtualTrash(tab.location) || isVirtualTrash(dst)) {
+    showToast(i18n.t("toast.trashOnlyPutBack"), "error");
+    return;
+  }
   await planTransferTo(targets, dst, "move", open, showToast);
 }
 
@@ -551,8 +565,17 @@ export async function triggerDelete(
   open: OpenFn,
   showToast: ToastFn,
 ): Promise<void> {
-  const { targets } = resolveActiveTargets();
+  const { tab, targets } = resolveActiveTargets();
   if (targets.length === 0) return;
+  // 가상 휴지통(Windows Recycle Bin) — 여기서의 삭제 = 영구 삭제(purge, 단어 확인).
+  if (isVirtualTrash(tab.location)) {
+    open({
+      kind: "trash-purge",
+      names: targets.map((t) => t.name),
+      all: false,
+    });
+    return;
+  }
   const r = await commands.fsDeletePlan(targets, mode);
   if (r.status === "ok") {
     open({
@@ -565,4 +588,9 @@ export async function triggerDelete(
       "error",
     );
   }
+}
+
+/** 가상 휴지통 비우기 — 확인(단어 타이핑) 다이얼로그를 연다. */
+export function triggerEmptyTrash(open: OpenFn): void {
+  open({ kind: "trash-purge", names: [], all: true });
 }

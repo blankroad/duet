@@ -53,7 +53,7 @@ fn ctx(
 }
 
 /// 새 JournalEntry 가 push 된 직후 호출 — JournalChangedEvent emit + id 반환.
-fn emit_pushed(app: &tauri::AppHandle, entry: JournalEntry) -> JournalId {
+pub(crate) fn emit_pushed(app: &tauri::AppHandle, entry: JournalEntry) -> JournalId {
     let id = entry.id;
     let _ = JournalChangedEvent {
         entry,

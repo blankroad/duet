@@ -1,5 +1,17 @@
 import { create } from "zustand";
-import type { CopyPlan, DeletePlan, MovePlan, EntryRef, Location, Volume, CompressPlan, SyncPlan, ComparePlan, ThreeWayPlan, ExtractPlan } from "@/types/bindings";
+import type {
+  CopyPlan,
+  DeletePlan,
+  MovePlan,
+  EntryRef,
+  Location,
+  Volume,
+  CompressPlan,
+  SyncPlan,
+  ComparePlan,
+  ThreeWayPlan,
+  ExtractPlan,
+} from "@/types/bindings";
 import type { PaneId } from "@/stores/panes";
 import type { ElevatablePlan } from "@/lib/elevatePending";
 
@@ -11,6 +23,8 @@ export type DialogState =
   | { kind: "new-file"; parent: Location }
   | { kind: "delete-confirm"; plan: DeletePlan }
   | { kind: "delete-danger"; plan: DeletePlan }
+  // 가상 휴지통(Windows Recycle Bin) 영구 삭제 / 비우기(all).
+  | { kind: "trash-purge"; names: string[]; all: boolean }
   | { kind: "copy-confirm"; plan: CopyPlan }
   // 보호 경로 copy/move/delete 가 PermissionDenied 로 실패 → 승격 재시도.
   // 로컬=UAC(elevate-op), 원격=sudo(sudo-op→필요 시 sudo-password).

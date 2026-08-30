@@ -70,16 +70,16 @@ fn local_trash_dir() -> Result<PathBuf, DuetError> {
 }
 #[cfg(target_os = "windows")]
 fn local_trash_dir() -> Result<PathBuf, DuetError> {
-    // Recycle Bin 은 셸 네임스페이스($I/$R) — 탐색 가능한 경로가 아님.
-    Err(DuetError::NotSupported(
-        "trash browsing is not available on Windows".into(),
-    ))
+    // Recycle Bin 은 셸 네임스페이스($I/$R) — 경로가 아니라 가상 location 으로 탐색
+    // (`commands::trash` 가 trash crate 목록으로 채운다).
+    Ok(PathBuf::from(crate::commands::trash::VIRTUAL_TRASH_PATH))
 }
 
 /// 휴지통 위치를 `Location` 으로 — 패널이 그대로 탐색(삭제 항목 보기/복구).
 ///
 /// 로컬: OS 휴지통 (mac `~/.Trash`, linux XDG). 원격: `<home>/.duet-trash`
-/// (없으면 생성). Windows 로컬은 `NotSupported` — 프론트가 안내 메시지.
+/// (없으면 생성). Windows 로컬은 가상 location(`VIRTUAL_TRASH_PATH`) — 프론트가
+/// `trash_list` 로 채운다.
 /// 경로 구성은 모두 backend (CLAUDE.md §7).
 #[tauri::command]
 #[specta::specta]
@@ -90,6 +90,10 @@ pub async fn trash_location(
     match &source {
         SourceId::Local => {
             let path = local_trash_dir()?;
+            // 가상 휴지통(Windows) — 실제 폴더가 아니므로 읽기 확인/생성 없이 그대로.
+            if path.as_os_str() == crate::commands::trash::VIRTUAL_TRASH_PATH {
+                return Ok(Location { source, path });
+            }
             // 읽기 가능 여부 선확인 — macOS ~/.Trash 는 TCC 보호라 명확히 안내.
             match tokio::fs::read_dir(&path).await {
                 Ok(_) => {}
