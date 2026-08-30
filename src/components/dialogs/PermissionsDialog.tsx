@@ -1,11 +1,14 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import * as Dialog from "@radix-ui/react-dialog";
-import { X, TriangleAlert } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 import { commands } from "@/types/bindings";
 import type { EntryRef } from "@/types/bindings";
 import { formatErr } from "@/lib/error";
 import { useToast } from "@/stores/toast";
+import { DialogShell } from "./DialogShell";
+import { DialogButton } from "./DialogButton";
+import { DialogInput } from "./DialogInput";
+import { DialogBand } from "./DialogBand";
 
 export interface PermissionsDialogProps {
   targets: EntryRef[];
@@ -103,157 +106,139 @@ export function PermissionsDialog({
     onClose();
   };
 
+  const subtitle =
+    targets.length === 1
+      ? targets[0]!.name
+      : t("dialog.permissions.items", { count: targets.length });
+
   return (
-    <Dialog.Root open onOpenChange={(o) => !o && onClose()}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none">
-          <div className="mb-3 flex items-start justify-between">
-            <Dialog.Title className="text-title font-medium">
-              {t("dialog.permissions.title")}
-              <span className="ml-2 text-meta font-normal text-fg-muted">
-                {targets.length === 1
-                  ? targets[0]!.name
-                  : t("dialog.permissions.items", { count: targets.length })}
-              </span>
-            </Dialog.Title>
-            <Dialog.Close
-              className="rounded p-1 text-fg-muted hover:bg-border"
-              aria-label={t("common.close")}
-            >
-              <X size={14} />
-            </Dialog.Close>
-          </div>
-
-          {/* rwx 그리드 — 행: Owner/Group/Others, 열: r/w/x. 비트 = 8-(행*3+열). */}
-          <div className="grid grid-cols-[5rem_repeat(3,2.5rem)] items-center gap-y-1 text-base">
-            <span />
-            {BITS.map((b) => (
-              <span key={b} className="text-center text-meta text-fg-muted">
-                {b}
-              </span>
-            ))}
-            {CLASSES.map((cls, row) => (
-              <div key={cls} className="contents">
-                <span className="text-meta text-fg-muted">
-                  {t(CLASS_KEYS[cls])}
-                </span>
-                {BITS.map((b, col) => {
-                  const bit = 1 << (8 - (row * 3 + col));
-                  return (
-                    <span key={b} className="text-center">
-                      <input
-                        type="checkbox"
-                        checked={(mode & bit) !== 0}
-                        onChange={() => toggleBit(bit)}
-                      />
-                    </span>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
-
-          <div className="mt-3 flex items-center gap-2">
+    <DialogShell
+      width="sm"
+      title={t("dialog.permissions.title")}
+      subtitle={<span className="font-mono">{subtitle}</span>}
+      description={t("dialog.permissions.desc")}
+      icon={ShieldCheck}
+      iconTone={irreversible ? "danger" : "muted"}
+      onClose={onClose}
+      footer={
+        <>
+          <DialogButton hint="esc" onClick={onClose}>
+            {t("common.cancel")}
+          </DialogButton>
+          <DialogButton
+            tone={irreversible ? "danger" : "primary"}
+            hint="enter"
+            disabled={busy}
+            onClick={() => void apply()}
+          >
+            {irreversible
+              ? t("dialog.permissions.applyNoUndo")
+              : t("common.apply")}
+          </DialogButton>
+        </>
+      }
+    >
+      {/* rwx 그리드 — 행: Owner/Group/Others, 열: r/w/x. 비트 = 8-(행*3+열). */}
+      <div className="grid grid-cols-[5rem_repeat(3,2.5rem)] items-center gap-y-1">
+        <span />
+        {BITS.map((b) => (
+          <span
+            key={b}
+            className="text-center font-mono text-meta text-fg-muted"
+          >
+            {b}
+          </span>
+        ))}
+        {CLASSES.map((cls, row) => (
+          <div key={cls} className="contents">
             <span className="text-meta text-fg-muted">
-              {t("dialog.permissions.octal")}
+              {t(CLASS_KEYS[cls])}
             </span>
-            <input
+            {BITS.map((b, col) => {
+              const bit = 1 << (8 - (row * 3 + col));
+              return (
+                <span key={b} className="text-center">
+                  <input
+                    type="checkbox"
+                    checked={(mode & bit) !== 0}
+                    onChange={() => toggleBit(bit)}
+                  />
+                </span>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+
+      <div className="flex items-center gap-2">
+        <span className="text-meta text-fg-muted">
+          {t("dialog.permissions.octal")}
+        </span>
+        <DialogInput
+          mono
+          type="text"
+          value={octal}
+          onChange={(e) => onOctalChange(e.target.value)}
+          className="w-20"
+        />
+        {initialMode === null && (
+          <span className="text-meta text-fg-muted">
+            {t("dialog.permissions.mixed")}
+          </span>
+        )}
+      </div>
+
+      {remote && (
+        <div className="grid grid-cols-2 gap-2">
+          <label className="flex flex-col gap-0.5">
+            <span className="text-meta text-fg-muted">
+              {t("dialog.permissions.ownerChown")}
+            </span>
+            <DialogInput
+              mono
               type="text"
-              value={octal}
-              onChange={(e) => onOctalChange(e.target.value)}
-              spellCheck={false}
-              className="w-20 rounded border border-border bg-subtle px-2 py-1 font-mono text-base focus:border-accent focus:outline-none"
+              value={owner}
+              onChange={(e) => setOwner(e.target.value)}
+              placeholder={t("dialog.permissions.unchanged")}
             />
-            {initialMode === null && (
-              <span className="text-meta text-fg-muted">
-                {t("dialog.permissions.mixed")}
-              </span>
-            )}
-          </div>
+          </label>
+          <label className="flex flex-col gap-0.5">
+            <span className="text-meta text-fg-muted">
+              {t("dialog.permissions.group")}
+            </span>
+            <DialogInput
+              mono
+              type="text"
+              value={group}
+              onChange={(e) => setGroup(e.target.value)}
+              placeholder={t("dialog.permissions.unchanged")}
+            />
+          </label>
+        </div>
+      )}
 
-          {remote && (
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <label className="block">
-                <span className="text-meta text-fg-muted">
-                  {t("dialog.permissions.ownerChown")}
-                </span>
-                <input
-                  type="text"
-                  value={owner}
-                  onChange={(e) => setOwner(e.target.value)}
-                  placeholder={t("dialog.permissions.unchanged")}
-                  spellCheck={false}
-                  className="mt-0.5 w-full rounded border border-border bg-subtle px-2 py-1 font-mono text-base focus:border-accent focus:outline-none"
-                />
-              </label>
-              <label className="block">
-                <span className="text-meta text-fg-muted">
-                  {t("dialog.permissions.group")}
-                </span>
-                <input
-                  type="text"
-                  value={group}
-                  onChange={(e) => setGroup(e.target.value)}
-                  placeholder={t("dialog.permissions.unchanged")}
-                  spellCheck={false}
-                  className="mt-0.5 w-full rounded border border-border bg-subtle px-2 py-1 font-mono text-base focus:border-accent focus:outline-none"
-                />
-              </label>
-            </div>
-          )}
+      {hasDir && (
+        <label className="flex items-start gap-2">
+          <input
+            type="checkbox"
+            checked={recursive}
+            onChange={(e) => setRecursive(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span>{t("dialog.permissions.recursive")}</span>
+        </label>
+      )}
 
-          {hasDir && (
-            <label className="mt-3 flex items-start gap-2">
-              <input
-                type="checkbox"
-                checked={recursive}
-                onChange={(e) => setRecursive(e.target.checked)}
-                className="mt-0.5"
-              />
-              <span className="text-base">
-                {t("dialog.permissions.recursive")}
-              </span>
-            </label>
-          )}
-
-          {irreversible && (
-            <div className="mt-2 flex items-center gap-1.5 text-meta text-danger">
-              <TriangleAlert size={12} className="shrink-0" />
-              {recursive
-                ? t("dialog.permissions.recursiveWarn")
-                : t("dialog.permissions.ownerWarn")}
-            </div>
-          )}
-
-          <div className="mt-4 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
-            >
-              {t("common.cancel")}
-            </button>
-            <button
-              type="button"
-              onClick={() => void apply()}
-              disabled={busy}
-              className={
-                irreversible
-                  ? "rounded bg-danger px-3 py-1 text-base text-white disabled:opacity-50"
-                  : "rounded bg-accent px-3 py-1 text-base text-white disabled:opacity-50"
-              }
-            >
-              {irreversible
-                ? t("dialog.permissions.applyNoUndo")
-                : t("common.apply")}
-            </button>
-          </div>
-          <Dialog.Description className="sr-only">
-            {t("dialog.permissions.desc")}
-          </Dialog.Description>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+      {irreversible && (
+        <DialogBand
+          tone="danger"
+          message={
+            recursive
+              ? t("dialog.permissions.recursiveWarn")
+              : t("dialog.permissions.ownerWarn")
+          }
+        />
+      )}
+    </DialogShell>
   );
 }

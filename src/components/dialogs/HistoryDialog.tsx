@@ -1,7 +1,6 @@
-import * as Dialog from "@radix-ui/react-dialog";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { X, History, Undo2, Redo2 } from "lucide-react";
+import { History, Undo2, Redo2 } from "lucide-react";
 import clsx from "clsx";
 import { useJournal } from "@/stores/journal";
 import { useToast } from "@/stores/toast";
@@ -9,6 +8,8 @@ import { triggerUndo, triggerRedo } from "@/lib/fileActions";
 import { basename } from "@/lib/paths";
 import { displayKey } from "@/lib/keyDisplay";
 import type { JournalEntry, Location, OpKind } from "@/types/bindings";
+import { DialogShell } from "./DialogShell";
+import { DialogButton } from "./DialogButton";
 
 /**
  * 작업 히스토리 (journal tail) — Ctrl+Z 가 "무엇을" 되돌릴지 누르기 전에
@@ -29,69 +30,53 @@ export function HistoryDialog({ onClose }: { onClose: () => void }) {
   const newestFirst = [...entries].reverse();
 
   return (
-    <Dialog.Root open onOpenChange={(o) => !o && onClose()}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex max-h-[70vh] w-full max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col rounded-md border border-border bg-base shadow-lg focus:outline-none">
-          <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
-            <History size={15} className="text-fg-muted" aria-hidden />
-            <Dialog.Title className="text-title font-medium">
-              {t("history.title")}
-            </Dialog.Title>
-            <Dialog.Close asChild>
-              <button
-                type="button"
-                className="ml-auto rounded p-1 text-fg-muted hover:bg-border"
-                aria-label={t("common.close")}
-              >
-                <X size={14} />
-              </button>
-            </Dialog.Close>
-          </div>
-
-          <div className="min-h-0 flex-1 overflow-auto">
-            {newestFirst.length === 0 ? (
-              <div className="px-4 py-6 text-center text-base text-fg-muted">
-                {t("history.empty")}
-              </div>
-            ) : (
-              <ul className="divide-y divide-border">
-                {newestFirst.map((e) => (
-                  <HistoryRow key={e.id} entry={e} isNext={e.id === nextUndoId} />
-                ))}
-              </ul>
-            )}
-          </div>
-
-          <div className="flex items-center gap-2 border-t border-border px-4 py-2.5">
-            <span className="text-meta text-fg-muted">
-              {t("history.redoNote")}
-            </span>
-            <button
-              type="button"
-              disabled={!hasUndoable}
-              onClick={() => void triggerUndo(showToast)}
-              className="ml-auto flex shrink-0 items-center gap-1.5 rounded border border-border px-3 py-1 text-base hover:bg-subtle disabled:opacity-40 disabled:hover:bg-transparent"
-            >
+    <DialogShell
+      width="lg"
+      bodyFill
+      divided
+      title={t("history.title")}
+      description="Journal of recent file operations"
+      icon={History}
+      onClose={onClose}
+      footerLeft={t("history.redoNote")}
+      footer={
+        <>
+          <DialogButton hint="esc" onClick={onClose}>
+            {t("common.close")}
+          </DialogButton>
+          <DialogButton
+            disabled={!hasUndoable}
+            onClick={() => void triggerUndo(showToast)}
+          >
+            <span className="flex items-center gap-1.5">
               <Undo2 size={13} aria-hidden />
               {t("history.undoLast", { key: displayKey("Ctrl+Z") })}
-            </button>
-            <button
-              type="button"
-              disabled={!hasRedoable}
-              onClick={() => void triggerRedo(showToast)}
-              className="flex shrink-0 items-center gap-1.5 rounded border border-border px-3 py-1 text-base hover:bg-subtle disabled:opacity-40 disabled:hover:bg-transparent"
-            >
+            </span>
+          </DialogButton>
+          <DialogButton
+            disabled={!hasRedoable}
+            onClick={() => void triggerRedo(showToast)}
+          >
+            <span className="flex items-center gap-1.5">
               <Redo2 size={13} aria-hidden />
               {t("history.redoLast", { key: displayKey("Ctrl+Shift+Z") })}
-            </button>
-          </div>
-          <Dialog.Description className="sr-only">
-            Journal of recent file operations
-          </Dialog.Description>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+            </span>
+          </DialogButton>
+        </>
+      }
+    >
+      {newestFirst.length === 0 ? (
+        <div className="py-6 text-center text-base text-fg-muted">
+          {t("history.empty")}
+        </div>
+      ) : (
+        <ul className="divide-y divide-border">
+          {newestFirst.map((e) => (
+            <HistoryRow key={e.id} entry={e} isNext={e.id === nextUndoId} />
+          ))}
+        </ul>
+      )}
+    </DialogShell>
   );
 }
 
@@ -106,7 +91,7 @@ function HistoryRow({
   return (
     <li
       className={clsx(
-        "flex items-baseline gap-2 px-4 py-1.5 text-base",
+        "flex items-baseline gap-2 py-1.5 text-base",
         entry.undone && "text-fg-muted line-through opacity-60",
       )}
     >
@@ -142,9 +127,15 @@ const shortLoc = (l: Location) => basename(String(l.path), "/");
 function opLabel(op: OpKind, t: TFunction): string {
   switch (op.kind) {
     case "trash":
-      return t("history.op.trash", { count: op.count, loc: shortLoc(op.location) });
+      return t("history.op.trash", {
+        count: op.count,
+        loc: shortLoc(op.location),
+      });
     case "permanent_delete":
-      return t("history.op.permanentDelete", { count: op.count, loc: shortLoc(op.location) });
+      return t("history.op.permanentDelete", {
+        count: op.count,
+        loc: shortLoc(op.location),
+      });
     case "copy":
       return t("history.op.copy", { count: op.count, loc: shortLoc(op.dst) });
     case "move":
@@ -152,18 +143,30 @@ function opLabel(op: OpKind, t: TFunction): string {
     case "rename":
       return t("history.op.rename", { from: op.from, to: op.to });
     case "batch_rename":
-      return t("history.op.batchRename", { count: op.count, loc: shortLoc(op.location) });
+      return t("history.op.batchRename", {
+        count: op.count,
+        loc: shortLoc(op.location),
+      });
     case "mkdir":
       return t("history.op.mkdir", { name: basename(op.path, op.path) });
     case "new_file":
       return t("history.op.newFile", { name: basename(op.path, op.path) });
     case "extract":
-      return t("history.op.extract", { name: basename(String(op.archive.path), "archive") });
+      return t("history.op.extract", {
+        name: basename(String(op.archive.path), "archive"),
+      });
     case "compress":
-      return t("history.op.compress", { count: op.count, loc: shortLoc(op.dst) });
+      return t("history.op.compress", {
+        count: op.count,
+        loc: shortLoc(op.dst),
+      });
     case "sync":
       return op.pruned > 0
-        ? t("history.op.syncPruned", { count: op.count, pruned: op.pruned, loc: shortLoc(op.dst) })
+        ? t("history.op.syncPruned", {
+            count: op.count,
+            pruned: op.pruned,
+            loc: shortLoc(op.dst),
+          })
         : t("history.op.sync", { count: op.count, loc: shortLoc(op.dst) });
     case "merge":
       return t("history.op.merge", { count: op.to_left + op.to_right });

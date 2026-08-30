@@ -1,10 +1,11 @@
-import * as Dialog from "@radix-ui/react-dialog";
 import { useTranslation } from "react-i18next";
-import { X, Keyboard } from "lucide-react";
+import { Keyboard } from "lucide-react";
 import { useAllCommands } from "@/stores/commands";
 import { useKeymap, effectiveKey } from "@/stores/keymap";
 import { displayKey } from "@/lib/keyDisplay";
 import { commandLabel, commandCategory } from "@/lib/commands";
+import { DialogShell } from "./DialogShell";
+import { DialogButton } from "./DialogButton";
 
 /**
  * 단축키 치트시트 (F1) — 카테고리별 command 단축키(리바인드 반영) +
@@ -46,56 +47,41 @@ export function ShortcutCheatsheet({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Dialog.Root open onOpenChange={(o) => !o && onClose()}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex max-h-[80vh] w-full max-w-3xl -translate-x-1/2 -translate-y-1/2 flex-col rounded-md border border-border bg-base shadow-lg focus:outline-none">
-          <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
-            <Keyboard size={15} className="text-fg-muted" aria-hidden />
-            <Dialog.Title className="text-title font-medium">
-              {t("cheatsheet.title")}
-            </Dialog.Title>
-            <span className="ml-2 text-meta text-fg-muted">
-              {t("cheatsheet.customize")}
-            </span>
-            <Dialog.Close asChild>
-              <button
-                type="button"
-                className="ml-auto rounded p-1 text-fg-muted hover:bg-border"
-                aria-label={t("common.close")}
-              >
-                <X size={14} />
-              </button>
-            </Dialog.Close>
-          </div>
-
-          <div className="min-h-0 flex-1 overflow-auto p-4">
-            <div className="columns-2 gap-6 [column-fill:_balance]">
-              <Section title={t("cheatsheet.basics")}>
-                {BUILTIN_GESTURES.map((g) => (
-                  <Row
-                    key={g.keys}
-                    label={t(`cheatsheet.g.${g.what}`)}
-                    keys={g.keys}
-                    raw
-                  />
-                ))}
-              </Section>
-              {[...byCategory.entries()].map(([category, cmds]) => (
-                <Section key={category} title={commandCategory(category, t)}>
-                  {cmds.map((c) => (
-                    <Row key={c.label} label={c.label} keys={c.key} />
-                  ))}
-                </Section>
-              ))}
-            </div>
-          </div>
-          <Dialog.Description className="sr-only">
-            Keyboard shortcut reference
-          </Dialog.Description>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+    <DialogShell
+      width="2xl"
+      bodyFill
+      divided
+      title={t("cheatsheet.title")}
+      subtitle={t("cheatsheet.customize")}
+      description="Keyboard shortcut reference"
+      icon={Keyboard}
+      onClose={onClose}
+      footer={
+        <DialogButton hint="esc" onClick={onClose}>
+          {t("common.close")}
+        </DialogButton>
+      }
+    >
+      <div className="columns-2 gap-6 [column-fill:_balance]">
+        <Section title={t("cheatsheet.basics")}>
+          {BUILTIN_GESTURES.map((g) => (
+            <Row
+              key={g.keys}
+              label={t(`cheatsheet.g.${g.what}`)}
+              keys={g.keys}
+              raw
+            />
+          ))}
+        </Section>
+        {[...byCategory.entries()].map(([category, cmds]) => (
+          <Section key={category} title={commandCategory(category, t)}>
+            {cmds.map((c) => (
+              <Row key={c.label} label={c.label} keys={c.key} />
+            ))}
+          </Section>
+        ))}
+      </div>
+    </DialogShell>
   );
 }
 

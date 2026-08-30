@@ -1,12 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import * as Dialog from "@radix-ui/react-dialog";
-import { Network, X } from "lucide-react";
+import { Network, Server } from "lucide-react";
 import { commands } from "@/types/bindings";
 import type { ConnectionDto, DuetError, HostKeyInfo } from "@/types/bindings";
 import { useConnections, type Host } from "@/stores/connections";
 import type { PaneId } from "@/stores/panes";
 import { HostKeyPrompt } from "./HostKeyPrompt";
+import { DialogShell } from "@/components/dialogs/DialogShell";
+import { DialogButton } from "@/components/dialogs/DialogButton";
+import { DialogInput } from "@/components/dialogs/DialogInput";
 
 /**
  * 새 SSH 연결 다이얼로그.
@@ -47,6 +49,7 @@ export function ConnectionDialog({
   const [target, setTarget] = useState<PaneId>("left");
   const [password, setPassword] = useState("");
   const [phase, setPhase] = useState<DialogPhase>({ kind: "idle" });
+  const pwRef = useRef<HTMLInputElement>(null);
 
   // 다이얼로그가 새 호스트로 다시 열릴 때마다 phase + password 초기화.
   useEffect(() => {
@@ -93,97 +96,86 @@ export function ConnectionDialog({
   };
   const handleConnect = () => void doConnect(false);
 
+  const busy = phase.kind === "connecting";
   return (
-    <Dialog.Root open={open} onOpenChange={(o) => !o && onClose()}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50 data-[state=open]:animate-in data-[state=open]:fade-in-0" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95">
-          <div className="mb-3 flex items-start justify-between gap-2">
-            <Dialog.Title className="text-title font-medium">
-              {t("dialog.connection.title", { alias })}
-            </Dialog.Title>
-            <Dialog.Close
-              className="rounded p-1 text-fg-muted hover:bg-border"
-              aria-label={t("common.close")}
+    <DialogShell
+      open={open}
+      title={t("dialog.connection.title", { alias })}
+      description={t("dialog.connection.desc", { alias })}
+      icon={Server}
+      onClose={onClose}
+      initialFocus={pwRef}
+      footer={
+        phase.kind === "host-key" ? undefined : (
+          <>
+            <DialogButton hint="esc" onClick={onClose}>
+              {t("common.cancel")}
+            </DialogButton>
+            <DialogButton
+              tone="primary"
+              hint="enter"
+              disabled={busy}
+              onClick={handleConnect}
             >
-              <X size={14} />
-            </Dialog.Close>
-          </div>
+              {busy
+                ? t("dialog.connection.connecting")
+                : t("dialog.connection.connect")}
+            </DialogButton>
+          </>
+        )
+      }
+    >
+      {host && <HostInfo host={host} />}
 
-          {host && <HostInfo host={host} />}
+      <div>
+        <div className="text-meta text-fg-muted">
+          {t("dialog.connection.openInPane")}
+        </div>
+        <div className="mt-1 flex gap-2">
+          <PaneRadio
+            value="left"
+            current={target}
+            onChange={setTarget}
+            label={t("dialog.connection.paneLeft")}
+          />
+          <PaneRadio
+            value="right"
+            current={target}
+            onChange={setTarget}
+            label={t("dialog.connection.paneRight")}
+          />
+        </div>
+      </div>
 
-          <div className="mt-4">
-            <div className="text-meta text-fg-muted">
-              {t("dialog.connection.openInPane")}
-            </div>
-            <div className="mt-1 flex gap-2">
-              <PaneRadio
-                value="left"
-                current={target}
-                onChange={setTarget}
-                label={t("dialog.connection.paneLeft")}
-              />
-              <PaneRadio
-                value="right"
-                current={target}
-                onChange={setTarget}
-                label={t("dialog.connection.paneRight")}
-              />
-            </div>
-          </div>
+      <div>
+        <label htmlFor="conn-pw" className="block text-meta text-fg-muted">
+          {t("dialog.connection.passwordLabel")}
+        </label>
+        <DialogInput
+          ref={pwRef}
+          id="conn-pw"
+          mono
+          type="password"
+          autoComplete="off"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !busy) handleConnect();
+          }}
+          className="mt-1"
+        />
+      </div>
 
-          <div className="mt-3">
-            <label htmlFor="conn-pw" className="block text-meta text-fg-muted">
-              {t("dialog.connection.passwordLabel")}
-            </label>
-            <input
-              id="conn-pw"
-              type="password"
-              autoComplete="off"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="mt-1 w-full rounded border border-border bg-subtle px-2 py-1 font-mono text-base focus:border-accent focus:outline-none"
-            />
-          </div>
-
-          {phase.kind === "error" && <ErrorBox error={phase.error} />}
-          {phase.kind === "host-key" && (
-            <HostKeyPrompt
-              info={phase.info}
-              onTrust={() => void doConnect(true)}
-              onReplace={() => void doConnect(false, true)}
-              onCancel={onClose}
-            />
-          )}
-
-          {phase.kind !== "host-key" && (
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={onClose}
-                className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
-              >
-                {t("common.cancel")}
-              </button>
-              <button
-                type="button"
-                onClick={handleConnect}
-                disabled={phase.kind === "connecting"}
-                className="rounded bg-accent px-3 py-1 text-base text-white disabled:opacity-50"
-              >
-                {phase.kind === "connecting"
-                  ? t("dialog.connection.connecting")
-                  : t("dialog.connection.connect")}
-              </button>
-            </div>
-          )}
-
-          <Dialog.Description className="sr-only">
-            {t("dialog.connection.desc", { alias })}
-          </Dialog.Description>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+      {phase.kind === "error" && <ErrorBox error={phase.error} />}
+      {phase.kind === "host-key" && (
+        <HostKeyPrompt
+          info={phase.info}
+          onTrust={() => void doConnect(true)}
+          onReplace={() => void doConnect(false, true)}
+          onCancel={onClose}
+        />
+      )}
+    </DialogShell>
   );
 }
 

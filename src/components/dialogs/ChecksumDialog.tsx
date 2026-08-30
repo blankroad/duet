@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import * as Dialog from "@radix-ui/react-dialog";
-import { X, Copy, Check, CircleAlert, LoaderCircle } from "lucide-react";
+import { Copy, Check, CircleAlert, Hash, LoaderCircle } from "lucide-react";
 import { commands } from "@/types/bindings";
 import type { ChecksumAlgo, EntryRef } from "@/types/bindings";
 import { childLocation } from "@/lib/entryDnd";
 import { formatErr } from "@/lib/error";
 import { useToast } from "@/stores/toast";
+import { DialogShell } from "./DialogShell";
+import { DialogButton } from "./DialogButton";
+import { DialogInput } from "./DialogInput";
 
 export interface ChecksumDialogProps {
   targets: EntryRef[];
@@ -84,125 +86,101 @@ export function ChecksumDialog({ targets, onClose }: ChecksumDialogProps) {
   };
 
   return (
-    <Dialog.Root open onOpenChange={(o) => !o && onClose()}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none">
-          <div className="mb-3 flex items-start justify-between">
-            <Dialog.Title className="text-title font-medium">
-              {t("dialog.checksum.title")}
-            </Dialog.Title>
-            <div className="flex items-center gap-2">
-              <select
-                value={algo}
-                onChange={(e) => setAlgo(e.target.value as ChecksumAlgo)}
-                className="rounded border border-border bg-subtle px-2 py-1 text-base focus:border-accent focus:outline-none"
-              >
-                <option value="sha256">SHA-256</option>
-                <option value="sha512">SHA-512</option>
-              </select>
-              <Dialog.Close
-                className="rounded p-1 text-fg-muted hover:bg-border"
-                aria-label={t("common.close")}
-              >
-                <X size={14} />
-              </Dialog.Close>
-            </div>
-          </div>
-
-          <div className="max-h-72 space-y-1 overflow-y-auto">
-            {targets.map((tgt) => {
-              const st = rows[tgt.name] ?? { status: "pending" as const };
-              const match =
-                expected && st.status === "done" ? st.hash === expected : null;
-              return (
-                <div
-                  key={tgt.name}
-                  className="rounded border border-border px-2 py-1.5"
+    <DialogShell
+      width="xl"
+      title={t("dialog.checksum.title")}
+      subtitle={t("dialog.permissions.items", { count: targets.length })}
+      description={t("dialog.checksum.desc")}
+      icon={Hash}
+      onClose={onClose}
+      headerRight={
+        <select
+          value={algo}
+          onChange={(e) => setAlgo(e.target.value as ChecksumAlgo)}
+          className="h-7 rounded border border-border bg-subtle px-2 text-base focus:border-accent focus:outline-none"
+        >
+          <option value="sha256">SHA-256</option>
+          <option value="sha512">SHA-512</option>
+        </select>
+      }
+      footer={
+        <>
+          <DialogButton disabled={doneRows.length === 0} onClick={copyAll}>
+            {t("dialog.checksum.copyAll")}
+          </DialogButton>
+          <DialogButton tone="primary" hint="esc" onClick={onClose}>
+            {t("common.close")}
+          </DialogButton>
+        </>
+      }
+    >
+      <div className="flex max-h-72 flex-col gap-1 overflow-y-auto">
+        {targets.map((tgt) => {
+          const st = rows[tgt.name] ?? { status: "pending" as const };
+          const match =
+            expected && st.status === "done" ? st.hash === expected : null;
+          return (
+            <div
+              key={tgt.name}
+              className="rounded-panel border border-border px-2.5 py-1.5"
+            >
+              <div className="flex items-center gap-2">
+                <span
+                  className="min-w-0 flex-1 truncate font-mono text-base"
+                  title={tgt.name}
                 >
-                  <div className="flex items-center gap-2">
-                    <span
-                      className="min-w-0 flex-1 truncate font-mono text-base"
-                      title={tgt.name}
-                    >
-                      {tgt.name}
-                    </span>
-                    {st.status === "pending" && (
-                      <LoaderCircle
-                        size={13}
-                        className="animate-spin text-fg-muted"
-                      />
-                    )}
-                    {match === true && (
-                      <span className="flex items-center gap-1 text-meta text-icon-code">
-                        <Check size={12} /> {t("dialog.checksum.match")}
-                      </span>
-                    )}
-                    {match === false && (
-                      <span className="flex items-center gap-1 text-meta text-danger">
-                        <CircleAlert size={12} />{" "}
-                        {t("dialog.checksum.mismatch")}
-                      </span>
-                    )}
-                    {st.status === "done" && (
-                      <button
-                        type="button"
-                        title={t("dialog.checksum.copyRow")}
-                        onClick={() => copyRow(tgt.name, st.hash)}
-                        className="rounded p-1 text-fg-muted hover:bg-border"
-                      >
-                        <Copy size={12} />
-                      </button>
-                    )}
-                  </div>
-                  {st.status === "done" && (
-                    <div className="select-text break-all font-mono text-meta text-fg-muted">
-                      {st.hash}
-                    </div>
-                  )}
-                  {st.status === "error" && (
-                    <div className="break-all text-meta text-danger">
-                      {st.message}
-                    </div>
-                  )}
+                  {tgt.name}
+                </span>
+                {st.status === "pending" && (
+                  <LoaderCircle
+                    size={13}
+                    className="animate-spin text-fg-muted"
+                  />
+                )}
+                {match === true && (
+                  <span className="flex items-center gap-1 text-meta text-success">
+                    <Check size={12} /> {t("dialog.checksum.match")}
+                  </span>
+                )}
+                {match === false && (
+                  <span className="flex items-center gap-1 text-meta text-danger">
+                    <CircleAlert size={12} /> {t("dialog.checksum.mismatch")}
+                  </span>
+                )}
+                {st.status === "done" && (
+                  <button
+                    type="button"
+                    title={t("dialog.checksum.copyRow")}
+                    onClick={() => copyRow(tgt.name, st.hash)}
+                    className="rounded p-1 text-fg-muted hover:bg-border"
+                  >
+                    <Copy size={12} />
+                  </button>
+                )}
+              </div>
+              {st.status === "done" && (
+                <div className="select-text break-all font-mono text-meta text-fg-muted">
+                  {st.hash}
                 </div>
-              );
-            })}
-          </div>
+              )}
+              {st.status === "error" && (
+                <div className="break-all text-meta text-danger">
+                  {st.message}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
 
-          <div className="mt-3">
-            <input
-              type="text"
-              value={verify}
-              onChange={(e) => setVerify(e.target.value)}
-              placeholder={t("dialog.checksum.verifyPlaceholder")}
-              spellCheck={false}
-              className="w-full rounded border border-border bg-subtle px-2 py-1 font-mono text-meta focus:border-accent focus:outline-none"
-            />
-          </div>
-
-          <div className="mt-4 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={copyAll}
-              disabled={doneRows.length === 0}
-              className="rounded border border-border px-3 py-1 text-base hover:bg-subtle disabled:opacity-50"
-            >
-              {t("dialog.checksum.copyAll")}
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded bg-accent px-3 py-1 text-base text-white"
-            >
-              {t("common.close")}
-            </button>
-          </div>
-          <Dialog.Description className="sr-only">
-            {t("dialog.checksum.desc")}
-          </Dialog.Description>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+      <DialogInput
+        mono
+        type="text"
+        value={verify}
+        onChange={(e) => setVerify(e.target.value)}
+        placeholder={t("dialog.checksum.verifyPlaceholder")}
+        className="text-meta"
+      />
+    </DialogShell>
   );
 }

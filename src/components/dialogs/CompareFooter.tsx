@@ -1,10 +1,27 @@
+import { DialogButton } from "./DialogButton";
+
 /**
- * 비교창 푸터 — 적용 요약(생성/덮어쓰기) + Close / Merge / Apply 액션.
- * truncated 면 Merge/Apply 비활성(부분 작업 방지).
+ * 비교창 푸터 — 적용 요약(생성/덮어쓰기)은 `CompareFooterSummary`(DialogShell 의
+ * footerLeft), 액션은 `CompareFooterButtons`(footer). truncated 면 Merge/Apply
+ * 비활성(부분 작업 방지).
  */
-export function CompareFooter({
+export function CompareFooterSummary({
   create,
   overwrite,
+}: {
+  create: number;
+  overwrite: number;
+}) {
+  return (
+    <span>
+      Apply: create <b className="text-fg">{create}</b> · overwrite{" "}
+      <b className="text-fg">{overwrite}</b>
+      {overwrite > 0 && " (after backup, undoable)"}
+    </span>
+  );
+}
+
+export function CompareFooterButtons({
   applyCount,
   mergeable,
   truncated,
@@ -12,8 +29,6 @@ export function CompareFooter({
   onMerge,
   onApply,
 }: {
-  create: number;
-  overwrite: number;
   applyCount: number;
   mergeable: number;
   truncated: boolean;
@@ -22,47 +37,36 @@ export function CompareFooter({
   onApply: () => void;
 }) {
   return (
-    <div className="mt-3 flex items-center justify-between gap-2">
-      <span className="text-meta text-fg-muted">
-        Apply: create <b className="text-fg">{create}</b> · overwrite{" "}
-        <b className="text-fg">{overwrite}</b>
-        {overwrite > 0 && " (after backup, undoable)"}
-      </span>
-      <div className="flex gap-2">
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
-        >
-          Close
-        </button>
-        <button
-          type="button"
-          onClick={onMerge}
-          disabled={mergeable === 0 || truncated}
-          className="rounded border border-border px-3 py-1 text-base hover:bg-subtle disabled:opacity-50"
-          title={
-            truncated
-              ? "Comparison truncated — can't merge. Narrow the scope."
-              : "Copy one-side-only files both ways (no overwrite/delete, undoable)"
-          }
-        >
+    <>
+      <DialogButton hint="esc" onClick={onClose}>
+        Close
+      </DialogButton>
+      <span
+        title={
+          truncated
+            ? "Comparison truncated — can't merge. Narrow the scope."
+            : "Copy one-side-only files both ways (no overwrite/delete, undoable)"
+        }
+      >
+        <DialogButton disabled={mergeable === 0 || truncated} onClick={onMerge}>
           Merge ↔
-        </button>
-        <button
-          type="button"
-          onClick={onApply}
+        </DialogButton>
+      </span>
+      <span
+        title={
+          truncated
+            ? "Comparison truncated — can't apply. Narrow the scope."
+            : "Apply chosen directions (overwrites backed up to .bak, undoable)"
+        }
+      >
+        <DialogButton
+          tone="primary"
           disabled={applyCount === 0 || truncated}
-          className="rounded bg-accent px-3 py-1 text-base text-white disabled:opacity-50"
-          title={
-            truncated
-              ? "Comparison truncated — can't apply. Narrow the scope."
-              : "Apply chosen directions (overwrites backed up to .bak, undoable)"
-          }
+          onClick={onApply}
         >
           Apply ({applyCount})
-        </button>
-      </div>
-    </div>
+        </DialogButton>
+      </span>
+    </>
   );
 }

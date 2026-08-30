@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import * as Dialog from "@radix-ui/react-dialog";
-import { X, AlertTriangle } from "lucide-react";
+import { AlertTriangle, PencilLine } from "lucide-react";
 import { commands } from "@/types/bindings";
 import type {
   EntryRef,
@@ -9,6 +8,9 @@ import type {
   BatchRenamePlan,
   CaseOp,
 } from "@/types/bindings";
+import { DialogShell } from "./DialogShell";
+import { DialogButton } from "./DialogButton";
+import { DialogInput } from "./DialogInput";
 
 export interface BatchRenameDialogProps {
   targets: EntryRef[];
@@ -22,6 +24,11 @@ const CASE_OPTS: { value: "" | CaseOp; labelKey: string }[] = [
   { value: "upper", labelKey: "dialog.batchRename.caseUpper" },
   { value: "title", labelKey: "dialog.batchRename.caseTitle" },
 ];
+
+const selectCls =
+  "h-7 w-full rounded border border-border bg-subtle px-2 text-base focus:border-accent focus:outline-none";
+const smallCls =
+  "h-6 rounded border border-border bg-subtle px-1 text-meta focus:border-accent focus:outline-none";
 
 /**
  * 다중 선택 일괄 이름변경. 규칙(찾기·바꾸기 / 접두·접미 / 새 이름 / 대소문자 /
@@ -102,215 +109,184 @@ export function BatchRenameDialog({
   };
 
   return (
-    <Dialog.Root open onOpenChange={(o) => !o && onClose()}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-        <Dialog.Content
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit();
-            else if (e.key === "Escape") onClose();
-          }}
-          onOpenAutoFocus={(e) => {
-            // 첫 입력창(Find)으로 포커스. Radix 기본(닫기 버튼) 대체.
-            e.preventDefault();
-            findRef.current?.focus();
-          }}
-          className="fixed left-1/2 top-1/2 z-50 flex max-h-[80vh] w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 flex-col rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none"
-        >
-          <div className="mb-3 flex items-start justify-between">
-            <Dialog.Title className="text-title font-medium">
-              {t("dialog.batchRename.title", { count: targets.length })}
-            </Dialog.Title>
-            <Dialog.Close
-              className="rounded p-1 text-fg-muted hover:bg-border"
-              aria-label={t("common.close")}
+    <DialogShell
+      width="xl"
+      bodyFill
+      title={t("dialog.batchRename.title", { count: targets.length })}
+      description={t("dialog.batchRename.desc", { count: targets.length })}
+      icon={PencilLine}
+      onClose={onClose}
+      initialFocus={findRef}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit();
+      }}
+      footerLeft={
+        plan?.has_collision ? (
+          <span className="text-danger">
+            {t("dialog.batchRename.collision")}
+          </span>
+        ) : undefined
+      }
+      footer={
+        <>
+          <DialogButton hint="esc" onClick={onClose}>
+            {t("common.cancel")}
+          </DialogButton>
+          <DialogButton
+            tone="primary"
+            disabled={blocked || !changed}
+            onClick={submit}
+          >
+            {t("dialog.batchRename.cta")}
+          </DialogButton>
+        </>
+      }
+    >
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+        <Field label={t("dialog.batchRename.find")}>
+          <DialogInput
+            ref={findRef}
+            mono
+            value={find}
+            onChange={(e) => setFind(e.target.value)}
+          />
+        </Field>
+        <Field label={t("dialog.batchRename.replaceWith")}>
+          <DialogInput
+            mono
+            value={replace}
+            onChange={(e) => setReplace(e.target.value)}
+          />
+        </Field>
+        <Field label={t("dialog.batchRename.newBase")}>
+          <DialogInput
+            mono
+            value={base}
+            onChange={(e) => setBase(e.target.value)}
+            placeholder={t("dialog.batchRename.keepOriginal")}
+          />
+        </Field>
+        <Field label={t("dialog.batchRename.case")}>
+          <select
+            className={selectCls}
+            value={caseOp}
+            onChange={(e) => setCaseOp(e.target.value as "" | CaseOp)}
+          >
+            {CASE_OPTS.map((c) => (
+              <option key={c.value} value={c.value}>
+                {t(c.labelKey)}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label={t("dialog.batchRename.prefix")}>
+          <DialogInput
+            mono
+            value={prefix}
+            onChange={(e) => setPrefix(e.target.value)}
+          />
+        </Field>
+        <Field label={t("dialog.batchRename.suffix")}>
+          <DialogInput
+            mono
+            value={suffix}
+            onChange={(e) => setSuffix(e.target.value)}
+          />
+        </Field>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-meta text-fg-muted">
+        <label className="flex items-center gap-1">
+          <input
+            type="checkbox"
+            checked={replaceAll}
+            onChange={(e) => setReplaceAll(e.target.checked)}
+          />
+          {t("dialog.batchRename.replaceAll")}
+        </label>
+        <label className="flex items-center gap-1">
+          <input
+            type="checkbox"
+            checked={targetExt}
+            onChange={(e) => setTargetExt(e.target.checked)}
+          />
+          {t("dialog.batchRename.includeExt")}
+        </label>
+        <label className="flex items-center gap-1">
+          <input
+            type="checkbox"
+            checked={seqOn}
+            onChange={(e) => setSeqOn(e.target.checked)}
+          />
+          {t("dialog.batchRename.number")}
+        </label>
+        {seqOn && (
+          <>
+            <span>{t("dialog.batchRename.start")}</span>
+            <input
+              type="number"
+              className={`w-14 ${smallCls}`}
+              value={seqStart}
+              onChange={(e) => setSeqStart(Number(e.target.value) || 0)}
+            />
+            <span>{t("dialog.batchRename.pad")}</span>
+            <input
+              type="number"
+              className={`w-12 ${smallCls}`}
+              value={seqPad}
+              onChange={(e) =>
+                setSeqPad(Math.max(0, Number(e.target.value) || 0))
+              }
+            />
+            <select
+              className={smallCls}
+              value={seqPos}
+              onChange={(e) => setSeqPos(e.target.value as "prefix" | "suffix")}
             >
-              <X size={14} />
-            </Dialog.Close>
-          </div>
+              <option value="suffix">{t("dialog.batchRename.atEnd")}</option>
+              <option value="prefix">{t("dialog.batchRename.atStart")}</option>
+            </select>
+          </>
+        )}
+      </div>
 
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-base">
-            <Field label={t("dialog.batchRename.find")}>
-              <input
-                ref={findRef}
-                className={inputCls}
-                value={find}
-                onChange={(e) => setFind(e.target.value)}
-              />
-            </Field>
-            <Field label={t("dialog.batchRename.replaceWith")}>
-              <input
-                className={inputCls}
-                value={replace}
-                onChange={(e) => setReplace(e.target.value)}
-              />
-            </Field>
-            <Field label={t("dialog.batchRename.newBase")}>
-              <input
-                className={inputCls}
-                value={base}
-                onChange={(e) => setBase(e.target.value)}
-                placeholder={t("dialog.batchRename.keepOriginal")}
-              />
-            </Field>
-            <Field label={t("dialog.batchRename.case")}>
-              <select
-                className={inputCls}
-                value={caseOp}
-                onChange={(e) => setCaseOp(e.target.value as "" | CaseOp)}
+      {/* 미리보기 */}
+      <div className="min-h-0 flex-1 overflow-y-auto rounded-panel border border-border">
+        <table className="w-full text-meta">
+          <tbody>
+            {plan?.items.map((it, i) => (
+              <tr
+                key={`${it.old_name}:${i}`}
+                className={
+                  it.collision
+                    ? "bg-danger/10 text-danger"
+                    : "even:bg-subtle/40"
+                }
               >
-                {CASE_OPTS.map((c) => (
-                  <option key={c.value} value={c.value}>
-                    {t(c.labelKey)}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label={t("dialog.batchRename.prefix")}>
-              <input
-                className={inputCls}
-                value={prefix}
-                onChange={(e) => setPrefix(e.target.value)}
-              />
-            </Field>
-            <Field label={t("dialog.batchRename.suffix")}>
-              <input
-                className={inputCls}
-                value={suffix}
-                onChange={(e) => setSuffix(e.target.value)}
-              />
-            </Field>
-          </div>
-
-          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-meta text-fg-muted">
-            <label className="flex items-center gap-1">
-              <input
-                type="checkbox"
-                checked={replaceAll}
-                onChange={(e) => setReplaceAll(e.target.checked)}
-              />
-              {t("dialog.batchRename.replaceAll")}
-            </label>
-            <label className="flex items-center gap-1">
-              <input
-                type="checkbox"
-                checked={targetExt}
-                onChange={(e) => setTargetExt(e.target.checked)}
-              />
-              {t("dialog.batchRename.includeExt")}
-            </label>
-            <label className="flex items-center gap-1">
-              <input
-                type="checkbox"
-                checked={seqOn}
-                onChange={(e) => setSeqOn(e.target.checked)}
-              />
-              {t("dialog.batchRename.number")}
-            </label>
-            {seqOn && (
-              <>
-                <span>{t("dialog.batchRename.start")}</span>
-                <input
-                  type="number"
-                  className="w-14 rounded border border-border bg-subtle px-1 py-0.5"
-                  value={seqStart}
-                  onChange={(e) => setSeqStart(Number(e.target.value) || 0)}
-                />
-                <span>{t("dialog.batchRename.pad")}</span>
-                <input
-                  type="number"
-                  className="w-12 rounded border border-border bg-subtle px-1 py-0.5"
-                  value={seqPad}
-                  onChange={(e) =>
-                    setSeqPad(Math.max(0, Number(e.target.value) || 0))
-                  }
-                />
-                <select
-                  className="rounded border border-border bg-subtle px-1 py-0.5"
-                  value={seqPos}
-                  onChange={(e) =>
-                    setSeqPos(e.target.value as "prefix" | "suffix")
-                  }
+                <td
+                  className="truncate px-2 py-0.5 font-mono text-fg-muted"
+                  title={it.old_name}
                 >
-                  <option value="suffix">
-                    {t("dialog.batchRename.atEnd")}
-                  </option>
-                  <option value="prefix">
-                    {t("dialog.batchRename.atStart")}
-                  </option>
-                </select>
-              </>
-            )}
-          </div>
-
-          {/* 미리보기 */}
-          <div className="mt-3 min-h-0 flex-1 overflow-y-auto rounded border border-border">
-            <table className="w-full text-meta">
-              <tbody>
-                {plan?.items.map((it, i) => (
-                  <tr
-                    key={`${it.old_name}:${i}`}
-                    className={
-                      it.collision
-                        ? "bg-danger/10 text-danger"
-                        : "even:bg-subtle/40"
-                    }
-                  >
-                    <td
-                      className="truncate px-2 py-0.5 font-mono text-fg-muted"
-                      title={it.old_name}
-                    >
-                      {it.old_name}
-                    </td>
-                    <td className="px-1 text-fg-muted">→</td>
-                    <td
-                      className="truncate px-2 py-0.5 font-mono"
-                      title={it.new_name}
-                    >
-                      {it.collision && (
-                        <AlertTriangle size={10} className="mr-1 inline" />
-                      )}
-                      {it.new_name}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="mt-3 flex items-center justify-between">
-            <span className="text-meta text-danger">
-              {plan?.has_collision ? t("dialog.batchRename.collision") : ""}
-            </span>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={onClose}
-                className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
-              >
-                {t("common.cancel")}
-              </button>
-              <button
-                type="button"
-                onClick={submit}
-                disabled={blocked || !changed}
-                className="rounded bg-accent px-3 py-1 text-base text-white disabled:opacity-50"
-              >
-                {t("dialog.batchRename.cta")}
-              </button>
-            </div>
-          </div>
-          <Dialog.Description className="sr-only">
-            {t("dialog.batchRename.desc", { count: targets.length })}
-          </Dialog.Description>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+                  {it.old_name}
+                </td>
+                <td className="px-1 text-fg-muted">→</td>
+                <td
+                  className="truncate px-2 py-0.5 font-mono"
+                  title={it.new_name}
+                >
+                  {it.collision && (
+                    <AlertTriangle size={10} className="mr-1 inline" />
+                  )}
+                  {it.new_name}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </DialogShell>
   );
 }
-
-const inputCls =
-  "w-full rounded border border-border bg-subtle px-2 py-1 font-mono text-base focus:border-accent focus:outline-none";
 
 function Field({
   label,

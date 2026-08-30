@@ -1,8 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useTranslation, Trans } from "react-i18next";
 import { save } from "@tauri-apps/plugin-dialog";
-import * as Dialog from "@radix-ui/react-dialog";
-import { X, FolderGit2 } from "lucide-react";
+import { FolderGit2 } from "lucide-react";
 import clsx from "clsx";
 import {
   commands,
@@ -24,7 +23,9 @@ import { basename } from "@/lib/paths";
 import { CompareTree } from "./CompareTree";
 import { CompareRulesBar } from "./CompareRulesBar";
 import { CompareFilterBar } from "./CompareFilterBar";
-import { CompareFooter } from "./CompareFooter";
+import { CompareFooterSummary, CompareFooterButtons } from "./CompareFooter";
+import { DialogShell } from "./DialogShell";
+import { DialogBand } from "./DialogBand";
 import { CompareDiffPreview } from "./CompareDiffPreview";
 
 export interface CompareDialogProps {
@@ -200,199 +201,177 @@ export function CompareDialog({
   }, [plan.entries, decisions]);
 
   return (
-    <Dialog.Root open onOpenChange={(o) => !o && onClose()}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-        <Dialog.Content
-          onOpenAutoFocus={(e) => {
-            // 기본은 헤더 Close 버튼에 포커스 → ↑↓ 가 죽음. 리스트에 포커스를 줘 즉시 키 내비.
-            e.preventDefault();
-            listRef.current?.focus();
-          }}
-          className="fixed left-1/2 top-1/2 z-50 flex max-h-[80vh] w-full max-w-3xl -translate-x-1/2 -translate-y-1/2 flex-col rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none"
+    <DialogShell
+      width="2xl"
+      bodyFill
+      title={t("dialog.compare.title")}
+      description={t("dialog.compare.desc")}
+      icon={FolderGit2}
+      onClose={onClose}
+      // 기본은 첫 버튼에 포커스 → ↑↓ 가 죽음. 리스트에 포커스를 줘 즉시 키 내비.
+      initialFocus={listRef}
+      headerRight={
+        <span
+          className={clsx("rounded border px-1.5 py-0.5 text-meta", badge.tone)}
+          title={badge.title}
         >
-          <div className="mb-2 flex items-start justify-between">
-            <Dialog.Title className="flex items-center gap-1.5 text-title font-medium">
-              <FolderGit2 size={15} /> {t("dialog.compare.title")}
-            </Dialog.Title>
-            <div className="flex items-center gap-2">
-              <span
-                className={clsx(
-                  "rounded border px-1.5 py-0.5 text-meta",
-                  badge.tone,
-                )}
-                title={badge.title}
-              >
-                {badge.label}
-              </span>
-              <Dialog.Close
-                className="rounded p-1 text-fg-muted hover:bg-border"
-                aria-label={t("common.close")}
-              >
-                <X size={14} />
-              </Dialog.Close>
-            </div>
-          </div>
+          {badge.label}
+        </span>
+      }
+      footerLeft={
+        <CompareFooterSummary
+          create={apply.create}
+          overwrite={apply.overwrite}
+        />
+      }
+      footer={
+        <CompareFooterButtons
+          applyCount={apply.payload.length}
+          mergeable={mergeable}
+          truncated={plan.truncated}
+          onClose={onClose}
+          onMerge={() => onMerge(detectRenames)}
+          onApply={() => onApply(apply.payload)}
+        />
+      }
+    >
+      <div className="grid grid-cols-2 gap-2 text-meta">
+        <div className="truncate">
+          <span className="text-fg-muted">{t("dialog.compare.left")} </span>
+          <span className="font-mono" title={String(plan.left.path)}>
+            {base(plan.left)}
+          </span>
+        </div>
+        <div className="truncate text-right">
+          <span className="font-mono" title={String(plan.right.path)}>
+            {base(plan.right)}
+          </span>
+          <span className="text-fg-muted"> {t("dialog.compare.right")}</span>
+        </div>
+      </div>
 
-          <div className="mb-2 grid grid-cols-2 gap-2 text-meta">
-            <div className="truncate">
-              <span className="text-fg-muted">{t("dialog.compare.left")} </span>
-              <span className="font-mono" title={String(plan.left.path)}>
-                {base(plan.left)}
-              </span>
-            </div>
-            <div className="truncate text-right">
-              <span className="font-mono" title={String(plan.right.path)}>
-                {base(plan.right)}
-              </span>
-              <span className="text-fg-muted">
-                {" "}
-                {t("dialog.compare.right")}
-              </span>
-            </div>
-          </div>
+      <CompareFilterBar
+        counts={counts}
+        active={active}
+        toggle={toggle}
+        query={query}
+        setQuery={setQuery}
+      />
 
-          <CompareFilterBar
-            counts={counts}
-            active={active}
-            toggle={toggle}
-            query={query}
-            setQuery={setQuery}
+      <CompareRulesBar onRecompare={onRecompare} busy={recomparing} />
+
+      <div className="flex items-center gap-2 text-meta text-fg-muted">
+        <button
+          type="button"
+          onClick={() => void onVerify()}
+          disabled={counts.same === 0 || verifying}
+          className="rounded border border-border px-2 py-0.5 hover:bg-subtle disabled:opacity-50"
+          title={t("dialog.compare.verifyTitle")}
+        >
+          {verifying
+            ? t("dialog.compare.verifying")
+            : t("dialog.compare.verifyCta", { count: counts.same })}
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowPreview((v) => !v)}
+          aria-pressed={showPreview}
+          className={clsx(
+            "rounded border px-2 py-0.5 hover:bg-subtle",
+            showPreview ? "border-border bg-subtle text-fg" : "border-border",
+          )}
+          title={t("dialog.compare.previewTitle")}
+        >
+          {t("dialog.compare.preview")}
+        </button>
+        <button
+          type="button"
+          onClick={() => setView((v) => (v === "list" ? "tree" : "list"))}
+          className="rounded border border-border px-2 py-0.5 hover:bg-subtle"
+          title={t("dialog.compare.viewToggleTitle")}
+        >
+          {view === "list"
+            ? t("dialog.compare.treeView")
+            : t("dialog.compare.listView")}
+        </button>
+        <label
+          className="flex items-center gap-1 text-fg-muted"
+          title={t("dialog.compare.detectMovesTitle")}
+        >
+          <input
+            type="checkbox"
+            checked={detectRenames}
+            onChange={(e) => setDetectRenames(e.target.checked)}
           />
+          {t("dialog.compare.detectMoves")}
+        </label>
+        <button
+          type="button"
+          onClick={() => void onExport()}
+          className="rounded border border-border px-2 py-0.5 hover:bg-subtle"
+          title={t("dialog.compare.exportTitle")}
+        >
+          {t("dialog.compare.export")}
+        </button>
+        {verifyNote && <span className="truncate">{verifyNote}</span>}
+      </div>
 
-          <CompareRulesBar onRecompare={onRecompare} busy={recomparing} />
+      {counts.unreadable > 0 && (
+        <DialogBand
+          tone="danger"
+          message={t("dialog.compare.unreadable", { count: counts.unreadable })}
+        />
+      )}
+      {plan.truncated && (
+        <DialogBand tone="warning" message={t("dialog.compare.truncated")} />
+      )}
 
-          <div className="mb-2 flex items-center gap-2 text-meta text-fg-muted">
-            <button
-              type="button"
-              onClick={() => void onVerify()}
-              disabled={counts.same === 0 || verifying}
-              className="rounded border border-border px-2 py-0.5 hover:bg-subtle disabled:opacity-50"
-              title={t("dialog.compare.verifyTitle")}
-            >
-              {verifying
-                ? t("dialog.compare.verifying")
-                : t("dialog.compare.verifyCta", { count: counts.same })}
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowPreview((v) => !v)}
-              aria-pressed={showPreview}
-              className={clsx(
-                "rounded border px-2 py-0.5 hover:bg-subtle",
-                showPreview
-                  ? "border-border bg-subtle text-fg"
-                  : "border-border",
-              )}
-              title={t("dialog.compare.previewTitle")}
-            >
-              {t("dialog.compare.preview")}
-            </button>
-            <button
-              type="button"
-              onClick={() => setView((v) => (v === "list" ? "tree" : "list"))}
-              className="rounded border border-border px-2 py-0.5 hover:bg-subtle"
-              title={t("dialog.compare.viewToggleTitle")}
-            >
-              {view === "list"
-                ? t("dialog.compare.treeView")
-                : t("dialog.compare.listView")}
-            </button>
-            <label
-              className="flex items-center gap-1 text-fg-muted"
-              title={t("dialog.compare.detectMovesTitle")}
-            >
-              <input
-                type="checkbox"
-                checked={detectRenames}
-                onChange={(e) => setDetectRenames(e.target.checked)}
-              />
-              {t("dialog.compare.detectMoves")}
-            </label>
-            <button
-              type="button"
-              onClick={() => void onExport()}
-              className="rounded border border-border px-2 py-0.5 hover:bg-subtle"
-              title={t("dialog.compare.exportTitle")}
-            >
-              {t("dialog.compare.export")}
-            </button>
-            {verifyNote && <span className="truncate">{verifyNote}</span>}
+      {moves.length > 0 && (
+        <div className="max-h-20 overflow-auto rounded-panel border border-border bg-subtle/40 px-2 py-1 text-meta">
+          <div className="text-fg-muted">
+            <Trans
+              i18nKey="dialog.compare.moves"
+              values={{ count: moves.length }}
+              components={{ 1: <b className="text-fg" /> }}
+            />
           </div>
-
-          {counts.unreadable > 0 && (
-            <div className="mb-2 rounded border border-danger/40 bg-danger/10 px-2 py-1 text-meta text-danger">
-              {t("dialog.compare.unreadable", { count: counts.unreadable })}
+          {moves.map((m) => (
+            <div
+              key={`${m.from_rel}=>${m.to_rel}`}
+              className="truncate font-mono text-fg-muted"
+              title={`${m.from_rel} ⇒ ${m.to_rel}`}
+            >
+              {m.from_rel} <span className="text-accent">⇒</span> {m.to_rel}
             </div>
-          )}
-          {plan.truncated && (
-            <div className="mb-2 rounded border border-warning/40 bg-warning/10 px-2 py-1 text-meta text-warning">
-              {t("dialog.compare.truncated")}
-            </div>
-          )}
+          ))}
+        </div>
+      )}
 
-          {moves.length > 0 && (
-            <div className="mb-2 max-h-20 overflow-auto rounded border border-border bg-subtle/40 px-2 py-1 text-meta">
-              <div className="text-fg-muted">
-                <Trans
-                  i18nKey="dialog.compare.moves"
-                  values={{ count: moves.length }}
-                  components={{ 1: <b className="text-fg" /> }}
-                />
-              </div>
-              {moves.map((m) => (
-                <div
-                  key={`${m.from_rel}=>${m.to_rel}`}
-                  className="truncate font-mono text-fg-muted"
-                  title={`${m.from_rel} ⇒ ${m.to_rel}`}
-                >
-                  {m.from_rel} <span className="text-accent">⇒</span> {m.to_rel}
-                </div>
-              ))}
-            </div>
-          )}
+      {view === "tree" ? (
+        <CompareTree
+          rows={rows}
+          dirOf={dirOf}
+          setDir={setDir}
+          onSelect={setSelectedEntry}
+        />
+      ) : (
+        <CompareList
+          rows={rows}
+          entriesEmpty={plan.entries.length === 0}
+          dirOf={dirOf}
+          setDir={setDir}
+          listRef={listRef}
+          onSelect={setSelectedEntry}
+        />
+      )}
 
-          {view === "tree" ? (
-            <CompareTree
-              rows={rows}
-              dirOf={dirOf}
-              setDir={setDir}
-              onSelect={setSelectedEntry}
-            />
-          ) : (
-            <CompareList
-              rows={rows}
-              entriesEmpty={plan.entries.length === 0}
-              dirOf={dirOf}
-              setDir={setDir}
-              listRef={listRef}
-              onSelect={setSelectedEntry}
-            />
-          )}
-
-          {showPreview && (
-            <CompareDiffPreview
-              entry={selectedEntry}
-              left={plan.left}
-              right={plan.right}
-            />
-          )}
-
-          <CompareFooter
-            create={apply.create}
-            overwrite={apply.overwrite}
-            applyCount={apply.payload.length}
-            mergeable={mergeable}
-            truncated={plan.truncated}
-            onClose={onClose}
-            onMerge={() => onMerge(detectRenames)}
-            onApply={() => onApply(apply.payload)}
-          />
-          <Dialog.Description className="sr-only">
-            {t("dialog.compare.desc")}
-          </Dialog.Description>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+      {showPreview && (
+        <CompareDiffPreview
+          entry={selectedEntry}
+          left={plan.left}
+          right={plan.right}
+        />
+      )}
+    </DialogShell>
   );
 }

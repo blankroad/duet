@@ -1,7 +1,9 @@
 import { useState } from "react";
-import * as Dialog from "@radix-ui/react-dialog";
 import { useTranslation } from "react-i18next";
-import { X } from "lucide-react";
+import { Settings } from "lucide-react";
+import clsx from "clsx";
+import { DialogShell } from "./dialogs/DialogShell";
+import { DialogButton } from "./dialogs/DialogButton";
 import { GeneralSection } from "./settings/GeneralSection";
 import { KeymapSection } from "./settings/KeymapSection";
 import { AliasesSection } from "./settings/AliasesSection";
@@ -19,52 +21,54 @@ const SECTIONS: { id: SectionId; label: string }[] = [
   { id: "aliases", label: "settings.nav.aliases" },
 ];
 
+/** 설정 — 왼쪽 섹션 내비 + 오른쪽 내용. 높이 고정(섹션 전환 시 창 크기 불변). */
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const [section, setSection] = useState<SectionId>("general");
 
   return (
-    <Dialog.Root open onOpenChange={(o) => !o && onClose()}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex h-[32rem] w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 flex-col rounded-md border border-border bg-base shadow-lg focus:outline-none">
-          <div className="flex items-center justify-between border-b border-border px-4 py-2">
-            <Dialog.Title className="text-title font-medium">
-              {t("settings.title")}
-            </Dialog.Title>
-            <Dialog.Close
-              className="rounded p-1 text-fg-muted hover:bg-border"
-              aria-label={t("common.close")}
+    <DialogShell
+      width="xl"
+      height="tall"
+      bodyFill
+      bodyPadding={false}
+      divided
+      title={t("settings.title")}
+      description="Application settings"
+      icon={Settings}
+      onClose={onClose}
+      footer={
+        <DialogButton hint="esc" onClick={onClose}>
+          {t("common.close")}
+        </DialogButton>
+      }
+    >
+      <div className="flex min-h-0 flex-1">
+        <aside className="w-32 shrink-0 border-r border-border bg-subtle p-2">
+          {SECTIONS.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => setSection(s.id)}
+              className={clsx(
+                "w-full rounded px-2 py-1 text-left text-base",
+                section === s.id
+                  ? "bg-active text-fg"
+                  : "text-fg-muted hover:bg-border",
+              )}
             >
-              <X size={14} />
-            </Dialog.Close>
-          </div>
-          <div className="flex flex-1 min-h-0">
-            <aside className="w-32 shrink-0 border-r border-border bg-subtle p-2">
-              {SECTIONS.map((s) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  onClick={() => setSection(s.id)}
-                  className={`w-full rounded px-2 py-1 text-left text-base ${
-                    section === s.id ? "bg-active text-fg" : "text-fg-muted hover:bg-border"
-                  }`}
-                >
-                  {t(s.label)}
-                </button>
-              ))}
-            </aside>
-            <main className="flex-1 overflow-auto p-4">
-              {section === "general" && <GeneralSection />}
-              {section === "icons" && <ExtIconsSection />}
-              {section === "openwith" && <OpenWithSection />}
-              {section === "keymap" && <KeymapSection />}
-              {section === "aliases" && <AliasesSection />}
-            </main>
-          </div>
-          <Dialog.Description className="sr-only">Application settings</Dialog.Description>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+              {t(s.label)}
+            </button>
+          ))}
+        </aside>
+        <main className="flex-1 overflow-auto p-4">
+          {section === "general" && <GeneralSection />}
+          {section === "icons" && <ExtIconsSection />}
+          {section === "openwith" && <OpenWithSection />}
+          {section === "keymap" && <KeymapSection />}
+          {section === "aliases" && <AliasesSection />}
+        </main>
+      </div>
+    </DialogShell>
   );
 }
