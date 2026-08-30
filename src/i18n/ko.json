@@ -7,26 +7,26 @@
     "background": "백그라운드",
     "working": "작업 중…",
     "runInBackground": "백그라운드로 실행",
-    "typeToConfirm": "<1>{{word}}</1> 를 입력해 확인:",
+    "typeToConfirm": "계속하려면 <1>{{word}}</1> 를 입력:",
     "ok": "확인"
   },
   "conflict": {
-    "exist": "대상에 같은 이름의 항목이 {{count}}개 있습니다. 처리 방법을 선택하세요:",
-    "replaceAll": "모두 교체",
+    "exist": "같은 이름 {{count}}개가 받는 위치에 이미 있음",
     "replaceAllHint": "기존 파일 덮어쓰기 (영구 — 되돌릴 수 없음)",
-    "skipAll": "모두 건너뛰기",
     "skipAllHint": "충돌 항목은 복사하지 않음",
-    "keepBothAll": "모두 유지",
     "keepBothAllHint": "새 이름으로 복사 — name (1).ext",
     "perFile": "파일별로 선택…",
-    "perFileHint": "항목마다 교체/건너뛰기/둘 다 유지를 결정",
     "setAll": "일괄 설정:",
     "replace": "교체",
     "skip": "건너뛰기",
     "keepBoth": "둘 다 유지",
-    "withChoices": "선택대로 {{cta}}",
     "metaNew": "새 파일",
-    "metaExisting": "기존"
+    "metaExisting": "기존",
+    "existsBadge": "이미 있음",
+    "perFileTitle": "{{cta}} — 파일별로 선택",
+    "perFileSummary": "충돌 {{count}}개 · 나머지 {{rest}}개는 그대로",
+    "replaceWarn": "교체 {{count}}개 — 기존 파일이 영구 덮어써지며 되돌릴 수 없음",
+    "tally": "교체 {{nReplace}} · 건너뛰기 {{nSkip}} · 둘 다 유지 {{nKeep}}"
   },
   "dialog": {
     "progress": {
@@ -277,11 +277,13 @@
     },
     "deleteConfirm": {
       "title": "휴지통으로 삭제할까요?",
-      "body": "{{count}}개, {{size}}"
+      "undoHint": "휴지통으로 이동합니다 — <1>{{key}}</1> 또는 휴지통에서 되돌릴 수 있음",
+      "undoHintRemote": "원격 휴지통(<2>~/.duet-trash</2>)으로 이동합니다 — <1>{{key}}</1> 로 되돌릴 수 있음"
     },
     "deleteDanger": {
       "title": "영구 삭제할까요?",
-      "body": "되돌릴 수 없습니다. {{count}}개 항목."
+      "body": "되돌릴 수 없습니다 — 휴지통을 거치지 않고 즉시 지워집니다.",
+      "cta": "영구 삭제"
     },
     "repack": {
       "title": "“{{label}}” 을(를) 업데이트할까요?",
@@ -310,15 +312,20 @@
       "move": "이동",
       "summary": "{{count}}개 · {{size}}",
       "summaryCountOnly": "{{count}}개",
-      "strategy": "전략: {{label}}",
-      "strategyLocal": "로컬",
-      "strategyRelay": "릴레이 (이 PC 경유)",
-      "strategySameHost": "동일 호스트 (빠름, 서버측)",
-      "conflicts": "대상에 {{count}}개 충돌"
+      "hintLocal": "로컬 디스크 간 복사",
+      "hintRelay": "이 PC 를 거쳐 전송",
+      "hintSameHost": "서버 안에서 직접 복사 — 이 PC 를 거치지 않음",
+      "hintRename": "같은 볼륨 — 이름만 바뀜 (즉시)"
     },
     "keyAuth": {
       "title": "비밀번호 없는 로그인",
       "confirm": "다음부터 비밀번호 없이 로그인하도록 이 호스트에 SSH 공개키를 설치할까요?"
+    },
+    "route": {
+      "src": "원본"
+    },
+    "items": {
+      "more": "외 {{count}}개 …"
     }
   },
   "history": {

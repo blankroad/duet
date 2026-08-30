@@ -358,7 +358,7 @@ registerName({ Icon: FileText, className: "text-icon-doc" }, [
  * `overrides` 는 확장자(소문자, 점 없음) → 팔레트 아이콘 이름.
  */
 export function iconForEntry(
-  entry: Entry,
+  entry: Pick<Entry, "name" | "kind">,
   overrides?: Record<string, string>,
 ): IconDesc {
   if (entry.kind === "dir") return { Icon: Folder, className: "text-accent" };

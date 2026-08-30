@@ -20,8 +20,8 @@ import { PasswordPromptDialog } from "@/components/dialogs/PasswordPromptDialog"
 import { ArgsDialog } from "@/components/dialogs/ArgsDialog";
 import { ConfirmDialog } from "@/components/dialogs/ConfirmDialog";
 import { CopyMoveConfirmDialog } from "@/components/dialogs/CopyMoveConfirmDialog";
-import { CopyOrMovePlanBody } from "@/components/dialogs/CopyOrMovePlanBody";
-import { DangerConfirmDialog } from "@/components/dialogs/DangerConfirmDialog";
+import { DeletePermanentDialog } from "@/components/dialogs/DeletePermanentDialog";
+import { DeleteTrashDialog } from "@/components/dialogs/DeleteTrashDialog";
 import { SudoPasswordDialog } from "@/components/dialogs/SudoPasswordDialog";
 import {
   rememberElevatable,
@@ -131,7 +131,6 @@ import { useIndexProgressEvents } from "@/hooks/useIndexProgressEvents";
 import i18n from "@/i18n";
 import { Trans } from "react-i18next";
 import { formatErr } from "@/lib/error";
-import { formatSize } from "@/lib/format";
 import { findSavedHostForAlias, prefillFromAlias } from "@/lib/hostAlias";
 import { platform } from "@tauri-apps/plugin-os";
 import { confirm as tauriConfirm } from "@tauri-apps/plugin-dialog";
@@ -1780,16 +1779,10 @@ function App() {
         />
       )}
       {dialog.kind === "delete-confirm" && (
-        <ConfirmDialog
-          title={i18n.t("dialog.deleteConfirm.title")}
-          body={i18n.t("dialog.deleteConfirm.body", {
-            count: dialog.plan.total_count,
-            size: formatSize(dialog.plan.total_size_bytes),
-          })}
-          ctaLabel={i18n.t("common.delete")}
-          ctaTone="neutral"
+        <DeleteTrashDialog
+          plan={dialog.plan}
           onCancel={closeDialog}
-          // 인자 없이 호출 — ConfirmDialog 의 onClick 이 이벤트를 넘기지 않도록 래핑.
+          // 인자 없이 호출 — 버튼 onClick 이 이벤트를 넘기지 않도록 래핑.
           onConfirm={() => onDeleteConfirm()}
         />
       )}
@@ -1898,30 +1891,16 @@ function App() {
         />
       )}
       {dialog.kind === "delete-danger" && (
-        <DangerConfirmDialog
-          title={i18n.t("dialog.deleteDanger.title")}
-          body={i18n.t("dialog.deleteDanger.body", {
-            count: dialog.plan.total_count,
-          })}
-          requiredWord="delete"
+        <DeletePermanentDialog
+          plan={dialog.plan}
           onCancel={closeDialog}
           onConfirm={onDeleteConfirm}
         />
       )}
       {dialog.kind === "copy-confirm" && (
         <CopyMoveConfirmDialog
-          title={i18n.t("dialog.transfer.copy")}
-          body={
-            <CopyOrMovePlanBody
-              items={dialog.plan.items}
-              totalSize={dialog.plan.total_size_bytes}
-              dstPath={dialog.plan.dst.path}
-              conflicts={dialog.plan.conflicts.length}
-              strategy={dialog.plan.strategy}
-            />
-          }
-          ctaLabel={i18n.t("dialog.transfer.copy")}
-          conflicts={dialog.plan.conflicts}
+          kind="copy"
+          plan={dialog.plan}
           onCancel={closeDialog}
           onConfirm={onCopyConfirm}
           onConfirmPerFile={(d) =>
@@ -1986,18 +1965,8 @@ function App() {
       )}
       {dialog.kind === "move-confirm" && (
         <CopyMoveConfirmDialog
-          title={i18n.t("dialog.transfer.move")}
-          body={
-            <CopyOrMovePlanBody
-              items={dialog.plan.items}
-              totalSize={dialog.plan.total_size_bytes}
-              dstPath={dialog.plan.dst.path}
-              conflicts={dialog.plan.conflicts.length}
-              strategy={dialog.plan.strategy}
-            />
-          }
-          ctaLabel={i18n.t("dialog.transfer.move")}
-          conflicts={dialog.plan.conflicts}
+          kind="move"
+          plan={dialog.plan}
           onCancel={closeDialog}
           onConfirm={onMoveConfirm}
           onConfirmPerFile={(d) =>

@@ -1,22 +1,37 @@
 import { useRef, useState } from "react";
-import * as Dialog from "@radix-ui/react-dialog";
 import { useTranslation, Trans } from "react-i18next";
-import { X, AlertTriangle } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import type { ReactNode } from "react";
+import { DialogShell } from "./DialogShell";
+import { DialogButton } from "./DialogButton";
 
 export interface DangerConfirmDialogProps {
   title: string;
-  body: ReactNode;
+  subtitle?: ReactNode | undefined;
+  /** 경고 밴드 한 줄 — 왜 되돌릴 수 없는지. */
+  warning: string;
+  /** 대상 목록 등 추가 본문. */
+  body?: ReactNode | undefined;
   requiredWord: string;
+  /** 주 버튼 라벨. 기본 "삭제". */
+  ctaLabel?: string | undefined;
   onCancel: () => void;
   /** 사용자가 실제로 타이핑한 확인 단어를 전달 — 백엔드 검증용(§3). */
   onConfirm: (typedWord: string) => void;
 }
 
+/**
+ * 위험 확인 다이얼로그 (영구 삭제) — 단어 타이핑 전까지 주 버튼 비활성.
+ * DESIGN.md "위험 확인 다이얼로그": 빨간 제목·빨간 버튼·단어 강제.
+ * 테두리 전체를 빨갛게 칠하는 대신 아이콘 타일 + 경고 밴드로 위험을 표시한다.
+ */
 export function DangerConfirmDialog({
   title,
+  subtitle,
+  warning,
   body,
   requiredWord,
+  ctaLabel,
   onCancel,
   onConfirm,
 }: DangerConfirmDialogProps) {
@@ -26,73 +41,62 @@ export function DangerConfirmDialog({
   const enabled = typed === requiredWord;
 
   return (
-    <Dialog.Root open onOpenChange={(o) => !o && onCancel()}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-        <Dialog.Content
-          onOpenAutoFocus={(e) => {
-            // 확인 단어 입력창으로 포커스. Radix 기본(닫기 버튼) 대체.
-            e.preventDefault();
-            inputRef.current?.focus();
+    <DialogShell
+      title={title}
+      subtitle={subtitle}
+      icon={AlertTriangle}
+      iconTone="danger"
+      titleTone="danger"
+      onClose={onCancel}
+      initialFocus={inputRef}
+      footer={
+        <>
+          <DialogButton hint="esc" onClick={onCancel}>
+            {t("common.cancel")}
+          </DialogButton>
+          <DialogButton
+            tone="danger"
+            hint="enter"
+            disabled={!enabled}
+            onClick={() => onConfirm(typed)}
+          >
+            {ctaLabel ?? t("common.delete")}
+          </DialogButton>
+        </>
+      }
+    >
+      <div className="flex items-center gap-2 rounded-panel border border-danger/30 bg-danger/10 px-3 py-2.5 text-base text-fg">
+        <AlertTriangle size={14} className="shrink-0 text-danger" />
+        <span>{warning}</span>
+      </div>
+      {body}
+      <div className="flex flex-col gap-1">
+        <div className="text-meta text-fg-muted">
+          <Trans
+            i18nKey="common.typeToConfirm"
+            values={{ word: requiredWord }}
+            components={{
+              // {{word}} 를 kbd 칩으로 감싸기 위한 Trans 사용.
+              1: (
+                <kbd className="rounded-[3px] border border-border bg-subtle px-1 font-mono text-fg" />
+              ),
+            }}
+          />
+        </div>
+        <input
+          ref={inputRef}
+          type="text"
+          value={typed}
+          placeholder={requiredWord}
+          spellCheck={false}
+          autoComplete="off"
+          onChange={(e) => setTyped(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && enabled) onConfirm(typed);
           }}
-          className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-md border-2 border-danger bg-base p-4 shadow-lg focus:outline-none"
-        >
-          <div className="mb-3 flex items-start justify-between">
-            <Dialog.Title className="flex items-center gap-2 text-title font-medium text-danger">
-              <AlertTriangle size={16} />
-              {title}
-            </Dialog.Title>
-            <Dialog.Close
-              className="rounded p-1 text-fg-muted hover:bg-border"
-              aria-label={t("common.close")}
-            >
-              <X size={14} />
-            </Dialog.Close>
-          </div>
-          <div className="text-base">{body}</div>
-          <div className="mt-3">
-            <div className="mb-1 text-meta text-fg-muted">
-              <Trans
-                i18nKey="common.typeToConfirm"
-                values={{ word: requiredWord }}
-                components={{
-                  // {{word}} 를 mono 스타일로 감싸기 위한 Trans 사용.
-                  1: <span className="font-mono text-fg" />,
-                }}
-              />
-            </div>
-            <input
-              ref={inputRef}
-              type="text"
-              value={typed}
-              onChange={(e) => setTyped(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && enabled) onConfirm(typed);
-                else if (e.key === "Escape") onCancel();
-              }}
-              className="w-full rounded border border-border bg-subtle px-2 py-1 font-mono text-base focus:border-danger focus:outline-none"
-            />
-          </div>
-          <div className="mt-4 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={onCancel}
-              className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
-            >
-              {t("common.cancel")}
-            </button>
-            <button
-              type="button"
-              onClick={() => onConfirm(typed)}
-              disabled={!enabled}
-              className="rounded bg-danger px-3 py-1 text-base text-white disabled:opacity-30"
-            >
-              {t("common.delete")}
-            </button>
-          </div>
-          <Dialog.Description className="sr-only">{title}</Dialog.Description>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+          className="h-7 w-full rounded border border-border bg-subtle px-2 font-mono text-base placeholder:text-fg-muted/50 focus:border-danger focus:outline-none"
+        />
+      </div>
+    </DialogShell>
   );
 }

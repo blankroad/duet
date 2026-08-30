@@ -1,10 +1,15 @@
-import * as Dialog from "@radix-ui/react-dialog";
+import { useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { X } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
+import { DialogShell } from "./DialogShell";
+import { DialogButton } from "./DialogButton";
 
 export interface ConfirmDialogProps {
   title: string;
+  /** 제목 아래 요약 (개수·용량·위치). */
+  subtitle?: ReactNode | undefined;
+  icon?: LucideIcon | undefined;
   body: ReactNode;
   ctaLabel: string;
   ctaTone: "neutral" | "danger";
@@ -12,8 +17,14 @@ export interface ConfirmDialogProps {
   onConfirm: () => void;
 }
 
+/**
+ * 확인 다이얼로그 — 휴지통 삭제, repack, 꺼내기, 권한 상승 등.
+ * 주 버튼에 포커스(Enter = 확인), Esc/바깥 클릭 = 취소.
+ */
 export function ConfirmDialog({
   title,
+  subtitle,
+  icon,
   body,
   ctaLabel,
   ctaTone,
@@ -21,42 +32,33 @@ export function ConfirmDialog({
   onConfirm,
 }: ConfirmDialogProps) {
   const { t } = useTranslation();
-  const ctaCls =
-    ctaTone === "danger" ? "bg-danger text-white" : "bg-accent text-white";
+  const ctaRef = useRef<HTMLButtonElement>(null);
+  const danger = ctaTone === "danger";
   return (
-    <Dialog.Root open onOpenChange={(o) => !o && onCancel()}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none">
-          <div className="mb-3 flex items-start justify-between">
-            <Dialog.Title className="text-title font-medium">{title}</Dialog.Title>
-            <Dialog.Close
-              className="rounded p-1 text-fg-muted hover:bg-border"
-              aria-label={t("common.close")}
-            >
-              <X size={14} />
-            </Dialog.Close>
-          </div>
-          <div className="text-base">{body}</div>
-          <div className="mt-4 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={onCancel}
-              className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
-            >
-              {t("common.cancel")}
-            </button>
-            <button
-              type="button"
-              onClick={onConfirm}
-              className={`rounded px-3 py-1 text-base ${ctaCls}`}
-            >
-              {ctaLabel}
-            </button>
-          </div>
-          <Dialog.Description className="sr-only">{title}</Dialog.Description>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+    <DialogShell
+      title={title}
+      subtitle={subtitle}
+      icon={icon}
+      iconTone={danger ? "danger" : "muted"}
+      onClose={onCancel}
+      initialFocus={ctaRef}
+      footer={
+        <>
+          <DialogButton hint="esc" onClick={onCancel}>
+            {t("common.cancel")}
+          </DialogButton>
+          <DialogButton
+            ref={ctaRef}
+            tone={danger ? "danger" : "primary"}
+            hint="enter"
+            onClick={onConfirm}
+          >
+            {ctaLabel}
+          </DialogButton>
+        </>
+      }
+    >
+      {body}
+    </DialogShell>
   );
 }

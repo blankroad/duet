@@ -7,26 +7,26 @@
     "background": "Background",
     "working": "Working…",
     "runInBackground": "Run in background",
-    "typeToConfirm": "Type <1>{{word}}</1> to confirm:",
+    "typeToConfirm": "Type <1>{{word}}</1> to continue:",
     "ok": "OK"
   },
   "conflict": {
-    "exist": "{{count}} item(s) already exist at the destination. Choose how to resolve:",
-    "replaceAll": "Replace all",
+    "exist": "{{count}} item(s) with the same name already exist at the destination",
     "replaceAllHint": "Overwrite existing (permanent — cannot be undone)",
-    "skipAll": "Skip all",
     "skipAllHint": "Don't copy conflicting items",
-    "keepBothAll": "Keep both (all)",
     "keepBothAllHint": "Copy with a new name — name (1).ext",
     "perFile": "Choose per file…",
-    "perFileHint": "Decide Replace / Skip / Keep both for each item",
     "setAll": "Set all:",
     "replace": "Replace",
     "skip": "Skip",
     "keepBoth": "Keep both",
-    "withChoices": "{{cta}} with choices",
     "metaNew": "New",
-    "metaExisting": "Existing"
+    "metaExisting": "Existing",
+    "existsBadge": "Exists",
+    "perFileTitle": "{{cta}} — choose per file",
+    "perFileSummary": "{{count}} conflict(s) · {{rest}} other(s) unaffected",
+    "replaceWarn": "Replace {{count}} — existing files are overwritten permanently and cannot be undone",
+    "tally": "Replace {{nReplace}} · Skip {{nSkip}} · Keep both {{nKeep}}"
   },
   "dialog": {
     "progress": {
@@ -280,11 +280,13 @@
     },
     "deleteConfirm": {
       "title": "Delete to trash?",
-      "body": "{{count}} item(s), {{size}}"
+      "undoHint": "Moves to the trash — undo with <1>{{key}}</1> or restore from the trash",
+      "undoHintRemote": "Moves to the remote trash (<2>~/.duet-trash</2>) — undo with <1>{{key}}</1>"
     },
     "deleteDanger": {
       "title": "Permanently delete?",
-      "body": "This CANNOT be undone. {{count}} item(s)."
+      "body": "This cannot be undone — items are erased immediately, bypassing the trash.",
+      "cta": "Delete permanently"
     },
     "repack": {
       "title": "Update “{{label}}”?",
@@ -313,15 +315,20 @@
       "move": "Move",
       "summary": "{{count}} item(s) · {{size}}",
       "summaryCountOnly": "{{count}} item(s)",
-      "strategy": "Strategy: {{label}}",
-      "strategyLocal": "local",
-      "strategyRelay": "relay (via this PC)",
-      "strategySameHost": "same-host (fast, server-side)",
-      "conflicts": "{{count}} conflict(s) at destination"
+      "hintLocal": "Local copy",
+      "hintRelay": "Transferred via this PC",
+      "hintSameHost": "Copied on the server itself — never passes through this PC",
+      "hintRename": "Same volume — renamed in place (instant)"
     },
     "keyAuth": {
       "title": "Passwordless login",
       "confirm": "Install your SSH public key on this host for passwordless login next time?"
+    },
+    "route": {
+      "src": "From"
+    },
+    "items": {
+      "more": "+{{count}} more…"
     }
   },
   "history": {
