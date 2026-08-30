@@ -35,7 +35,7 @@ export function HistoryDialog({ onClose }: { onClose: () => void }) {
       bodyFill
       divided
       title={t("history.title")}
-      description="Journal of recent file operations"
+      description={t("history.desc")}
       icon={History}
       onClose={onClose}
       footerLeft={t("history.redoNote")}

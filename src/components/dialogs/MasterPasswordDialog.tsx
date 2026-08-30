@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Lock } from "lucide-react";
 import { vaultUnlock } from "@/stores/vault";
 import { DialogShell } from "./DialogShell";
@@ -26,6 +27,7 @@ export function MasterPasswordDialog({
   /** unlock 성공 후 호출 (caller 가 후속 작업 — vault_set 등). */
   onUnlocked: () => void;
 }) {
+  const { t } = useTranslation();
   const [pw, setPw] = useState("");
   const [pwConfirm, setPwConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -46,16 +48,16 @@ export function MasterPasswordDialog({
 
   const handleSubmit = async () => {
     if (!pw) {
-      setError("Master password required");
+      setError(t("dialog.masterPassword.errRequired"));
       return;
     }
     if (mode === "create") {
       if (pw !== pwConfirm) {
-        setError("Passwords do not match");
+        setError(t("dialog.masterPassword.errMismatch"));
         return;
       }
       if (pw.length < 8) {
-        setError("Master password must be at least 8 characters");
+        setError(t("dialog.masterPassword.errShort"));
         return;
       }
     }
@@ -70,7 +72,9 @@ export function MasterPasswordDialog({
       onClose();
     } else {
       setError(
-        mode === "create" ? "Failed to create vault" : "Wrong master password",
+        mode === "create"
+          ? t("dialog.masterPassword.errCreateFailed")
+          : t("dialog.masterPassword.errWrong"),
       );
     }
   };
@@ -83,15 +87,19 @@ export function MasterPasswordDialog({
       open={open}
       width="sm"
       layer="above"
-      title={mode === "create" ? "Create vault" : "Unlock vault"}
-      description="Master password prompt."
+      title={
+        mode === "create"
+          ? t("dialog.masterPassword.createTitle")
+          : t("dialog.masterPassword.unlockTitle")
+      }
+      description={t("dialog.masterPassword.desc")}
       icon={Lock}
       onClose={handleClose}
       initialFocus={inputRef}
       footer={
         <>
           <DialogButton hint="esc" onClick={handleClose}>
-            Cancel
+            {t("common.cancel")}
           </DialogButton>
           <DialogButton
             tone="primary"
@@ -99,15 +107,19 @@ export function MasterPasswordDialog({
             disabled={busy}
             onClick={() => void handleSubmit()}
           >
-            {busy ? "…" : mode === "create" ? "Create" : "Unlock"}
+            {busy
+              ? "…"
+              : mode === "create"
+                ? t("dialog.masterPassword.create")
+                : t("dialog.masterPassword.unlock")}
           </DialogButton>
         </>
       }
     >
       <p className="text-meta text-fg-muted">
         {mode === "create"
-          ? "No password vault yet. Set a master password to encrypt saved hosts' passwords (age, scrypt+ChaCha20). If you forget the master, it can't be recovered."
-          : "Enter the master password to use saved passwords. Cached in memory only for the session."}
+          ? t("dialog.masterPassword.createBody")
+          : t("dialog.masterPassword.unlockBody")}
       </p>
       <DialogInput
         ref={inputRef}
@@ -117,7 +129,7 @@ export function MasterPasswordDialog({
         value={pw}
         onChange={(e) => setPw(e.target.value)}
         onKeyDown={onEnter}
-        placeholder="Master password"
+        placeholder={t("dialog.masterPassword.placeholder")}
       />
       {mode === "create" && (
         <DialogInput
@@ -127,7 +139,7 @@ export function MasterPasswordDialog({
           value={pwConfirm}
           onChange={(e) => setPwConfirm(e.target.value)}
           onKeyDown={onEnter}
-          placeholder="Confirm master password"
+          placeholder={t("dialog.masterPassword.confirmPlaceholder")}
         />
       )}
       {error && <DialogBand tone="danger" message={error} />}

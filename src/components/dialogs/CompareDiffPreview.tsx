@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import clsx from "clsx";
+import { useTranslation } from "react-i18next";
 import {
   commands,
   type CompareEntry,
@@ -27,6 +28,7 @@ export function CompareDiffPreview({
   left: Location;
   right: Location;
 }) {
+  const { t } = useTranslation();
   const [data, setData] = useState<ComparePairPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -70,10 +72,17 @@ export function CompareDiffPreview({
     </div>
   );
 
-  if (!entry) return <Shell>{note("Select a row to preview.")}</Shell>;
-  if (!previewable) return <Shell>{note("No preview (one-side only / directory).")}</Shell>;
-  if (loading) return <Shell>{note("Loading…")}</Shell>;
-  if (error) return <Shell>{note(`Preview failed: ${error}`, true)}</Shell>;
+  if (!entry)
+    return <Shell>{note(t("dialog.compare.previewSelectRow"))}</Shell>;
+  if (!previewable)
+    return <Shell>{note(t("dialog.compare.previewNone"))}</Shell>;
+  if (loading) return <Shell>{note(t("dialog.compare.previewLoading"))}</Shell>;
+  if (error)
+    return (
+      <Shell>
+        {note(t("dialog.compare.previewFailed", { err: error }), true)}
+      </Shell>
+    );
   if (!data) return null;
 
   if (data.left.kind === "text" && data.right.kind === "text") {
@@ -102,7 +111,7 @@ export function CompareDiffPreview({
               {op.text}
             </div>
           ))}
-          {truncated && note("(truncated — large file)", false)}
+          {truncated && note(t("dialog.compare.previewTruncated"), false)}
         </div>
       </Shell>
     );
@@ -112,7 +121,11 @@ export function CompareDiffPreview({
     return (
       <Shell>
         <div className="flex items-start gap-2 p-2">
-          <img src={dataUrl(data.left)} alt="left" className="max-h-40 max-w-[48%] object-contain" />
+          <img
+            src={dataUrl(data.left)}
+            alt="left"
+            className="max-h-40 max-w-[48%] object-contain"
+          />
           <img
             src={dataUrl(data.right)}
             alt="right"
@@ -123,9 +136,27 @@ export function CompareDiffPreview({
     );
   }
 
-  return <Shell>{note(`Preview: ${data.left.kind} ↔ ${data.right.kind} (not text/image)`)}</Shell>;
+  return (
+    <Shell>
+      {note(
+        t("dialog.compare.previewKinds", {
+          left: data.left.kind,
+          right: data.right.kind,
+        }),
+      )}
+    </Shell>
+  );
 }
 
 function note(text: string, danger = false) {
-  return <div className={clsx("px-2 py-3 text-center", danger ? "text-danger" : "text-fg-muted")}>{text}</div>;
+  return (
+    <div
+      className={clsx(
+        "px-2 py-3 text-center",
+        danger ? "text-danger" : "text-fg-muted",
+      )}
+    >
+      {text}
+    </div>
+  );
 }

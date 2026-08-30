@@ -1,3 +1,4 @@
+import { useTranslation, Trans } from "react-i18next";
 import { DialogButton } from "./DialogButton";
 
 /**
@@ -12,11 +13,18 @@ export function CompareFooterSummary({
   create: number;
   overwrite: number;
 }) {
+  const { t } = useTranslation();
   return (
     <span>
-      Apply: create <b className="text-fg">{create}</b> · overwrite{" "}
-      <b className="text-fg">{overwrite}</b>
-      {overwrite > 0 && " (after backup, undoable)"}
+      <Trans
+        i18nKey="dialog.compare.applySummary"
+        values={{ create, overwrite }}
+        components={{
+          1: <b className="text-fg" />,
+          3: <b className="text-fg" />,
+        }}
+      />
+      {overwrite > 0 && t("dialog.compare.applyBackupNote")}
     </span>
   );
 }
@@ -36,27 +44,28 @@ export function CompareFooterButtons({
   onMerge: () => void;
   onApply: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <DialogButton hint="esc" onClick={onClose}>
-        Close
+        {t("common.close")}
       </DialogButton>
       <span
         title={
           truncated
-            ? "Comparison truncated — can't merge. Narrow the scope."
-            : "Copy one-side-only files both ways (no overwrite/delete, undoable)"
+            ? t("dialog.compare.mergeTruncatedTitle")
+            : t("dialog.compare.mergeTitle")
         }
       >
         <DialogButton disabled={mergeable === 0 || truncated} onClick={onMerge}>
-          Merge ↔
+          {t("dialog.compare.merge")}
         </DialogButton>
       </span>
       <span
         title={
           truncated
-            ? "Comparison truncated — can't apply. Narrow the scope."
-            : "Apply chosen directions (overwrites backed up to .bak, undoable)"
+            ? t("dialog.compare.applyTruncatedTitle")
+            : t("dialog.compare.applyTitle")
         }
       >
         <DialogButton
@@ -64,7 +73,7 @@ export function CompareFooterButtons({
           disabled={applyCount === 0 || truncated}
           onClick={onApply}
         >
-          Apply ({applyCount})
+          {t("dialog.compare.applyCta", { count: applyCount })}
         </DialogButton>
       </span>
     </>

@@ -148,7 +148,55 @@
       "unreadable_other": "{{count}}개 디렉토리를 읽을 수 없음 — 병합/동기화에서 제외됩니다.",
       "truncated": "항목이 너무 많음 — 일부만 표시 (한도 도달). 병합/적용이 비활성화됩니다.",
       "moves": "↔ 이동/이름변경 <1>{{count}}</1> — 복사 안 함 (중복 방지)",
-      "desc": "두 패널 디렉토리의 재귀 비교."
+      "desc": "두 패널 디렉토리의 재귀 비교.",
+      "status": {
+        "leftOnly": "← 왼쪽만",
+        "rightOnly": "오른쪽만 →",
+        "newerLeft": "← 더 최신",
+        "newerRight": "더 최신 →",
+        "differ": "다름",
+        "same": "같음",
+        "unreadable": "읽기 불가"
+      },
+      "toggleStatus": "{{label}} 표시 전환",
+      "searchPlaceholder": "경로 검색",
+      "ignorePlaceholder": "무시 패턴 (node_modules .git *.log)",
+      "tolTitle": "mtime 허용오차 — 크기가 같고 시각 차이가 이 안이면 같은 것으로 (SSH↔로컬 오탐 흡수)",
+      "tolExact": "mtime 정확히",
+      "recompare": "다시 비교",
+      "comparing": "비교 중…",
+      "resultsAria": "비교 결과",
+      "noDiffs": "차이 없음 — 두 폴더가 동일합니다.",
+      "noItemsFiltered": "표시할 항목 없음 (필터/검색)",
+      "noItems": "표시할 항목 없음",
+      "dir": {
+        "toLeft": "오른쪽 → 왼쪽",
+        "skip": "건너뛰기",
+        "toRight": "왼쪽 → 오른쪽"
+      },
+      "folderDir": "폴더 전체: {{dir}}",
+      "strategy": {
+        "sameHost": "⚡ 같은 호스트 직접",
+        "sameHostTitle": "병합이 서버 안에서 직접 실행 — 이 PC 대역폭 0",
+        "relay": "↔ 이 PC 경유",
+        "relayTitle": "파일이 이 PC 를 거쳐 복사됨 (다른 호스트 간)",
+        "local": "로컬",
+        "localTitle": "로컬 ↔ 로컬"
+      },
+      "previewSelectRow": "미리보기할 행을 선택하세요.",
+      "previewNone": "미리보기 없음 (한쪽만 있음 / 폴더)",
+      "previewLoading": "불러오는 중…",
+      "previewFailed": "미리보기 실패: {{err}}",
+      "previewTruncated": "(잘림 — 큰 파일)",
+      "previewKinds": "미리보기: {{left}} ↔ {{right}} (텍스트/이미지 아님)",
+      "applySummary": "적용: 생성 <1>{{create}}</1> · 덮어쓰기 <3>{{overwrite}}</3>",
+      "applyBackupNote": " (백업 후 — 되돌리기 가능)",
+      "merge": "병합 ↔",
+      "mergeTitle": "한쪽에만 있는 파일을 양방향 복사 (덮어쓰기/삭제 없음, 되돌리기 가능)",
+      "mergeTruncatedTitle": "비교가 잘림 — 병합할 수 없습니다. 범위를 좁히세요.",
+      "applyCta": "적용 ({{count}})",
+      "applyTitle": "선택한 방향대로 적용 (덮어쓰기는 .bak 백업 — 되돌리기 가능)",
+      "applyTruncatedTitle": "비교가 잘림 — 적용할 수 없습니다. 범위를 좁히세요."
     },
     "threeWay": {
       "title": "3-way 비교",
@@ -326,6 +374,22 @@
     },
     "items": {
       "more": "외 {{count}}개 …"
+    },
+    "masterPassword": {
+      "createTitle": "비밀 저장소 만들기",
+      "unlockTitle": "비밀 저장소 잠금 해제",
+      "desc": "마스터 비밀번호 입력",
+      "createBody": "아직 비밀 저장소가 없습니다. 저장된 호스트 비밀번호를 암호화할 마스터 비밀번호를 정하세요 (age, scrypt+ChaCha20). 마스터 비밀번호를 잊으면 복구할 수 없습니다.",
+      "unlockBody": "저장된 비밀번호를 쓰려면 마스터 비밀번호를 입력하세요. 이 세션 동안 메모리에만 보관됩니다.",
+      "placeholder": "마스터 비밀번호",
+      "confirmPlaceholder": "마스터 비밀번호 확인",
+      "create": "만들기",
+      "unlock": "잠금 해제",
+      "errRequired": "마스터 비밀번호를 입력하세요",
+      "errMismatch": "비밀번호가 서로 다릅니다",
+      "errShort": "마스터 비밀번호는 8자 이상이어야 합니다",
+      "errCreateFailed": "비밀 저장소를 만들지 못했습니다",
+      "errWrong": "마스터 비밀번호가 틀렸습니다"
     }
   },
   "history": {
@@ -351,7 +415,8 @@
       "merge": "폴더 병합 — {{count}}개",
       "compareApply": "비교 적용 — {{count}}개",
       "threeWayApply": "3-way 적용 — {{count}}개"
-    }
+    },
+    "desc": "최근 파일 작업 기록"
   },
   "menu": {
     "putBack": "제자리로 복원",
@@ -416,7 +481,8 @@
       "marquee": "마키(드래그) 선택",
       "dragOut": "OS/반대 패널로 복사",
       "dragMove": "복사 대신 이동 (로컬)"
-    }
+    },
+    "desc": "단축키 참조"
   },
   "topbar": {
     "toggleSidebar": "사이드바 토글 ({{key}})",
@@ -512,7 +578,8 @@
       "edit": "편집",
       "reset": "초기화",
       "pressKey": "키를 누르세요…"
-    }
+    },
+    "desc": "앱 설정"
   },
   "toast": {
     "renameSelectOne": "이름 변경: 항목을 하나만 선택하세요",

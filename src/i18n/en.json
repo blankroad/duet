@@ -150,7 +150,55 @@
       "unreadable_other": "Could not read {{count}} directories — excluded from merge/sync.",
       "truncated": "Too many items — only some are shown (limit reached). Merge/apply is disabled.",
       "moves": "↔ Move/rename <1>{{count}}</1> — not copied (avoids duplicates)",
-      "desc": "Recursive comparison of the two pane directories."
+      "desc": "Recursive comparison of the two pane directories.",
+      "status": {
+        "leftOnly": "← only",
+        "rightOnly": "only →",
+        "newerLeft": "← newer",
+        "newerRight": "newer →",
+        "differ": "differ",
+        "same": "same",
+        "unreadable": "unreadable"
+      },
+      "toggleStatus": "Toggle {{label}}",
+      "searchPlaceholder": "Search path",
+      "ignorePlaceholder": "Ignore patterns (node_modules .git *.log)",
+      "tolTitle": "mtime tolerance — same size + time diff within this = treated equal (absorbs SSH↔local false diffs)",
+      "tolExact": "mtime exact",
+      "recompare": "Re-compare",
+      "comparing": "Comparing…",
+      "resultsAria": "Comparison results",
+      "noDiffs": "No differences — the two folders are identical.",
+      "noItemsFiltered": "No items to show (filter/search).",
+      "noItems": "No items to show",
+      "dir": {
+        "toLeft": "Right → Left",
+        "skip": "Skip",
+        "toRight": "Left → Right"
+      },
+      "folderDir": "Whole folder: {{dir}}",
+      "strategy": {
+        "sameHost": "⚡ Same-host direct",
+        "sameHostTitle": "Merge runs directly on the server — zero PC bandwidth",
+        "relay": "↔ Via your PC",
+        "relayTitle": "Files are copied through your PC (cross-host)",
+        "local": "Local",
+        "localTitle": "Local ↔ Local"
+      },
+      "previewSelectRow": "Select a row to preview.",
+      "previewNone": "No preview (one-side only / directory).",
+      "previewLoading": "Loading…",
+      "previewFailed": "Preview failed: {{err}}",
+      "previewTruncated": "(truncated — large file)",
+      "previewKinds": "Preview: {{left}} ↔ {{right}} (not text/image)",
+      "applySummary": "Apply: create <1>{{create}}</1> · overwrite <3>{{overwrite}}</3>",
+      "applyBackupNote": " (after backup, undoable)",
+      "merge": "Merge ↔",
+      "mergeTitle": "Copy one-side-only files both ways (no overwrite/delete, undoable)",
+      "mergeTruncatedTitle": "Comparison truncated — can't merge. Narrow the scope.",
+      "applyCta": "Apply ({{count}})",
+      "applyTitle": "Apply chosen directions (overwrites backed up to .bak, undoable)",
+      "applyTruncatedTitle": "Comparison truncated — can't apply. Narrow the scope."
     },
     "threeWay": {
       "title": "3-way compare",
@@ -329,6 +377,22 @@
     },
     "items": {
       "more": "+{{count}} more…"
+    },
+    "masterPassword": {
+      "createTitle": "Create vault",
+      "unlockTitle": "Unlock vault",
+      "desc": "Master password prompt.",
+      "createBody": "No password vault yet. Set a master password to encrypt saved hosts' passwords (age, scrypt+ChaCha20). If you forget the master, it can't be recovered.",
+      "unlockBody": "Enter the master password to use saved passwords. Cached in memory only for the session.",
+      "placeholder": "Master password",
+      "confirmPlaceholder": "Confirm master password",
+      "create": "Create",
+      "unlock": "Unlock",
+      "errRequired": "Master password required",
+      "errMismatch": "Passwords do not match",
+      "errShort": "Master password must be at least 8 characters",
+      "errCreateFailed": "Failed to create vault",
+      "errWrong": "Wrong master password"
     }
   },
   "history": {
@@ -354,7 +418,8 @@
       "merge": "Merged folders — {{count}} item(s)",
       "compareApply": "Compare apply — {{count}} item(s)",
       "threeWayApply": "3-way apply — {{count}} item(s)"
-    }
+    },
+    "desc": "Journal of recent file operations"
   },
   "menu": {
     "putBack": "Put back",
@@ -419,7 +484,8 @@
       "marquee": "Marquee select",
       "dragOut": "Copy out to OS / other pane",
       "dragMove": "Move instead of copy (local)"
-    }
+    },
+    "desc": "Keyboard shortcut reference"
   },
   "topbar": {
     "toggleSidebar": "Toggle sidebar ({{key}})",
@@ -515,7 +581,8 @@
       "edit": "Edit",
       "reset": "Reset",
       "pressKey": "Press key…"
-    }
+    },
+    "desc": "Application settings"
   },
   "toast": {
     "renameSelectOne": "Rename: select exactly one item",

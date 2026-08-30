@@ -34,7 +34,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       bodyPadding={false}
       divided
       title={t("settings.title")}
-      description="Application settings"
+      description={t("settings.desc")}
       icon={Settings}
       onClose={onClose}
       footer={

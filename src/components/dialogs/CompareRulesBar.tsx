@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Filter, RefreshCw } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { commands, type CompareRules } from "@/types/bindings";
 import { buildSettingsPatch } from "@/lib/settingsPatch";
 
@@ -14,6 +15,7 @@ export function CompareRulesBar({
   onRecompare: (rules: CompareRules) => void;
   busy: boolean;
 }) {
+  const { t } = useTranslation();
   const [ignore, setIgnore] = useState("");
   const [tol, setTol] = useState(0);
 
@@ -50,16 +52,16 @@ export function CompareRulesBar({
         value={ignore}
         onChange={(e) => setIgnore(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && run()}
-        placeholder="Ignore patterns (node_modules .git *.log)"
+        placeholder={t("dialog.compare.ignorePlaceholder")}
         className="min-w-0 flex-1 rounded border border-border bg-subtle px-2 py-0.5 focus:border-accent focus:outline-none"
       />
       <select
         value={tol}
         onChange={(e) => setTol(Number(e.target.value))}
         className="rounded border border-border bg-subtle px-1 py-0.5 focus:outline-none"
-        title="mtime tolerance — same size + time diff within this = treated equal (absorbs SSH↔local false diffs)"
+        title={t("dialog.compare.tolTitle")}
       >
-        <option value={0}>mtime exact</option>
+        <option value={0}>{t("dialog.compare.tolExact")}</option>
         <option value={2000}>±2s</option>
         <option value={60000}>±1m</option>
       </select>
@@ -70,7 +72,7 @@ export function CompareRulesBar({
         className="flex items-center gap-1 rounded border border-border px-2 py-0.5 hover:bg-subtle disabled:opacity-50"
       >
         <RefreshCw size={11} className={busy ? "animate-spin" : ""} />
-        {busy ? "Comparing…" : "Re-compare"}
+        {busy ? t("dialog.compare.comparing") : t("dialog.compare.recompare")}
       </button>
     </div>
   );

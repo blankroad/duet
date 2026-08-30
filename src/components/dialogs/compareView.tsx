@@ -1,7 +1,20 @@
-import { ArrowLeft, ArrowRight, Equal, AlertTriangle, FileWarning } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Equal,
+  AlertTriangle,
+  FileWarning,
+} from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import clsx from "clsx";
-import type { ApplyDirection, CompareEntry, CompareStatus, CopyStrategy } from "@/types/bindings";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
+import type {
+  ApplyDirection,
+  CompareEntry,
+  CompareStatus,
+  CopyStrategy,
+} from "@/types/bindings";
 import { formatSize, formatTime } from "@/lib/format";
 
 /**
@@ -21,17 +34,26 @@ export const DIFF_STATUSES: CompareStatus[] = [
 ];
 
 /** 칩 노출 순서. */
-export const ALL_STATUSES: CompareStatus[] = [...DIFF_STATUSES, "same", "unreadable"];
+export const ALL_STATUSES: CompareStatus[] = [
+  ...DIFF_STATUSES,
+  "same",
+  "unreadable",
+];
 
-export const LABEL: Record<CompareStatus, string> = {
-  left_only: "← only",
-  right_only: "only →",
-  newer_left: "← newer",
-  newer_right: "newer →",
-  differ: "differ",
-  same: "same",
-  unreadable: "unreadable",
+const LABEL_KEY: Record<CompareStatus, string> = {
+  left_only: "dialog.compare.status.leftOnly",
+  right_only: "dialog.compare.status.rightOnly",
+  newer_left: "dialog.compare.status.newerLeft",
+  newer_right: "dialog.compare.status.newerRight",
+  differ: "dialog.compare.status.differ",
+  same: "dialog.compare.status.same",
+  unreadable: "dialog.compare.status.unreadable",
 };
+
+/** 상태 라벨 (현지화). */
+export function statusLabel(s: CompareStatus, t: TFunction): string {
+  return t(LABEL_KEY[s]);
+}
 
 export const TONE: Record<CompareStatus, string> = {
   left_only: "text-accent",
@@ -61,25 +83,25 @@ export interface StrategyBadge {
 }
 
 /** 머지/싱크가 어떤 경로로 실행될지 — 대역폭 사전 고지. */
-export function strategyBadge(s: CopyStrategy): StrategyBadge {
+export function strategyBadge(s: CopyStrategy, t: TFunction): StrategyBadge {
   switch (s.kind) {
     case "ssh_same_host":
       return {
-        label: "⚡ Same-host direct",
+        label: t("dialog.compare.strategy.sameHost"),
         tone: "border-accent bg-subtle text-accent",
-        title: "Merge runs directly on the server — zero PC bandwidth",
+        title: t("dialog.compare.strategy.sameHostTitle"),
       };
     case "relay":
       return {
-        label: "↔ Via your PC",
+        label: t("dialog.compare.strategy.relay"),
         tone: "border-warning/40 bg-warning/10 text-warning",
-        title: "Files are copied through your PC (cross-host)",
+        title: t("dialog.compare.strategy.relayTitle"),
       };
     case "local_to_local":
       return {
-        label: "Local",
+        label: t("dialog.compare.strategy.local"),
         tone: "border-border bg-subtle text-fg-muted",
-        title: "Local ↔ Local",
+        title: t("dialog.compare.strategy.localTitle"),
       };
   }
 }
@@ -149,6 +171,7 @@ export function DirectionToggle({
   value: ApplyDirection;
   onChange: (dir: ApplyDirection) => void;
 }) {
+  const { t } = useTranslation();
   const allowed = allowedDirections(status);
   const opt = (dir: ApplyDirection, label: string, title: string) => {
     const can = allowed.includes(dir);
@@ -164,7 +187,9 @@ export function DirectionToggle({
         title={title}
         className={clsx(
           "px-1 leading-none",
-          value === dir ? "font-bold text-accent" : "text-fg-muted hover:text-fg",
+          value === dir
+            ? "font-bold text-accent"
+            : "text-fg-muted hover:text-fg",
           !can && "opacity-20",
         )}
       >
@@ -174,9 +199,9 @@ export function DirectionToggle({
   };
   return (
     <span className="flex items-center justify-end font-mono">
-      {opt("to_left", "←", "Right → Left")}
-      {opt("skip", "·", "Skip")}
-      {opt("to_right", "→", "Left → Right")}
+      {opt("to_left", "←", t("dialog.compare.dir.toLeft"))}
+      {opt("skip", "·", t("dialog.compare.dir.skip"))}
+      {opt("to_right", "→", t("dialog.compare.dir.toRight"))}
     </span>
   );
 }

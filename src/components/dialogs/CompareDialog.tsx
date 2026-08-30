@@ -174,7 +174,7 @@ export function CompareDialog({
   }, [plan.entries, active, query]);
 
   const mergeable = plan.left_only + plan.right_only;
-  const badge = strategyBadge(plan.strategy);
+  const badge = strategyBadge(plan.strategy, t);
   const base = (loc: { path: string }) => basename(String(loc.path));
 
   const toggle = (s: CompareStatus) =>

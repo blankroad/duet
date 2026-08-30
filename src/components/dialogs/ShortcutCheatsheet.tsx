@@ -53,7 +53,7 @@ export function ShortcutCheatsheet({ onClose }: { onClose: () => void }) {
       divided
       title={t("cheatsheet.title")}
       subtitle={t("cheatsheet.customize")}
-      description="Keyboard shortcut reference"
+      description={t("cheatsheet.desc")}
       icon={Keyboard}
       onClose={onClose}
       footer={

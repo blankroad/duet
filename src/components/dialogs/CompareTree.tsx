@@ -1,10 +1,15 @@
 import { useMemo, useState } from "react";
 import { ChevronRight, ChevronDown, Folder } from "lucide-react";
 import clsx from "clsx";
-import type { ApplyDirection, CompareEntry, CompareStatus } from "@/types/bindings";
+import { useTranslation } from "react-i18next";
+import type {
+  ApplyDirection,
+  CompareEntry,
+  CompareStatus,
+} from "@/types/bindings";
 import { buildCompareTree, type TreeNode } from "@/lib/compareTree";
 import {
-  LABEL,
+  statusLabel,
   TONE,
   ICON,
   sizeText,
@@ -33,7 +38,13 @@ export interface CompareTreeProps {
  * 비교 결과 트리뷰 — 디렉토리 접기/펼치기 + 폴더별 상태 롤업 배지.
  * leaf 행은 list 와 동일(상태/메타/방향토글). 키보드 내비는 list 모드 전용(v1).
  */
-export function CompareTree({ rows, dirOf, setDir, onSelect }: CompareTreeProps) {
+export function CompareTree({
+  rows,
+  dirOf,
+  setDir,
+  onSelect,
+}: CompareTreeProps) {
+  const { t } = useTranslation();
   const tree = useMemo(() => buildCompareTree(rows), [rows]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggle = (rel: string) =>
@@ -47,7 +58,9 @@ export function CompareTree({ rows, dirOf, setDir, onSelect }: CompareTreeProps)
   return (
     <div className="min-h-0 flex-1 overflow-auto rounded border border-border text-meta">
       {tree.length === 0 ? (
-        <div className="px-2 py-3 text-center text-fg-muted">No items to show</div>
+        <div className="px-2 py-3 text-center text-fg-muted">
+          {t("dialog.compare.noItems")}
+        </div>
       ) : (
         tree.map((n) => (
           <TreeRow
@@ -83,6 +96,7 @@ function TreeRow({
   setDir: (rel: string, dir: ApplyDirection) => void;
   onSelect: ((entry: CompareEntry | null) => void) | undefined;
 }) {
+  const { t } = useTranslation();
   const pad = { paddingLeft: `${depth * 14 + 4}px` };
 
   // leaf — 파일/한쪽전용 디렉토리
@@ -93,16 +107,26 @@ function TreeRow({
       <div
         onClick={() => onSelect?.(e)}
         className="flex cursor-default items-center gap-2 px-2 py-0.5 hover:bg-subtle/40"
-        title={`${LABEL[e.status]} — ${e.rel}`}
+        title={`${statusLabel(e.status, t)} — ${e.rel}`}
       >
         <span style={pad} className="flex min-w-0 flex-1 items-center gap-1.5">
           <Icon size={11} className={TONE[e.status]} />
-          <span className="truncate font-mono">{e.kind === "dir" ? `${node.name}/` : node.name}</span>
+          <span className="truncate font-mono">
+            {e.kind === "dir" ? `${node.name}/` : node.name}
+          </span>
         </span>
-        <span className="w-24 shrink-0 whitespace-nowrap text-right text-fg-muted">{sizeText(e)}</span>
-        <span className="w-14 shrink-0 whitespace-nowrap text-right text-fg-muted">{mtimeText(e)}</span>
+        <span className="w-24 shrink-0 whitespace-nowrap text-right text-fg-muted">
+          {sizeText(e)}
+        </span>
+        <span className="w-14 shrink-0 whitespace-nowrap text-right text-fg-muted">
+          {mtimeText(e)}
+        </span>
         <span className="w-14 shrink-0">
-          <DirectionToggle status={e.status} value={dirOf(e.rel, e.status)} onChange={(d) => setDir(e.rel, d)} />
+          <DirectionToggle
+            status={e.status}
+            value={dirOf(e.rel, e.status)}
+            onChange={(d) => setDir(e.rel, d)}
+          />
         </span>
       </div>
     );
@@ -115,7 +139,10 @@ function TreeRow({
   const setFolderDir = (dir: ApplyDirection) => {
     const walk = (n: TreeNode) => {
       if (n.entry) {
-        setDir(n.entry.rel, allowedDirections(n.entry.status).includes(dir) ? dir : "skip");
+        setDir(
+          n.entry.rel,
+          allowedDirections(n.entry.status).includes(dir) ? dir : "skip",
+        );
       } else n.children?.forEach(walk);
     };
     walk(node);
@@ -154,6 +181,7 @@ function TreeRow({
 
 /** 폴더 행의 서브트리 일괄 방향 지정 (← · →) — 클릭 시 자손 leaf 전체에 전파. */
 function FolderDirSet({ onSet }: { onSet: (dir: ApplyDirection) => void }) {
+  const { t } = useTranslation();
   const btn = (dir: ApplyDirection, label: string, title: string) => (
     <button
       type="button"
@@ -169,9 +197,21 @@ function FolderDirSet({ onSet }: { onSet: (dir: ApplyDirection) => void }) {
   );
   return (
     <span className="flex w-14 shrink-0 items-center justify-end font-mono">
-      {btn("to_left", "←", "Whole folder: Right → Left")}
-      {btn("skip", "·", "Whole folder: Skip")}
-      {btn("to_right", "→", "Whole folder: Left → Right")}
+      {btn(
+        "to_left",
+        "←",
+        t("dialog.compare.folderDir", { dir: t("dialog.compare.dir.toLeft") }),
+      )}
+      {btn(
+        "skip",
+        "·",
+        t("dialog.compare.folderDir", { dir: t("dialog.compare.dir.skip") }),
+      )}
+      {btn(
+        "to_right",
+        "→",
+        t("dialog.compare.folderDir", { dir: t("dialog.compare.dir.toRight") }),
+      )}
     </span>
   );
 }

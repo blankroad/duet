@@ -1,8 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import clsx from "clsx";
-import type { ApplyDirection, CompareEntry, CompareStatus } from "@/types/bindings";
+import { useTranslation } from "react-i18next";
+import type {
+  ApplyDirection,
+  CompareEntry,
+  CompareStatus,
+} from "@/types/bindings";
 import {
-  LABEL,
+  statusLabel,
   TONE,
   ICON,
   sizeText,
@@ -36,6 +41,7 @@ export function CompareList({
   listRef,
   onSelect,
 }: CompareListProps) {
+  const { t } = useTranslation();
   const [sel, setSel] = useState(0);
   const selectedRowRef = useRef<HTMLTableRowElement>(null);
   const selClamped = useMemo(
@@ -61,7 +67,8 @@ export function CompareList({
     } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
       const row = rows[selClamped];
       if (!row) return;
-      const dir: ApplyDirection = e.key === "ArrowLeft" ? "to_left" : "to_right";
+      const dir: ApplyDirection =
+        e.key === "ArrowLeft" ? "to_left" : "to_right";
       if (allowedDirections(row.status).includes(dir)) {
         e.preventDefault();
         setDir(row.rel, dir);
@@ -75,15 +82,17 @@ export function CompareList({
       className="min-h-0 flex-1 overflow-y-auto rounded border border-border focus:outline-none focus:ring-1 focus:ring-accent"
       tabIndex={0}
       role="listbox"
-      aria-label="Comparison results"
-      aria-activedescendant={rows.length === 0 ? undefined : `cmp-opt-${selClamped}`}
+      aria-label={t("dialog.compare.resultsAria")}
+      aria-activedescendant={
+        rows.length === 0 ? undefined : `cmp-opt-${selClamped}`
+      }
       onKeyDown={onKeyDown}
     >
       {rows.length === 0 ? (
         <div className="px-2 py-3 text-center text-meta text-fg-muted">
           {entriesEmpty
-            ? "No differences — the two folders are identical."
-            : "No items to show (filter/search)."}
+            ? t("dialog.compare.noDiffs")
+            : t("dialog.compare.noItemsFiltered")}
         </div>
       ) : (
         <table className="w-full text-meta">
@@ -103,10 +112,15 @@ export function CompareList({
                     i === selClamped ? "bg-accent/15" : "even:bg-subtle/40",
                   )}
                 >
-                  <td className={clsx("w-24 px-2 py-0.5 font-medium", TONE[e.status])}>
+                  <td
+                    className={clsx(
+                      "w-24 px-2 py-0.5 font-medium",
+                      TONE[e.status],
+                    )}
+                  >
                     <span className="flex items-center gap-1">
                       <RowIcon size={11} />
-                      {LABEL[e.status]}
+                      {statusLabel(e.status, t)}
                     </span>
                   </td>
                   <td className="truncate px-2 py-0.5 font-mono" title={e.rel}>
