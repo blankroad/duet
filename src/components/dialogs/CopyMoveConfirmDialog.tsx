@@ -6,6 +6,7 @@ import type { ConflictPolicy } from "@/types/bindings";
 import { DialogShell } from "./DialogShell";
 import { DialogButton } from "./DialogButton";
 import { Segmented } from "./Segmented";
+import { DialogBand } from "./DialogBand";
 import { ConflictPerFileList, policyOptions } from "./ConflictPerFileList";
 import {
   TransferPlanBody,
@@ -131,11 +132,10 @@ export function CopyMoveConfirmDialog({
     >
       <TransferPlanBody plan={plan} />
       {hasConflicts && (
-        <div className="flex flex-col gap-2 rounded-panel border border-warning/30 bg-warning/10 px-3 py-2.5">
-          <div className="flex items-center gap-2 text-base text-fg">
-            <AlertTriangle size={14} className="shrink-0 text-warning" />
-            <span>{t("conflict.exist", { count: conflicts.length })}</span>
-          </div>
+        <DialogBand
+          tone="warning"
+          message={t("conflict.exist", { count: conflicts.length })}
+        >
           <div className="flex items-center gap-2.5">
             <Segmented
               value={policy}
@@ -158,7 +158,7 @@ export function CopyMoveConfirmDialog({
               {t("conflict.perFile")}
             </button>
           </div>
-        </div>
+        </DialogBand>
       )}
     </DialogShell>
   );

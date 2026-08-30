@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import * as Dialog from "@radix-ui/react-dialog";
-import { X, Plus, Trash2 } from "lucide-react";
+import { Plus, Terminal, Trash2 } from "lucide-react";
+import { DialogShell } from "./DialogShell";
+import { DialogButton } from "./DialogButton";
+import { DialogInput } from "./DialogInput";
 
 export interface ArgsDialogProps {
   /** 편집 대상 앱 이름 (표시용). */
@@ -36,81 +38,58 @@ export function ArgsDialog({
     onSubmit(rows.map((r) => r.trim()).filter((r) => r.length > 0));
 
   return (
-    <Dialog.Root open onOpenChange={(o) => !o && onClose()}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none">
-          <div className="mb-3 flex items-start justify-between">
-            <Dialog.Title className="text-title font-medium">
-              {t("dialog.args.title", { name })}
-            </Dialog.Title>
-            <Dialog.Close
-              className="rounded p-1 text-fg-muted hover:bg-border"
-              aria-label={t("common.close")}
-            >
-              <X size={14} />
-            </Dialog.Close>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            {rows.map((r, i) => (
-              <div key={i} className="flex items-center gap-1">
-                <span className="w-5 text-right text-meta text-fg-muted">
-                  {i + 1}
-                </span>
-                <input
-                  type="text"
-                  value={r}
-                  placeholder={t("dialog.args.placeholder")}
-                  autoFocus={i === rows.length - 1}
-                  onChange={(e) => setRow(i, e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") submit();
-                    else if (e.key === "Escape") onClose();
-                  }}
-                  className="min-w-0 flex-1 rounded border border-border bg-subtle px-2 py-1 font-mono text-base focus:border-accent focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={() => removeRow(i)}
-                  className="rounded p-1 text-fg-muted hover:bg-border hover:text-danger"
-                  aria-label={t("dialog.args.remove")}
-                >
-                  <Trash2 size={13} />
-                </button>
-              </div>
-            ))}
-          </div>
-          <button
-            type="button"
-            onClick={addRow}
-            className="mt-2 flex items-center gap-1 rounded px-1 py-0.5 text-meta text-fg-muted hover:text-fg"
-          >
-            <Plus size={12} /> {t("dialog.args.add")}
-          </button>
-          <p className="mt-3 text-meta text-fg-muted">
-            {t("dialog.args.note")}
-          </p>
-          <div className="mt-4 flex justify-end gap-2">
+    <DialogShell
+      title={t("dialog.args.title", { name })}
+      description={t("dialog.args.desc", { name })}
+      icon={Terminal}
+      onClose={onClose}
+      footerLeft={t("dialog.args.note")}
+      footer={
+        <>
+          <DialogButton hint="esc" onClick={onClose}>
+            {t("common.cancel")}
+          </DialogButton>
+          <DialogButton tone="primary" hint="enter" onClick={submit}>
+            {t("dialog.args.save")}
+          </DialogButton>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-1.5">
+        {rows.map((r, i) => (
+          <div key={i} className="flex items-center gap-1">
+            <span className="w-5 text-right text-meta text-fg-muted">
+              {i + 1}
+            </span>
+            <DialogInput
+              mono
+              type="text"
+              value={r}
+              placeholder={t("dialog.args.placeholder")}
+              autoFocus={i === rows.length - 1}
+              onChange={(e) => setRow(i, e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submit();
+              }}
+            />
             <button
               type="button"
-              onClick={onClose}
-              className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
+              onClick={() => removeRow(i)}
+              className="rounded p-1 text-fg-muted hover:bg-border hover:text-danger"
+              aria-label={t("dialog.args.remove")}
             >
-              {t("common.cancel")}
-            </button>
-            <button
-              type="button"
-              onClick={submit}
-              className="rounded bg-accent px-3 py-1 text-base text-white"
-            >
-              {t("dialog.args.save")}
+              <Trash2 size={13} />
             </button>
           </div>
-          <Dialog.Description className="sr-only">
-            {t("dialog.args.desc", { name })}
-          </Dialog.Description>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+        ))}
+      </div>
+      <button
+        type="button"
+        onClick={addRow}
+        className="flex items-center gap-1 self-start rounded px-1 py-0.5 text-meta text-fg-muted hover:text-fg"
+      >
+        <Plus size={12} /> {t("dialog.args.add")}
+      </button>
+    </DialogShell>
   );
 }

@@ -1860,8 +1860,6 @@ function App() {
       )}
       {dialog.kind === "sync-confirm" && (
         <SyncDialog
-          srcLabel={dialog.srcLabel}
-          dstLabel={dialog.dstLabel}
           src={dialog.plan.src}
           dst={dialog.plan.dst}
           onClose={closeDialog}

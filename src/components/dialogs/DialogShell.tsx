@@ -6,6 +6,8 @@ import type { ReactNode, RefObject } from "react";
 export type DialogIconTone = "muted" | "accent" | "danger";
 
 interface DialogShellProps {
+  /** 제어형 열림 — 생략 시 항상 열림(마운트 = 열림). */
+  open?: boolean | undefined;
   title: string;
   /** 제목 아래 한 줄 요약 — 개수·용량·위치 같은 보조 정보. */
   subtitle?: ReactNode | undefined;
@@ -26,6 +28,10 @@ interface DialogShellProps {
   onClose: () => void;
   /** 열릴 때 포커스할 요소 (기본: Radix 첫 포커스 가능 요소). */
   initialFocus?: RefObject<HTMLElement | null> | undefined;
+  /** initialFocus 가 input 이면 내용 전체 선택 (초기값 덮어쓰기용). */
+  selectOnFocus?: boolean | undefined;
+  /** above = 다른 다이얼로그 위에 겹쳐 뜨는 것 (암호 프롬프트 등, z-60). */
+  layer?: "base" | "above" | undefined;
   /** false 면 바깥 클릭으로 닫히지 않음 (진행률처럼 실수로 놓치면 안 되는 것). */
   dismissOnOutsideClick?: boolean | undefined;
 }
@@ -44,6 +50,7 @@ const ICON_TONE: Record<DialogIconTone, string> = {
  * 색·모양은 전부 테마 토큰(bg-base, border, rounded-panel, shadow-raised).
  */
 export function DialogShell({
+  open = true,
   title,
   subtitle,
   description,
@@ -57,23 +64,29 @@ export function DialogShell({
   footer,
   onClose,
   initialFocus,
+  selectOnFocus = false,
+  layer = "base",
   dismissOnOutsideClick = true,
 }: DialogShellProps) {
+  const z = layer === "above" ? "z-[60]" : "z-50";
   return (
-    <Dialog.Root open onOpenChange={(o) => !o && onClose()}>
+    <Dialog.Root open={open} onOpenChange={(o) => !o && onClose()}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
+        <Dialog.Overlay className={clsx("fixed inset-0 bg-black/50", z)} />
         <Dialog.Content
           onOpenAutoFocus={(e) => {
             if (!initialFocus) return;
             e.preventDefault();
-            initialFocus.current?.focus();
+            const el = initialFocus.current;
+            el?.focus();
+            if (selectOnFocus && el instanceof HTMLInputElement) el.select();
           }}
           onPointerDownOutside={(e) => {
             if (!dismissOnOutsideClick) e.preventDefault();
           }}
           className={clsx(
-            "fixed left-1/2 top-1/2 z-50 flex max-h-[85vh] w-full -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-panel border border-border bg-base shadow-raised focus:outline-none",
+            "fixed left-1/2 top-1/2 flex max-h-[85vh] w-full -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-panel border border-border bg-base shadow-raised focus:outline-none",
+            z,
             width === "sm" ? "max-w-sm" : "max-w-[30rem]",
           )}
         >

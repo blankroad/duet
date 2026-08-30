@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation, Trans } from "react-i18next";
-import * as Dialog from "@radix-ui/react-dialog";
-import { X, AlertTriangle, FilePlus2, Trash2, Loader2 } from "lucide-react";
+import { FilePlus2, FolderSync, Trash2, Loader2 } from "lucide-react";
 import clsx from "clsx";
 import {
   commands,
@@ -11,10 +10,12 @@ import {
 } from "@/types/bindings";
 import { formatErr } from "@/lib/error";
 import { formatSize } from "@/lib/format";
+import { DialogShell } from "./DialogShell";
+import { DialogButton } from "./DialogButton";
+import { DialogBand } from "./DialogBand";
+import { RouteBlock } from "./RouteBlock";
 
 export interface SyncDialogProps {
-  srcLabel: string;
-  dstLabel: string;
   src: Location;
   dst: Location;
   onClose: () => void;
@@ -23,17 +24,10 @@ export interface SyncDialogProps {
 }
 
 /**
- * 단방향 미러 확인 — 방향 + dry-run(복사/삭제 목록 사전 표시) + prune 토글.
+ * 단방향 미러 확인 — 방향(RouteBlock) + dry-run(복사/삭제 목록 사전 표시) + prune 토글.
  * prune 은 기본 OFF. 켜면 대상 전용 파일을 휴지통으로(undo 가능). 켰을 때 CTA danger.
  */
-export function SyncDialog({
-  srcLabel,
-  dstLabel,
-  src,
-  dst,
-  onClose,
-  onConfirm,
-}: SyncDialogProps) {
+export function SyncDialog({ src, dst, onClose, onConfirm }: SyncDialogProps) {
   const { t } = useTranslation();
   const [prune, setPrune] = useState(false);
   const [preview, setPreview] = useState<SyncPreview | null>(null);
@@ -73,135 +67,104 @@ export function SyncDialog({
   }, [src, dst]);
 
   return (
-    <Dialog.Root open onOpenChange={(o) => !o && onClose()}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex max-h-[80vh] w-full max-w-md -translate-x-1/2 -translate-y-1/2 flex-col rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none">
-          <div className="mb-3 flex items-start justify-between">
-            <Dialog.Title className="text-title font-medium">
-              {t("dialog.sync.title")}
-            </Dialog.Title>
-            <Dialog.Close
-              className="rounded p-1 text-fg-muted hover:bg-border"
-              aria-label={t("common.close")}
-            >
-              <X size={14} />
-            </Dialog.Close>
-          </div>
+    <DialogShell
+      title={t("dialog.sync.title")}
+      description={t("dialog.sync.desc")}
+      icon={FolderSync}
+      onClose={onClose}
+      footer={
+        <>
+          <DialogButton hint="esc" onClick={onClose}>
+            {t("common.cancel")}
+          </DialogButton>
+          <DialogButton
+            tone={prune ? "danger" : "primary"}
+            hint="enter"
+            onClick={() => onConfirm(prune)}
+          >
+            {prune ? t("dialog.sync.ctaPruned") : t("dialog.sync.cta")}
+          </DialogButton>
+        </>
+      }
+    >
+      <RouteBlock src={src} dst={dst} />
 
-          <div className="text-base">
-            <span className="font-mono">{srcLabel}</span>
-            <span className="mx-2 text-fg-muted">→</span>
-            <span className="font-mono">{dstLabel}</span>
-          </div>
-
-          {/* dry-run 요약 + 목록 */}
-          <div className="mt-3 min-h-0 flex-1">
-            {error ? (
-              <div className="rounded border border-danger/40 bg-danger/10 px-2 py-1 text-meta text-danger">
-                {t("dialog.sync.previewFailed", { err: error })}
-              </div>
-            ) : preview == null ? (
-              <div className="flex items-center gap-2 text-meta text-fg-muted">
-                <Loader2 size={13} className="animate-spin" />{" "}
-                {t("dialog.sync.computing")}
-              </div>
-            ) : (
-              <div className="space-y-2 text-meta">
-                <Section
-                  icon={<FilePlus2 size={12} className="text-accent" />}
-                  label={t("dialog.sync.copyLabel")}
-                  items={preview.copy}
-                  tone="text-fg"
-                />
-                <Section
-                  icon={
-                    <Trash2
-                      size={12}
-                      className={prune ? "text-danger" : "text-fg-muted"}
-                    />
-                  }
-                  label={
-                    prune
-                      ? t("dialog.sync.deleteLabel")
-                      : t("dialog.sync.targetOnlyLabel")
-                  }
-                  items={preview.prune}
-                  tone={prune ? "text-danger" : "text-fg-muted"}
-                />
-                {preview.truncated && (
-                  <div className="text-warning">
-                    {t("dialog.sync.truncated")}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          <label className="mt-3 flex cursor-pointer items-start gap-2 text-base">
-            <input
-              type="checkbox"
-              checked={prune}
-              onChange={(e) => setPrune(e.target.checked)}
-              className="mt-0.5"
-            />
-            <span>
-              {t("dialog.sync.pruneOption")}
-              <span className="block text-meta text-fg-muted">
-                {preview
-                  ? t("dialog.sync.pruneHintCount", {
-                      count: preview.prune.length,
-                    })
-                  : t("dialog.sync.pruneHint")}
-              </span>
-            </span>
-          </label>
-
-          {trash && (
-            <div className="mt-2 text-meta text-fg-muted">
-              <Trans
-                i18nKey="dialog.sync.remoteTrash"
-                components={{ 1: <span className="font-mono" /> }}
-              />{" "}
-              <b className={trash.bytes > 0 ? "text-fg" : ""}>
-                {formatSize(trash.bytes)}
-              </b>
-              {trash.bytes > 0 && t("dialog.sync.remoteTrashPile")}
-            </div>
+      {/* dry-run 요약 + 목록 */}
+      {error ? (
+        <DialogBand
+          tone="danger"
+          message={t("dialog.sync.previewFailed", { err: error })}
+        />
+      ) : preview == null ? (
+        <div className="flex items-center gap-2 text-meta text-fg-muted">
+          <Loader2 size={13} className="animate-spin" />{" "}
+          {t("dialog.sync.computing")}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2 text-meta">
+          <Section
+            icon={<FilePlus2 size={12} className="text-accent" />}
+            label={t("dialog.sync.copyLabel")}
+            items={preview.copy}
+            tone="text-fg"
+          />
+          <Section
+            icon={
+              <Trash2
+                size={12}
+                className={prune ? "text-danger" : "text-fg-muted"}
+              />
+            }
+            label={
+              prune
+                ? t("dialog.sync.deleteLabel")
+                : t("dialog.sync.targetOnlyLabel")
+            }
+            items={preview.prune}
+            tone={prune ? "text-danger" : "text-fg-muted"}
+          />
+          {preview.truncated && (
+            <div className="text-warning">{t("dialog.sync.truncated")}</div>
           )}
+        </div>
+      )}
 
-          {prune && (
-            <div className="mt-2 flex items-start gap-1.5 rounded border border-warning/40 bg-warning/10 p-2 text-meta text-warning">
-              <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-              <span>{t("dialog.sync.pruneWarn")}</span>
-            </div>
-          )}
+      <label className="flex cursor-pointer items-start gap-2 text-base">
+        <input
+          type="checkbox"
+          checked={prune}
+          onChange={(e) => setPrune(e.target.checked)}
+          className="mt-0.5"
+        />
+        <span>
+          {t("dialog.sync.pruneOption")}
+          <span className="block text-meta text-fg-muted">
+            {preview
+              ? t("dialog.sync.pruneHintCount", {
+                  count: preview.prune.length,
+                })
+              : t("dialog.sync.pruneHint")}
+          </span>
+        </span>
+      </label>
 
-          <div className="mt-4 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
-            >
-              {t("common.cancel")}
-            </button>
-            <button
-              type="button"
-              onClick={() => onConfirm(prune)}
-              className={clsx(
-                "rounded px-3 py-1 text-base text-white",
-                prune ? "bg-danger" : "bg-accent",
-              )}
-            >
-              {prune ? t("dialog.sync.ctaPruned") : t("dialog.sync.cta")}
-            </button>
-          </div>
-          <Dialog.Description className="sr-only">
-            {t("dialog.sync.desc")}
-          </Dialog.Description>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+      {trash && (
+        <div className="text-meta text-fg-muted">
+          <Trans
+            i18nKey="dialog.sync.remoteTrash"
+            components={{ 1: <span className="font-mono" /> }}
+          />{" "}
+          <b className={trash.bytes > 0 ? "text-fg" : ""}>
+            {formatSize(trash.bytes)}
+          </b>
+          {trash.bytes > 0 && t("dialog.sync.remoteTrashPile")}
+        </div>
+      )}
+
+      {prune && (
+        <DialogBand tone="warning" message={t("dialog.sync.pruneWarn")} />
+      )}
+    </DialogShell>
   );
 }
 

@@ -1,7 +1,10 @@
-import { useState } from "react";
-import * as Dialog from "@radix-ui/react-dialog";
-import { Lock, X } from "lucide-react";
+import { useRef, useState } from "react";
+import { Lock } from "lucide-react";
 import { vaultUnlock } from "@/stores/vault";
+import { DialogShell } from "./DialogShell";
+import { DialogButton } from "./DialogButton";
+import { DialogInput } from "./DialogInput";
+import { DialogBand } from "./DialogBand";
 
 /**
  * Master password 프롬프트 — vault unlock (또는 신규 vault 생성).
@@ -27,6 +30,7 @@ export function MasterPasswordDialog({
   const [pwConfirm, setPwConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const reset = () => {
     setPw("");
@@ -65,87 +69,68 @@ export function MasterPasswordDialog({
       onUnlocked();
       onClose();
     } else {
-      setError(mode === "create" ? "Failed to create vault" : "Wrong master password");
+      setError(
+        mode === "create" ? "Failed to create vault" : "Wrong master password",
+      );
     }
+  };
+  const onEnter = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !busy) void handleSubmit();
   };
 
   return (
-    <Dialog.Root open={open} onOpenChange={(o) => !o && handleClose()}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-[60] bg-black/50" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-[60] w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none">
-          <div className="mb-3 flex items-start justify-between gap-2">
-            <Dialog.Title className="flex items-center gap-2 text-title font-medium">
-              <Lock size={14} />
-              {mode === "create" ? "Create vault" : "Unlock vault"}
-            </Dialog.Title>
-            <Dialog.Close
-              className="rounded p-1 text-fg-muted hover:bg-border"
-              aria-label="Close"
-            >
-              <X size={14} />
-            </Dialog.Close>
-          </div>
-
-          <p className="mb-3 text-meta text-fg-muted">
-            {mode === "create"
-              ? "No password vault yet. Set a master password to encrypt saved hosts' passwords (age, scrypt+ChaCha20). If you forget the master, it can't be recovered."
-              : "Enter the master password to use saved passwords. Cached in memory only for the session."}
-          </p>
-
-          <input
-            type="password"
-            autoComplete="off"
-            autoFocus
-            value={pw}
-            onChange={(e) => setPw(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !busy) handleSubmit();
-            }}
-            placeholder="Master password"
-            className="w-full rounded border border-border bg-subtle px-2 py-1 font-mono text-base focus:border-accent focus:outline-none"
-          />
-          {mode === "create" && (
-            <input
-              type="password"
-              autoComplete="off"
-              value={pwConfirm}
-              onChange={(e) => setPwConfirm(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !busy) handleSubmit();
-              }}
-              placeholder="Confirm master password"
-              className="mt-2 w-full rounded border border-border bg-subtle px-2 py-1 font-mono text-base focus:border-accent focus:outline-none"
-            />
-          )}
-
-          {error && (
-            <div className="mt-2 rounded border border-danger/50 bg-danger/10 p-2 text-meta text-danger">
-              {error}
-            </div>
-          )}
-
-          <div className="mt-4 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={handleClose}
-              className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleSubmit}
-              disabled={busy}
-              className="rounded bg-accent px-3 py-1 text-base text-white disabled:opacity-50"
-            >
-              {busy ? "…" : mode === "create" ? "Create" : "Unlock"}
-            </button>
-          </div>
-
-          <Dialog.Description className="sr-only">Master password prompt.</Dialog.Description>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+    <DialogShell
+      open={open}
+      width="sm"
+      layer="above"
+      title={mode === "create" ? "Create vault" : "Unlock vault"}
+      description="Master password prompt."
+      icon={Lock}
+      onClose={handleClose}
+      initialFocus={inputRef}
+      footer={
+        <>
+          <DialogButton hint="esc" onClick={handleClose}>
+            Cancel
+          </DialogButton>
+          <DialogButton
+            tone="primary"
+            hint="enter"
+            disabled={busy}
+            onClick={() => void handleSubmit()}
+          >
+            {busy ? "…" : mode === "create" ? "Create" : "Unlock"}
+          </DialogButton>
+        </>
+      }
+    >
+      <p className="text-meta text-fg-muted">
+        {mode === "create"
+          ? "No password vault yet. Set a master password to encrypt saved hosts' passwords (age, scrypt+ChaCha20). If you forget the master, it can't be recovered."
+          : "Enter the master password to use saved passwords. Cached in memory only for the session."}
+      </p>
+      <DialogInput
+        ref={inputRef}
+        mono
+        type="password"
+        autoComplete="off"
+        value={pw}
+        onChange={(e) => setPw(e.target.value)}
+        onKeyDown={onEnter}
+        placeholder="Master password"
+      />
+      {mode === "create" && (
+        <DialogInput
+          mono
+          type="password"
+          autoComplete="off"
+          value={pwConfirm}
+          onChange={(e) => setPwConfirm(e.target.value)}
+          onKeyDown={onEnter}
+          placeholder="Confirm master password"
+        />
+      )}
+      {error && <DialogBand tone="danger" message={error} />}
+    </DialogShell>
   );
 }

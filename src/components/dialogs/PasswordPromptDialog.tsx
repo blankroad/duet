@@ -1,7 +1,10 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import * as Dialog from "@radix-ui/react-dialog";
-import { Lock, X } from "lucide-react";
+import { Lock } from "lucide-react";
+import { DialogShell } from "./DialogShell";
+import { DialogButton } from "./DialogButton";
+import { DialogInput } from "./DialogInput";
+import { DialogBand } from "./DialogBand";
 
 /** submit 결과: "ok" = 닫기(성공 또는 caller 가 이미 처리), "retry" = 암호 틀림 → 재입력. */
 export type PwSubmitResult = "ok" | "retry";
@@ -59,80 +62,48 @@ export function PasswordPromptDialog({
   };
 
   return (
-    <Dialog.Root open onOpenChange={(o) => !o && onClose()}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-[60] bg-black/50" />
-        <Dialog.Content
-          onOpenAutoFocus={(e) => {
-            // Radix 기본(첫 요소=닫기 버튼) 대신 암호 입력창으로 포커스.
-            e.preventDefault();
-            inputRef.current?.focus();
-          }}
-          className="fixed left-1/2 top-1/2 z-[60] w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-md border border-border bg-base p-4 shadow-lg focus:outline-none"
-        >
-          <div className="mb-3 flex items-start justify-between gap-2">
-            <Dialog.Title className="flex items-center gap-2 text-title font-medium">
-              <Lock size={14} />
-              {t("dialog.passwordPrompt.title")}
-            </Dialog.Title>
-            <Dialog.Close
-              className="rounded p-1 text-fg-muted hover:bg-border"
-              aria-label={t("common.close")}
-            >
-              <X size={14} />
-            </Dialog.Close>
-          </div>
-
-          <p
-            className="mb-3 truncate text-meta text-fg-muted"
-            title={archiveName}
+    <DialogShell
+      width="sm"
+      layer="above"
+      title={t("dialog.passwordPrompt.title")}
+      subtitle={
+        <span title={archiveName}>
+          {t("dialog.passwordPrompt.body", { name: archiveName })}
+        </span>
+      }
+      description={t("dialog.passwordPrompt.desc", { name: archiveName })}
+      icon={Lock}
+      onClose={onClose}
+      initialFocus={inputRef}
+      footer={
+        <>
+          <DialogButton hint="esc" onClick={onClose}>
+            {t("common.cancel")}
+          </DialogButton>
+          <DialogButton
+            tone="primary"
+            hint="enter"
+            disabled={busy || !pw}
+            onClick={() => void run()}
           >
-            {t("dialog.passwordPrompt.body", { name: archiveName })}
-          </p>
-
-          <input
-            ref={inputRef}
-            type="password"
-            autoComplete="off"
-            value={pw}
-            onChange={(e) => setPw(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void run();
-              else if (e.key === "Escape") onClose();
-            }}
-            placeholder={t("dialog.passwordPrompt.placeholder")}
-            className="w-full rounded border border-border bg-subtle px-2 py-1 font-mono text-base focus:border-accent focus:outline-none"
-          />
-
-          {error && (
-            <div className="mt-2 rounded border border-danger/50 bg-danger/10 p-2 text-meta text-danger">
-              {error}
-            </div>
-          )}
-
-          <div className="mt-4 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
-            >
-              {t("common.cancel")}
-            </button>
-            <button
-              type="button"
-              onClick={() => void run()}
-              disabled={busy || !pw}
-              className="rounded bg-accent px-3 py-1 text-base text-white disabled:opacity-50"
-            >
-              {busy ? "…" : t("dialog.passwordPrompt.cta")}
-            </button>
-          </div>
-
-          <Dialog.Description className="sr-only">
-            {t("dialog.passwordPrompt.desc", { name: archiveName })}
-          </Dialog.Description>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+            {busy ? "…" : t("dialog.passwordPrompt.cta")}
+          </DialogButton>
+        </>
+      }
+    >
+      <DialogInput
+        ref={inputRef}
+        mono
+        type="password"
+        autoComplete="off"
+        value={pw}
+        onChange={(e) => setPw(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") void run();
+        }}
+        placeholder={t("dialog.passwordPrompt.placeholder")}
+      />
+      {error && <DialogBand tone="danger" message={error} />}
+    </DialogShell>
   );
 }
