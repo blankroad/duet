@@ -959,7 +959,8 @@
     },
     "ssh": {
       "setupKeyAuth": "Set up passwordless login (this host)"
-    }
+    },
+    "view.focusSidebarFilter": "Focus sidebar filter"
   },
   "cmdCategory": {
     "Tab": "Tab",

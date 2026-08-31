@@ -60,6 +60,8 @@ export interface BuiltinDeps {
   refresh: () => void;
   toggleHidden: () => void;
   toggleSidebar: () => void;
+  /** 사이드바 이름 필터로 포커스 — 기본 키 없음(Ctrl+F 는 패널 필터가 쓴다). */
+  focusSidebarFilter: () => void;
   togglePreview: () => void;
   toggleSyncBrowse: () => void;
   /** 단일 패널 모드 토글 — 활성 패널만 전체 폭 (외부 DnD 시 창 축소용). */
@@ -210,6 +212,14 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
       category: "View",
       defaultKey: "Ctrl+B",
       action: deps.toggleSidebar,
+    },
+    {
+      id: "view.focusSidebarFilter",
+      label: "Focus sidebar filter",
+      category: "View",
+      // 기본 키를 주지 않는다 — Ctrl+F 는 패널 빠른 필터가 쓰고 있고, 키는 전부
+      // keymap 에서 사용자가 정하는 게 원칙(CLAUDE.md). 팔레트에서는 바로 쓸 수 있다.
+      action: deps.focusSidebarFilter,
     },
     {
       id: "view.togglePreview",

@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Search, X } from "lucide-react";
 import { useSidebarFilter, matchRange } from "@/stores/sidebarFilter";
@@ -7,16 +7,24 @@ import { useSidebarFilter, matchRange } from "@/stores/sidebarFilter";
  * 사이드바 상단 이름 필터 — 항목이 쌓이면 눈으로 훑는 수밖에 없던 문제.
  * 패널 필터바와 같은 어휘("필터…"). Esc 로 지우고 포커스를 뺀다.
  *
- * 단축키는 아직 붙이지 않았다: `Ctrl+F` 는 패널 빠른 필터가 이미 쓰고 있고,
- * 키는 전부 keymap 에서 설정 가능해야 하므로(CLAUDE.md) 하드코딩하지 않는다.
- * 필요하면 command 로 등록해 사용자가 원하는 키에 매는 게 맞다.
+ * 기본 단축키는 없다: `Ctrl+F` 는 패널 빠른 필터가 이미 쓰고 있고 키는 전부 keymap 에서
+ * 정하는 게 원칙(CLAUDE.md). 대신 `view.focusSidebarFilter` command 로 등록돼 있어
+ * 커맨드 팔레트에서 바로 쓰거나 원하는 키에 맬 수 있다.
  */
 export function SidebarFilter() {
   const { t } = useTranslation();
   const q = useSidebarFilter((s) => s.q);
   const set = useSidebarFilter((s) => s.set);
   const clear = useSidebarFilter((s) => s.clear);
+  const focusNonce = useSidebarFilter((s) => s.focusNonce);
   const ref = useRef<HTMLInputElement>(null);
+
+  // command(팔레트/사용자 지정 키)로 온 포커스 요청 — 바로 새 질의를 칠 수 있게 전체선택.
+  useEffect(() => {
+    if (focusNonce === 0) return;
+    ref.current?.focus();
+    ref.current?.select();
+  }, [focusNonce]);
 
   return (
     <div className="sticky top-0 z-20 shrink-0 border-b border-border bg-subtle px-2 py-1.5">

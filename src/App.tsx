@@ -137,6 +137,7 @@ import { platform } from "@tauri-apps/plugin-os";
 import { confirm as tauriConfirm } from "@tauri-apps/plugin-dialog";
 import { commands } from "@/types/bindings";
 import { isVirtualTrash, loadTrashEntries, trashIdsFor } from "@/lib/trashView";
+import { useSidebarFilter } from "@/stores/sidebarFilter";
 import type {
   CompressFormat,
   ConnectionDto,
@@ -773,6 +774,7 @@ function App() {
       toggleHidden: () =>
         usePanes.getState().toggleShowHidden(usePanes.getState().activePane),
       toggleSidebar: () => toggleSidebar(),
+      focusSidebarFilter: () => useSidebarFilter.getState().requestFocus(),
       togglePreview: () => togglePreview(),
       toggleSyncBrowse: () => useUI.getState().toggleSyncBrowse(),
       toggleSinglePane: () => useUI.getState().toggleSinglePane(),

@@ -6,14 +6,19 @@ import { create } from "zustand";
  */
 interface State {
   q: string;
+  /** 포커스 요청 신호 — 값이 오르면 입력창이 포커스+전체선택. command 에서 발사. */
+  focusNonce: number;
   set: (q: string) => void;
   clear: () => void;
+  requestFocus: () => void;
 }
 
 export const useSidebarFilter = create<State>((set) => ({
   q: "",
+  focusNonce: 0,
   set: (q) => set({ q }),
   clear: () => set({ q: "" }),
+  requestFocus: () => set((s) => ({ focusNonce: s.focusNonce + 1 })),
 }));
 
 /**
