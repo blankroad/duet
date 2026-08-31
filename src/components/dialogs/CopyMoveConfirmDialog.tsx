@@ -136,27 +136,33 @@ export function CopyMoveConfirmDialog({
           tone="warning"
           message={t("conflict.exist", { count: conflicts.length })}
         >
-          <div className="flex items-center gap-2.5">
+          {/* 되돌릴 수 없는 "교체" 가 섞인 결정 — 세 칸을 한눈에 보이게 크게(lg) 두고,
+              고른 것의 결과는 바로 아래 한 줄로 설명한다. */}
+          <div className="flex flex-col gap-2">
             <Segmented
+              size="lg"
+              fill
               value={policy}
               options={policyOptions(t)}
               onChange={setPolicy}
             />
-            <span
-              className={clsx(
-                "min-w-0 flex-1 text-meta",
-                destructive ? "text-danger" : "text-fg-muted",
-              )}
-            >
-              {t(POLICY_HINT[policy])}
-            </span>
-            <button
-              type="button"
-              onClick={() => setPerFile(true)}
-              className="shrink-0 text-meta text-accent hover:underline"
-            >
-              {t("conflict.perFile")}
-            </button>
+            <div className="flex items-center gap-2.5">
+              <span
+                className={clsx(
+                  "min-w-0 flex-1 text-meta",
+                  destructive ? "text-danger" : "text-fg-muted",
+                )}
+              >
+                {t(POLICY_HINT[policy])}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPerFile(true)}
+                className="shrink-0 text-meta text-accent hover:underline"
+              >
+                {t("conflict.perFile")}
+              </button>
+            </div>
           </div>
         </DialogBand>
       )}

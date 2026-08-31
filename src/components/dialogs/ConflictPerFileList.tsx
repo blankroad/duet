@@ -1,17 +1,26 @@
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import clsx from "clsx";
+import { Copy, FilePlus2, SkipForward } from "lucide-react";
 import { formatSize, formatTime } from "@/lib/format";
 import { iconForEntry } from "@/lib/fileIcon";
 import type { Conflict, ConflictPolicy } from "@/types/bindings";
 import { Segmented, type SegmentedOption } from "./Segmented";
 
-/** 충돌 정책 선택지 — 안전한 것부터, 파괴적인 교체는 마지막·danger. */
+/**
+ * 충돌 정책 선택지 — 안전한 것부터, 파괴적인 교체는 마지막·danger.
+ * 아이콘은 lg(일괄 선택)에서만 그려진다 — 좁은 행에서는 라벨이 우선.
+ */
 export function policyOptions(t: TFunction): SegmentedOption<ConflictPolicy>[] {
   return [
-    { value: "skip", label: t("conflict.skip") },
-    { value: "keepboth", label: t("conflict.keepBoth") },
-    { value: "replace", label: t("conflict.replace"), danger: true },
+    { value: "skip", label: t("conflict.skip"), icon: SkipForward },
+    { value: "keepboth", label: t("conflict.keepBoth"), icon: FilePlus2 },
+    {
+      value: "replace",
+      label: t("conflict.replace"),
+      icon: Copy,
+      danger: true,
+    },
   ];
 }
 
@@ -36,7 +45,7 @@ export function ConflictPerFileList({
     <>
       <div className="flex items-center gap-2 text-meta text-fg-muted">
         <span>{t("conflict.setAll")}</span>
-        <Segmented value={null} options={opts} onChange={onSetAll} />
+        <Segmented size="md" value={null} options={opts} onChange={onSetAll} />
       </div>
       <ul className="divide-y divide-border overflow-hidden rounded-panel border border-border">
         {conflicts.map((c) => {
@@ -55,6 +64,7 @@ export function ConflictPerFileList({
                   {c.name}
                 </span>
                 <Segmented
+                  size="md"
                   value={decisions[c.name] ?? "skip"}
                   options={opts}
                   onChange={(p) => onChange(c.name, p)}
