@@ -11,6 +11,8 @@ import {
 } from "@/stores/panes";
 import { useUI } from "@/stores/ui";
 import { usePreviewHover } from "@/stores/previewHover";
+import { usePreviewWidth } from "@/stores/previewWidth";
+import { beginWidthDrag } from "@/stores/panelWidth";
 import { formatErr } from "@/lib/error";
 import { PreviewView, Centered } from "@/components/pane/PreviewView";
 import { PreviewInspector } from "@/components/pane/PreviewInspector";
@@ -134,9 +136,24 @@ export function PreviewPane() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const target = useMemo(() => hover ?? cursorTarget(), [hover, cursorKey]);
   const state = usePreviewLoad(target);
+  const width = usePreviewWidth((s) => s.width);
+  const setWidth = usePreviewWidth((s) => s.setWidth);
+  const reset = usePreviewWidth((s) => s.reset);
 
   return (
-    <div className="flex w-80 shrink-0 flex-col overflow-hidden rounded-panel border border-border">
+    <div
+      className="relative flex shrink-0 flex-col overflow-hidden rounded-panel border border-border"
+      style={{ width }}
+    >
+      {/* 왼쪽 가장자리를 끌어 폭 조절 — 정보 패널은 보조라 기본은 좁게(260px). */}
+      <div
+        onPointerDown={(e) =>
+          beginWidthDrag(e, "left", usePreviewWidth.getState().width, setWidth)
+        }
+        onDoubleClick={reset}
+        title={t("preview.resizeTitle")}
+        className="absolute left-0 top-0 z-10 h-full w-1 cursor-col-resize hover:bg-accent/50"
+      />
       <div className="flex h-8 shrink-0 items-center justify-between border-b border-border px-2">
         <span className="truncate text-meta text-fg-muted">
           {t("preview.info")}

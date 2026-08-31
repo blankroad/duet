@@ -20,6 +20,7 @@ const BUILTIN_GESTURES: Array<{ keys: string; what: string }> = [
   { keys: "↑ ↓ (← → in grid)", what: "moveCursor" },
   { keys: "Enter", what: "open" },
   { keys: "Backspace", what: "goUp" },
+  { keys: "Esc", what: "cancel" },
   { keys: "Tab", what: "switchPane" },
   { keys: "Space", what: "quickLook" },
   { keys: "Ctrl/⌘+Space", what: "toggleSelect" },

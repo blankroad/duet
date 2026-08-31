@@ -492,7 +492,8 @@
       "toggleClick": "Toggle select",
       "marquee": "Marquee select",
       "dragOut": "Copy out to OS / other pane",
-      "dragMove": "Move instead of copy (local)"
+      "dragMove": "Move instead of copy (local)",
+      "cancel": "Cancel cut / clear selection"
     },
     "desc": "Keyboard shortcut reference"
   },
@@ -860,7 +861,8 @@
     "modified": "Modified",
     "perms": "Perms",
     "where": "Where",
-    "truncated": "Preview truncated — file is larger"
+    "truncated": "Preview truncated — file is larger",
+    "resizeTitle": "Drag to resize · double-click to reset"
   },
   "dnd": {
     "items": "{{count}} items"

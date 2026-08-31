@@ -1,7 +1,30 @@
 import { useEffect } from "react";
-import { usePanes, activeTab, computeDisplayed, isParentEntry } from "@/stores/panes";
+import {
+  usePanes,
+  activeTab,
+  computeDisplayed,
+  isParentEntry,
+} from "@/stores/panes";
 import type { PaneId } from "@/stores/panes";
 import { useContextMenu } from "@/stores/contextMenu";
+import { useClipboard } from "@/stores/clipboard";
+import { useUIDialogs } from "@/stores/ui-dialogs";
+import { usePalette } from "@/stores/palette";
+import { useSearch } from "@/stores/search";
+import { useUI } from "@/stores/ui";
+
+/**
+ * Esc 의 주인이 따로 있는가 — 다이얼로그·팔레트·검색·QuickLook 이 열려 있으면 그쪽이
+ * 먼저 닫혀야 하므로 목록은 Esc 를 건드리지 않는다. (컨텍스트 메뉴는 위에서 이미 걸러짐.)
+ */
+function escapeOwnedByOverlay(): boolean {
+  return (
+    useUIDialogs.getState().dialog.kind !== "none" ||
+    usePalette.getState().isOpen ||
+    useSearch.getState().isOpen ||
+    useUI.getState().quickLookOpen
+  );
+}
 
 /**
  * 글로벌 키보드 네비게이션 (활성 패널 대상).
@@ -36,6 +59,20 @@ export function useKeyboardNav(
       const rowStep = tab.viewMode === "grid" ? Math.max(1, tab.gridCols) : 1;
 
       switch (e.key) {
+        // Esc — 되돌리기 계열. preventDefault 하지 않는다(놓친 오버레이가 있어도 살게).
+        case "Escape": {
+          if (escapeOwnedByOverlay()) break;
+          // 1) 잘라내기 대기 취소가 먼저 — 흐리게 표시된 항목을 원래대로.
+          //    (탐색기와 같은 관례. 취소했는데 계속 흐린 게 이 처리가 없던 버그.)
+          const clip = useClipboard.getState();
+          if (clip.entry?.mode === "move") {
+            clip.clear();
+            break;
+          }
+          // 2) 선택 해제 (DESIGN.md 키 바인딩 표).
+          if (tab.selected.size > 0) state.setSelected(id, []);
+          break;
+        }
         case "ArrowDown":
           e.preventDefault();
           state.moveCursor(id, rowStep);
@@ -77,7 +114,8 @@ export function useKeyboardNav(
             if (tab.cursorIndex >= 0) {
               // displayed 기준 인덱싱(정렬/필터/".." 반영). ".." 는 선택 불가.
               const entry = computeDisplayed(tab)[tab.cursorIndex];
-              if (entry && !isParentEntry(entry)) state.toggleSelected(id, entry.name);
+              if (entry && !isParentEntry(entry))
+                state.toggleSelected(id, entry.name);
             }
           } else {
             onQuickLook(id);

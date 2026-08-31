@@ -489,7 +489,8 @@
       "toggleClick": "선택 토글",
       "marquee": "마키(드래그) 선택",
       "dragOut": "OS/반대 패널로 복사",
-      "dragMove": "복사 대신 이동 (로컬)"
+      "dragMove": "복사 대신 이동 (로컬)",
+      "cancel": "잘라내기 취소 / 선택 해제"
     },
     "desc": "단축키 참조"
   },
@@ -856,7 +857,8 @@
     "modified": "수정일",
     "perms": "권한",
     "where": "위치",
-    "truncated": "미리보기 잘림 — 파일이 더 큽니다"
+    "truncated": "미리보기 잘림 — 파일이 더 큽니다",
+    "resizeTitle": "끌어서 폭 조절 · 더블클릭하면 기본값"
   },
   "dnd": {
     "items": "{{count}}개"

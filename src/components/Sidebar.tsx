@@ -55,6 +55,7 @@ import { useRecents, type RecentEntry } from "@/stores/recents";
 import { useSidebarFilter, matchesQuery } from "@/stores/sidebarFilter";
 import { SidebarFilter, RowLabel } from "@/components/SidebarFilter";
 import { useSidebarWidth } from "@/stores/sidebarWidth";
+import { beginWidthDrag } from "@/stores/panelWidth";
 import { useDragState } from "@/stores/dragState";
 import { sidebarZoneKey, BOOKMARK_ADD_ZONE } from "@/lib/dropTarget";
 import {
@@ -181,20 +182,8 @@ function SidebarResizer() {
   const { t } = useTranslation();
   const setWidth = useSidebarWidth((s) => s.setWidth);
   const reset = useSidebarWidth((s) => s.reset);
-  const onPointerDown = (e: React.PointerEvent) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startW = useSidebarWidth.getState().width;
-    const move = (ev: PointerEvent) => setWidth(startW + (ev.clientX - startX));
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      document.body.style.cursor = "";
-    };
-    document.body.style.cursor = "col-resize";
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  };
+  const onPointerDown = (e: React.PointerEvent) =>
+    beginWidthDrag(e, "right", useSidebarWidth.getState().width, setWidth);
   return (
     <div
       onPointerDown={onPointerDown}

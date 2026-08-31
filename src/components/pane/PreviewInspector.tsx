@@ -68,11 +68,11 @@ export function PreviewInspector({
     );
 
   return (
-    <div className="border-b border-border p-3">
+    <div className="border-b border-border p-2.5">
       <div className="mb-2 flex items-center gap-2">
         <EntryIcon
           entry={entry}
-          size={28}
+          size={22}
           localPath={
             // 인스펙터의 location 은 엔트리 자신의 경로 (목록과 달리 join 불필요).
             location.source.kind === "local" ? String(location.path) : null
@@ -82,7 +82,7 @@ export function PreviewInspector({
           {entry.name}
         </span>
       </div>
-      <dl className="grid grid-cols-[5rem_1fr] gap-x-2 gap-y-1 text-meta">
+      <dl className="grid grid-cols-[4rem_1fr] gap-x-2 gap-y-0.5 text-meta">
         <Row k={t("preview.kind")} v={kindLabel(entry)} />
         {isDir && <Row k={t("preview.items")} v={itemsRow} />}
         <Row k={t("preview.size")} v={sizeRow} />
