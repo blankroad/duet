@@ -54,6 +54,9 @@ import {
 import { useRecents, type RecentEntry } from "@/stores/recents";
 import { useSidebarFilter, matchesQuery } from "@/stores/sidebarFilter";
 import { SidebarFilter, RowLabel } from "@/components/SidebarFilter";
+import { useSidebarWidth } from "@/stores/sidebarWidth";
+import { useDragState } from "@/stores/dragState";
+import { sidebarZoneKey, BOOKMARK_ADD_ZONE } from "@/lib/dropTarget";
 import {
   useHostGroups,
   createGroup,
@@ -134,34 +137,71 @@ export function Sidebar({
   onEject: (volume: Volume) => void;
 }) {
   const open = useUI((s) => s.sidebarOpen);
+  const width = useSidebarWidth((s) => s.width);
   if (!open) return null;
 
   return (
-    <aside className="flex w-48 min-h-0 flex-col overflow-y-auto border-r border-border bg-subtle pb-2 text-base">
-      {/* 태스크 진행은 TasksBar(하단, 사이드바 접힘과 무관)로 일원화 — 중복 제거. */}
-      <SidebarFilter />
-      <TagBar />
-      <PlacesSection
-        onOpenLocation={onOpenLocation}
-        onTrashActivate={onTrashActivate}
-        onEject={onEject}
-      />
-      <HostsSection
-        onHostActivate={onHostActivate}
-        onAdHocOpen={onAdHocOpen}
-        onSavedActivate={onSavedActivate}
-      />
-      <BookmarksSection
-        onOpen={onOpenLocation}
-        onAdd={onAddBookmark}
-        onOpenHostPath={onOpenHostPath}
-      />
-      <RecentSection
-        onOpenLocation={onOpenLocation}
-        onOpenHostPath={onOpenHostPath}
-      />
-      <ShelfSection />
-    </aside>
+    <div className="relative flex min-h-0 shrink-0" style={{ width }}>
+      <aside className="flex w-full min-h-0 flex-col overflow-y-auto border-r border-border bg-subtle pb-2 text-base">
+        {/* 태스크 진행은 TasksBar(하단, 사이드바 접힘과 무관)로 일원화 — 중복 제거. */}
+        <SidebarFilter />
+        <TagBar />
+        <PlacesSection
+          onOpenLocation={onOpenLocation}
+          onTrashActivate={onTrashActivate}
+          onEject={onEject}
+        />
+        <HostsSection
+          onHostActivate={onHostActivate}
+          onAdHocOpen={onAdHocOpen}
+          onSavedActivate={onSavedActivate}
+        />
+        <BookmarksSection
+          onOpen={onOpenLocation}
+          onAdd={onAddBookmark}
+          onOpenHostPath={onOpenHostPath}
+        />
+        <RecentSection
+          onOpenLocation={onOpenLocation}
+          onOpenHostPath={onOpenHostPath}
+        />
+        <ShelfSection />
+      </aside>
+      <SidebarResizer />
+    </div>
+  );
+}
+
+/**
+ * 오른쪽 가장자리 폭 조절 손잡이 — 끌어서 조절, 더블클릭이면 기본값(192px).
+ * 컬럼 폭 조절과 같은 방식(포인터 캡처 없이 window 리스너 + body 커서).
+ * aside 바깥(형제)에 두어야 스크롤을 따라 움직이지 않는다.
+ */
+function SidebarResizer() {
+  const { t } = useTranslation();
+  const setWidth = useSidebarWidth((s) => s.setWidth);
+  const reset = useSidebarWidth((s) => s.reset);
+  const onPointerDown = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = useSidebarWidth.getState().width;
+    const move = (ev: PointerEvent) => setWidth(startW + (ev.clientX - startX));
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      document.body.style.cursor = "";
+    };
+    document.body.style.cursor = "col-resize";
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  return (
+    <div
+      onPointerDown={onPointerDown}
+      onDoubleClick={reset}
+      title={t("sidebar.resizeTitle")}
+      className="absolute right-0 top-0 z-30 h-full w-1 cursor-col-resize hover:bg-accent/50"
+    />
   );
 }
 
@@ -251,6 +291,26 @@ function usePaneAt(source: SourceId, path: string): string {
     return out;
   });
 }
+
+/**
+ * 이 행을 파일 드롭 대상으로 만든다. `data-drop-*` 만 달면 되고 해석은 lib/dropTarget
+ * 이 DOM 에서 직접 한다(등록 레지스트리 없음). 반환값을 행에 스프레드.
+ */
+function dropAttrs(source: SourceId, path: string) {
+  return {
+    "data-drop-path": path,
+    "data-drop-source": JSON.stringify(source),
+  };
+}
+
+/** 드래그가 이 행 위에 있으면 true — accent 링으로 "여기에 놓입니다" 표시. */
+function useDropHover(source: SourceId, path: string): boolean {
+  const key = sidebarZoneKey(source, path);
+  return useDragState((s) => s.active && s.overSidebar === key);
+}
+
+/** 드롭 대상으로 지목된 행의 링 — 배경을 덮지 않고 테두리만. */
+const dropHoverClass = "bg-accent/10 ring-1 ring-inset ring-accent";
 
 /** 어느 패널이 이 위치를 보고 있는지 — 행 오른쪽 끝 작은 배지. */
 function PaneBadge({ pane }: { pane: string }) {
@@ -418,15 +478,22 @@ function PlaceItem({
     },
   ];
   const pane = usePaneAt(source, path);
+  const dropOver = useDropHover(source, path);
   return (
     <button
       type="button"
+      {...dropAttrs(source, path)}
       onClick={(e) =>
         onOpenLocation(locationForSource(source, path), targetPane(e))
       }
       onContextMenu={(e) => openMenu(e, menu)}
       title={path}
-      className={clsx(rowClass, "w-full text-left", pane && rowActiveClass)}
+      className={clsx(
+        rowClass,
+        "w-full text-left",
+        pane && rowActiveClass,
+        dropOver && dropHoverClass,
+      )}
     >
       {placeIcon(place.label)}
       <RowLabel text={place.label} />
@@ -481,6 +548,7 @@ function VolumeItem({
   const { t } = useTranslation();
   const path = String(volume.path);
   const pane = usePaneAt(source, path);
+  const dropOver = useDropHover(source, path);
   const menu: MenuEntry[] = [
     {
       id: "open",
@@ -522,7 +590,12 @@ function VolumeItem({
       }
       onContextMenu={(e) => openMenu(e, menu)}
       title={path}
-      className={clsx(rowClass, pane && rowActiveClass)}
+      {...dropAttrs(source, path)}
+      className={clsx(
+        rowClass,
+        pane && rowActiveClass,
+        dropOver && dropHoverClass,
+      )}
     >
       <HardDrive size={14} className="shrink-0 text-fg-muted" />
       <RowLabel text={volume.name} />
@@ -957,6 +1030,9 @@ function BookmarksSection({
   const byKey = useTags((s) => s.byKey);
   const q = useSidebarFilter((s) => s.q);
   const tagFilter = useTagFilter((s) => s.active);
+  const bookmarkDrop = useDragState(
+    (s) => s.active && s.overSidebar === BOOKMARK_ADD_ZONE,
+  );
   // 살아있는(connected) 연결만 — 재연결 포기로 죽은 entry 도 배너용으로 store 에
   // 남아 있어서, 그대로 세면 끊긴 호스트가 "연결됨" 초록 점으로 보인다.
   const activeAliases = new Set(
@@ -996,37 +1072,53 @@ function BookmarksSection({
       count={totalAll}
       action={<AddBtn label={t("sidebar.bookmarkActiveTab")} onClick={onAdd} />}
     >
-      {totalAll === 0 ? (
-        <Item label={t("sidebar.noBookmarks")} muted />
-      ) : total === 0 ? (
-        <Item label={t("sidebar.noTagMatch")} muted />
-      ) : (
-        <>
-          {items.length > 0 && <SubLabel>{t("sidebar.local")}</SubLabel>}
-          {items.map((b) => (
-            <Fragment key={b.id}>
-              {dragKey && insertBeforeKey === b.id && <DropLine />}
-              <BookmarkItem
-                bookmark={b}
-                onOpen={onOpen}
-                dragging={dragKey === b.id}
-                onMouseDown={(e) => onItemMouseDown(e, b.id)}
+      {/* 섹션 본문 전체가 "여기에 놓으면 북마크" 존 — 행 위에 놓으면 행이 이긴다
+          (dropTarget 이 행을 먼저 본다). DESIGN.md "사이드바 즐겨찾기로 드래그". */}
+      <div
+        data-drop-bookmark="1"
+        className={clsx(
+          "flex flex-col rounded",
+          bookmarkDrop && "bg-accent/10 ring-1 ring-inset ring-accent",
+        )}
+      >
+        {bookmarkDrop && (
+          <div className="flex h-[26px] items-center gap-2 pl-1.5 text-meta text-accent">
+            <Star size={14} className="shrink-0" />
+            <span>{t("sidebar.dropBookmark")}</span>
+          </div>
+        )}
+        {totalAll === 0 ? (
+          <Item label={t("sidebar.noBookmarks")} muted />
+        ) : total === 0 ? (
+          <Item label={t("sidebar.noTagMatch")} muted />
+        ) : (
+          <>
+            {items.length > 0 && <SubLabel>{t("sidebar.local")}</SubLabel>}
+            {items.map((b) => (
+              <Fragment key={b.id}>
+                {dragKey && insertBeforeKey === b.id && <DropLine />}
+                <BookmarkItem
+                  bookmark={b}
+                  onOpen={onOpen}
+                  dragging={dragKey === b.id}
+                  onMouseDown={(e) => onItemMouseDown(e, b.id)}
+                />
+              </Fragment>
+            ))}
+            {dragKey && insertBeforeKey === null && <DropLine />}
+            {favKeys.length > 0 && <SubLabel>{t("sidebar.remote")}</SubLabel>}
+            {favKeys.map((alias) => (
+              <FavoriteGroup
+                key={alias}
+                alias={alias}
+                favs={favGroups[alias]!}
+                connected={activeAliases.has(alias)}
+                onOpen={onOpenHostPath}
               />
-            </Fragment>
-          ))}
-          {dragKey && insertBeforeKey === null && <DropLine />}
-          {favKeys.length > 0 && <SubLabel>{t("sidebar.remote")}</SubLabel>}
-          {favKeys.map((alias) => (
-            <FavoriteGroup
-              key={alias}
-              alias={alias}
-              favs={favGroups[alias]!}
-              connected={activeAliases.has(alias)}
-              onOpen={onOpenHostPath}
-            />
-          ))}
-        </>
-      )}
+            ))}
+          </>
+        )}
+      </div>
     </Section>
   );
 }
@@ -1044,6 +1136,9 @@ function BookmarkItem({
 }) {
   const { t } = useTranslation();
   const sshPrefix = bookmark.location.source.kind === "ssh" ? "ssh:" : "";
+  const bmPath = String(bookmark.location.path);
+  const pane = usePaneAt(bookmark.location.source, bmPath);
+  const dropOver = useDropHover(bookmark.location.source, bmPath);
   const tags = tagsFor(
     useTags((s) => s.byKey),
     bmTagKey(bookmark.id),
@@ -1085,10 +1180,17 @@ function BookmarkItem({
       onDoubleClick={(e) => onOpen(bookmark.location, targetPane(e))}
       onContextMenu={(e) => openMenu(e, menu)}
       title={`${sshPrefix}${bookmark.location.path}`}
-      className={clsx(rowClass, dragging && "opacity-50")}
+      {...dropAttrs(bookmark.location.source, String(bookmark.location.path))}
+      className={clsx(
+        rowClass,
+        dragging && "opacity-50",
+        pane && rowActiveClass,
+        dropOver && dropHoverClass,
+      )}
     >
       <Star size={14} className="shrink-0 text-fg-muted" />
       <RowLabel text={bookmark.name} />
+      <PaneBadge pane={pane} />
       <InlineTags tags={tags} />
       <DeleteBtn
         label={t("sidebar.removeBookmark")}

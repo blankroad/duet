@@ -9,7 +9,12 @@ import type { Entry, EntryRef } from "@/types/bindings";
 import { exceedsThreshold } from "@/lib/marquee";
 import { useDragState } from "@/stores/dragState";
 import { childLocation, sameLocation, dropDestination } from "@/lib/entryDnd";
-import { resolveDropAt } from "@/lib/dropTarget";
+import {
+  resolveDropAt,
+  resolveSidebarDropAt,
+  BOOKMARK_ADD_ZONE,
+} from "@/lib/dropTarget";
+import { addBookmark } from "@/stores/bookmarks";
 import { planTransferTo } from "@/lib/fileActions";
 import { resolveDragPaths, startDragWithPaths } from "@/lib/dragOut";
 import { useUIDialogs } from "@/stores/ui-dialogs";
@@ -117,9 +122,17 @@ export function useEntryDrag(id: PaneId) {
           document.body.style.cursor = "grabbing";
         }
         const d = resolveDropAt(ev.clientX, ev.clientY);
+        // 사이드바(위치·볼륨·북마크)도 드롭 대상 — 패널 밖이라 위와 겹치지 않는다.
+        const sb = resolveSidebarDropAt(ev.clientX, ev.clientY);
         useDragState
           .getState()
-          .move(ev.clientX, ev.clientY, d?.pane ?? null, d?.folder ?? null);
+          .move(
+            ev.clientX,
+            ev.clientY,
+            d?.pane ?? null,
+            d?.folder ?? null,
+            sb?.key ?? null,
+          );
       };
 
       const onUp = (ev: MouseEvent) => {
@@ -129,8 +142,45 @@ export function useEntryDrag(id: PaneId) {
         document.body.style.cursor = "";
         const { source, targets: dragTargets } = useDragState.getState();
         const d = resolveDropAt(ev.clientX, ev.clientY);
+        const sb = resolveSidebarDropAt(ev.clientX, ev.clientY);
         useDragState.getState().end();
         suppressNextClick();
+
+        // ── 사이드바에 놓았을 때 ──
+        if (sb && source) {
+          if (sb.key === BOOKMARK_ADD_ZONE) {
+            // 섹션 빈 곳 = 북마크 추가 (DESIGN.md "사이드바 즐겨찾기로 드래그").
+            // 원격 즐겨찾기는 호스트별 저장이라 여기서는 로컬만 — 원격은 패널의 ★ 로.
+            void (async () => {
+              let added = 0;
+              for (const t of dragTargets) {
+                if (t.location.source.kind !== "local") continue;
+                if (
+                  await addBookmark(t.name, childLocation(t.location, t.name))
+                )
+                  added += 1;
+              }
+              showToast(
+                added > 0
+                  ? i18n.t("toast.bookmarkAdded", { count: added })
+                  : i18n.t("toast.bookmarkLocalOnly"),
+                added > 0 ? "success" : "error",
+              );
+            })();
+            return;
+          }
+          if (sb.location) {
+            if (sameLocation(source, sb.location)) return;
+            void planTransferTo(
+              dragTargets,
+              sb.location,
+              wantMove ? "move" : "copy",
+              open,
+              showToast,
+            );
+          }
+          return;
+        }
 
         if (!d || !source) return;
         const dstLoc = activeTab(usePanes.getState(), d.pane).location;

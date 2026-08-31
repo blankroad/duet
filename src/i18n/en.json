@@ -671,7 +671,9 @@
     "trashOpenHint": "Put the item back before opening it",
     "trashOnlyPutBack": "Items in the trash can only be put back",
     "purgeDone": "{{count}} item(s) permanently deleted",
-    "purgeFailed": "Permanent delete failed: {{err}}"
+    "purgeFailed": "Permanent delete failed: {{err}}",
+    "bookmarkAdded": "{{count}} bookmark(s) added",
+    "bookmarkLocalOnly": "Bookmarks are local-only — use ★ in the path bar for remote"
   },
   "sidebar": {
     "tasks": "Tasks",
@@ -733,7 +735,10 @@
       "connecting": "connecting",
       "disconnected": "disconnected"
     },
-    "filterLabel": "Filter sidebar"
+    "filterLabel": "Filter sidebar",
+    "dropHere": "Copy here",
+    "dropBookmark": "Add to bookmarks",
+    "resizeTitle": "Drag to resize · double-click to reset"
   },
   "tasks": {
     "count": "{{count}} tasks",

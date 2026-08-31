@@ -668,7 +668,9 @@
     "trashOpenHint": "휴지통 항목은 제자리로 복원한 뒤 열 수 있어요",
     "trashOnlyPutBack": "휴지통에서는 제자리로 복원만 가능합니다",
     "purgeDone": "{{count}}개 영구 삭제됨",
-    "purgeFailed": "영구 삭제 실패: {{err}}"
+    "purgeFailed": "영구 삭제 실패: {{err}}",
+    "bookmarkAdded": "북마크 {{count}}개 추가됨",
+    "bookmarkLocalOnly": "북마크는 로컬 폴더만 — 원격은 경로 표시줄의 ★ 로 추가하세요"
   },
   "sidebar": {
     "tasks": "작업",
@@ -730,7 +732,10 @@
       "connecting": "연결 중",
       "disconnected": "연결 안 됨"
     },
-    "filterLabel": "사이드바 필터"
+    "filterLabel": "사이드바 필터",
+    "dropHere": "여기로 복사",
+    "dropBookmark": "북마크에 추가",
+    "resizeTitle": "끌어서 폭 조절 · 더블클릭하면 기본값"
   },
   "tasks": {
     "count": "작업 {{count}}개",
