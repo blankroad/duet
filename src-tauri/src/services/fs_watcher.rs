@@ -21,6 +21,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use notify::event::{MetadataKind, ModifyKind};
 use notify::{recommended_watcher, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use tauri::AppHandle;
 use tauri_specta::Event;
@@ -91,6 +92,17 @@ impl FsWatcher {
             if !matches!(
                 event.kind,
                 EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+            ) {
+                return;
+            }
+            // atime 만 바뀐 것도 무시. Linux inotify 는 **파일을 읽기만 해도**
+            // IN_ATTRIB(= Modify(Metadata(AccessTime))) 를 던지는데, 미리보기가
+            // 커서 항목을 읽을 때마다 그게 뜬다. 그걸로 목록을 다시 읽으면 사용자가
+            // 스크롤한 위치가 흔들린다. 권한/소유자/수정시각 변경은 화면에 보이는
+            // 값이라 그대로 통과시킨다.
+            if matches!(
+                event.kind,
+                EventKind::Modify(ModifyKind::Metadata(MetadataKind::AccessTime))
             ) {
                 return;
             }

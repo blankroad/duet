@@ -293,12 +293,42 @@ export const usePanes = create<PanesState>((set, get) => ({
         cur.trashRoot && loc.path.startsWith(cur.trashRoot)
           ? cur.trashRoot
           : undefined;
+      // 같은 폴더 새로고침이면 커서와 선택을 유지한다.
+      //
+      // 예전엔 무조건 커서를 0 으로 되돌렸다 — 그런데 EntryList 가 커서로
+      // scrollToIndex 하므로, 감시자가 이벤트를 하나 던질 때마다 목록이 맨 위로
+      // 튀었다. 리눅스 inotify 는 특히 자주 뜬다(미리보기가 파일을 읽기만 해도
+      // IN_ATTRIB). 스크롤해서 아래 항목을 누르려는 순간 위로 튀어 오르던 버그.
+      //
+      // 커서는 **이름**으로 따라간다 — 새로고침 사이에 항목이 추가/삭제돼 인덱스가
+      // 밀려도 보던 항목에 그대로 남게. 그 항목이 사라졌으면 인덱스를 clamp.
+      let cursorIndex: number;
+      let selected: Set<string>;
+      if (navigated) {
+        cursorIndex = entries.length > 0 ? 0 : -1;
+        selected = new Set();
+      } else {
+        const names = new Set(entries.map((e) => e.name));
+        selected = new Set([...cur.selected].filter((n) => names.has(n)));
+        const focused = computeDisplayed(cur)[cur.cursorIndex]?.name;
+        const after = computeDisplayed({ ...cur, entries, location: loc });
+        const found =
+          focused === undefined
+            ? -1
+            : after.findIndex((e) => e.name === focused);
+        cursorIndex =
+          found >= 0
+            ? found
+            : after.length > 0
+              ? Math.min(Math.max(0, cur.cursorIndex), after.length - 1)
+              : -1;
+      }
       const nextTab: TabState = {
         ...cur,
         location: loc,
         entries,
-        cursorIndex: entries.length > 0 ? 0 : -1,
-        selected: new Set(),
+        cursorIndex,
+        selected,
         loading: false,
         loadedAt: Date.now(),
         filter: navigated ? "" : cur.filter,
