@@ -10,13 +10,13 @@ import {
   ChevronDown,
   ChevronRight,
   Trash2,
+  TriangleAlert,
   Home,
   FileText,
   Download,
   Image as ImageIcon,
   Film,
   HardDrive,
-  Clock,
   RefreshCw,
   ArrowUpFromLine,
   Monitor,
@@ -52,6 +52,8 @@ import {
   sourceKey,
 } from "@/stores/places";
 import { useRecents, type RecentEntry } from "@/stores/recents";
+import { useSidebarFilter, matchesQuery } from "@/stores/sidebarFilter";
+import { SidebarFilter, RowLabel } from "@/components/SidebarFilter";
 import {
   useHostGroups,
   createGroup,
@@ -135,8 +137,9 @@ export function Sidebar({
   if (!open) return null;
 
   return (
-    <aside className="flex w-48 min-h-0 flex-col overflow-y-auto border-r border-border bg-subtle text-base">
+    <aside className="flex w-48 min-h-0 flex-col overflow-y-auto border-r border-border bg-subtle pb-2 text-base">
       {/* 태스크 진행은 TasksBar(하단, 사이드바 접힘과 무관)로 일원화 — 중복 제거. */}
+      <SidebarFilter />
       <TagBar />
       <PlacesSection
         onOpenLocation={onOpenLocation}
@@ -220,8 +223,44 @@ function DropLine() {
   return <div className="mx-2 my-0.5 h-0.5 rounded bg-accent" />;
 }
 
+/**
+ * 사이드바 행 — 26px, 아이콘 14px, gap 8px. 좌측 2px 바는 늘 자리를 잡아두고(투명)
+ * 활성일 때만 accent 로 칠한다 — EntryRow 와 같은 어휘라 폭이 흔들리지 않는다.
+ * 예전엔 23.5px 라 DESIGN.md 가 정한 최소 클릭 타겟 24px 에 못 미쳤다.
+ */
 const rowClass =
-  "group flex cursor-default items-center gap-1 rounded px-2 py-0.5 hover:bg-border";
+  "group flex h-[26px] cursor-default items-center gap-2 rounded border-l-2 border-l-transparent pl-1.5 pr-1.5 hover:bg-border";
+
+/** 활성 행 — 이 위치를 패널이 보고 있다. */
+const rowActiveClass = "border-l-accent bg-active hover:bg-active";
+
+/**
+ * 이 위치를 보고 있는 패널 배지 문자열("L"/"R"/"LR", 없으면 ""). 사이드바에서 연
+ * 결과가 화면에 남지 않던 문제. **원시값**을 반환해야 셀렉터가 매 렌더 새 참조를
+ * 만들지 않는다(무한 리렌더 방지).
+ */
+function usePaneAt(source: SourceId, path: string): string {
+  const key = sourceKey(source);
+  return usePanes((s) => {
+    let out = "";
+    for (const id of ["left", "right"] as const) {
+      const loc = activeTab(s, id).location;
+      if (String(loc.path) === path && sourceKey(loc.source) === key)
+        out += id === "left" ? "L" : "R";
+    }
+    return out;
+  });
+}
+
+/** 어느 패널이 이 위치를 보고 있는지 — 행 오른쪽 끝 작은 배지. */
+function PaneBadge({ pane }: { pane: string }) {
+  if (!pane) return null;
+  return (
+    <span className="ml-auto shrink-0 rounded-[3px] bg-accent/15 px-1 py-0.5 text-[10px] font-medium leading-none text-accent">
+      {pane}
+    </span>
+  );
+}
 
 // ─────────────────────────── Local anchor (This PC) ───────────────────────────
 
@@ -237,17 +276,17 @@ function placeIcon(label: string): ReactNode {
   const cls = "shrink-0 text-fg-muted";
   switch (label) {
     case "Home":
-      return <Home size={11} className={cls} />;
+      return <Home size={14} className={cls} />;
     case "Documents":
-      return <FileText size={11} className={cls} />;
+      return <FileText size={14} className={cls} />;
     case "Downloads":
-      return <Download size={11} className={cls} />;
+      return <Download size={14} className={cls} />;
     case "Pictures":
-      return <ImageIcon size={11} className={cls} />;
+      return <ImageIcon size={14} className={cls} />;
     case "Movies":
-      return <Film size={11} className={cls} />;
+      return <Film size={14} className={cls} />;
     default:
-      return <Folder size={11} className={cls} />;
+      return <Folder size={14} className={cls} />;
   }
 }
 
@@ -266,10 +305,14 @@ function PlacesSection({
 }) {
   const { t } = useTranslation();
   const source = useActiveSource();
-  const places =
+  const q = useSidebarFilter((s) => s.q);
+  const filtering = q.trim() !== "";
+  const allPlaces =
     usePlaces((s) => s.bySource[sourceKey(source)]?.places) ?? EMPTY_PLACES;
-  const volumes =
+  const allVolumes =
     usePlaces((s) => s.bySource[sourceKey(source)]?.volumes) ?? EMPTY_VOLUMES;
+  const places = allPlaces.filter((p) => matchesQuery(p.label, q));
+  const volumes = allVolumes.filter((v) => matchesQuery(v.name, q));
   // 로컬 home — This PC 앵커용(백엔드가 OS별 해석 — §7 준수).
   const localHome = usePlaces(
     (s) =>
@@ -284,12 +327,15 @@ function PlacesSection({
   useEffect(() => {
     void refreshVolumes();
   }, []);
+  const trashMatch = matchesQuery(t("sidebar.trash"), q);
+  if (filtering && places.length + volumes.length === 0 && !trashMatch)
+    return null;
   return (
     <Section
+      first
       sectionKey="places"
       title={t("sidebar.places")}
-      icon={<Folder size={14} />}
-      count={places.length + volumes.length}
+      count={allPlaces.length + allVolumes.length}
       action={
         <button
           type="button"
@@ -298,11 +344,11 @@ function PlacesSection({
           title={t("sidebar.rescanVolumes")}
           aria-label={t("sidebar.rescanVolumes")}
         >
-          <RefreshCw size={11} />
+          <RefreshCw size={12} />
         </button>
       }
     >
-      {localHome && source.kind !== "local" && (
+      {localHome && source.kind !== "local" && !filtering && (
         <button
           type="button"
           onClick={(e) =>
@@ -311,8 +357,8 @@ function PlacesSection({
           title={t("sidebar.thisPcTitle")}
           className={clsx(rowClass, "w-full text-left font-medium text-accent")}
         >
-          <Monitor size={11} className="shrink-0" />
-          <span className="truncate">{t("sidebar.thisPc")}</span>
+          <Monitor size={14} className="shrink-0" />
+          <span className="min-w-0 flex-1 truncate">{t("sidebar.thisPc")}</span>
         </button>
       )}
       {places.map((p) => (
@@ -323,7 +369,7 @@ function PlacesSection({
           onOpenLocation={onOpenLocation}
         />
       ))}
-      <TrashItem onTrashActivate={onTrashActivate} />
+      {trashMatch && <TrashItem onTrashActivate={onTrashActivate} />}
       {volumes.length > 0 && <SubLabel>{t("sidebar.volumes")}</SubLabel>}
       {volumes.map((v) => (
         <VolumeItem
@@ -371,6 +417,7 @@ function PlaceItem({
       onSelect: () => copyText(path),
     },
   ];
+  const pane = usePaneAt(source, path);
   return (
     <button
       type="button"
@@ -379,10 +426,11 @@ function PlaceItem({
       }
       onContextMenu={(e) => openMenu(e, menu)}
       title={path}
-      className={clsx(rowClass, "w-full text-left")}
+      className={clsx(rowClass, "w-full text-left", pane && rowActiveClass)}
     >
       {placeIcon(place.label)}
-      <span className="truncate">{place.label}</span>
+      <RowLabel text={place.label} />
+      <PaneBadge pane={pane} />
     </button>
   );
 }
@@ -413,8 +461,8 @@ function TrashItem({
       title={t("sidebar.trashTitle")}
       className={clsx(rowClass, "w-full text-left")}
     >
-      <Trash2 size={11} className="shrink-0 text-fg-muted" />
-      <span className="truncate">{t("sidebar.trash")}</span>
+      <Trash2 size={14} className="shrink-0 text-fg-muted" />
+      <span className="min-w-0 flex-1 truncate">{t("sidebar.trash")}</span>
     </button>
   );
 }
@@ -432,6 +480,7 @@ function VolumeItem({
 }) {
   const { t } = useTranslation();
   const path = String(volume.path);
+  const pane = usePaneAt(source, path);
   const menu: MenuEntry[] = [
     {
       id: "open",
@@ -473,10 +522,11 @@ function VolumeItem({
       }
       onContextMenu={(e) => openMenu(e, menu)}
       title={path}
-      className={rowClass}
+      className={clsx(rowClass, pane && rowActiveClass)}
     >
-      <HardDrive size={11} className="shrink-0 text-fg-muted" />
-      <span className="truncate">{volume.name}</span>
+      <HardDrive size={14} className="shrink-0 text-fg-muted" />
+      <RowLabel text={volume.name} />
+      <PaneBadge pane={pane} />
       {volume.ejectable && (
         <button
           type="button"
@@ -488,7 +538,7 @@ function VolumeItem({
           aria-label={t("sidebar.ejectName", { name: volume.name })}
           title={t("sidebar.eject")}
         >
-          <ArrowUpFromLine size={11} />
+          <ArrowUpFromLine size={12} />
         </button>
       )}
     </div>
@@ -505,16 +555,18 @@ function RecentSection({
   onOpenHostPath: (hostAlias: string, path: string, pane: PaneId) => void;
 }) {
   const { t } = useTranslation();
-  const items = useRecents((s) => s.items);
+  const allItems = useRecents((s) => s.items);
   const clear = useRecents((s) => s.clear);
+  const q = useSidebarFilter((s) => s.q);
+  const items = allItems.filter((r) => matchesQuery(r.label, q));
+  if (q.trim() !== "" && items.length === 0) return null;
   return (
     <Section
       sectionKey="recent"
       title={t("sidebar.recent")}
-      icon={<Clock size={14} />}
-      count={items.length}
+      count={allItems.length}
       action={
-        items.length > 0 ? (
+        allItems.length > 0 ? (
           <button
             type="button"
             onClick={clear}
@@ -522,12 +574,12 @@ function RecentSection({
             title={t("sidebar.clearRecents")}
             aria-label={t("sidebar.clearRecents")}
           >
-            <X size={11} />
+            <X size={12} />
           </button>
         ) : undefined
       }
     >
-      {items.length === 0 ? (
+      {allItems.length === 0 ? (
         <Item label={t("sidebar.noRecent")} muted />
       ) : (
         items.map((r, i) => (
@@ -585,11 +637,11 @@ function RecentItem({
       className={clsx(rowClass, "w-full text-left")}
     >
       {entry.source === "ssh" ? (
-        <Server size={11} className="shrink-0 text-fg-muted" />
+        <Server size={14} className="shrink-0 text-fg-muted" />
       ) : (
-        <Folder size={11} className="shrink-0 text-fg-muted" />
+        <Folder size={14} className="shrink-0 text-fg-muted" />
       )}
-      <span className="truncate">{entry.label}</span>
+      <RowLabel text={entry.label} />
       {entry.source === "ssh" && (
         <span className="ml-auto shrink-0 truncate text-meta opacity-50">
           {entry.alias}
@@ -619,7 +671,12 @@ function SavedHostsBody({
   const allHosts = rawHosts.filter((h) =>
     matchesTagFilter(tagsFor(byKey, hostTagKey(h.alias)), active),
   );
-  const hosts = allHosts.filter((h) => !hideAliases.has(h.alias));
+  const nicks = useHostNicknames((s) => s.byAlias);
+  const q = useSidebarFilter((s) => s.q);
+  const hosts = allHosts.filter(
+    (h) =>
+      !hideAliases.has(h.alias) && matchesQuery(nicks[h.alias] ?? h.alias, q),
+  );
   const groups = useHostGroups((s) => s.groups);
   const byAlias = new Map(hosts.map((h) => [h.alias, h]));
   // 그룹에 배정된 alias 집합 (live 호스트만 — dangling 멤버 무시).
@@ -673,7 +730,7 @@ function SavedHostsBody({
 /** 통합 Hosts 섹션 내부의 작은 구분 라벨(~/.ssh/config / Saved). */
 function SubLabel({ children }: { children: ReactNode }) {
   return (
-    <div className="px-2 pb-0.5 pt-1 text-meta uppercase tracking-wide text-fg-muted/50">
+    <div className="flex h-[18px] items-center pl-3.5 pr-2 text-meta text-fg-muted">
       {children}
     </div>
   );
@@ -863,8 +920,8 @@ function SavedHostItem({
       title={`${host.user}@${host.host}:${host.port}${host.key_path ? ` (key: ${host.key_path})` : ""}${nickname ? ` · ${host.alias}` : ""}`}
       className={clsx(rowClass, reorder?.dragging && "opacity-50")}
     >
-      <Bookmark size={11} className="shrink-0 text-fg-muted" />
-      <span className="truncate">{display}</span>
+      <Bookmark size={14} className="shrink-0 text-fg-muted" />
+      <RowLabel text={display} />
       {nickname && (
         <span className="shrink-0 truncate text-meta text-fg-muted/60">
           {host.alias}
@@ -898,6 +955,7 @@ function BookmarksSection({
   const allItems = useBookmarks((s) => s.items);
   const allFav = useHostFavorites((s) => s.items);
   const byKey = useTags((s) => s.byKey);
+  const q = useSidebarFilter((s) => s.q);
   const tagFilter = useTagFilter((s) => s.active);
   // 살아있는(connected) 연결만 — 재연결 포기로 죽은 entry 도 배너용으로 store 에
   // 남아 있어서, 그대로 세면 끊긴 호스트가 "연결됨" 초록 점으로 보인다.
@@ -907,11 +965,16 @@ function BookmarksSection({
       .map((c) => c.alias),
   );
   // 태그 필터 — 로컬 북마크는 bm:<id>, 원격 즐겨찾기는 fav:<id> 키.
-  const items = allItems.filter((b) =>
-    matchesTagFilter(tagsFor(byKey, bmTagKey(b.id)), tagFilter),
+  // 이름 필터(q)는 그 위에 한 번 더 좁힌다.
+  const items = allItems.filter(
+    (b) =>
+      matchesTagFilter(tagsFor(byKey, bmTagKey(b.id)), tagFilter) &&
+      matchesQuery(b.name, q),
   );
-  const favItems = allFav.filter((f) =>
-    matchesTagFilter(tagsFor(byKey, favTagKey(f.id)), tagFilter),
+  const favItems = allFav.filter(
+    (f) =>
+      matchesTagFilter(tagsFor(byKey, favTagKey(f.id)), tagFilter) &&
+      matchesQuery(f.name, q),
   );
   const { dragKey, insertBeforeKey, onItemMouseDown } = useReorderable({
     group: "bookmarks",
@@ -924,12 +987,12 @@ function BookmarksSection({
   // 전체 개수(배지·빈상태 판단)는 필터 무관, 표시는 필터 적용분.
   const totalAll = allItems.length + allFav.length;
   const total = items.length + favItems.length;
+  if (q.trim() !== "" && total === 0) return null;
 
   return (
     <Section
       sectionKey="bookmarks"
       title={t("sidebar.bookmarks")}
-      icon={<Star size={14} />}
       count={totalAll}
       action={<AddBtn label={t("sidebar.bookmarkActiveTab")} onClick={onAdd} />}
     >
@@ -1024,8 +1087,8 @@ function BookmarkItem({
       title={`${sshPrefix}${bookmark.location.path}`}
       className={clsx(rowClass, dragging && "opacity-50")}
     >
-      <Star size={11} className="shrink-0 text-fg-muted" />
-      <span className="truncate">{bookmark.name}</span>
+      <Star size={14} className="shrink-0 text-fg-muted" />
+      <RowLabel text={bookmark.name} />
       <InlineTags tags={tags} />
       <DeleteBtn
         label={t("sidebar.removeBookmark")}
@@ -1153,8 +1216,8 @@ function FavoriteItem({
       title={path}
       className={clsx(rowClass, "pl-4", dragging && "opacity-50")}
     >
-      <Heart size={11} className="shrink-0 text-fg-muted" />
-      <span className="truncate">{fav.name}</span>
+      <Heart size={14} className="shrink-0 text-fg-muted" />
+      <RowLabel text={fav.name} />
       <InlineTags tags={tags} />
       <DeleteBtn
         label={t("sidebar.removeFavorite")}
@@ -1186,16 +1249,19 @@ function HostsSection({
   const byKey = useTags((s) => s.byKey);
   const active = useTagFilter((s) => s.active);
   const configAliases = new Set(allHosts.map((h) => h.alias));
-  // 태그 필터 — config 호스트는 host:<alias> 키.
-  const hosts = allHosts.filter((h) =>
-    matchesTagFilter(tagsFor(byKey, hostTagKey(h.alias)), active),
+  const nicks = useHostNicknames((s) => s.byAlias);
+  const q = useSidebarFilter((s) => s.q);
+  // 태그 필터 — config 호스트는 host:<alias> 키. 이름 필터는 별명 우선(화면에 보이는 것).
+  const hosts = allHosts.filter(
+    (h) =>
+      matchesTagFilter(tagsFor(byKey, hostTagKey(h.alias)), active) &&
+      matchesQuery(nicks[h.alias] ?? h.alias, q),
   );
 
   return (
     <Section
       sectionKey="hosts"
       title={t("sidebar.hosts")}
-      icon={<Server size={14} />}
       count={allHosts.length + savedCount}
       action={<AddBtn label={t("dialog.adhoc.title")} onClick={onAdHocOpen} />}
     >
@@ -1269,10 +1335,10 @@ function HostItem({
       onDoubleClick={onActivate}
       onContextMenu={(e) => openMenu(e, menu)}
       title={`${host.user}@${host.hostname}:${host.port}${host.has_proxy_jump ? " (via jump)" : ""}${nickname ? ` · ${host.alias}` : ""}`}
-      className="flex cursor-default items-center gap-1 rounded px-2 py-0.5 hover:bg-border"
+      className={rowClass}
     >
       <StateDot state={state} />
-      <span className="truncate">{display}</span>
+      <RowLabel text={display} />
       {nickname && (
         <span className="shrink-0 truncate text-meta text-fg-muted/60">
           {host.alias}
@@ -1281,7 +1347,7 @@ function HostItem({
       <InlineTags tags={tags} />
       {host.has_proxy_jump && (
         <Network
-          size={11}
+          size={14}
           className="ml-auto shrink-0 text-fg-muted"
           aria-label="ProxyJump"
         />
@@ -1290,20 +1356,35 @@ function HostItem({
   );
 }
 
+/**
+ * 연결 상태 표식 — **모양**이 먼저다. 넷 다 같은 점에 색만 다르면 색을 못 보는 사람은
+ * 물론 라이트 모드의 옅은 회색 점도 구분이 안 된다. 채운 원 / 반쯤 찬 원 / 빈 원 /
+ * 삼각형으로 가른다 (비교창의 상태 아이콘과 같은 원칙).
+ */
 function StateDot({ state }: { state: ConnectionState }) {
   const { t } = useTranslation();
-  const cls = {
-    connected: "bg-success",
-    connecting: "bg-warning animate-pulse",
-    error: "bg-danger",
-    disconnected: "bg-fg-muted/30",
-  }[state.kind];
   const label =
     state.kind === "error" ? state.message : t(`sidebar.state.${state.kind}`);
+  if (state.kind === "error") {
+    return (
+      <TriangleAlert
+        size={11}
+        aria-label={label}
+        className="shrink-0 text-danger"
+      />
+    );
+  }
+  const cls = {
+    connected: "bg-success",
+    // 반쯤 찬 원 — 진행 중임을 색 없이도 알 수 있게.
+    connecting:
+      "border border-warning bg-gradient-to-r from-warning from-50% to-transparent to-50% animate-pulse",
+    disconnected: "border border-fg-muted/50",
+  }[state.kind];
   return (
     <span
       aria-label={label}
-      className={clsx("h-1.5 w-1.5 shrink-0 rounded-full", cls)}
+      className={clsx("h-[7px] w-[7px] shrink-0 rounded-full", cls)}
     />
   );
 }
@@ -1314,39 +1395,51 @@ function StateDot({ state }: { state: ConnectionState }) {
 function Section({
   sectionKey,
   title,
-  icon,
   count,
   action,
   children,
+  first = false,
 }: {
   sectionKey: string;
   title: string;
-  icon: ReactNode;
   count?: number;
   action?: ReactNode;
   children: ReactNode;
+  /** 첫 섹션은 위 여백 없이 — 여백이 섹션을 나누는 장치라 맨 위엔 필요 없다. */
+  first?: boolean;
 }) {
   const collapsed = useUI((s) => s.collapsed[sectionKey]);
   const toggle = useUI((s) => s.toggleSection);
+  // 필터 중에는 접힘을 무시한다 — 접힌 섹션 안에 답이 숨으면 필터가 쓸모없다.
+  const filtering = useSidebarFilter((s) => s.q.trim() !== "");
+  const open = filtering || !collapsed;
   return (
-    <div className="border-b border-border px-2 py-1">
-      <div className="flex items-center justify-between gap-1 text-meta text-fg-muted">
+    <div className={clsx("flex flex-col", !first && "mt-3.5")}>
+      {/* 구분선이 아니라 위 여백이 섹션을 나눈다 — border-border 는 bg-subtle 과
+          밝기 차가 라이트 7%·다크 6% 라 선으로는 보이지 않는다. 헤더 아래 hairline 은
+          제목을 제 본문에 붙여주는 보조 역할. 스크롤해도 제목이 남도록 sticky. */}
+      <div className="sticky top-0 z-10 flex h-5 shrink-0 items-center gap-1.5 border-b border-border bg-subtle pl-2 pr-1">
         <button
           type="button"
           onClick={() => toggle(sectionKey)}
-          className="flex min-w-0 flex-1 items-center gap-1 hover:text-fg"
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-fg-muted hover:text-fg"
         >
-          {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
-          {icon}
-          <span className="truncate">{title}</span>
-          {/* 접혔을 때만 개수 표시 — 펼치면 항목이 보이니 중복 제거. */}
-          {collapsed && count !== undefined && count > 0 && (
-            <span className="ml-auto text-meta opacity-50">{count}</span>
+          {open ? (
+            <ChevronDown size={12} className="shrink-0" />
+          ) : (
+            <ChevronRight size={12} className="shrink-0" />
           )}
+          <span className="truncate text-meta font-medium uppercase tracking-wider">
+            {title}
+          </span>
         </button>
+        {/* 접혔을 때만 개수 — 펼치면 항목이 보이니 중복. */}
+        {!open && count !== undefined && count > 0 && (
+          <span className="shrink-0 text-meta text-fg-muted">{count}</span>
+        )}
         {action}
       </div>
-      {!collapsed && <div className="mt-1">{children}</div>}
+      {open && <div className="flex flex-col pr-1 pt-1">{children}</div>}
     </div>
   );
 }
@@ -1393,16 +1486,17 @@ function AddBtn({ label, onClick }: { label: string; onClick: () => void }) {
       aria-label={label}
       title={label}
     >
-      <Plus size={11} />
+      <Plus size={12} />
     </button>
   );
 }
 
+/** 빈 상태 한 줄 — 행과 같은 높이/들여쓰기라 목록이 갑자기 좁아 보이지 않는다. */
 function Item({ label, muted }: { label: string; muted?: boolean }) {
   return (
     <div
       className={clsx(
-        "rounded px-2 py-0.5 hover:bg-border",
+        "flex min-h-[26px] items-center rounded pl-3.5 pr-2",
         muted && "text-fg-muted",
       )}
     >

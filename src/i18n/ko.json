@@ -729,7 +729,8 @@
       "connected": "연결됨",
       "connecting": "연결 중",
       "disconnected": "연결 안 됨"
-    }
+    },
+    "filterLabel": "사이드바 필터"
   },
   "tasks": {
     "count": "작업 {{count}}개",

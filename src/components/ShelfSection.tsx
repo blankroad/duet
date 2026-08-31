@@ -45,7 +45,7 @@ export function ShelfSection() {
   const st = () => useShelf.getState();
 
   return (
-    <div className="border-b border-border px-2 py-1">
+    <div className="mt-3.5 flex flex-col px-2">
       <div className="flex items-center gap-1 text-meta text-fg-muted">
         <Layers size={12} />
         <span className="truncate">{t("shelf.title")}</span>
@@ -86,7 +86,9 @@ export function ShelfSection() {
               className="min-w-0 flex-1 truncate bg-transparent text-meta text-fg-muted focus:text-fg focus:outline-none"
               aria-label={t("shelf.sectionName")}
             />
-            <span className="shrink-0 text-meta opacity-50">{sec.items.length}</span>
+            <span className="shrink-0 text-meta opacity-50">
+              {sec.items.length}
+            </span>
             <button
               type="button"
               disabled={sec.items.length === 0}
