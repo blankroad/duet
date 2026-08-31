@@ -67,6 +67,12 @@ interface PanesState {
   // tab management
   openTab: (id: PaneId, location?: Location) => void;
   closeTab: (id: PaneId, index: number) => void;
+  /** `index` 만 남기고 나머지를 닫는다 (탭 우클릭 "다른 탭 모두 닫기"). */
+  closeOtherTabs: (id: PaneId, index: number) => void;
+  /** `index` 오른쪽 탭들을 닫는다. */
+  closeTabsToRight: (id: PaneId, index: number) => void;
+  /** 활성 탭만 남기고 모두 닫는다 — 어느 탭에서 눌러도 결과가 같다. */
+  closeAllTabs: (id: PaneId) => void;
   selectTab: (id: PaneId, index: number) => void;
   // existing — 활성 탭에 dispatch
   setEntries: (
@@ -226,6 +232,34 @@ export const usePanes = create<PanesState>((set, get) => ({
         next = p.activeTabIndex - 1;
       }
       return { panes: { ...s.panes, [id]: { tabs, activeTabIndex: next } } };
+    }),
+  closeOtherTabs: (id, index) =>
+    set((s) => {
+      const p = s.panes[id];
+      const keep = p.tabs[index];
+      if (!keep || p.tabs.length <= 1) return s;
+      return {
+        panes: { ...s.panes, [id]: { tabs: [keep], activeTabIndex: 0 } },
+      };
+    }),
+  closeTabsToRight: (id, index) =>
+    set((s) => {
+      const p = s.panes[id];
+      if (index < 0 || index >= p.tabs.length - 1) return s;
+      const tabs = p.tabs.slice(0, index + 1);
+      // 닫힌 탭이 활성이었으면 기준 탭으로 옮겨온다.
+      const next = Math.min(p.activeTabIndex, index);
+      return { panes: { ...s.panes, [id]: { tabs, activeTabIndex: next } } };
+    }),
+  closeAllTabs: (id) =>
+    set((s) => {
+      const p = s.panes[id];
+      // 패널은 탭이 최소 1개 필요하다 — 보고 있던 탭을 남긴다.
+      const keep = p.tabs[p.activeTabIndex] ?? p.tabs[0];
+      if (!keep || p.tabs.length <= 1) return s;
+      return {
+        panes: { ...s.panes, [id]: { tabs: [keep], activeTabIndex: 0 } },
+      };
     }),
   selectTab: (id, index) =>
     set((s) => {

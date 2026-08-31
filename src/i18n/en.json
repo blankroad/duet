@@ -828,7 +828,12 @@
   },
   "tabs": {
     "newTab": "New tab",
-    "closeTab": "Close tab"
+    "closeTab": "Close tab",
+    "closeThis": "Close tab",
+    "closeOthers": "Close other tabs",
+    "closeRight": "Close tabs to the right",
+    "closeAll": "Close all tabs",
+    "duplicate": "Duplicate tab"
   },
   "filter": {
     "placeholder": "Filter…",
