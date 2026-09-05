@@ -1,11 +1,13 @@
 import { usePanes, type PaneId, type RestoredLayout } from "./panes";
+import { useConnections } from "./connections";
 
 /**
  * 세션(탭 레이아웃) 영속 — 재시작 시 좌/우 패널의 탭 구성·경로·정렬/뷰 복원.
  *
  * localStorage 에 저장(자격증명 아닌 경로/뷰 메타라 §5 무관, recents 와 동일 패턴).
- * **로컬 탭만** 저장/복원 — SSH 탭은 재시작 시 연결이 사라져 connection_id 가 무효라
- * 복원해도 동작하지 않으므로 제외(후속: alias 기반 재접속 복원).
+ * 원격 탭은 **alias + 경로**로 저장한다 — connection_id 는 재시작하면 무효지만
+ * alias 만 있으면 패널 배너의 "다시 연결"이 그 경로로 되돌아간다. 비밀번호 같은
+ * 자격증명은 저장하지 않는다(§5).
  */
 
 const KEY = "duet.session.v1";
@@ -16,17 +18,29 @@ function snapshot(): RestoredLayout {
   const slimPane = (id: PaneId): RestoredLayout["panes"][PaneId] => {
     const p = s.panes[id];
     const activeId = p.tabs[p.activeTabIndex]?.id;
-    const localTabs = p.tabs.filter((t) => t.location.source.kind === "local");
-    const idx = localTabs.findIndex((t) => t.id === activeId);
+    // 아카이브/휴지통 임시 루트는 재시작 후 존재하지 않으므로 제외.
+    const keep = p.tabs.filter(
+      (t) => t.archive === undefined && t.trashRoot === undefined,
+    );
+    const idx = keep.findIndex((t) => t.id === activeId);
     return {
       activeTabIndex: idx >= 0 ? idx : 0,
-      tabs: localTabs.map((t) => ({
-        path: String(t.location.path),
-        sortKey: t.sortKey,
-        sortOrder: t.sortOrder,
-        showHidden: t.showHidden,
-        viewMode: t.viewMode,
-      })),
+      tabs: keep.map((t) => {
+        const src = t.location.source;
+        const host =
+          src.kind === "ssh"
+            ? (useConnections.getState().active[src.connection_id]?.alias ??
+              src.connection_id.split(":")[0])
+            : undefined;
+        return {
+          path: String(t.location.path),
+          ...(host ? { host } : {}),
+          sortKey: t.sortKey,
+          sortOrder: t.sortOrder,
+          showHidden: t.showHidden,
+          viewMode: t.viewMode,
+        };
+      }),
     };
   };
   return {

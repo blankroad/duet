@@ -94,6 +94,7 @@ import {
   activeTab,
   computeDisplayed,
   isParentEntry,
+  isRestoredRemote,
   applyTabDefaults,
   type PaneId,
   type SortKey,
@@ -180,6 +181,13 @@ function App() {
     [listDirectory],
   );
 
+  /**
+   * 패널별 이동 토큰 — 느린 SSH 에서 폴더 A 를 누른 직후 뒤로/다른 폴더를 누르면
+   * 두 listDirectory 가 겹치고 **늦게 도착한 쪽**이 최종 상태가 됐다("클릭했는데
+   * 다른 폴더가 열림"). 최신 요청이 아니면 응답을 버린다.
+   */
+  const navSeq = useRef<Record<PaneId, number>>({ left: 0, right: 0 });
+
   const navigate = useCallback(
     async (
       id: PaneId,
@@ -191,8 +199,10 @@ function App() {
       // 로드 중 표시 — 느린 SSH ls 에서 이전 목록이 그대로 보여 "무반응"으로
       // 오인되는 것 방지. setEntries 가 성공 시 자동 해제.
       state.setLoading(id, true);
+      const seq = ++navSeq.current[id];
       try {
         const entries = await listEntries(location);
+        if (navSeq.current[id] !== seq) return; // 더 새 이동이 시작됨
         state.setEntries(id, location, entries, {
           pushHistory: opts.pushHistory ?? true,
           ...(opts.focusName !== undefined
@@ -209,6 +219,7 @@ function App() {
           }
         }
       } catch (e) {
+        if (navSeq.current[id] !== seq) return; // 낡은 요청의 실패는 무시
         usePanes.getState().setLoading(id, false);
         // 사용자가 더블클릭해도 silent fail 면 무반응으로 인식. toast 로 노출.
         showToast(
@@ -228,8 +239,10 @@ function App() {
       opts: { pushHistory?: boolean } = {},
     ) => {
       usePanes.getState().setLoading(id, true);
+      const seq = ++navSeq.current[id];
       try {
         const entries = await listEntries(location);
+        if (navSeq.current[id] !== seq) return;
         usePanes.getState().setEntries(id, location, entries, {
           pushHistory: opts.pushHistory ?? true,
         });
@@ -241,6 +254,7 @@ function App() {
           }
         }
       } catch (e) {
+        if (navSeq.current[id] !== seq) return;
         usePanes.getState().setLoading(id, false);
         showToast(
           i18n.t("toast.cannotOpen", {
@@ -1677,13 +1691,17 @@ function App() {
         usePanes.getState().restoreLayout(saved);
         // 복원된 탭들은 entries 캐시가 비어 있으므로 각 탭을 navigate 해 적재. 끝나면 원래 active 로.
         for (const pane of ["left", "right"] as PaneId[]) {
-          const tabPaths = usePanes
-            .getState()
-            .panes[pane].tabs.map((t) => String(t.location.path));
+          const tabs = usePanes.getState().panes[pane].tabs.map((t) => ({
+            path: String(t.location.path),
+            // 복원된 원격 탭은 아직 연결이 없다 — 목록을 읽으려 하면 실패 토스트만
+            // 뜬다. 비워 둔 채로 두면 패널이 "연결 끊김 + 다시 연결" 배너를 띄운다.
+            remote: isRestoredRemote(t.location),
+          }));
           const savedActive = usePanes.getState().panes[pane].activeTabIndex;
-          for (let i = 0; i < tabPaths.length; i++) {
+          for (let i = 0; i < tabs.length; i++) {
+            if (tabs[i]!.remote) continue;
             usePanes.getState().selectTab(pane, i);
-            await navigate(pane, tabPaths[i]!, { pushHistory: false });
+            await navigate(pane, tabs[i]!.path, { pushHistory: false });
           }
           usePanes.getState().selectTab(pane, savedActive);
         }

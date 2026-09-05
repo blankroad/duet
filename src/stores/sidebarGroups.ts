@@ -73,12 +73,10 @@ export async function assignToGroup(
   alias: string,
   folderId: string | null,
 ): Promise<void> {
-  const groups = useHostGroups
-    .getState()
-    .groups.map((g) => ({
-      ...g,
-      members: g.members.filter((m) => m !== alias),
-    }));
+  const groups = useHostGroups.getState().groups.map((g) => ({
+    ...g,
+    members: g.members.filter((m) => m !== alias),
+  }));
   if (folderId) {
     const g = groups.find((x) => x.id === folderId);
     if (g) g.members = [...g.members, alias];

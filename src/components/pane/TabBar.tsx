@@ -26,6 +26,12 @@ export function TabBar({ id }: { id: PaneId }) {
       {tabs.map((t, i) => {
         const active = i === activeIndex;
         const label = labelOf(t.location.path);
+        // 원격 탭은 호스트를 앞에 — 로컬 /var/log 탭과 원격 /var/log 탭이
+        // 이름만으로는 구분되지 않았다.
+        const host =
+          t.location.source.kind === "ssh"
+            ? (t.location.source.connection_id.split(":")[0] ?? "")
+            : null;
         return (
           <div
             key={t.id}
@@ -46,7 +52,12 @@ export function TabBar({ id }: { id: PaneId }) {
                 : "border-l-transparent text-fg-muted",
             )}
           >
-            <span className="max-w-[10rem] truncate">{label}</span>
+            <span className="flex max-w-[12rem] items-baseline gap-1 truncate">
+              {host && (
+                <span className="shrink-0 text-fg-muted/70">{host}:</span>
+              )}
+              <span className="truncate">{label}</span>
+            </span>
             <button
               type="button"
               onClick={(e) => {

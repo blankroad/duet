@@ -29,12 +29,15 @@ export function ConnectionBanner({
   const conn = useConnections((s) => (connId ? s.active[connId] : undefined));
   const lastAlias = useRef<string | null>(null);
   if (conn) lastAlias.current = conn.alias;
+  // 연결이 store 에 없어도(재시작 복원 탭) connection_id 앞부분이 alias 다 —
+  // 이게 없으면 "다시 연결"이 alias 를 몰라 ad-hoc 다이얼로그로 떨어졌다.
+  const alias = lastAlias.current ?? connId?.split(":")[0] ?? null;
 
   if (!connId || source.kind !== "ssh") return null;
   const state = conn?.state ?? { kind: "disconnected" as const };
   if (state.kind === "connected") return null;
 
-  const label = lastAlias.current ?? `${source.user}@${source.host_ip}`;
+  const label = alias ?? `${source.user}@${source.host_ip}`;
 
   if (state.kind === "connecting") {
     return (
@@ -66,7 +69,7 @@ export function ConnectionBanner({
       </span>
       <button
         type="button"
-        onClick={() => onReconnect(lastAlias.current, id)}
+        onClick={() => onReconnect(alias, id)}
         className="ml-auto flex shrink-0 items-center gap-1 rounded-panel border border-border bg-base px-2 py-0.5 text-meta hover:bg-subtle"
       >
         <RefreshCw size={11} aria-hidden />

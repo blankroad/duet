@@ -129,7 +129,13 @@ interface PanesState {
   restoreLayout: (layout: RestoredLayout) => void;
 }
 
-/** 세션 영속용 슬림 레이아웃 — 로컬 탭만 (SSH 는 재시작 시 연결 소실). */
+/**
+ * 세션 영속용 슬림 레이아웃.
+ *
+ * 원격 탭은 `host`(alias)로 저장한다 — 재시작하면 연결이 사라져 connection_id 는
+ * 무효지만, alias+경로만 있으면 배너의 "다시 연결"이 그 자리로 되돌아갈 수 있다.
+ * (예전엔 원격 탭을 통째로 버려서 SSH 작업 문맥이 재시작마다 사라졌다.)
+ */
 export interface RestoredLayout {
   activePane: PaneId;
   panes: Record<
@@ -138,6 +144,8 @@ export interface RestoredLayout {
       activeTabIndex: number;
       tabs: Array<{
         path: string;
+        /** SSH 탭이면 호스트 alias. 없으면 로컬 탭. */
+        host?: string;
         sortKey: SortKey;
         sortOrder: SortOrder;
         showHidden: boolean;
@@ -145,6 +153,17 @@ export interface RestoredLayout {
       }>;
     }
   >;
+}
+
+/** 복원된(아직 연결 안 된) 원격 탭의 connection_id 접미사. */
+export const RESTORED_CONN = "restored";
+
+/** 이 위치가 복원된 원격 탭인가 — 아직 살아있는 연결이 없다. */
+export function isRestoredRemote(loc: Location): boolean {
+  return (
+    loc.source.kind === "ssh" &&
+    loc.source.connection_id.endsWith(`:${RESTORED_CONN}`)
+  );
 }
 
 const home = (): Location => ({
@@ -361,10 +380,24 @@ export const usePanes = create<PanesState>((set, get) => ({
     set(() => {
       const buildPane = (slim: RestoredLayout["panes"][PaneId]): PaneState => {
         const tabs: TabState[] = slim.tabs.map((t) => ({
-          ...initialTab({
-            source: { kind: "local" },
-            path: normalizePath(t.path),
-          }),
+          ...initialTab(
+            t.host
+              ? {
+                  // 죽은 연결을 가리키는 자리표시자 — 패널이 "연결 끊김" 배너를
+                  // 띄우고, 거기서 alias 로 다시 연결하면 이 경로로 돌아온다.
+                  source: {
+                    kind: "ssh",
+                    connection_id: `${t.host}:${RESTORED_CONN}`,
+                    host_ip: "0.0.0.0",
+                    user: "",
+                  },
+                  path: t.path,
+                }
+              : {
+                  source: { kind: "local" },
+                  path: normalizePath(t.path),
+                },
+          ),
           sortKey: t.sortKey,
           sortOrder: t.sortOrder,
           showHidden: t.showHidden,
