@@ -79,7 +79,7 @@ interface PanesState {
     id: PaneId,
     location: Location,
     entries: Entry[],
-    opts?: { pushHistory?: boolean },
+    opts?: { pushHistory?: boolean; focusName?: string },
   ) => void;
   setActivePane: (id: PaneId) => void;
   moveCursor: (id: PaneId, delta: number) => void;
@@ -87,6 +87,12 @@ interface PanesState {
   toggleSelected: (id: PaneId, name: string) => void;
   /** 선택 집합을 names 로 교체 (마키 드래그 선택용). */
   setSelected: (id: PaneId, names: string[]) => void;
+  /** displayed 인덱스 [from..to] 구간을 선택 (Shift+↑↓/Home/End 범위 선택). ".." 제외. */
+  selectRange: (id: PaneId, from: number, to: number) => void;
+  /** 표시 중인 항목 전체 선택 (".." 제외). */
+  selectAll: (id: PaneId) => void;
+  /** 선택 반전 (".." 제외). */
+  invertSelection: (id: PaneId) => void;
   /** glob/substring 패턴에 맞는 표시 항목을 선택집합에 추가/해제 (".." 제외).
    *  영향받은(매치된) 항목 수를 반환 — 호출부 토스트 피드백용. */
   selectByPattern: (
@@ -305,8 +311,17 @@ export const usePanes = create<PanesState>((set, get) => ({
       let cursorIndex: number;
       let selected: Set<string>;
       if (navigated) {
-        cursorIndex = entries.length > 0 ? 0 : -1;
         selected = new Set();
+        // 상위로 갈 때는 **떠나온 폴더**에 커서를 놓는다(TC·DOpus·탐색기 관례).
+        // 예전엔 무조건 0 이라, 위로 간 직후 커서가 ".." 에 앉아 Enter 를 누르면
+        // 또 위로 갔고, 형제 폴더를 오가는 작업마다 커서를 다시 찾아야 했다.
+        const focusName = opts?.focusName;
+        const displayed = computeDisplayed({ ...cur, entries, location: loc });
+        const at =
+          focusName === undefined
+            ? -1
+            : displayed.findIndex((e) => e.name === focusName);
+        cursorIndex = at >= 0 ? at : entries.length > 0 ? 0 : -1;
       } else {
         const names = new Set(entries.map((e) => e.name));
         selected = new Set([...cur.selected].filter((n) => names.has(n)));
@@ -392,6 +407,50 @@ export const usePanes = create<PanesState>((set, get) => ({
       panes: {
         ...s.panes,
         [id]: withActiveTab(s.panes[id], (t) => ({ ...t, cursorIndex: index })),
+      },
+    })),
+  selectRange: (id, from, to) =>
+    set((s) => ({
+      panes: {
+        ...s.panes,
+        [id]: withActiveTab(s.panes[id], (t) => {
+          const visible = computeDisplayed(t);
+          const lo = Math.max(0, Math.min(from, to));
+          const hi = Math.min(visible.length - 1, Math.max(from, to));
+          const sel = new Set<string>();
+          for (let i = lo; i <= hi; i++) {
+            const e = visible[i];
+            if (e && !isParentEntry(e)) sel.add(e.name);
+          }
+          return { ...t, selected: sel };
+        }),
+      },
+    })),
+  selectAll: (id) =>
+    set((s) => ({
+      panes: {
+        ...s.panes,
+        [id]: withActiveTab(s.panes[id], (t) => ({
+          ...t,
+          selected: new Set(
+            computeDisplayed(t)
+              .filter((e) => !isParentEntry(e))
+              .map((e) => e.name),
+          ),
+        })),
+      },
+    })),
+  invertSelection: (id) =>
+    set((s) => ({
+      panes: {
+        ...s.panes,
+        [id]: withActiveTab(s.panes[id], (t) => {
+          const sel = new Set<string>();
+          for (const e of computeDisplayed(t)) {
+            if (!isParentEntry(e) && !t.selected.has(e.name)) sel.add(e.name);
+          }
+          return { ...t, selected: sel };
+        }),
       },
     })),
   toggleSelected: (id, name) =>
@@ -709,6 +768,16 @@ export function computeDisplayed(t: TabState): Entry[] {
   return sorted;
 }
 
+/**
+ * 이름 비교기 — **자연 정렬**(numeric): `img_2` 가 `img_10` 앞에 온다.
+ * `localeCompare` 는 문자열 비교라 사진·로그 폴더에서 순서가 뒤집혀 보였다.
+ * 모듈 레벨 1회 생성 — 비교마다 만들면 큰 폴더 정렬이 눈에 띄게 느려진다.
+ */
+const collator = new Intl.Collator(undefined, {
+  numeric: true,
+  sensitivity: "base",
+});
+
 function sortEntries(
   entries: Entry[],
   key: SortKey,
@@ -721,13 +790,13 @@ function sortEntries(
     }
     return 0;
   };
-  const cmpName = (a: Entry, b: Entry) => a.name.localeCompare(b.name);
+  const cmpName = (a: Entry, b: Entry) => collator.compare(a.name, b.name);
   const cmpExt = (a: Entry, b: Entry) => {
     const ax = a.name.lastIndexOf(".");
     const bx = b.name.lastIndexOf(".");
     const ae = ax >= 0 ? a.name.slice(ax + 1) : "";
     const be = bx >= 0 ? b.name.slice(bx + 1) : "";
-    return ae.localeCompare(be) || cmpName(a, b);
+    return collator.compare(ae, be) || cmpName(a, b);
   };
   const cmpKey = (a: Entry, b: Entry): number => {
     switch (key) {

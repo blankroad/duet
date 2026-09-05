@@ -116,7 +116,9 @@ describe("panes — dirSizes (크기 계산 캐시)", () => {
     expect(usePanes.getState().panes.left.tabs[0]!.dirSizes["docs"]).toBe(1234);
     // 없는 tabId 는 무시(탭 닫힘 후 늦게 도착한 결과).
     s.setDirSize("left", "gone", "x", 1);
-    expect(usePanes.getState().panes.left.tabs[0]!.dirSizes["x"]).toBeUndefined();
+    expect(
+      usePanes.getState().panes.left.tabs[0]!.dirSizes["x"],
+    ).toBeUndefined();
   });
 
   it("같은 폴더 새로고침은 유지, 다른 폴더 이동은 리셋", () => {
@@ -587,5 +589,69 @@ describe("panes — swap / move tab", () => {
     const s = usePanes.getState();
     expect(s.panes.left.tabs.length).toBe(1); // fresh tab
     expect(activeTab(s, "right").location.path).toBe("/solo");
+  });
+});
+
+describe("panes — 자연 정렬(numeric)", () => {
+  it("img_2 가 img_10 앞에 온다", () => {
+    // 루트 경로라 ".." 행이 붙지 않는다 — 정렬만 본다.
+    const tab = mkTab("/", [mk("img_10"), mk("img_2"), mk("img_1")]);
+    const names = computeDisplayed(tab).map((e) => e.name);
+    expect(names).toEqual(["img_1", "img_2", "img_10"]);
+  });
+
+  it("확장자 정렬도 자연 정렬을 쓴다", () => {
+    const tab = {
+      ...mkTab("/", [mk("a.r10"), mk("b.r2")]),
+      sortKey: "ext" as const,
+    };
+    expect(computeDisplayed(tab).map((e) => e.name)).toEqual(["b.r2", "a.r10"]);
+  });
+});
+
+describe("panes — 범위·전체·반전 선택", () => {
+  beforeEach(() => {
+    usePanes.setState((s) => ({
+      panes: {
+        ...s.panes,
+        left: {
+          ...s.panes.left,
+          activeTabIndex: 0,
+          tabs: [mkTab("/", [mk("a"), mk("b"), mk("c"), mk("d")])],
+        },
+      },
+    }));
+  });
+
+  it("selectRange 는 두 인덱스 사이를 모두 고른다(순서 무관)", () => {
+    usePanes.getState().selectRange("left", 2, 0);
+    const sel = activeTab(usePanes.getState(), "left").selected;
+    expect([...sel].sort()).toEqual(["a", "b", "c"]);
+  });
+
+  it("selectAll 은 전부, invertSelection 은 나머지를 고른다", () => {
+    usePanes.getState().selectAll("left");
+    expect(activeTab(usePanes.getState(), "left").selected.size).toBe(4);
+
+    usePanes.getState().setSelected("left", ["a", "b"]);
+    usePanes.getState().invertSelection("left");
+    const sel = activeTab(usePanes.getState(), "left").selected;
+    expect([...sel].sort()).toEqual(["c", "d"]);
+  });
+
+  it("'..' 는 선택 대상이 아니다", () => {
+    usePanes.setState((s) => ({
+      panes: {
+        ...s.panes,
+        left: {
+          ...s.panes.left,
+          activeTabIndex: 0,
+          tabs: [mkTab("/x/sub", [mk("a"), mk("b")])],
+        },
+      },
+    }));
+    usePanes.getState().selectAll("left");
+    const sel = activeTab(usePanes.getState(), "left").selected;
+    expect([...sel].sort()).toEqual(["a", "b"]);
   });
 });

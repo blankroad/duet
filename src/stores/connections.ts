@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { commands } from "@/types/bindings";
 import type { ConnectionId } from "@/types/bindings";
 
 /**
@@ -132,3 +133,22 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
     return found;
   },
 }));
+
+/**
+ * 이 alias 의 살아있는 연결을 모두 끊는다 — 사이드바/팔레트의 "연결 끊기".
+ *
+ * 백엔드 `connection_close` 는 재연결 취소·임시 dir 정리까지 하는데 프론트에 호출부가
+ * 하나도 없어서, 앱을 끄는 것 말고는 세션을 정리할 방법이 없었다. 그 탭들은 배너의
+ * "다시 연결"로 살릴 수 있다.
+ */
+export async function disconnectAlias(alias: string): Promise<number> {
+  const targets = Object.values(useConnections.getState().active).filter(
+    (c) => c.alias === alias,
+  );
+  let closed = 0;
+  for (const c of targets) {
+    const r = await commands.connectionClose(c.id);
+    if (r.status === "ok") closed += 1;
+  }
+  return closed;
+}

@@ -57,6 +57,7 @@ import {
   sameLocationDir,
 } from "@/lib/entryDnd";
 import { isArchiveName } from "@/lib/archive";
+import { basename } from "@/lib/paths";
 import {
   resolveActiveTargets,
   triggerCompare,
@@ -85,6 +86,7 @@ import { buildBuiltins } from "@/lib/commands";
 import { useUI } from "@/stores/ui";
 import { useShelf } from "@/stores/shelf";
 import { useAppSettings, syncAppSettings } from "@/stores/settings";
+import { useVault } from "@/stores/vault";
 import {
   usePanes,
   activeTab,
@@ -176,7 +178,11 @@ function App() {
   );
 
   const navigate = useCallback(
-    async (id: PaneId, path: string, opts: { pushHistory?: boolean } = {}) => {
+    async (
+      id: PaneId,
+      path: string,
+      opts: { pushHistory?: boolean; focusName?: string } = {},
+    ) => {
       const state = usePanes.getState();
       const location = { ...activeTab(state, id).location, path };
       // 로드 중 표시 — 느린 SSH ls 에서 이전 목록이 그대로 보여 "무반응"으로
@@ -186,6 +192,9 @@ function App() {
         const entries = await listEntries(location);
         state.setEntries(id, location, entries, {
           pushHistory: opts.pushHistory ?? true,
+          ...(opts.focusName !== undefined
+            ? { focusName: opts.focusName }
+            : {}),
         });
         // navigate 성공 후 watcher 갱신. 실패는 silent — fs:changed 알림 안 옴
         // 정도의 영향. (사용자가 명시 새로고침으로 우회 가능.)
@@ -372,7 +381,8 @@ function App() {
       // 부모 경로 — Windows(C:\)·POSIX·혼합 구분자 모두 처리(parentPath). 루트면 멈춤.
       const parent = parentPath(tab.location.path);
       if (parent === null) return;
-      void navigate(id, parent);
+      // 떠나온 폴더에 커서를 놓는다 — 형제 폴더를 오갈 때 매번 커서를 다시 찾지 않게.
+      void navigate(id, parent, { focusName: basename(tab.location.path) });
       // 동기화 브라우징 — 반대 패널도 한 단계 위로(아카이브/휴지통 컨텍스트면 skip).
       if (useUI.getState().syncBrowse && !tab.archive && !tab.trashRoot) {
         const opp: PaneId = id === "left" ? "right" : "left";
@@ -466,6 +476,25 @@ function App() {
     },
     [navigate],
   );
+
+  /**
+   * 탭 전환 시 그 탭 폴더를 다시 읽고 백엔드 감시자도 그 경로로 옮긴다.
+   *
+   * `selectTab` 은 순수 store 액션이라, 전환해 온 탭은 예전 목록을 그대로 보여 주고
+   * (그 사이 다른 탭에서 만든 파일이 안 보였다) `pane_watch_set` 은 마지막 navigate
+   * 경로에 머물러 그 탭에서는 자동 새로고침이 아예 오지 않았다.
+   */
+  const leftTab = usePanes((s) => s.panes.left.activeTabIndex);
+  const rightTab = usePanes((s) => s.panes.right.activeTabIndex);
+  const prevTabIdx = useRef({ left: leftTab, right: rightTab });
+  useEffect(() => {
+    for (const id of ["left", "right"] as const) {
+      const now = id === "left" ? leftTab : rightTab;
+      if (prevTabIdx.current[id] === now) continue; // 마운트/무관한 렌더
+      prevTabIdx.current[id] = now;
+      onRefresh(id);
+    }
+  }, [leftTab, rightTab, onRefresh]);
 
   const onBack = useCallback(
     (id: PaneId) => {
@@ -830,6 +859,18 @@ function App() {
         const id = usePanes.getState().activePane;
         const tab = activeTab(usePanes.getState(), id);
         useSearch.getState().open(id, tab.location);
+      },
+      selectAll: () => {
+        const st = usePanes.getState();
+        st.selectAll(st.activePane);
+      },
+      clearSelection: () => {
+        const st = usePanes.getState();
+        st.setSelected(st.activePane, []);
+      },
+      invertSelection: () => {
+        const st = usePanes.getState();
+        st.invertSelection(st.activePane);
       },
       selectByPattern: () =>
         useUI
@@ -1596,6 +1637,10 @@ function App() {
       void bootstrapHostGroups();
       void bootstrapHostNicknames();
       void bootstrapTags();
+      // vault 상태(있음/잠김)를 여기서 한 번 읽어야 저장된 호스트 비밀번호가 재시작
+      // 후에도 쓰인다 — 안 읽으면 store 가 exists=false 로 남아 "Unlock vault" 가
+      // 아예 안 보이고, 백엔드는 비번 없이 키/agent 만 시도해 AuthFailed 로 끝났다.
+      void useVault.getState().refresh();
       // 설정 적용 — 테마 + 새 탭 기본값(정렬/뷰/숨김), 기존 탭에도 즉시 반영.
       void commands.settingsGet().then((r) => {
         if (r.status === "ok") {

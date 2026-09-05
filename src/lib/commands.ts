@@ -82,6 +82,9 @@ export interface BuiltinDeps {
   focusFilter: () => void;
   openSearch: () => void;
   // select (glob/substring pattern)
+  selectAll: () => void;
+  clearSelection: () => void;
+  invertSelection: () => void;
   selectByPattern: () => void;
   deselectByPattern: () => void;
   // shelf (drop stack)
@@ -330,10 +333,34 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
       action: deps.openSearch,
     },
     {
+      id: "select.all",
+      label: "Select all",
+      category: "Select",
+      defaultKey: "Ctrl+A",
+      action: deps.selectAll,
+    },
+    {
+      id: "select.none",
+      label: "Clear selection",
+      category: "Select",
+      defaultKey: "Ctrl+Shift+A",
+      action: deps.clearSelection,
+    },
+    {
+      id: "select.invert",
+      label: "Invert selection",
+      category: "Select",
+      defaultKey: "Ctrl+Shift+I",
+      // TC 관례의 NumPad `*` 도 같이 받는다.
+      altKeys: ["NumpadMultiply"],
+      action: deps.invertSelection,
+    },
+    {
       id: "select.byPattern",
       label: "Select by pattern (glob)",
       category: "Select",
       defaultKey: "Ctrl+=",
+      altKeys: ["NumpadAdd"], // TC 관례
       action: deps.selectByPattern,
     },
     {
@@ -341,6 +368,7 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
       label: "Deselect by pattern (glob)",
       category: "Select",
       defaultKey: "Ctrl+-",
+      altKeys: ["NumpadSubtract"], // TC 관례
       action: deps.deselectByPattern,
     },
     {

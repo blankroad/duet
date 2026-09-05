@@ -758,7 +758,8 @@
     "dropBookmark": "Add to bookmarks",
     "resizeTitle": "Drag to resize · double-click to reset",
     "rename": "Rename…",
-    "renamePrompt": "New name"
+    "renamePrompt": "New name",
+    "disconnect": "Disconnect"
   },
   "tasks": {
     "count": "{{count}} tasks",

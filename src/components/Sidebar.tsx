@@ -27,6 +27,7 @@ import i18n from "@/i18n";
 import { useUI } from "@/stores/ui";
 import {
   useConnections,
+  disconnectAlias,
   type Host,
   type ConnectionState,
 } from "@/stores/connections";
@@ -1510,6 +1511,15 @@ function HostItem({
   const menu: MenuEntry[] = [
     { id: "connect", label: t("sidebar.connect"), onSelect: onActivate },
     { id: "rename", label: t("sidebar.setDisplayName"), onSelect: promptName },
+    ...(state.kind === "connected" || state.kind === "connecting"
+      ? [
+          {
+            id: "disconnect",
+            label: t("sidebar.disconnect"),
+            onSelect: () => void disconnectAlias(host.alias),
+          } as MenuEntry,
+        ]
+      : []),
     {
       id: "tags",
       label: t("sidebar.editTags"),

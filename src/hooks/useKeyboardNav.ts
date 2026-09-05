@@ -27,6 +27,60 @@ function escapeOwnedByOverlay(): boolean {
 }
 
 /**
+ * Shift 범위 선택의 기준점 — `pane:tabIndex` → displayed 인덱스.
+ * Shift 없이 커서를 옮기면 지운다(다음 Shift 이동이 새 기준을 잡게).
+ */
+const anchors = new Map<string, number>();
+
+function anchorKey(id: PaneId): string {
+  const p = usePanes.getState().panes[id];
+  return `${id}:${p.activeTabIndex}`;
+}
+
+/** 한 페이지 = 뷰포트에 들어가는 행 수(대략). 그리드는 행 단위로 맞춘다. */
+function pageStep(tab: ReturnType<typeof activeTab>): number {
+  const rows = 12;
+  return tab.viewMode === "grid" ? rows * Math.max(1, tab.gridCols) : rows;
+}
+
+/** 커서 이동 + Shift 면 기준점부터 범위 선택. */
+function moveWithSelection(id: PaneId, delta: number, shift: boolean): void {
+  const state = usePanes.getState();
+  const tab = activeTab(state, id);
+  const len = computeDisplayed(tab).length;
+  const next = Math.max(0, Math.min(len - 1, tab.cursorIndex + delta));
+  applyMove(id, next, shift, tab.cursorIndex);
+}
+
+/** 특정 인덱스로 점프 + Shift 면 범위 선택. */
+function jumpWithSelection(id: PaneId, index: number, shift: boolean): void {
+  const state = usePanes.getState();
+  const tab = activeTab(state, id);
+  const len = computeDisplayed(tab).length;
+  const next = Math.max(0, Math.min(len - 1, index));
+  applyMove(id, next, shift, tab.cursorIndex);
+}
+
+function applyMove(
+  id: PaneId,
+  next: number,
+  shift: boolean,
+  from: number,
+): void {
+  const state = usePanes.getState();
+  const key = anchorKey(id);
+  if (shift) {
+    const anchor = anchors.get(key) ?? from;
+    anchors.set(key, anchor);
+    state.setCursor(id, next);
+    state.selectRange(id, anchor, next);
+  } else {
+    anchors.delete(key);
+    state.setCursor(id, next);
+  }
+}
+
+/**
  * 글로벌 키보드 네비게이션 (활성 패널 대상).
  * DESIGN.md 키 바인딩 표 — MVP-0 항목.
  *
@@ -75,12 +129,39 @@ export function useKeyboardNav(
         }
         case "ArrowDown":
           e.preventDefault();
-          state.moveCursor(id, rowStep);
+          moveWithSelection(id, rowStep, e.shiftKey);
           break;
         case "ArrowUp":
           e.preventDefault();
-          state.moveCursor(id, -rowStep);
+          moveWithSelection(id, -rowStep, e.shiftKey);
           break;
+        // Home/End/PageUp/PageDown — 1만 항목 폴더에서 ↓ 를 1만 번 누르지 않게.
+        case "Home":
+          e.preventDefault();
+          jumpWithSelection(id, 0, e.shiftKey);
+          break;
+        case "End":
+          e.preventDefault();
+          jumpWithSelection(id, computeDisplayed(tab).length - 1, e.shiftKey);
+          break;
+        case "PageDown":
+          e.preventDefault();
+          moveWithSelection(id, pageStep(tab), e.shiftKey);
+          break;
+        case "PageUp":
+          e.preventDefault();
+          moveWithSelection(id, -pageStep(tab), e.shiftKey);
+          break;
+        // Insert — TC 관례: 토글하고 한 칸 내려간다(연속 선택).
+        case "Insert": {
+          e.preventDefault();
+          const entry = computeDisplayed(tab)[tab.cursorIndex];
+          if (entry && !isParentEntry(entry))
+            state.toggleSelected(id, entry.name);
+          state.moveCursor(id, 1);
+          anchors.delete(anchorKey(id));
+          break;
+        }
         case "ArrowLeft":
           if (tab.viewMode === "grid") {
             e.preventDefault();
