@@ -10,10 +10,12 @@ use crate::types::{DuetError, Location};
 #[specta::specta]
 pub async fn frecency_record(
     location: Location,
+    // SSH 면 호스트 alias — 재접속해도 같은 항목으로 합쳐지고, 점퍼가 alias 로 다시 연다.
+    host_alias: Option<String>,
     store: tauri::State<'_, Arc<FrecencyStore>>,
 ) -> Result<(), DuetError> {
     store
-        .record(location, chrono::Utc::now().timestamp_millis())
+        .record(location, host_alias, chrono::Utc::now().timestamp_millis())
         .await
 }
 

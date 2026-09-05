@@ -188,6 +188,15 @@ function App() {
    */
   const navSeq = useRef<Record<PaneId, number>>({ left: 0, right: 0 });
 
+  /** 이 위치의 호스트 alias (로컬이면 null) — 살아있는 연결 우선, 없으면 id 접두. */
+  const aliasOf = (loc: Location): string | null => {
+    if (loc.source.kind !== "ssh") return null;
+    const id = loc.source.connection_id;
+    return (
+      useConnections.getState().active[id]?.alias ?? id.split(":")[0] ?? null
+    );
+  };
+
   const navigate = useCallback(
     async (
       id: PaneId,
@@ -215,7 +224,9 @@ function App() {
         if (opts.pushHistory !== false) {
           if (!isVirtualTrash(location)) {
             recordRecent(location);
-            void commands.frecencyRecord(location); // 점퍼(Ctrl+J) 랭킹용
+            // alias 를 함께 넘긴다 — 재접속해도 같은 항목으로 합쳐지고, 점퍼가
+            // 그 alias 로 다시 연결할 수 있다.
+            void commands.frecencyRecord(location, aliasOf(location)); // 점퍼(Ctrl+J) 랭킹용
           }
         }
       } catch (e) {
@@ -250,7 +261,9 @@ function App() {
         if (opts.pushHistory !== false) {
           if (!isVirtualTrash(location)) {
             recordRecent(location);
-            void commands.frecencyRecord(location); // 점퍼(Ctrl+J) 랭킹용
+            // alias 를 함께 넘긴다 — 재접속해도 같은 항목으로 합쳐지고, 점퍼가
+            // 그 alias 로 다시 연결할 수 있다.
+            void commands.frecencyRecord(location, aliasOf(location)); // 점퍼(Ctrl+J) 랭킹용
           }
         }
       } catch (e) {
@@ -2193,7 +2206,10 @@ function App() {
       <PromptDialogHost />
       <Toast />
       <CommandPalette />
-      <FrecencyJumper onOpenLocation={onOpenLocation} />
+      <FrecencyJumper
+        onOpenLocation={onOpenLocation}
+        onOpenHostPath={onOpenHostPath}
+      />
       <ContextMenu />
       <DragGhost />
     </div>

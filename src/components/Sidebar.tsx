@@ -25,6 +25,7 @@ import { useEffect, Fragment, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import i18n from "@/i18n";
 import { useUI } from "@/stores/ui";
+import { reloadSshHosts } from "@/hooks/useSshHosts";
 import {
   useConnections,
   disconnectAlias,
@@ -1457,7 +1458,21 @@ function HostsSection({
       sectionKey="hosts"
       title={t("sidebar.hosts")}
       count={allHosts.length + savedCount}
-      action={<AddBtn label={t("dialog.adhoc.title")} onClick={onAdHocOpen} />}
+      action={
+        <div className="flex items-center gap-0.5">
+          {/* ~/.ssh/config 를 편집하고 돌아왔을 때 — 예전엔 앱을 다시 켜야 했다. */}
+          <button
+            type="button"
+            onClick={() => void reloadSshHosts()}
+            className="rounded p-0.5 text-fg-muted hover:bg-border hover:text-fg"
+            title={t("sidebar.reloadSshConfig")}
+            aria-label={t("sidebar.reloadSshConfig")}
+          >
+            <RefreshCw size={12} />
+          </button>
+          <AddBtn label={t("dialog.adhoc.title")} onClick={onAdHocOpen} />
+        </div>
+      }
     >
       {allHosts.length === 0 && savedCount === 0 ? (
         <Item label={t("sidebar.noHosts")} muted />

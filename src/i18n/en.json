@@ -812,7 +812,8 @@
     "resizeTitle": "Drag to resize · double-click to reset",
     "rename": "Rename…",
     "renamePrompt": "New name",
-    "disconnect": "Disconnect"
+    "disconnect": "Disconnect",
+    "reloadSshConfig": "Reload ~/.ssh/config"
   },
   "tasks": {
     "count": "{{count}} tasks",

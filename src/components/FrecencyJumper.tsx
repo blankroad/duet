@@ -24,8 +24,11 @@ function sourceLabel(loc: Location): string {
  */
 export function FrecencyJumper({
   onOpenLocation,
+  onOpenHostPath,
 }: {
   onOpenLocation: (location: Location, pane: PaneId) => void;
+  /** 원격 항목 — alias 로 (필요하면 접속부터) 연다. */
+  onOpenHostPath: (alias: string, path: string, pane: PaneId) => void;
 }) {
   const { t } = useTranslation();
   const isOpen = useFrecency((s) => s.isOpen);
@@ -62,7 +65,14 @@ export function FrecencyJumper({
 
   const jump = (entry: FrecencyEntry) => {
     close();
-    onOpenLocation(entry.location, usePanes.getState().activePane);
+    const pane = usePanes.getState().activePane;
+    // 원격 항목은 alias 로 연다 — 저장된 connection_id 는 재시작·재접속 후 죽어 있다.
+    // (연결이 없으면 onOpenHostPath 가 접속부터 하고 그 경로로 이동한다.)
+    if (entry.host_alias && entry.location.source.kind === "ssh") {
+      onOpenHostPath(entry.host_alias, String(entry.location.path), pane);
+      return;
+    }
+    onOpenLocation(entry.location, pane);
   };
 
   return (

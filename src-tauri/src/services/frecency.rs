@@ -19,17 +19,25 @@ const MAX_ENTRIES: usize = 1000;
 pub struct FrecencyEntry {
     /// 방문한 디렉토리 위치(로컬 또는 SSH).
     pub location: Location,
+    /// SSH 면 호스트 alias — 재접속해도 안정적인 식별자.
+    ///
+    /// 예전에는 ephemeral `connection_id` 로만 키를 잡아, 재접속할 때마다 같은 폴더가
+    /// 새 항목으로 쌓이고 예전 항목은 죽은 id 를 품은 채 남아 골라도 "열 수 없음" 이었다.
+    #[serde(default)]
+    pub host_alias: Option<String>,
     /// 누적 방문 횟수.
     pub count: u32,
     /// 마지막 방문 시각 (epoch ms, UTC).
     pub last_visit_ms: i64,
 }
 
-/// 소스+경로 식별 키 — dedup/조회용. 소스는 로컬/connection 단위.
-fn loc_key(loc: &Location) -> String {
-    let src = match &loc.source {
-        SourceId::Local => "local".to_string(),
-        SourceId::Ssh { connection_id, .. } => format!("ssh:{}", connection_id.0),
+/// 소스+경로 식별 키 — dedup/조회용. SSH 는 **alias** 단위(재접속에 안정).
+fn loc_key(loc: &Location, host_alias: Option<&str>) -> String {
+    let src = match (&loc.source, host_alias) {
+        (SourceId::Local, _) => "local".to_string(),
+        (SourceId::Ssh { .. }, Some(alias)) => format!("ssh:{alias}"),
+        // alias 를 모르는 항목(구버전 데이터)은 연결 id 로 — 로드 시 걸러진다.
+        (SourceId::Ssh { connection_id, .. }, None) => format!("ssh?:{}", connection_id.0),
     };
     // NUL 구분자 — 경로/소스에 등장하지 않아 충돌 없음.
     format!("{src}\u{0}{}", loc.path.to_string_lossy())
@@ -62,6 +70,16 @@ impl FrecencyStore {
                 .ok()
                 .filter(|t| !t.trim().is_empty())
                 .and_then(|t| serde_json::from_str::<Vec<FrecencyEntry>>(&t).ok())
+                .map(|v| {
+                    // alias 없는 원격 항목은 구버전 데이터 — 죽은 connection_id 를 품고
+                    // 있어 열면 실패한다. 조용히 버린다(캐시성 데이터).
+                    v.into_iter()
+                        .filter(|e| {
+                            !matches!(e.location.source, SourceId::Ssh { .. })
+                                || e.host_alias.is_some()
+                        })
+                        .collect()
+                })
                 .unwrap_or_default()
         } else {
             Vec::new()
@@ -73,15 +91,24 @@ impl FrecencyStore {
     }
 
     /// 방문 기록 — 같은 위치면 count+1·최근성 갱신, 처음이면 추가. 상한 초과 시 prune.
-    pub async fn record(&self, location: Location, now_ms: i64) -> Result<(), DuetError> {
-        let key = loc_key(&location);
+    pub async fn record(
+        &self,
+        location: Location,
+        host_alias: Option<String>,
+        now_ms: i64,
+    ) -> Result<(), DuetError> {
+        let key = loc_key(&location, host_alias.as_deref());
         let mut v = self.inner.write().await;
-        if let Some(e) = v.iter_mut().find(|e| loc_key(&e.location) == key) {
+        if let Some(e) = v
+            .iter_mut()
+            .find(|e| loc_key(&e.location, e.host_alias.as_deref()) == key)
+        {
             e.count = e.count.saturating_add(1);
             e.last_visit_ms = now_ms;
         } else {
             v.push(FrecencyEntry {
                 location,
+                host_alias,
                 count: 1,
                 last_visit_ms: now_ms,
             });
@@ -156,8 +183,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("f.json");
         let s = FrecencyStore::load_from(&path).await.unwrap();
-        s.record(loc("/home/u/proj"), 1000).await.unwrap();
-        s.record(loc("/home/u/proj"), 2000).await.unwrap();
+        s.record(loc("/home/u/proj"), None, 1000).await.unwrap();
+        s.record(loc("/home/u/proj"), None, 2000).await.unwrap();
         // 재로드 후에도 count=2 유지
         let s2 = FrecencyStore::load_from(&path).await.unwrap();
         let all = s2.query("", 10, 3000).await;
@@ -172,8 +199,8 @@ mod tests {
         let s = FrecencyStore::load_from(&dir.path().join("f.json"))
             .await
             .unwrap();
-        s.record(loc("/var/log"), 1000).await.unwrap();
-        s.record(loc("/home/proj"), 1000).await.unwrap();
+        s.record(loc("/var/log"), None, 1000).await.unwrap();
+        s.record(loc("/home/proj"), None, 1000).await.unwrap();
         let r = s.query("proj", 10, 2000).await;
         assert_eq!(r.len(), 1);
         assert_eq!(r[0].location.path, PathBuf::from("/home/proj"));
@@ -188,9 +215,9 @@ mod tests {
         // A: 많이·오래전, B: 적게·방금
         let now = 100 * 86_400_000;
         for _ in 0..10 {
-            s.record(loc("/a"), 1).await.unwrap(); // 오래 전(거의 0)
+            s.record(loc("/a"), None, 1).await.unwrap(); // 오래 전(거의 0)
         }
-        s.record(loc("/b"), now).await.unwrap(); // 방금
+        s.record(loc("/b"), None, now).await.unwrap(); // 방금
         let r = s.query("", 10, now).await;
         // 최근성 감쇠로 방금 방문한 /b 가 위
         assert_eq!(r[0].location.path, PathBuf::from("/b"));
@@ -210,8 +237,56 @@ mod tests {
             },
             path: PathBuf::from("/home/proj"),
         };
-        s.record(loc("/home/proj"), 1000).await.unwrap();
-        s.record(ssh, 1000).await.unwrap();
+        s.record(loc("/home/proj"), None, 1000).await.unwrap();
+        s.record(ssh, Some("prod".into()), 1000).await.unwrap();
         assert_eq!(s.query("", 10, 2000).await.len(), 2);
+    }
+
+    /// 재접속하면 connection_id 가 바뀌는데, 같은 호스트·경로는 한 항목으로 합쳐져야
+    /// 한다 — 예전엔 접속할 때마다 새 항목이 쌓이고 예전 것은 열 수 없었다.
+    #[tokio::test]
+    async fn ssh_entries_merge_by_alias_across_reconnects() {
+        let dir = tempdir().unwrap();
+        let s = FrecencyStore::load_from(&dir.path().join("f.json"))
+            .await
+            .unwrap();
+        let ssh_at = |conn: &str| Location {
+            source: SourceId::Ssh {
+                connection_id: crate::types::ConnectionId(conn.into()),
+                host_ip: "10.0.0.1".parse().unwrap(),
+                user: "u".into(),
+            },
+            path: PathBuf::from("/var/log"),
+        };
+        s.record(ssh_at("prod:aaa"), Some("prod".into()), 1000)
+            .await
+            .unwrap();
+        s.record(ssh_at("prod:bbb"), Some("prod".into()), 2000)
+            .await
+            .unwrap();
+
+        let hits = s.query("", 10, 3000).await;
+        assert_eq!(hits.len(), 1, "재접속해도 한 항목이어야 함");
+        assert_eq!(hits[0].count, 2);
+        assert_eq!(hits[0].host_alias.as_deref(), Some("prod"));
+    }
+
+    /// alias 없는 구버전 원격 항목은 로드 시 버린다(죽은 connection_id).
+    #[tokio::test]
+    async fn legacy_ssh_entries_without_alias_are_dropped() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("f.json");
+        let legacy = r#"[
+          {"location":{"source":{"kind":"ssh","connection_id":"old:xyz",
+            "host_ip":"10.0.0.1","user":"u"},"path":"/var/log"},
+           "count":5,"last_visit_ms":1000},
+          {"location":{"source":{"kind":"local"},"path":"/home/u"},
+           "count":2,"last_visit_ms":1000}
+        ]"#;
+        tokio::fs::write(&path, legacy).await.unwrap();
+        let s = FrecencyStore::load_from(&path).await.unwrap();
+        let hits = s.query("", 10, 2000).await;
+        assert_eq!(hits.len(), 1, "원격 구버전 항목은 버려야 함");
+        assert!(matches!(hits[0].location.source, SourceId::Local));
     }
 }
