@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { Plus, X } from "lucide-react";
-import { useUserAliases, addUserAlias, removeUserAlias } from "@/stores/userAliases";
+import {
+  useUserAliases,
+  addUserAlias,
+  removeUserAlias,
+} from "@/stores/userAliases";
 import { useSavedHosts } from "@/stores/savedHosts";
 import { usePanes, activeTab } from "@/stores/panes";
 import type { AliasKind } from "@/types/bindings";
@@ -59,7 +63,9 @@ function AddForm({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState("");
   const [kindStr, setKindStr] = useState<"navigate" | "connect">("navigate");
   const tab = usePanes((s) => activeTab(s, s.activePane));
-  const [savedHost, setSavedHost] = useState<string>(savedHosts[0]?.alias ?? "");
+  const [savedHost, setSavedHost] = useState<string>(
+    savedHosts[0]?.alias ?? "",
+  );
 
   const submit = async () => {
     if (!name.trim()) return;
@@ -77,7 +83,9 @@ function AddForm({ onClose }: { onClose: () => void }) {
   return (
     <div className="rounded border border-accent bg-subtle p-2">
       <div className="grid grid-cols-[5rem_1fr] items-center gap-2 text-base">
-        <label htmlFor="alias-name" className="text-fg-muted">Name</label>
+        <label htmlFor="alias-name" className="text-fg-muted">
+          Name
+        </label>
         <input
           id="alias-name"
           type="text"
@@ -86,7 +94,9 @@ function AddForm({ onClose }: { onClose: () => void }) {
           onChange={(e) => setName(e.target.value)}
           className="rounded border border-border bg-base px-2 py-1 font-mono"
         />
-        <label htmlFor="alias-kind" className="text-fg-muted">Kind</label>
+        <label htmlFor="alias-kind" className="text-fg-muted">
+          Kind
+        </label>
         <select
           id="alias-kind"
           value={kindStr}
@@ -99,11 +109,15 @@ function AddForm({ onClose }: { onClose: () => void }) {
         {kindStr === "navigate" ? (
           <>
             <div className="text-fg-muted">Target</div>
-            <div className="truncate font-mono text-meta text-fg-muted">{tab.location.path}</div>
+            <div className="truncate font-mono text-meta text-fg-muted">
+              {tab.location.path}
+            </div>
           </>
         ) : (
           <>
-            <label htmlFor="alias-host" className="text-fg-muted">Host</label>
+            <label htmlFor="alias-host" className="text-fg-muted">
+              Host
+            </label>
             <select
               id="alias-host"
               value={savedHost}
@@ -113,7 +127,11 @@ function AddForm({ onClose }: { onClose: () => void }) {
               {savedHosts.length === 0 ? (
                 <option value="">(no saved hosts)</option>
               ) : (
-                savedHosts.map((h) => <option key={h.alias} value={h.alias}>{h.alias}</option>)
+                savedHosts.map((h) => (
+                  <option key={h.alias} value={h.alias}>
+                    {h.alias}
+                  </option>
+                ))
               )}
             </select>
           </>

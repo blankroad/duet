@@ -79,10 +79,13 @@ export function useReorderable(opts: {
         const targetKey = el.dataset.reorderKey!;
         const r = el.getBoundingClientRect();
         const size = horizontal ? r.width : r.height;
-        const pos = (horizontal ? ev.clientX - r.left : ev.clientY - r.top) / size;
+        const pos =
+          (horizontal ? ev.clientX - r.left : ev.clientY - r.top) / size;
 
         const canMergeHere =
-          !!onMergeRef.current && targetKey !== key && (canMergeRef.current?.(targetKey) ?? true);
+          !!onMergeRef.current &&
+          targetKey !== key &&
+          (canMergeRef.current?.(targetKey) ?? true);
         if (canMergeHere && pos >= 0.3 && pos <= 0.7) {
           insertRef.current = null;
           setInsertBeforeKey(null);
@@ -118,11 +121,21 @@ export function useReorderable(opts: {
           c.stopPropagation();
           c.preventDefault();
         };
-        window.addEventListener("click", suppress, { capture: true, once: true });
-        setTimeout(() => window.removeEventListener("click", suppress, true), 0);
+        window.addEventListener("click", suppress, {
+          capture: true,
+          once: true,
+        });
+        setTimeout(
+          () => window.removeEventListener("click", suppress, true),
+          0,
+        );
 
         // 머지(드롭-온토)가 armed 면 reorder 대신 onMerge.
-        if (mergeTargetRef.current != null && mergeArmedRef.current && onMergeRef.current) {
+        if (
+          mergeTargetRef.current != null &&
+          mergeArmedRef.current &&
+          onMergeRef.current
+        ) {
           const target = mergeTargetRef.current;
           setDragKey(null);
           setInsertBeforeKey(null);
@@ -136,7 +149,8 @@ export function useReorderable(opts: {
         const before = insertRef.current;
         const without = ks.filter((k) => k !== key);
         const idx = before == null ? without.length : without.indexOf(before);
-        const next = idx < 0 ? ks : [...without.slice(0, idx), key, ...without.slice(idx)];
+        const next =
+          idx < 0 ? ks : [...without.slice(0, idx), key, ...without.slice(idx)];
         setDragKey(null);
         setInsertBeforeKey(null);
         insertRef.current = null;

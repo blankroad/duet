@@ -7,6 +7,8 @@
  * - Modifier-only keypress (key === "Control" 등) 는 null 반환.
  * - NumPad 는 `e.code` 이름 그대로 ("NumpadMultiply") — TC 의 `*`(선택 반전),
  *   `+`/`-`(패턴 선택)를 메인 키보드의 같은 문자와 구분해서 맬 수 있게.
+ * - 숫자열은 `e.code`(Digit1..0) 기준 — macOS 에서 ⌥1 은 `e.key` 가 "¡" 라
+ *   "Alt+1" 바인딩이 영영 안 맞았다. 물리 키 위치로 맞추는 게 단축키 관례이기도 하다.
  */
 
 const MODIFIER_KEYS = new Set(["Control", "Shift", "Alt", "Meta", "OS"]);
@@ -20,8 +22,11 @@ export function formatKeyEvent(e: KeyboardEvent): string | null {
   if (e.shiftKey) parts.push("Shift");
 
   let key = e.key;
+  const digit = /^Digit([0-9])$/.exec(e.code);
   if (e.code.startsWith("Numpad") && e.code !== "NumpadEnter") {
     key = e.code;
+  } else if (digit) {
+    key = digit[1]!;
   } else if (key.startsWith("Arrow")) {
     key = key.slice("Arrow".length);
   } else if (key === " ") {

@@ -515,17 +515,17 @@
     "dropTray": "Drop tray ({{key}}) — always-on-top stash to drag files out to other apps"
   },
   "toolbar": {
-    "newFolder": "New folder (F7)",
-    "copy": "Copy → other pane (F5)",
-    "move": "Move → other pane (F6)",
-    "deleteTrash": "Delete to trash (Del)",
+    "newFolder": "New folder ({{key}})",
+    "copy": "Copy → other pane ({{key}})",
+    "move": "Move → other pane ({{key}})",
+    "deleteTrash": "Delete to trash ({{key}})",
     "viewDetails": "Details",
     "viewGrid": "Grid",
     "viewTiles": "Tiles",
     "syncBrowseOn": "Synchronized browsing: ON — panes navigate together",
     "syncBrowseOff": "Synchronized browsing: OFF",
-    "hideHidden": "Hide hidden files (Ctrl+H)",
-    "showHidden": "Show hidden files (Ctrl+H)"
+    "hideHidden": "Hide hidden files ({{key}})",
+    "showHidden": "Show hidden files ({{key}})"
   },
   "shelf": {
     "title": "Shelf",
@@ -860,9 +860,9 @@
   },
   "pathbar": {
     "back": "Back",
-    "backTitle": "Back (Alt+←)",
+    "backTitle": "Back ({{key}})",
     "forward": "Forward",
-    "forwardTitle": "Forward (Alt+→)",
+    "forwardTitle": "Forward ({{key}})",
     "up": "Up",
     "archiveReadOnlyTitle": "{{name}} (read-only)",
     "updateArchive": "Update archive",
@@ -870,7 +870,7 @@
     "readOnly": "read-only",
     "pathPlaceholder": "Type a path and press Enter…",
     "goToPath": "Go to path",
-    "newTabTitle": "New tab (Ctrl+T)",
+    "newTabTitle": "New tab ({{key}})",
     "editPath": "Edit path",
     "editPathTitle": "Edit path / go to location (Ctrl+L)",
     "favorites": "Favorites",
@@ -882,7 +882,7 @@
     "bookmarkTitle": "Bookmark this folder (Ctrl+D)",
     "bookmarkedTitle": "Bookmarked (Ctrl+D)",
     "swapPanes": "Swap panels (left ↔ right)",
-    "swapPanesTitle": "Swap panels (left ↔ right) — Ctrl+U",
+    "swapPanesTitle": "Swap panels (left ↔ right) — {{key}}",
     "trash": "Trash"
   },
   "tabs": {

@@ -60,8 +60,8 @@ export class ErrorBoundary extends Component<Props, State> {
           </button>
         </div>
         <div className="max-w-md text-center text-meta text-fg-muted">
-          Reset clears saved tabs/layout and local preferences — not your files or SSH
-          config.
+          Reset clears saved tabs/layout and local preferences — not your files
+          or SSH config.
         </div>
       </div>
     );

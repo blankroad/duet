@@ -39,7 +39,9 @@ describe("useTauri", () => {
     });
     const { result } = renderHook(() => useTauri("listDirectory"));
     await act(async () => {
-      await result.current.call({ source: { kind: "local" }, path: "/nope" }).catch(() => {});
+      await result.current
+        .call({ source: { kind: "local" }, path: "/nope" })
+        .catch(() => {});
     });
     expect(result.current.error).toEqual({ kind: "NotFound", message: "nope" });
     expect(result.current.data).toBeNull();
@@ -52,7 +54,9 @@ describe("useTauri", () => {
     );
     const { result } = renderHook(() => useTauri("listDirectory"));
     await act(async () => {
-      await result.current.call({ source: { kind: "local" }, path: "/" }).catch(() => {});
+      await result.current
+        .call({ source: { kind: "local" }, path: "/" })
+        .catch(() => {});
     });
     expect(result.current.error?.kind).toBe("IpcError");
     const err = result.current.error;

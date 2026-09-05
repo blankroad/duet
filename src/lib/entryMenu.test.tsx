@@ -1,12 +1,30 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { buildEntryMenu, buildEmptyMenu } from "./entryMenu";
-import { isSeparator, type MenuEntry, type MenuItem } from "@/stores/contextMenu";
+import {
+  isSeparator,
+  type MenuEntry,
+  type MenuItem,
+} from "@/stores/contextMenu";
 import { useConnections } from "@/stores/connections";
 import type { Entry, Location } from "@/types/bindings";
 
 const localLoc: Location = { source: { kind: "local" }, path: "/home/u" };
-const dir: Entry = { name: "proj", kind: "dir", size: null, modified_ms: null, permissions: null, hidden: false };
-const file: Entry = { name: "a.txt", kind: "file", size: 10, modified_ms: null, permissions: null, hidden: false };
+const dir: Entry = {
+  name: "proj",
+  kind: "dir",
+  size: null,
+  modified_ms: null,
+  permissions: null,
+  hidden: false,
+};
+const file: Entry = {
+  name: "a.txt",
+  kind: "file",
+  size: 10,
+  modified_ms: null,
+  permissions: null,
+  hidden: false,
+};
 
 const ids = (items: MenuEntry[]) =>
   items.filter((e): e is MenuItem => !isSeparator(e)).map((e) => e.id);
@@ -67,7 +85,14 @@ describe("buildEntryMenu", () => {
   });
 
   it("adds Extract only for an archive file", () => {
-    const zip: Entry = { name: "data.zip", kind: "file", size: 10, modified_ms: null, permissions: null, hidden: false };
+    const zip: Entry = {
+      name: "data.zip",
+      kind: "file",
+      size: 10,
+      modified_ms: null,
+      permissions: null,
+      hidden: false,
+    };
     const menu = buildEntryMenu({
       paneId: "left",
       entry: zip,
@@ -91,7 +116,12 @@ describe("buildEntryMenu", () => {
     expect(ids(localMenu)).toContain("reveal");
 
     const sshLoc: Location = {
-      source: { kind: "ssh", connection_id: "c1", host_ip: "10.0.0.1", user: "u" },
+      source: {
+        kind: "ssh",
+        connection_id: "c1",
+        host_ip: "10.0.0.1",
+        user: "u",
+      },
       path: "/var",
     };
     const sshMenu = buildEntryMenu({
@@ -115,7 +145,9 @@ describe("buildEntryMenu", () => {
       onOpenInOtherPane: noop,
     });
     expect(ids(menu)).not.toContain("open");
-    const rename = menu.find((e): e is MenuItem => !isSeparator(e) && e.id === "rename");
+    const rename = menu.find(
+      (e): e is MenuItem => !isSeparator(e) && e.id === "rename",
+    );
     expect(rename?.disabled).toBe(true);
   });
 
@@ -132,11 +164,22 @@ describe("buildEntryMenu", () => {
 
     useConnections.setState({
       active: {
-        c1: { id: "c1", alias: "srv", host_ip: "10.0.0.1", user: "u", state: { kind: "connected" } },
+        c1: {
+          id: "c1",
+          alias: "srv",
+          host_ip: "10.0.0.1",
+          user: "u",
+          state: { kind: "connected" },
+        },
       },
     });
     const sshLoc: Location = {
-      source: { kind: "ssh", connection_id: "c1", host_ip: "10.0.0.1", user: "u" },
+      source: {
+        kind: "ssh",
+        connection_id: "c1",
+        host_ip: "10.0.0.1",
+        user: "u",
+      },
       path: "/var",
     };
     const sshMenu = buildEntryMenu({

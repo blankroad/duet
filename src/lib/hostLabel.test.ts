@@ -16,7 +16,11 @@ describe("resolveHostLabel", () => {
   });
 
   it("uses nickname when set for the connection's alias", () => {
-    const label = resolveHostLabel(ssh("c1"), { "prod-1": "Production" }, () => "prod-1");
+    const label = resolveHostLabel(
+      ssh("c1"),
+      { "prod-1": "Production" },
+      () => "prod-1",
+    );
     expect(label).toBe("Production");
   });
 
@@ -25,7 +29,9 @@ describe("resolveHostLabel", () => {
   });
 
   it("falls back to user@host_ip when alias unknown", () => {
-    expect(resolveHostLabel(ssh("c1"), {}, () => undefined)).toBe("deploy@10.0.0.1");
+    expect(resolveHostLabel(ssh("c1"), {}, () => undefined)).toBe(
+      "deploy@10.0.0.1",
+    );
   });
 });
 

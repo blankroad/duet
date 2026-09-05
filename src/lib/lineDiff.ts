@@ -8,7 +8,9 @@ export function lineDiff(a: string[], b: string[]): DiffOp[] {
   const n = a.length;
   const m = b.length;
   // dp[i][j] = LCS length of a[i..], b[j..]
-  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
+  const dp: number[][] = Array.from({ length: n + 1 }, () =>
+    new Array<number>(m + 1).fill(0),
+  );
   for (let i = n - 1; i >= 0; i--) {
     const row = dp[i] ?? [];
     const next = dp[i + 1] ?? [];

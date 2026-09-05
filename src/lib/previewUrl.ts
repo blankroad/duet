@@ -3,7 +3,8 @@ import type { Location } from "@/types/bindings";
 /** UTF-8 문자열을 hex 로 — duet-preview:// URL 세그먼트 인코딩(percent-encoding 회피). */
 function hex(s: string): string {
   let out = "";
-  for (const b of new TextEncoder().encode(s)) out += b.toString(16).padStart(2, "0");
+  for (const b of new TextEncoder().encode(s))
+    out += b.toString(16).padStart(2, "0");
   return out;
 }
 
@@ -18,7 +19,8 @@ function targetSeg(location: Location): string {
 function protoPrefix(scheme: string): string {
   const win =
     typeof window !== "undefined" &&
-    (window.location.protocol === "http:" || window.location.hostname.endsWith(".localhost"));
+    (window.location.protocol === "http:" ||
+      window.location.hostname.endsWith(".localhost"));
   return win ? `http://${scheme}.localhost` : `${scheme}://localhost`;
 }
 

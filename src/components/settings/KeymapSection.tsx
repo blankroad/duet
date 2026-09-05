@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAllCommands } from "@/stores/commands";
-import { useKeymap, setKeymap, unsetKeymap, resetKeymap } from "@/stores/keymap";
+import {
+  useKeymap,
+  setKeymap,
+  unsetKeymap,
+  resetKeymap,
+} from "@/stores/keymap";
 import { formatKeyEvent } from "@/lib/keyEvent";
 import { displayKey } from "@/lib/keyDisplay";
 import { commandLabel, commandCategory } from "@/lib/commands";
@@ -27,7 +32,9 @@ export function KeymapSection() {
   const shown = q
     ? all.filter((c) => {
         const key =
-          bindings.find((b) => b.command_id === c.id)?.key ?? c.defaultKey ?? "";
+          bindings.find((b) => b.command_id === c.id)?.key ??
+          c.defaultKey ??
+          "";
         // 번역 라벨 + 원문 라벨 둘 다 매칭 — 한국어 UI 에서 영어 검색도 동작.
         return (
           commandLabel(c, t).toLowerCase().includes(q) ||

@@ -26,7 +26,8 @@ export function sourceKey(source: SourceId): string {
 
 export const usePlaces = create<State>((set) => ({
   bySource: {},
-  setData: (key, data) => set((s) => ({ bySource: { ...s.bySource, [key]: data } })),
+  setData: (key, data) =>
+    set((s) => ({ bySource: { ...s.bySource, [key]: data } })),
   setVolumes: (key, volumes) =>
     set((s) => ({
       bySource: {
@@ -52,7 +53,9 @@ export async function bootstrapPlaces(): Promise<void> {
 }
 
 /** 원격 호스트 Places/Volumes 로드 — 연결 open 시 1회. */
-export async function loadRemotePlaces(connectionId: ConnectionId): Promise<void> {
+export async function loadRemotePlaces(
+  connectionId: ConnectionId,
+): Promise<void> {
   const [p, v] = await Promise.all([
     commands.sshPlaces(connectionId),
     commands.sshVolumes(connectionId),
@@ -75,7 +78,9 @@ export async function refreshVolumes(): Promise<void> {
 }
 
 /** 원격 볼륨 새로고침 (on-demand). */
-export async function refreshRemoteVolumes(connectionId: ConnectionId): Promise<void> {
+export async function refreshRemoteVolumes(
+  connectionId: ConnectionId,
+): Promise<void> {
   const v = await commands.sshVolumes(connectionId);
   if (v.status === "ok") usePlaces.getState().setVolumes(connectionId, v.data);
 }

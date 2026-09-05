@@ -45,7 +45,10 @@ export const useRecents = create<State>((set) => ({
   add: (e) =>
     set((s) => {
       const k = recentKey(e);
-      const items = [e, ...s.items.filter((x) => recentKey(x) !== k)].slice(0, CAP);
+      const items = [e, ...s.items.filter((x) => recentKey(x) !== k)].slice(
+        0,
+        CAP,
+      );
       save(items);
       return { items };
     }),
@@ -65,6 +68,11 @@ export function recordRecent(location: Location): void {
     return;
   }
   const connId = location.source.connection_id;
-  const conn = Object.values(useConnections.getState().active).find((c) => c.id === connId);
-  if (conn) useRecents.getState().add({ source: "ssh", alias: conn.alias, path, label });
+  const conn = Object.values(useConnections.getState().active).find(
+    (c) => c.id === connId,
+  );
+  if (conn)
+    useRecents
+      .getState()
+      .add({ source: "ssh", alias: conn.alias, path, label });
 }

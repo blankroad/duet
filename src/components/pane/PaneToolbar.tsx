@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { useTranslation } from "react-i18next";
+import { useKeyHint } from "@/lib/keyHint";
 import {
   usePanes,
   activeTab,
@@ -40,6 +41,11 @@ interface PaneToolbarProps {
  * 모든 액션은 키보드와 동일 경로(파괴적 액션 lib/fileActions, 뷰/hidden panes store).
  */
 export function PaneToolbar({ id }: PaneToolbarProps) {
+  const kNewFolder = useKeyHint("file.newFolder");
+  const kCopy = useKeyHint("file.copy");
+  const kMove = useKeyHint("file.move");
+  const kDelete = useKeyHint("file.delete");
+  const kHidden = useKeyHint("view.toggleHidden");
   const { t } = useTranslation();
   const viewMode = usePanes((s) => activeTab(s, id).viewMode);
   const showHidden = usePanes((s) => activeTab(s, id).showHidden);
@@ -52,23 +58,26 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
 
   return (
     <div className="flex h-8 shrink-0 items-center gap-0.5 border-b border-border px-1.5">
-      <ToolButton label={t("toolbar.newFolder")} onClick={() => triggerMkdir(open)}>
+      <ToolButton
+        label={t("toolbar.newFolder", { key: kNewFolder })}
+        onClick={() => triggerMkdir(open)}
+      >
         <FolderPlus size={15} />
       </ToolButton>
       <ToolButton
-        label={t("toolbar.copy")}
+        label={t("toolbar.copy", { key: kCopy })}
         onClick={() => void triggerCopy(open, showToast)}
       >
         <Copy size={15} />
       </ToolButton>
       <ToolButton
-        label={t("toolbar.move")}
+        label={t("toolbar.move", { key: kMove })}
         onClick={() => void triggerMove(open, showToast)}
       >
         <MoveRight size={15} />
       </ToolButton>
       <ToolButton
-        label={t("toolbar.deleteTrash")}
+        label={t("toolbar.deleteTrash", { key: kDelete })}
         onClick={() => void triggerDelete("trash", open, showToast)}
       >
         <Trash2 size={15} />
@@ -104,14 +113,20 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
       <Divider />
 
       <ToolButton
-        label={syncBrowse ? t("toolbar.syncBrowseOn") : t("toolbar.syncBrowseOff")}
+        label={
+          syncBrowse ? t("toolbar.syncBrowseOn") : t("toolbar.syncBrowseOff")
+        }
         active={syncBrowse}
         onClick={() => toggleSyncBrowse()}
       >
         <FolderSync size={15} />
       </ToolButton>
       <ToolButton
-        label={showHidden ? t("toolbar.hideHidden") : t("toolbar.showHidden")}
+        label={
+          showHidden
+            ? t("toolbar.hideHidden", { key: kHidden })
+            : t("toolbar.showHidden", { key: kHidden })
+        }
         active={showHidden}
         onClick={() => toggleShowHidden(id)}
       >

@@ -28,10 +28,18 @@ function ToastCard({ toast }: { toast: ToastItem }) {
       )}
     >
       {toast.kind === "success" && (
-        <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-accent" aria-hidden />
+        <CheckCircle2
+          size={14}
+          className="mt-0.5 shrink-0 text-accent"
+          aria-hidden
+        />
       )}
       {toast.kind === "error" && (
-        <AlertCircle size={14} className="mt-0.5 shrink-0 text-danger" aria-hidden />
+        <AlertCircle
+          size={14}
+          className="mt-0.5 shrink-0 text-danger"
+          aria-hidden
+        />
       )}
       {/* 멀티라인 에러(연결 실패 상세 등)도 잘리지 않게 whitespace 보존. */}
       <span className="whitespace-pre-wrap break-words">{toast.message}</span>

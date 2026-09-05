@@ -1,5 +1,6 @@
 import { ArrowLeftRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useKeyHint } from "@/lib/keyHint";
 import { usePanes } from "@/stores/panes";
 
 /**
@@ -9,12 +10,13 @@ import { usePanes } from "@/stores/panes";
 export function SwapPanesButton() {
   const { t } = useTranslation();
   const swapPanes = usePanes((s) => s.swapPanes);
+  const kSwap = useKeyHint("pane.swap");
   return (
     <div className="flex shrink-0 items-center">
       <button
         type="button"
         onClick={swapPanes}
-        title={t("pathbar.swapPanesTitle")}
+        title={t("pathbar.swapPanesTitle", { key: kSwap })}
         aria-label={t("pathbar.swapPanes")}
         className="rounded-panel p-1 text-fg-muted transition-colors hover:bg-subtle hover:text-fg"
       >

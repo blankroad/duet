@@ -36,7 +36,10 @@ export function useConnectionEvents() {
           evictRemotePlaces(payload.id);
           break;
         case "error":
-          setState(payload.id, { kind: "error", message: payload.state.message });
+          setState(payload.id, {
+            kind: "error",
+            message: payload.state.message,
+          });
           break;
         case "connecting":
           setState(payload.id, { kind: "connecting" });

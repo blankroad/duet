@@ -33,7 +33,9 @@ async function persist(next: HostGroup[]): Promise<void> {
     useHostGroups.getState().setGroups(r.data);
   } else {
     useHostGroups.getState().setGroups(prev);
-    useToast.getState().show(`Group update failed: ${formatErr(r.error)}`, "error");
+    useToast
+      .getState()
+      .show(`Group update failed: ${formatErr(r.error)}`, "error");
   }
 }
 
@@ -42,7 +44,10 @@ function newId(): string {
 }
 
 /** 새 그룹 생성 (선택적으로 첫 멤버 alias 포함). */
-export async function createGroup(name: string, firstMember?: string): Promise<void> {
+export async function createGroup(
+  name: string,
+  firstMember?: string,
+): Promise<void> {
   const groups = [
     ...useHostGroups.getState().groups,
     { id: newId(), name, members: firstMember ? [firstMember] : [] },
@@ -51,7 +56,11 @@ export async function createGroup(name: string, firstMember?: string): Promise<v
 }
 
 export async function renameGroup(id: string, name: string): Promise<void> {
-  await persist(useHostGroups.getState().groups.map((g) => (g.id === id ? { ...g, name } : g)));
+  await persist(
+    useHostGroups
+      .getState()
+      .groups.map((g) => (g.id === id ? { ...g, name } : g)),
+  );
 }
 
 /** 그룹 삭제 — 멤버는 ungrouped 로 돌아감(members 가 사라질 뿐 host 자체는 그대로). */
@@ -60,10 +69,16 @@ export async function deleteGroup(id: string): Promise<void> {
 }
 
 /** alias 를 folderId 그룹으로 이동 (null = 모든 그룹에서 제거 → ungrouped). */
-export async function assignToGroup(alias: string, folderId: string | null): Promise<void> {
+export async function assignToGroup(
+  alias: string,
+  folderId: string | null,
+): Promise<void> {
   const groups = useHostGroups
     .getState()
-    .groups.map((g) => ({ ...g, members: g.members.filter((m) => m !== alias) }));
+    .groups.map((g) => ({
+      ...g,
+      members: g.members.filter((m) => m !== alias),
+    }));
   if (folderId) {
     const g = groups.find((x) => x.id === folderId);
     if (g) g.members = [...g.members, alias];

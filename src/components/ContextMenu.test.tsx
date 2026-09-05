@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, cleanup, act } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  cleanup,
+  act,
+} from "@testing-library/react";
 import { ContextMenu } from "./ContextMenu";
 import { useContextMenu } from "@/stores/contextMenu";
 
@@ -34,7 +40,11 @@ describe("ContextMenu", () => {
   it("closes on Escape without selecting", () => {
     const onSelect = vi.fn();
     render(<ContextMenu />);
-    act(() => useContextMenu.getState().openAt(10, 10, [{ id: "x", label: "X", onSelect }]));
+    act(() =>
+      useContextMenu
+        .getState()
+        .openAt(10, 10, [{ id: "x", label: "X", onSelect }]),
+    );
     fireEvent.keyDown(window, { key: "Escape" });
     expect(onSelect).not.toHaveBeenCalled();
     expect(useContextMenu.getState().open).toBe(false);
@@ -44,7 +54,9 @@ describe("ContextMenu", () => {
     const onSelect = vi.fn();
     render(<ContextMenu />);
     act(() =>
-      useContextMenu.getState().openAt(10, 10, [{ id: "x", label: "Click me", onSelect }]),
+      useContextMenu
+        .getState()
+        .openAt(10, 10, [{ id: "x", label: "Click me", onSelect }]),
     );
     fireEvent.click(screen.getByText("Click me"));
     expect(onSelect).toHaveBeenCalledTimes(1);

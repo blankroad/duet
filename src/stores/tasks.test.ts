@@ -2,7 +2,10 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { useTasks, selectActive } from "./tasks";
 import type { TaskDto } from "@/types/bindings";
 
-const mk = (id: string, status: TaskDto["status"] = { kind: "queued" }): TaskDto =>
+const mk = (
+  id: string,
+  status: TaskDto["status"] = { kind: "queued" },
+): TaskDto =>
   ({
     id,
     kind: "copy",
@@ -35,8 +38,14 @@ describe("tasks store", () => {
   it("setProgress updates only matching id", () => {
     useTasks.getState().add(mk("a"));
     useTasks.getState().setProgress("a", {
-      bytes_done: 100, bytes_total: 200, speed_bps: 50, eta_sec: 2, percent: 50,
-      current_file: "f.txt", files_done: 0, files_total: 1,
+      bytes_done: 100,
+      bytes_total: 200,
+      speed_bps: 50,
+      eta_sec: 2,
+      percent: 50,
+      current_file: "f.txt",
+      files_done: 0,
+      files_total: 1,
     });
     expect(useTasks.getState().tasks.get("a")?.progress?.percent).toBe(50);
   });
@@ -44,7 +53,9 @@ describe("tasks store", () => {
   it("selectActive filters queued+running", () => {
     useTasks.getState().add(mk("q", { kind: "queued" }));
     useTasks.getState().add(mk("r", { kind: "running" }));
-    useTasks.getState().add(mk("c", { kind: "completed", journal_id: "x" } as any));
+    useTasks
+      .getState()
+      .add(mk("c", { kind: "completed", journal_id: "x" } as any));
     useTasks.getState().add(mk("f", { kind: "failed", message: "x" } as any));
     const active = selectActive(useTasks.getState().tasks);
     expect(active.length).toBe(2);

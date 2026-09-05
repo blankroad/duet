@@ -2,7 +2,11 @@ import { describe, it, expect } from "vitest";
 import { buildCompareTree, diffCount } from "./compareTree";
 import type { CompareEntry, CompareStatus } from "@/types/bindings";
 
-const e = (rel: string, status: CompareStatus, kind: "file" | "dir" = "file"): CompareEntry => ({
+const e = (
+  rel: string,
+  status: CompareStatus,
+  kind: "file" | "dir" = "file",
+): CompareEntry => ({
   rel,
   kind,
   status,

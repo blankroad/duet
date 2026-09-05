@@ -66,7 +66,9 @@ export const useShelf = create<ShelfState>((set, get) => ({
     if (fresh.length === 0) return 0;
     set({
       sections: s.sections.map((sec) =>
-        sec.id === s.targetId ? { ...sec, items: [...sec.items, ...fresh] } : sec,
+        sec.id === s.targetId
+          ? { ...sec, items: [...sec.items, ...fresh] }
+          : sec,
       ),
     });
     return fresh.length;
@@ -81,7 +83,9 @@ export const useShelf = create<ShelfState>((set, get) => ({
     })),
 
   clear: () =>
-    set((s) => ({ sections: s.sections.map((sec) => ({ ...sec, items: [] })) })),
+    set((s) => ({
+      sections: s.sections.map((sec) => ({ ...sec, items: [] })),
+    })),
 
   clearSection: (id) =>
     set((s) => ({
@@ -140,6 +144,7 @@ export const useShelf = create<ShelfState>((set, get) => ({
 /** 특정 섹션의 항목 (없으면 첫 섹션). fileActions/apply 에서 사용. */
 export function shelfSectionItems(id?: string): EntryRef[] {
   const s = useShelf.getState();
-  const sec = s.sections.find((x) => x.id === (id ?? s.targetId)) ?? s.sections[0];
+  const sec =
+    s.sections.find((x) => x.id === (id ?? s.targetId)) ?? s.sections[0];
   return sec?.items ?? [];
 }

@@ -21,7 +21,12 @@ export function normRect(r: Rect): Rect {
 }
 
 /** 균일 높이 리스트에서 y 범위와 겹치는 행 인덱스들. */
-export function rowsInRect(y1: number, y2: number, rowH: number, count: number): number[] {
+export function rowsInRect(
+  y1: number,
+  y2: number,
+  rowH: number,
+  count: number,
+): number[] {
   if (count <= 0 || rowH <= 0) return [];
   const top = Math.min(y1, y2);
   const bot = Math.max(y1, y2);
@@ -57,6 +62,10 @@ export function cellsInRect(
 }
 
 /** 드래그 거리가 임계값을 넘었는지 (클릭 vs 마키 구분). */
-export function exceedsThreshold(dx: number, dy: number, threshold = 4): boolean {
+export function exceedsThreshold(
+  dx: number,
+  dy: number,
+  threshold = 4,
+): boolean {
   return Math.abs(dx) >= threshold || Math.abs(dy) >= threshold;
 }

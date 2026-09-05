@@ -13,7 +13,9 @@ describe("ui-dialogs store", () => {
 
   it("only one dialog at a time — open replaces", () => {
     useUIDialogs.getState().open({ kind: "settings" });
-    useUIDialogs.getState().open({ kind: "progress", title: "x", taskId: "tid" });
+    useUIDialogs
+      .getState()
+      .open({ kind: "progress", title: "x", taskId: "tid" });
     expect(useUIDialogs.getState().dialog.kind).toBe("progress");
   });
 });

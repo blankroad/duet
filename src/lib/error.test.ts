@@ -16,7 +16,10 @@ describe("formatErr — humanized error lines", () => {
       }),
     ).toBe("Permission denied — Access is denied.");
     expect(
-      formatErr({ kind: "Io", message: "No space left on device (os error 28)" }),
+      formatErr({
+        kind: "Io",
+        message: "No space left on device (os error 28)",
+      }),
     ).toBe("I/O error — No space left on device");
   });
 

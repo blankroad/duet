@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useKeyHint } from "@/lib/keyHint";
 import {
   ArrowLeft,
   ArrowRight,
@@ -105,6 +106,9 @@ export function PathBar({
   editActive,
   onNewTab,
 }: PathBarProps) {
+  const kBack = useKeyHint("nav.back");
+  const kForward = useKeyHint("nav.forward");
+  const kNewTab = useKeyHint("tab.new");
   const { t } = useTranslation();
   const isLocal = location.source.kind === "local";
   const sourceTitle = useHostLabel(location.source);
@@ -237,7 +241,7 @@ export function PathBar({
         disabled={!canBack}
         className="rounded p-1 text-fg-muted hover:bg-border hover:text-fg disabled:opacity-30"
         aria-label={t("pathbar.back")}
-        title={t("pathbar.backTitle")}
+        title={t("pathbar.backTitle", { key: kBack })}
       >
         <ArrowLeft size={14} />
       </button>
@@ -247,7 +251,7 @@ export function PathBar({
         disabled={!canForward}
         className="rounded p-1 text-fg-muted hover:bg-border hover:text-fg disabled:opacity-30"
         aria-label={t("pathbar.forward")}
-        title={t("pathbar.forwardTitle")}
+        title={t("pathbar.forwardTitle", { key: kForward })}
       >
         <ArrowRight size={14} />
       </button>
@@ -359,7 +363,7 @@ export function PathBar({
             onClick={onNewTab}
             className="rounded p-1 hover:bg-border"
             aria-label={t("tabs.newTab")}
-            title={t("pathbar.newTabTitle")}
+            title={t("pathbar.newTabTitle", { key: kNewTab })}
           >
             <Plus size={14} className="text-fg-muted" />
           </button>

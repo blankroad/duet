@@ -22,10 +22,14 @@ export async function calcDirSizes(
 
   const cursorName = tab.entries[tab.cursorIndex]?.name;
   const candidates =
-    names ?? (tab.selected.size > 0 ? [...tab.selected] : cursorName ? [cursorName] : []);
+    names ??
+    (tab.selected.size > 0
+      ? [...tab.selected]
+      : cursorName
+        ? [cursorName]
+        : []);
   const dirs = candidates.filter(
-    (n) =>
-      n !== ".." && tab.entries.find((e) => e.name === n)?.kind === "dir",
+    (n) => n !== ".." && tab.entries.find((e) => e.name === n)?.kind === "dir",
   );
   if (dirs.length === 0) {
     toast("Calculate size: select a folder");

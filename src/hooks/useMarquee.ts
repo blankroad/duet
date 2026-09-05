@@ -94,18 +94,28 @@ export function useMarquee(opts: {
         let dy = 0;
         let dx = 0;
         if (last.y < r.top + EDGE) dy = -edgeSpeed(r.top + EDGE - last.y);
-        else if (last.y > r.bottom - EDGE) dy = edgeSpeed(last.y - (r.bottom - EDGE));
+        else if (last.y > r.bottom - EDGE)
+          dy = edgeSpeed(last.y - (r.bottom - EDGE));
         if (last.x < r.left + EDGE) dx = -edgeSpeed(r.left + EDGE - last.x);
-        else if (last.x > r.right - EDGE) dx = edgeSpeed(last.x - (r.right - EDGE));
+        else if (last.x > r.right - EDGE)
+          dx = edgeSpeed(last.x - (r.right - EDGE));
         if (dy !== 0) {
-          const n = clamp(el.scrollTop + dy, 0, el.scrollHeight - el.clientHeight);
+          const n = clamp(
+            el.scrollTop + dy,
+            0,
+            el.scrollHeight - el.clientHeight,
+          );
           if (n !== el.scrollTop) {
             el.scrollTop = n;
             dirtyRef.current = true;
           }
         }
         if (dx !== 0) {
-          const n = clamp(el.scrollLeft + dx, 0, el.scrollWidth - el.clientWidth);
+          const n = clamp(
+            el.scrollLeft + dx,
+            0,
+            el.scrollWidth - el.clientWidth,
+          );
           if (n !== el.scrollLeft) {
             el.scrollLeft = n;
             dirtyRef.current = true;
@@ -163,7 +173,9 @@ export function useMarquee(opts: {
     lastClientRef.current = { x: e.clientX, y: e.clientY };
     draggingRef.current = true;
     dirtyRef.current = false;
-    baseRef.current = additive ? Array.from(activeTab(usePanes.getState(), id).selected) : [];
+    baseRef.current = additive
+      ? Array.from(activeTab(usePanes.getState(), id).selected)
+      : [];
     lastSelRef.current = baseRef.current;
     if (!additive) usePanes.getState().setSelected(id, []); // 빈 곳 클릭 = 선택 해제
     setMarquee({ x1: x, y1: y, x2: x, y2: y });

@@ -512,17 +512,17 @@
     "dropTray": "드롭 트레이 ({{key}}) — 파일을 다른 앱으로 빼는 항상-위 임시함"
   },
   "toolbar": {
-    "newFolder": "새 폴더 (F7)",
-    "copy": "반대 패널로 복사 (F5)",
-    "move": "반대 패널로 이동 (F6)",
-    "deleteTrash": "휴지통으로 삭제 (Del)",
+    "newFolder": "새 폴더 ({{key}})",
+    "copy": "반대 패널로 복사 ({{key}})",
+    "move": "반대 패널로 이동 ({{key}})",
+    "deleteTrash": "휴지통으로 삭제 ({{key}})",
     "viewDetails": "상세",
     "viewGrid": "그리드",
     "viewTiles": "타일",
     "syncBrowseOn": "동기화 브라우징: 켜짐 — 양 패널 동반 이동",
     "syncBrowseOff": "동기화 브라우징: 꺼짐",
-    "hideHidden": "숨김 파일 숨기기 (Ctrl+H)",
-    "showHidden": "숨김 파일 표시 (Ctrl+H)"
+    "hideHidden": "숨김 파일 숨기기 ({{key}})",
+    "showHidden": "숨김 파일 표시 ({{key}})"
   },
   "shelf": {
     "title": "선반",
@@ -857,9 +857,9 @@
   },
   "pathbar": {
     "back": "뒤로",
-    "backTitle": "뒤로 (Alt+←)",
+    "backTitle": "뒤로 ({{key}})",
     "forward": "앞으로",
-    "forwardTitle": "앞으로 (Alt+→)",
+    "forwardTitle": "앞으로 ({{key}})",
     "up": "위로",
     "archiveReadOnlyTitle": "{{name}} (읽기 전용)",
     "updateArchive": "아카이브 업데이트",
@@ -867,7 +867,7 @@
     "readOnly": "읽기 전용",
     "pathPlaceholder": "경로 입력 후 Enter…",
     "goToPath": "경로로 이동",
-    "newTabTitle": "새 탭 (Ctrl+T)",
+    "newTabTitle": "새 탭 ({{key}})",
     "editPath": "경로 편집",
     "editPathTitle": "경로 편집 / 위치로 이동 (Ctrl+L)",
     "favorites": "즐겨찾기",
@@ -879,7 +879,7 @@
     "bookmarkTitle": "이 폴더 북마크 (Ctrl+D)",
     "bookmarkedTitle": "북마크됨 (Ctrl+D)",
     "swapPanes": "패널 교환 (왼쪽 ↔ 오른쪽)",
-    "swapPanesTitle": "패널 교환 (왼쪽 ↔ 오른쪽) — Ctrl+U",
+    "swapPanesTitle": "패널 교환 (좌 ↔ 우) — {{key}}",
     "trash": "휴지통"
   },
   "tabs": {

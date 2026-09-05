@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import clsx from "clsx";
 import { displayKey } from "@/lib/keyDisplay";
+import { useKeymap, effectiveKey } from "@/stores/keymap";
+import { useCommands } from "@/stores/commands";
 import {
   useContextMenu,
   isSeparator,
@@ -300,6 +302,23 @@ function StatusPanel({ status }: { status: "loading" | "empty" }) {
   );
 }
 
+/**
+ * 항목의 단축키 힌트 — `commandId` 가 있으면 **현재 키맵**에서 계산한다.
+ * 예전에는 메뉴마다 "Ctrl+C" 처럼 박아 둬서, 키를 바꾼 사용자에게 메뉴가 거짓말을 했다.
+ */
+function shortcutOf(item: MenuItem): string | undefined {
+  if (item.commandId) {
+    const { builtins, dynamic } = useCommands.getState();
+    const cmd = [...builtins, ...dynamic].find((c) => c.id === item.commandId);
+    const key = effectiveKey(
+      item.commandId,
+      useKeymap.getState().bindings,
+      cmd?.defaultKey,
+    );
+    if (key) return key;
+  }
+  return item.shortcut;
+}
 function Row({
   item,
   active,
@@ -333,9 +352,9 @@ function Row({
           <span className="shrink-0 text-fg-muted">{item.icon}</span>
         )}
         <span className="flex-1 truncate">{item.label}</span>
-        {item.shortcut && (
+        {shortcutOf(item) && (
           <span className="shrink-0 text-meta text-fg-muted">
-            {displayKey(item.shortcut)}
+            {displayKey(shortcutOf(item)!)}
           </span>
         )}
         {hasKids && (

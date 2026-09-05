@@ -31,11 +31,10 @@ export type FrontendError = DuetError | { kind: "IpcError"; message: string };
 export type CommandsApi = typeof commands;
 export type CommandName = keyof CommandsApi;
 
-type SuccessData<K extends CommandName> = Awaited<
-  ReturnType<CommandsApi[K]>
-> extends { status: "ok"; data: infer D }
-  ? D
-  : never;
+type SuccessData<K extends CommandName> =
+  Awaited<ReturnType<CommandsApi[K]>> extends { status: "ok"; data: infer D }
+    ? D
+    : never;
 
 export interface UseTauriResult<K extends CommandName> {
   data: SuccessData<K> | null;

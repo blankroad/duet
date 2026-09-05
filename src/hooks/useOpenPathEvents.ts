@@ -12,7 +12,9 @@ import { usePanes, type PaneId } from "@/stores/panes";
  * Windows 전용 기능이지만 리스너는 모든 OS 에서 무해하게 상시 등록한다(이벤트가
  * 안 오면 아무 일도 없음).
  */
-export function useOpenPathEvents(navigate: (id: PaneId, path: string) => void) {
+export function useOpenPathEvents(
+  navigate: (id: PaneId, path: string) => void,
+) {
   useEffect(() => {
     const unlistenP = events.openPathEvent.listen(({ payload }) => {
       const side = usePanes.getState().activePane;

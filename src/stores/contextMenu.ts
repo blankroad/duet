@@ -14,6 +14,11 @@ export interface MenuItem {
   icon?: ReactNode;
   /** 우측에 회색으로 표시되는 단축키 힌트 (표시 전용). */
   shortcut?: string;
+  /**
+   * 이 항목이 실행하는 커맨드 id — 있으면 힌트를 **현재 키맵**에서 계산한다.
+   * 하드코딩된 `shortcut` 은 커맨드가 없는 항목(Enter 로 열기 등)에만 쓴다.
+   */
+  commandId?: string;
   danger?: boolean;
   disabled?: boolean;
   onSelect?: () => void;

@@ -21,7 +21,8 @@ export const useVault = create<State>((set) => ({
   unlocked: false,
   refresh: async () => {
     const r = await commands.vaultStatus();
-    if (r.status === "ok") set({ exists: r.data.exists, unlocked: r.data.unlocked });
+    if (r.status === "ok")
+      set({ exists: r.data.exists, unlocked: r.data.unlocked });
   },
 }));
 
@@ -36,7 +37,10 @@ export async function vaultUnlock(passphrase: string): Promise<boolean> {
 }
 
 /** alias → password 저장. vault 가 unlocked 여야 함. */
-export async function vaultSet(alias: string, password: string): Promise<boolean> {
+export async function vaultSet(
+  alias: string,
+  password: string,
+): Promise<boolean> {
   const r = await commands.vaultSet(alias, password);
   if (r.status === "ok") {
     await useVault.getState().refresh(); // exists=true 갱신

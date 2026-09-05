@@ -1,3 +1,4 @@
+import { platform } from "@tauri-apps/plugin-os";
 export type CommandCategory =
   | "Tab"
   | "Navigation"
@@ -155,491 +156,533 @@ function tabGotoCommands(deps: BuiltinDeps): Command[] {
 }
 
 /**
- * Ctrl+Alt+1..9 → 사이드바 N 번째 북마크. TC 핫리스트·DOpus "Go FAVORITE=N" 자리.
- * (Alt+1..9 는 탭 이동이 가져갔다 — 둘 다 키맵에서 바꿀 수 있다.)
+ * Alt+Shift+1..9 → 사이드바 N 번째 북마크. TC 핫리스트·DOpus "Go FAVORITE=N" 자리.
+ * (Alt+1..9 는 탭 이동, Ctrl+Alt+1..5 는 맥 정렬이 쓴다 — 셋 다 키맵에서 변경 가능.)
  */
 function bookmarkGotoCommands(deps: BuiltinDeps): Command[] {
   return Array.from({ length: 9 }, (_, i) => ({
     id: `bookmark.goto${i + 1}`,
     label: `Go to bookmark ${i + 1}`,
     category: "Navigation" as const,
-    defaultKey: `Ctrl+Alt+${i + 1}`,
+    defaultKey: `Alt+Shift+${i + 1}`,
     action: () => deps.gotoBookmark(i + 1),
   }));
 }
 
+/**
+ * macOS 에서만 다른 기본 키 — OS 예약 키를 밟던 것들.
+ *
+ * 이 앱은 ⌘ 와 Ctrl 을 "Ctrl" 한 이름으로 통일해 다루므로(keyEvent), 아래 표기의
+ * `Ctrl` 은 맥에서 ⌘ 로 읽힌다. 즉 `Ctrl+Shift+3` = ⇧⌘3 = **OS 스크린샷**이라
+ * 앱까지 오지 않았다. 다음도 같은 이유로 옮긴다:
+ *   ⌘H(앱 숨기기) → 파인더와 같은 ⇧⌘. 로, F11(데스크탑 보기) → ⇧⌘P 로.
+ */
+const MAC_KEYS: Record<string, string> = {
+  "sort.byName": "Ctrl+Alt+1",
+  "sort.bySize": "Ctrl+Alt+2",
+  "sort.byMtime": "Ctrl+Alt+3",
+  "sort.byKind": "Ctrl+Alt+4",
+  "sort.byExt": "Ctrl+Alt+5",
+  "view.toggleHidden": "Ctrl+Shift+.",
+  "view.togglePreview": "Ctrl+Shift+P",
+};
+
+/** macOS 에서 추가로 받아 주는 키 — 맥 사용자가 먼저 눌러 보는 것들. */
+const MAC_ALT_KEYS: Record<string, string[]> = {
+  "pane.editPath": ["Ctrl+Shift+G"], // 파인더 "폴더로 이동"
+};
+
+/** 플랫폼별 기본 키 적용 — 등록 직후 한 번. */
+function applyPlatformKeys(cmds: Command[], isMac: boolean): Command[] {
+  if (!isMac) return cmds;
+  return cmds.map((c) => {
+    const key = MAC_KEYS[c.id];
+    const alts = MAC_ALT_KEYS[c.id];
+    if (!key && !alts) return c;
+    return {
+      ...c,
+      ...(key ? { defaultKey: key } : {}),
+      ...(alts ? { altKeys: [...(c.altKeys ?? []), ...alts] } : {}),
+    };
+  });
+}
+
 export function buildBuiltins(deps: BuiltinDeps): Command[] {
-  return [
-    {
-      id: "tab.new",
-      label: "New tab",
-      category: "Tab",
-      defaultKey: "Ctrl+T",
-      action: deps.openTab,
-    },
-    {
-      id: "tab.close",
-      label: "Close tab",
-      category: "Tab",
-      defaultKey: "Ctrl+W",
-      action: deps.closeActiveTab,
-    },
-    {
-      id: "tab.next",
-      label: "Next tab",
-      category: "Tab",
-      defaultKey: "Ctrl+Tab",
-      action: deps.nextTab,
-    },
-    {
-      id: "tab.prev",
-      label: "Previous tab",
-      category: "Tab",
-      defaultKey: "Ctrl+Shift+Tab",
-      action: deps.prevTab,
-    },
-    {
-      id: "tab.moveToOther",
-      label: "Move tab to other panel",
-      category: "Tab",
-      action: deps.moveTabToOther,
-    },
-    {
-      id: "nav.back",
-      label: "Go back",
-      category: "Navigation",
-      defaultKey: "Alt+Left",
-      action: deps.back,
-    },
-    {
-      id: "nav.forward",
-      label: "Go forward",
-      category: "Navigation",
-      defaultKey: "Alt+Right",
-      action: deps.forward,
-    },
-    {
-      id: "pane.editPath",
-      label: "Edit path (type a location)",
-      category: "Navigation",
-      defaultKey: "Ctrl+L",
-      action: deps.editPath,
-    },
-    {
-      id: "nav.jump",
-      label: "Jump to frequent folder",
-      category: "Navigation",
-      defaultKey: "Ctrl+J",
-      action: deps.jump,
-    },
-    {
-      id: "view.refresh",
-      label: "Refresh",
-      category: "View",
-      defaultKey: "Ctrl+R",
-      action: deps.refresh,
-    },
-    {
-      id: "view.toggleHidden",
-      label: "Toggle hidden files",
-      category: "View",
-      defaultKey: "Ctrl+H",
-      action: deps.toggleHidden,
-    },
-    {
-      id: "view.toggleSidebar",
-      label: "Toggle sidebar",
-      category: "View",
-      defaultKey: "Ctrl+B",
-      action: deps.toggleSidebar,
-    },
-    {
-      id: "view.focusSidebarFilter",
-      label: "Focus sidebar filter",
-      category: "View",
-      // 기본 키를 주지 않는다 — Ctrl+F 는 패널 빠른 필터가 쓰고 있고, 키는 전부
-      // keymap 에서 사용자가 정하는 게 원칙(CLAUDE.md). 팔레트에서는 바로 쓸 수 있다.
-      action: deps.focusSidebarFilter,
-    },
-    {
-      id: "view.togglePreview",
-      label: "Toggle preview",
-      category: "View",
-      defaultKey: "F11",
-      action: deps.togglePreview,
-    },
-    {
-      id: "view.quickLook",
-      label: "Quick Look (large preview)",
-      category: "View",
-      action: deps.quickLook,
-    },
-    {
-      id: "view.syncBrowse",
-      label: "Toggle synchronized browsing",
-      category: "View",
-      action: deps.toggleSyncBrowse,
-    },
-    {
-      id: "view.singlePane",
-      label: "Toggle single pane",
-      category: "View",
-      defaultKey: "Ctrl+Shift+D",
-      action: deps.toggleSinglePane,
-    },
-    {
-      id: "view.dropTray",
-      label: "Toggle drop tray",
-      category: "View",
-      defaultKey: "Ctrl+Shift+Y",
-      action: deps.toggleDropTray,
-    },
-    {
-      id: "view.details",
-      label: "View: Details",
-      category: "View",
-      action: deps.viewDetails,
-    },
-    {
-      id: "view.grid",
-      label: "View: Grid",
-      category: "View",
-      action: deps.viewGrid,
-    },
-    {
-      id: "view.tiles",
-      label: "View: Tiles",
-      category: "View",
-      action: deps.viewTiles,
-    },
-    {
-      id: "sort.byName",
-      label: "Sort by name",
-      category: "Sort",
-      defaultKey: "Ctrl+Shift+1",
-      action: deps.sortByName,
-    },
-    {
-      id: "sort.bySize",
-      label: "Sort by size",
-      category: "Sort",
-      defaultKey: "Ctrl+Shift+2",
-      action: deps.sortBySize,
-    },
-    {
-      id: "sort.byMtime",
-      label: "Sort by modified",
-      category: "Sort",
-      defaultKey: "Ctrl+Shift+3",
-      action: deps.sortByMtime,
-    },
-    {
-      id: "sort.byKind",
-      label: "Sort by kind",
-      category: "Sort",
-      defaultKey: "Ctrl+Shift+4",
-      action: deps.sortByKind,
-    },
-    {
-      id: "sort.byExt",
-      label: "Sort by extension",
-      category: "Sort",
-      defaultKey: "Ctrl+Shift+5",
-      action: deps.sortByExt,
-    },
-    {
-      id: "bookmark.toggle",
-      label: "Bookmark this folder",
-      category: "Navigation",
-      defaultKey: "Ctrl+D",
-      action: deps.toggleBookmark,
-    },
-    {
-      id: "filter.focus",
-      label: "Focus filter",
-      category: "Filter",
-      defaultKey: "Ctrl+F",
-      altKeys: ["/"], // vim/less 식 빠른 찾기 (입력창에선 자동 무시 — allowInInput 없음)
-      action: deps.focusFilter,
-    },
-    {
-      id: "search.global",
-      label: "Global search",
-      category: "Search",
-      defaultKey: "Ctrl+Shift+F",
-      action: deps.openSearch,
-    },
-    {
-      id: "pane.openInOther",
-      label: "Open folder in other pane",
-      category: "Navigation",
-      defaultKey: "Ctrl+Right",
-      action: deps.openInOtherPane,
-    },
-    {
-      id: "tab.openInNew",
-      label: "Open folder in new tab",
-      category: "Tab",
-      defaultKey: "Ctrl+Up",
-      action: deps.openInNewTab,
-    },
-    ...tabGotoCommands(deps),
-    ...bookmarkGotoCommands(deps),
-    {
-      id: "connection.quick",
-      label: "Quick connect (search hosts)",
-      category: "Connection",
-      defaultKey: "Ctrl+Shift+K",
-      action: deps.quickConnect,
-    },
-    {
-      id: "select.all",
-      label: "Select all",
-      category: "Select",
-      defaultKey: "Ctrl+A",
-      action: deps.selectAll,
-    },
-    {
-      id: "select.none",
-      label: "Clear selection",
-      category: "Select",
-      defaultKey: "Ctrl+Shift+A",
-      action: deps.clearSelection,
-    },
-    {
-      id: "select.invert",
-      label: "Invert selection",
-      category: "Select",
-      defaultKey: "Ctrl+Shift+I",
-      // TC 관례의 NumPad `*` 도 같이 받는다.
-      altKeys: ["NumpadMultiply"],
-      action: deps.invertSelection,
-    },
-    {
-      id: "select.byPattern",
-      label: "Select by pattern (glob)",
-      category: "Select",
-      defaultKey: "Ctrl+=",
-      altKeys: ["NumpadAdd"], // TC 관례
-      action: deps.selectByPattern,
-    },
-    {
-      id: "select.removeByPattern",
-      label: "Deselect by pattern (glob)",
-      category: "Select",
-      defaultKey: "Ctrl+-",
-      altKeys: ["NumpadSubtract"], // TC 관례
-      action: deps.deselectByPattern,
-    },
-    {
-      id: "shelf.add",
-      label: "Add to shelf",
-      category: "File",
-      defaultKey: "Ctrl+Shift+A",
-      action: deps.shelfAdd,
-    },
-    {
-      id: "shelf.applyCopy",
-      label: "Shelf: copy here",
-      category: "File",
-      action: deps.shelfApplyCopy,
-    },
-    {
-      id: "shelf.applyMove",
-      label: "Shelf: move here",
-      category: "File",
-      action: deps.shelfApplyMove,
-    },
-    {
-      id: "shelf.clear",
-      label: "Shelf: clear",
-      category: "File",
-      action: deps.shelfClear,
-    },
-    {
-      id: "file.compare",
-      label: "Compare folders (left ↔ right)",
-      category: "File",
-      action: deps.compareFolders,
-    },
-    {
-      id: "file.threeWay",
-      label: "3-way compare (base ↔ left ↔ right)",
-      category: "File",
-      action: deps.threeWayCompare,
-    },
-    {
-      id: "file.sync",
-      label: "Sync to other pane (mirror)",
-      category: "File",
-      action: deps.syncFolders,
-    },
-    {
-      id: "pane.swap",
-      label: "Swap panels (left ↔ right)",
-      category: "View",
-      defaultKey: "Ctrl+U",
-      action: deps.swapPanes,
-    },
-    {
-      id: "settings.open",
-      label: "Open settings",
-      category: "Settings",
-      defaultKey: "Ctrl+,",
-      action: deps.openSettings,
-    },
-    {
-      id: "palette.open",
-      label: "Command palette",
-      category: "Settings",
-      defaultKey: "Ctrl+P",
-      action: deps.openPalette,
-    },
-    {
-      id: "app.quit",
-      label: "Quit",
-      category: "Settings",
-      defaultKey: "Ctrl+Q",
-      action: deps.quit,
-    },
-    // 파일 작업 — 재바인딩 가능 (KeymapSection + 팔레트 노출). F5=copy 는 TC 표준.
-    {
-      id: "file.copy",
-      label: "Copy to other panel",
-      category: "File",
-      defaultKey: "F5",
-      action: deps.copy,
-    },
-    {
-      id: "file.move",
-      label: "Move to other panel",
-      category: "File",
-      defaultKey: "F6",
-      action: deps.move,
-    },
-    {
-      id: "file.rename",
-      label: "Rename",
-      category: "File",
-      defaultKey: "F2",
-      action: deps.rename,
-    },
-    {
-      id: "file.newFolder",
-      label: "New folder",
-      category: "File",
-      defaultKey: "F7",
-      action: deps.newFolder,
-    },
-    {
-      id: "file.newFile",
-      label: "New file",
-      category: "File",
-      // Shift+F4 = TC 의 "새 파일" 관례 (TC 는 편집기까지 열지만 여기선 생성만).
-      defaultKey: "Shift+F4",
-      action: deps.newFile,
-    },
-    {
-      id: "file.delete",
-      label: "Delete (to trash)",
-      category: "File",
-      defaultKey: "Delete",
-      action: deps.delete,
-    },
-    // 영구 삭제는 설정에서 켠 경우에만 등록한다(CLAUDE.md §3) — 꺼져 있는데 팔레트에
-    // 보이고 누르면 백엔드가 거부해 에러 토스트로 끝나던 것.
-    ...(deps.permanentDeleteEnabled
-      ? [
-          {
-            id: "file.deletePerm",
-            label: "Delete permanently",
-            category: "File",
-            defaultKey: "Shift+Delete",
-            action: deps.deletePerm,
-          } as Command,
-        ]
-      : []),
-    {
-      id: "file.clipCopy",
-      label: "Copy",
-      category: "File",
-      defaultKey: "Ctrl+C",
-      action: deps.clipCopy,
-    },
-    {
-      id: "file.clipCut",
-      label: "Cut",
-      category: "File",
-      defaultKey: "Ctrl+X",
-      action: deps.clipCut,
-    },
-    {
-      id: "file.clipPaste",
-      label: "Paste",
-      category: "File",
-      defaultKey: "Ctrl+V",
-      action: deps.clipPaste,
-    },
-    {
-      id: "file.copyPath",
-      label: "Copy path",
-      category: "File",
-      defaultKey: "Ctrl+Shift+C",
-      action: deps.copyPath,
-    },
-    {
-      id: "file.copyName",
-      label: "Copy name",
-      category: "File",
-      defaultKey: "Ctrl+Alt+C",
-      action: deps.copyName,
-    },
-    {
-      id: "file.calcSize",
-      label: "Calculate folder size",
-      category: "File",
-      defaultKey: "Shift+Space",
-      action: deps.calcDirSize,
-    },
-    {
-      id: "edit.undo",
-      label: "Undo last operation",
-      category: "File",
-      defaultKey: "Ctrl+Z",
-      action: deps.undo,
-    },
-    {
-      id: "edit.redo",
-      label: "Redo last undone operation",
-      category: "File",
-      defaultKey: "Ctrl+Shift+Z",
-      action: deps.redo,
-    },
-    {
-      id: "edit.history",
-      label: "Operation history",
-      category: "File",
-      action: deps.openHistory,
-    },
-    {
-      id: "file.contextMenu",
-      label: "Open context menu",
-      category: "File",
-      defaultKey: "Shift+F10",
-      action: deps.openContextMenu,
-    },
-    {
-      id: "help.shortcuts",
-      label: "Keyboard shortcuts",
-      category: "Help",
-      defaultKey: "F1",
-      action: deps.openShortcuts,
-    },
-    {
-      id: "ssh.setupKeyAuth",
-      label: "Set up passwordless login (this host)",
-      category: "Settings",
-      action: deps.setupKeyAuth,
-    },
-  ];
+  return applyPlatformKeys(
+    [
+      {
+        id: "tab.new",
+        label: "New tab",
+        category: "Tab",
+        defaultKey: "Ctrl+T",
+        action: deps.openTab,
+      },
+      {
+        id: "tab.close",
+        label: "Close tab",
+        category: "Tab",
+        defaultKey: "Ctrl+W",
+        action: deps.closeActiveTab,
+      },
+      {
+        id: "tab.next",
+        label: "Next tab",
+        category: "Tab",
+        defaultKey: "Ctrl+Tab",
+        action: deps.nextTab,
+      },
+      {
+        id: "tab.prev",
+        label: "Previous tab",
+        category: "Tab",
+        defaultKey: "Ctrl+Shift+Tab",
+        action: deps.prevTab,
+      },
+      {
+        id: "tab.moveToOther",
+        label: "Move tab to other panel",
+        category: "Tab",
+        action: deps.moveTabToOther,
+      },
+      {
+        id: "nav.back",
+        label: "Go back",
+        category: "Navigation",
+        defaultKey: "Alt+Left",
+        action: deps.back,
+      },
+      {
+        id: "nav.forward",
+        label: "Go forward",
+        category: "Navigation",
+        defaultKey: "Alt+Right",
+        action: deps.forward,
+      },
+      {
+        id: "pane.editPath",
+        label: "Edit path (type a location)",
+        category: "Navigation",
+        defaultKey: "Ctrl+L",
+        action: deps.editPath,
+      },
+      {
+        id: "nav.jump",
+        label: "Jump to frequent folder",
+        category: "Navigation",
+        defaultKey: "Ctrl+J",
+        action: deps.jump,
+      },
+      {
+        id: "view.refresh",
+        label: "Refresh",
+        category: "View",
+        defaultKey: "Ctrl+R",
+        action: deps.refresh,
+      },
+      {
+        id: "view.toggleHidden",
+        label: "Toggle hidden files",
+        category: "View",
+        defaultKey: "Ctrl+H",
+        action: deps.toggleHidden,
+      },
+      {
+        id: "view.toggleSidebar",
+        label: "Toggle sidebar",
+        category: "View",
+        defaultKey: "Ctrl+B",
+        action: deps.toggleSidebar,
+      },
+      {
+        id: "view.focusSidebarFilter",
+        label: "Focus sidebar filter",
+        category: "View",
+        // 기본 키를 주지 않는다 — Ctrl+F 는 패널 빠른 필터가 쓰고 있고, 키는 전부
+        // keymap 에서 사용자가 정하는 게 원칙(CLAUDE.md). 팔레트에서는 바로 쓸 수 있다.
+        action: deps.focusSidebarFilter,
+      },
+      {
+        id: "view.togglePreview",
+        label: "Toggle preview",
+        category: "View",
+        defaultKey: "F11",
+        action: deps.togglePreview,
+      },
+      {
+        id: "view.quickLook",
+        label: "Quick Look (large preview)",
+        category: "View",
+        action: deps.quickLook,
+      },
+      {
+        id: "view.syncBrowse",
+        label: "Toggle synchronized browsing",
+        category: "View",
+        action: deps.toggleSyncBrowse,
+      },
+      {
+        id: "view.singlePane",
+        label: "Toggle single pane",
+        category: "View",
+        defaultKey: "Ctrl+Shift+D",
+        action: deps.toggleSinglePane,
+      },
+      {
+        id: "view.dropTray",
+        label: "Toggle drop tray",
+        category: "View",
+        defaultKey: "Ctrl+Shift+Y",
+        action: deps.toggleDropTray,
+      },
+      {
+        id: "view.details",
+        label: "View: Details",
+        category: "View",
+        action: deps.viewDetails,
+      },
+      {
+        id: "view.grid",
+        label: "View: Grid",
+        category: "View",
+        action: deps.viewGrid,
+      },
+      {
+        id: "view.tiles",
+        label: "View: Tiles",
+        category: "View",
+        action: deps.viewTiles,
+      },
+      {
+        id: "sort.byName",
+        label: "Sort by name",
+        category: "Sort",
+        defaultKey: "Ctrl+Shift+1",
+        action: deps.sortByName,
+      },
+      {
+        id: "sort.bySize",
+        label: "Sort by size",
+        category: "Sort",
+        defaultKey: "Ctrl+Shift+2",
+        action: deps.sortBySize,
+      },
+      {
+        id: "sort.byMtime",
+        label: "Sort by modified",
+        category: "Sort",
+        defaultKey: "Ctrl+Shift+3",
+        action: deps.sortByMtime,
+      },
+      {
+        id: "sort.byKind",
+        label: "Sort by kind",
+        category: "Sort",
+        defaultKey: "Ctrl+Shift+4",
+        action: deps.sortByKind,
+      },
+      {
+        id: "sort.byExt",
+        label: "Sort by extension",
+        category: "Sort",
+        defaultKey: "Ctrl+Shift+5",
+        action: deps.sortByExt,
+      },
+      {
+        id: "bookmark.toggle",
+        label: "Bookmark this folder",
+        category: "Navigation",
+        defaultKey: "Ctrl+D",
+        action: deps.toggleBookmark,
+      },
+      {
+        id: "filter.focus",
+        label: "Focus filter",
+        category: "Filter",
+        defaultKey: "Ctrl+F",
+        altKeys: ["/"], // vim/less 식 빠른 찾기 (입력창에선 자동 무시 — allowInInput 없음)
+        action: deps.focusFilter,
+      },
+      {
+        id: "search.global",
+        label: "Global search",
+        category: "Search",
+        defaultKey: "Ctrl+Shift+F",
+        action: deps.openSearch,
+      },
+      {
+        id: "pane.openInOther",
+        label: "Open folder in other pane",
+        category: "Navigation",
+        defaultKey: "Ctrl+Right",
+        action: deps.openInOtherPane,
+      },
+      {
+        id: "tab.openInNew",
+        label: "Open folder in new tab",
+        category: "Tab",
+        defaultKey: "Ctrl+Up",
+        action: deps.openInNewTab,
+      },
+      ...tabGotoCommands(deps),
+      ...bookmarkGotoCommands(deps),
+      {
+        id: "connection.quick",
+        label: "Quick connect (search hosts)",
+        category: "Connection",
+        defaultKey: "Ctrl+Shift+K",
+        action: deps.quickConnect,
+      },
+      {
+        id: "select.all",
+        label: "Select all",
+        category: "Select",
+        defaultKey: "Ctrl+A",
+        action: deps.selectAll,
+      },
+      {
+        id: "select.none",
+        label: "Clear selection",
+        category: "Select",
+        // 기본 키 없음 — Esc 가 이미 선택을 푼다(Ctrl+Shift+A 는 셸프 담기가 쓴다).
+        // 팔레트에서 쓰거나 키맵에서 원하는 키에 맬 수 있다.
+        action: deps.clearSelection,
+      },
+      {
+        id: "select.invert",
+        label: "Invert selection",
+        category: "Select",
+        defaultKey: "Ctrl+Shift+I",
+        // TC 관례의 NumPad `*` 도 같이 받는다.
+        altKeys: ["NumpadMultiply"],
+        action: deps.invertSelection,
+      },
+      {
+        id: "select.byPattern",
+        label: "Select by pattern (glob)",
+        category: "Select",
+        defaultKey: "Ctrl+=",
+        altKeys: ["NumpadAdd"], // TC 관례
+        action: deps.selectByPattern,
+      },
+      {
+        id: "select.removeByPattern",
+        label: "Deselect by pattern (glob)",
+        category: "Select",
+        defaultKey: "Ctrl+-",
+        altKeys: ["NumpadSubtract"], // TC 관례
+        action: deps.deselectByPattern,
+      },
+      {
+        id: "shelf.add",
+        label: "Add to shelf",
+        category: "File",
+        defaultKey: "Ctrl+Shift+A",
+        action: deps.shelfAdd,
+      },
+      {
+        id: "shelf.applyCopy",
+        label: "Shelf: copy here",
+        category: "File",
+        action: deps.shelfApplyCopy,
+      },
+      {
+        id: "shelf.applyMove",
+        label: "Shelf: move here",
+        category: "File",
+        action: deps.shelfApplyMove,
+      },
+      {
+        id: "shelf.clear",
+        label: "Shelf: clear",
+        category: "File",
+        action: deps.shelfClear,
+      },
+      {
+        id: "file.compare",
+        label: "Compare folders (left ↔ right)",
+        category: "File",
+        action: deps.compareFolders,
+      },
+      {
+        id: "file.threeWay",
+        label: "3-way compare (base ↔ left ↔ right)",
+        category: "File",
+        action: deps.threeWayCompare,
+      },
+      {
+        id: "file.sync",
+        label: "Sync to other pane (mirror)",
+        category: "File",
+        action: deps.syncFolders,
+      },
+      {
+        id: "pane.swap",
+        label: "Swap panels (left ↔ right)",
+        category: "View",
+        defaultKey: "Ctrl+U",
+        action: deps.swapPanes,
+      },
+      {
+        id: "settings.open",
+        label: "Open settings",
+        category: "Settings",
+        defaultKey: "Ctrl+,",
+        action: deps.openSettings,
+      },
+      {
+        id: "palette.open",
+        label: "Command palette",
+        category: "Settings",
+        defaultKey: "Ctrl+P",
+        action: deps.openPalette,
+      },
+      {
+        id: "app.quit",
+        label: "Quit",
+        category: "Settings",
+        defaultKey: "Ctrl+Q",
+        action: deps.quit,
+      },
+      // 파일 작업 — 재바인딩 가능 (KeymapSection + 팔레트 노출). F5=copy 는 TC 표준.
+      {
+        id: "file.copy",
+        label: "Copy to other panel",
+        category: "File",
+        defaultKey: "F5",
+        action: deps.copy,
+      },
+      {
+        id: "file.move",
+        label: "Move to other panel",
+        category: "File",
+        defaultKey: "F6",
+        action: deps.move,
+      },
+      {
+        id: "file.rename",
+        label: "Rename",
+        category: "File",
+        defaultKey: "F2",
+        action: deps.rename,
+      },
+      {
+        id: "file.newFolder",
+        label: "New folder",
+        category: "File",
+        defaultKey: "F7",
+        action: deps.newFolder,
+      },
+      {
+        id: "file.newFile",
+        label: "New file",
+        category: "File",
+        // Shift+F4 = TC 의 "새 파일" 관례 (TC 는 편집기까지 열지만 여기선 생성만).
+        defaultKey: "Shift+F4",
+        action: deps.newFile,
+      },
+      {
+        id: "file.delete",
+        label: "Delete (to trash)",
+        category: "File",
+        defaultKey: "Delete",
+        action: deps.delete,
+      },
+      // 영구 삭제는 설정에서 켠 경우에만 등록한다(CLAUDE.md §3) — 꺼져 있는데 팔레트에
+      // 보이고 누르면 백엔드가 거부해 에러 토스트로 끝나던 것.
+      ...(deps.permanentDeleteEnabled
+        ? [
+            {
+              id: "file.deletePerm",
+              label: "Delete permanently",
+              category: "File",
+              defaultKey: "Shift+Delete",
+              action: deps.deletePerm,
+            } as Command,
+          ]
+        : []),
+      {
+        id: "file.clipCopy",
+        label: "Copy",
+        category: "File",
+        defaultKey: "Ctrl+C",
+        action: deps.clipCopy,
+      },
+      {
+        id: "file.clipCut",
+        label: "Cut",
+        category: "File",
+        defaultKey: "Ctrl+X",
+        action: deps.clipCut,
+      },
+      {
+        id: "file.clipPaste",
+        label: "Paste",
+        category: "File",
+        defaultKey: "Ctrl+V",
+        action: deps.clipPaste,
+      },
+      {
+        id: "file.copyPath",
+        label: "Copy path",
+        category: "File",
+        defaultKey: "Ctrl+Shift+C",
+        action: deps.copyPath,
+      },
+      {
+        id: "file.copyName",
+        label: "Copy name",
+        category: "File",
+        defaultKey: "Ctrl+Alt+C",
+        action: deps.copyName,
+      },
+      {
+        id: "file.calcSize",
+        label: "Calculate folder size",
+        category: "File",
+        defaultKey: "Shift+Space",
+        action: deps.calcDirSize,
+      },
+      {
+        id: "edit.undo",
+        label: "Undo last operation",
+        category: "File",
+        defaultKey: "Ctrl+Z",
+        action: deps.undo,
+      },
+      {
+        id: "edit.redo",
+        label: "Redo last undone operation",
+        category: "File",
+        defaultKey: "Ctrl+Shift+Z",
+        action: deps.redo,
+      },
+      {
+        id: "edit.history",
+        label: "Operation history",
+        category: "File",
+        action: deps.openHistory,
+      },
+      {
+        id: "file.contextMenu",
+        label: "Open context menu",
+        category: "File",
+        defaultKey: "Shift+F10",
+        action: deps.openContextMenu,
+      },
+      {
+        id: "help.shortcuts",
+        label: "Keyboard shortcuts",
+        category: "Help",
+        defaultKey: "F1",
+        action: deps.openShortcuts,
+      },
+      {
+        id: "ssh.setupKeyAuth",
+        label: "Set up passwordless login (this host)",
+        category: "Settings",
+        action: deps.setupKeyAuth,
+      },
+    ],
+    platform() === "macos",
+  );
 }

@@ -95,7 +95,7 @@ function openTabMenu(e: React.MouseEvent, id: PaneId, index: number): void {
     {
       id: "close",
       label: i18n.t("tabs.closeThis"),
-      shortcut: "Ctrl+W",
+      commandId: "tab.close",
       disabled: only,
       onSelect: () => s.closeTab(id, index),
     },
@@ -126,7 +126,7 @@ function openTabMenu(e: React.MouseEvent, id: PaneId, index: number): void {
     {
       id: "new-tab",
       label: i18n.t("tabs.newTab"),
-      shortcut: "Ctrl+T",
+      commandId: "tab.new",
       onSelect: () => s.openTab(id),
     },
   ];

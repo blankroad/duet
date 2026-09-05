@@ -37,20 +37,26 @@ beforeEach(resetShelf);
 
 describe("shelf store", () => {
   it("add returns count and stores items in target section", () => {
-    const n = useShelf.getState().add([localRef("/a", "x"), localRef("/a", "y")]);
+    const n = useShelf
+      .getState()
+      .add([localRef("/a", "x"), localRef("/a", "y")]);
     expect(n).toBe(2);
     expect(shelfSectionItems()).toHaveLength(2);
   });
 
   it("dedups globally by source + path + name", () => {
     useShelf.getState().add([localRef("/a", "x")]);
-    const n = useShelf.getState().add([localRef("/a", "x"), localRef("/a", "z")]);
+    const n = useShelf
+      .getState()
+      .add([localRef("/a", "x"), localRef("/a", "z")]);
     expect(n).toBe(1); // x 는 중복, z 만 추가
     expect(allItems()).toHaveLength(2);
   });
 
   it("same name in different folders are distinct", () => {
-    const n = useShelf.getState().add([localRef("/a", "x"), localRef("/b", "x")]);
+    const n = useShelf
+      .getState()
+      .add([localRef("/a", "x"), localRef("/b", "x")]);
     expect(n).toBe(2);
   });
 

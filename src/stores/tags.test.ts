@@ -2,7 +2,11 @@ import { describe, it, expect } from "vitest";
 import { tagsFor, allTagNames, matchesTagFilter } from "./tags";
 
 describe("tags helpers", () => {
-  const map = { "host:a": ["prod", "db"], "bm:1": ["prod"], "fav:2": ["client"] };
+  const map = {
+    "host:a": ["prod", "db"],
+    "bm:1": ["prod"],
+    "fav:2": ["client"],
+  };
 
   it("tagsFor returns tags or empty", () => {
     expect(tagsFor(map, "host:a")).toEqual(["prod", "db"]);

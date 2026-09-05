@@ -27,11 +27,15 @@ describe("formatKeyEvent", () => {
   });
 
   it("Ctrl+Shift+F", () => {
-    expect(formatKeyEvent(mkEvent({ key: "f", ctrlKey: true, shiftKey: true }))).toBe("Ctrl+Shift+F");
+    expect(
+      formatKeyEvent(mkEvent({ key: "f", ctrlKey: true, shiftKey: true })),
+    ).toBe("Ctrl+Shift+F");
   });
 
   it("Alt+ArrowLeft", () => {
-    expect(formatKeyEvent(mkEvent({ key: "ArrowLeft", altKey: true }))).toBe("Alt+Left");
+    expect(formatKeyEvent(mkEvent({ key: "ArrowLeft", altKey: true }))).toBe(
+      "Alt+Left",
+    );
   });
 
   it("F5 no modifier", () => {
@@ -43,15 +47,23 @@ describe("formatKeyEvent", () => {
   });
 
   it("modifier-only returns null", () => {
-    expect(formatKeyEvent(mkEvent({ key: "Control", ctrlKey: true }))).toBeNull();
-    expect(formatKeyEvent(mkEvent({ key: "Shift", shiftKey: true }))).toBeNull();
+    expect(
+      formatKeyEvent(mkEvent({ key: "Control", ctrlKey: true })),
+    ).toBeNull();
+    expect(
+      formatKeyEvent(mkEvent({ key: "Shift", shiftKey: true })),
+    ).toBeNull();
   });
 
   it("Ctrl+Tab", () => {
-    expect(formatKeyEvent(mkEvent({ key: "Tab", ctrlKey: true }))).toBe("Ctrl+Tab");
+    expect(formatKeyEvent(mkEvent({ key: "Tab", ctrlKey: true }))).toBe(
+      "Ctrl+Tab",
+    );
   });
 
   it("Ctrl+Shift+Tab", () => {
-    expect(formatKeyEvent(mkEvent({ key: "Tab", ctrlKey: true, shiftKey: true }))).toBe("Ctrl+Shift+Tab");
+    expect(
+      formatKeyEvent(mkEvent({ key: "Tab", ctrlKey: true, shiftKey: true })),
+    ).toBe("Ctrl+Shift+Tab");
   });
 });

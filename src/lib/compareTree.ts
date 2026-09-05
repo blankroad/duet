@@ -41,7 +41,12 @@ function emptyRollup(): Record<CompareStatus, number> {
 }
 
 export function buildCompareTree(entries: CompareEntry[]): TreeNode[] {
-  const root: TreeNode = { name: "", rel: "", children: [], rollup: emptyRollup() };
+  const root: TreeNode = {
+    name: "",
+    rel: "",
+    children: [],
+    rollup: emptyRollup(),
+  };
   const folders = new Map<string, TreeNode>([["", root]]);
 
   const ensureFolder = (rel: string): TreeNode => {
@@ -101,6 +106,10 @@ function sortTree(node: TreeNode): void {
 /** folder 노드의 의미있는 차이 개수(same/unreadable 제외) — 배지 표시 판단용. */
 export function diffCount(rollup: Record<CompareStatus, number>): number {
   return (
-    rollup.left_only + rollup.right_only + rollup.newer_left + rollup.newer_right + rollup.differ
+    rollup.left_only +
+    rollup.right_only +
+    rollup.newer_left +
+    rollup.newer_right +
+    rollup.differ
   );
 }

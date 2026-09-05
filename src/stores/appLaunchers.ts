@@ -19,7 +19,9 @@ export function isAppFolder(item: AppItem): boolean {
   return item.path == null;
 }
 
-const apply = (r: { status: "ok"; data: AppItem[] } | { status: "error"; error: unknown }) => {
+const apply = (
+  r: { status: "ok"; data: AppItem[] } | { status: "error"; error: unknown },
+) => {
   if (r.status === "ok") useAppLaunchers.getState().setAll(r.data);
   else useToast.getState().show(`App launcher: ${formatErr(r.error)}`, "error");
 };
@@ -33,7 +35,10 @@ export async function bootstrapAppLaunchers(): Promise<void> {
 export async function addAppLauncher(path: string): Promise<void> {
   apply(await commands.appsAdd("", path));
 }
-export async function renameAppLauncher(id: string, name: string): Promise<void> {
+export async function renameAppLauncher(
+  id: string,
+  name: string,
+): Promise<void> {
   apply(await commands.appsRename(id, name));
 }
 export async function setAppArgs(id: string, args: string[]): Promise<void> {
@@ -42,13 +47,22 @@ export async function setAppArgs(id: string, args: string[]): Promise<void> {
 export async function removeAppLauncher(id: string): Promise<void> {
   apply(await commands.appsRemove(id));
 }
-export async function groupApps(dragId: string, targetId: string): Promise<void> {
+export async function groupApps(
+  dragId: string,
+  targetId: string,
+): Promise<void> {
   apply(await commands.appsGroup(dragId, targetId));
 }
-export async function moveIntoFolder(appId: string, folderId: string): Promise<void> {
+export async function moveIntoFolder(
+  appId: string,
+  folderId: string,
+): Promise<void> {
   apply(await commands.appsMoveIntoFolder(appId, folderId));
 }
-export async function moveOutOfFolder(appId: string, folderId: string): Promise<void> {
+export async function moveOutOfFolder(
+  appId: string,
+  folderId: string,
+): Promise<void> {
   apply(await commands.appsMoveOut(appId, folderId));
 }
 export async function dissolveFolder(folderId: string): Promise<void> {
@@ -59,19 +73,28 @@ export async function dissolveFolder(folderId: string): Promise<void> {
 export async function reorderAppLaunchers(ids: string[]): Promise<void> {
   const prev = useAppLaunchers.getState().items;
   const byId = new Map(prev.map((a) => [a.id, a]));
-  const optimistic = ids.map((id) => byId.get(id)).filter((a): a is AppItem => a !== undefined);
+  const optimistic = ids
+    .map((id) => byId.get(id))
+    .filter((a): a is AppItem => a !== undefined);
   useAppLaunchers.getState().setAll(optimistic);
   const r = await commands.appsReorder(ids);
   if (r.status === "ok") useAppLaunchers.getState().setAll(r.data);
   else useAppLaunchers.getState().setAll(prev);
 }
 
-export async function reorderInFolder(folderId: string, ids: string[]): Promise<void> {
+export async function reorderInFolder(
+  folderId: string,
+  ids: string[],
+): Promise<void> {
   apply(await commands.appsReorderInFolder(folderId, ids));
 }
 
 /** 앱 실행 — 인자 포함. 실패 시 토스트. */
-export async function launchApp(path: string, args: string[] = []): Promise<void> {
+export async function launchApp(
+  path: string,
+  args: string[] = [],
+): Promise<void> {
   const r = await commands.appLaunch(path, args);
-  if (r.status === "error") useToast.getState().show(`Launch failed: ${formatErr(r.error)}`, "error");
+  if (r.status === "error")
+    useToast.getState().show(`Launch failed: ${formatErr(r.error)}`, "error");
 }

@@ -33,7 +33,15 @@ function bucketFor(displayPx: number): number {
 }
 
 /** 파일별(임베드) 아이콘 가능 확장자 — 경로 단위 캐시 대상. 나머지는 확장자 단위. */
-const OWN_ICON_EXTS = new Set(["exe", "lnk", "ico", "scr", "url", "cur", "ani"]);
+const OWN_ICON_EXTS = new Set([
+  "exe",
+  "lnk",
+  "ico",
+  "scr",
+  "url",
+  "cur",
+  "ani",
+]);
 
 function cacheKey(path: string, name: string, px: number): string {
   const ext = extOf(name);

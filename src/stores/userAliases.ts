@@ -19,7 +19,10 @@ export async function bootstrapUserAliases(): Promise<void> {
   if (r.status === "ok") useUserAliases.getState().setAll(r.data);
 }
 
-export async function addUserAlias(name: string, kind: AliasKind): Promise<boolean> {
+export async function addUserAlias(
+  name: string,
+  kind: AliasKind,
+): Promise<boolean> {
   const r = await commands.userAliasesAdd(name, kind);
   if (r.status === "ok") {
     useUserAliases.getState().setAll(r.data);

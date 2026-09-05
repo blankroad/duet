@@ -1,5 +1,15 @@
 import { useEffect, useState } from "react";
-import { PanelLeft, PanelRight, Search, Command, Settings, FolderGit2, Undo2, Columns2, Inbox } from "lucide-react";
+import {
+  PanelLeft,
+  PanelRight,
+  Search,
+  Command,
+  Settings,
+  FolderGit2,
+  Undo2,
+  Columns2,
+  Inbox,
+} from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useTranslation } from "react-i18next";
 import clsx from "clsx";
@@ -9,7 +19,7 @@ import { usePalette } from "@/stores/palette";
 import { useSearch } from "@/stores/search";
 import { useUIDialogs } from "@/stores/ui-dialogs";
 import { useToast } from "@/stores/toast";
-import { displayKey } from "@/lib/keyDisplay";
+import { useKeyHint } from "@/lib/keyHint";
 import { triggerCompare, triggerUndo } from "@/lib/fileActions";
 import { toggleDropTray } from "@/lib/dropTray";
 import { AppLauncherStrip } from "@/components/AppLauncherStrip";
@@ -23,6 +33,13 @@ import { AppLauncherStrip } from "@/components/AppLauncherStrip";
  * (data-tauri-drag-region), 우측에 최소화/최대화/닫기 커스텀 컨트롤.
  */
 export function TopBar() {
+  const kViewTogglesidebar = useKeyHint("view.toggleSidebar");
+  const kViewSinglepane = useKeyHint("view.singlePane");
+  const kViewDroptray = useKeyHint("view.dropTray");
+  const kEditUndo = useKeyHint("edit.undo");
+  const kSearchGlobal = useKeyHint("search.global");
+  const kPaletteOpen = useKeyHint("palette.open");
+  const kSettingsOpen = useKeyHint("settings.open");
   const { t } = useTranslation();
   const sidebarOpen = useUI((s) => s.sidebarOpen);
   const previewOpen = useUI((s) => s.previewOpen);
@@ -54,8 +71,23 @@ export function TopBar() {
           aria-hidden="true"
           className="pointer-events-none shrink-0"
         >
-          <rect x="1.5" y="3" width="5.4" height="10" rx="1.6" className="fill-accent" opacity="0.5" />
-          <rect x="9.1" y="3" width="5.4" height="10" rx="1.6" className="fill-accent" />
+          <rect
+            x="1.5"
+            y="3"
+            width="5.4"
+            height="10"
+            rx="1.6"
+            className="fill-accent"
+            opacity="0.5"
+          />
+          <rect
+            x="9.1"
+            y="3"
+            width="5.4"
+            height="10"
+            rx="1.6"
+            className="fill-accent"
+          />
         </svg>
         <span className="pointer-events-none font-brand text-title font-semibold tracking-tight text-fg">
           duet
@@ -63,36 +95,45 @@ export function TopBar() {
       </span>
       <Divider />
       <IconBtn
-        label={t("topbar.toggleSidebar", { key: displayKey("Ctrl+B") })}
+        label={t("topbar.toggleSidebar", { key: kViewTogglesidebar })}
         active={sidebarOpen}
         onClick={toggleSidebar}
       >
         <PanelLeft size={15} />
       </IconBtn>
-      <IconBtn label={t("topbar.togglePreview")} active={previewOpen} onClick={togglePreview}>
+      <IconBtn
+        label={t("topbar.togglePreview")}
+        active={previewOpen}
+        onClick={togglePreview}
+      >
         <PanelRight size={15} />
       </IconBtn>
       <IconBtn
-        label={t("topbar.singlePane", { key: displayKey("Ctrl+Shift+D") })}
+        label={t("topbar.singlePane", { key: kViewSinglepane })}
         active={singlePane}
         onClick={toggleSinglePane}
       >
         <Columns2 size={15} />
       </IconBtn>
       <IconBtn
-        label={t("topbar.dropTray", { key: displayKey("Ctrl+Shift+Y") })}
+        label={t("topbar.dropTray", { key: kViewDroptray })}
         onClick={() => void toggleDropTray()}
       >
         <Inbox size={15} />
       </IconBtn>
       <IconBtn
         label={t("topbar.compareFolders")}
-        onClick={() => void triggerCompare(useUIDialogs.getState().open, useToast.getState().show)}
+        onClick={() =>
+          void triggerCompare(
+            useUIDialogs.getState().open,
+            useToast.getState().show,
+          )
+        }
       >
         <FolderGit2 size={15} />
       </IconBtn>
       <IconBtn
-        label={t("topbar.undo", { key: displayKey("Ctrl+Z") })}
+        label={t("topbar.undo", { key: kEditUndo })}
         onClick={() => void triggerUndo(useToast.getState().show)}
         onContextMenu={(e) => {
           e.preventDefault();
@@ -109,17 +150,20 @@ export function TopBar() {
         <AppLauncherStrip />
       </div>
 
-      <IconBtn label={t("topbar.search", { key: displayKey("Ctrl+Shift+F") })} onClick={openSearch}>
+      <IconBtn
+        label={t("topbar.search", { key: kSearchGlobal })}
+        onClick={openSearch}
+      >
         <Search size={15} />
       </IconBtn>
       <IconBtn
-        label={t("topbar.palette", { key: displayKey("Ctrl+P") })}
+        label={t("topbar.palette", { key: kPaletteOpen })}
         onClick={() => usePalette.getState().open()}
       >
         <Command size={15} />
       </IconBtn>
       <IconBtn
-        label={t("topbar.settings", { key: displayKey("Ctrl+,") })}
+        label={t("topbar.settings", { key: kSettingsOpen })}
         onClick={() => useUIDialogs.getState().open({ kind: "settings" })}
       >
         <Settings size={15} />
@@ -154,7 +198,9 @@ function WindowControls() {
     return () => unlisten?.();
   }, []);
 
-  const run = (fn: (win: ReturnType<typeof getCurrentWindow>) => Promise<unknown>) => {
+  const run = (
+    fn: (win: ReturnType<typeof getCurrentWindow>) => Promise<unknown>,
+  ) => {
     try {
       void fn(getCurrentWindow());
     } catch {
@@ -165,8 +211,18 @@ function WindowControls() {
   return (
     // -mr-2 로 헤더 우측 패딩을 상쇄해 화면 가장자리까지 flush
     <div className="-mr-2 flex h-10 items-center">
-      <WinBtn label={t("topbar.minimize")} onClick={() => run((w) => w.minimize())}>
-        <svg width="11" height="11" viewBox="0 0 11 11" stroke="currentColor" strokeWidth="1.1" aria-hidden="true">
+      <WinBtn
+        label={t("topbar.minimize")}
+        onClick={() => run((w) => w.minimize())}
+      >
+        <svg
+          width="11"
+          height="11"
+          viewBox="0 0 11 11"
+          stroke="currentColor"
+          strokeWidth="1.1"
+          aria-hidden="true"
+        >
           <line x1="1.5" y1="5.5" x2="9.5" y2="5.5" />
         </svg>
       </WinBtn>
@@ -175,18 +231,45 @@ function WindowControls() {
         onClick={() => run((w) => w.toggleMaximize())}
       >
         {maximized ? (
-          <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" strokeWidth="1.1" aria-hidden="true">
+          <svg
+            width="11"
+            height="11"
+            viewBox="0 0 11 11"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.1"
+            aria-hidden="true"
+          >
             <rect x="1" y="3" width="6" height="6" />
             <path d="M3 3 V1 H10 V8 H8" />
           </svg>
         ) : (
-          <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" strokeWidth="1.1" aria-hidden="true">
+          <svg
+            width="11"
+            height="11"
+            viewBox="0 0 11 11"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.1"
+            aria-hidden="true"
+          >
             <rect x="1.5" y="1.5" width="8" height="8" />
           </svg>
         )}
       </WinBtn>
-      <WinBtn label={t("topbar.closeWindow")} danger onClick={() => run((w) => w.close())}>
-        <svg width="11" height="11" viewBox="0 0 11 11" stroke="currentColor" strokeWidth="1.1" aria-hidden="true">
+      <WinBtn
+        label={t("topbar.closeWindow")}
+        danger
+        onClick={() => run((w) => w.close())}
+      >
+        <svg
+          width="11"
+          height="11"
+          viewBox="0 0 11 11"
+          stroke="currentColor"
+          strokeWidth="1.1"
+          aria-hidden="true"
+        >
           <line x1="1.5" y1="1.5" x2="9.5" y2="9.5" />
           <line x1="9.5" y1="1.5" x2="1.5" y2="9.5" />
         </svg>
@@ -214,7 +297,9 @@ function WinBtn({
       aria-label={label}
       className={clsx(
         "flex h-10 w-11 items-center justify-center text-fg-muted transition-colors",
-        danger ? "hover:bg-danger hover:text-white" : "hover:bg-subtle hover:text-fg",
+        danger
+          ? "hover:bg-danger hover:text-white"
+          : "hover:bg-subtle hover:text-fg",
       )}
     >
       {children}

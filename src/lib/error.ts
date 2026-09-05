@@ -37,8 +37,7 @@ export function formatErr(e: unknown): string {
     const o = e as Partial<DuetError> & { message?: unknown };
     const kind = typeof o.kind === "string" ? o.kind : undefined;
     const label = kind ? KIND_LABEL[kind] : undefined;
-    const detail =
-      typeof o.message === "string" ? cleanMessage(o.message) : "";
+    const detail = typeof o.message === "string" ? cleanMessage(o.message) : "";
     if (label) {
       if (!detail) return label;
       // detail 이 라벨을 사실상 반복하면 한 번만 ("Permission denied" 등).
