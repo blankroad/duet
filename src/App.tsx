@@ -774,6 +774,11 @@ function App() {
   useShellWarm();
 
   const setBuiltins = useCommands((s) => s.setBuiltins);
+  // onOpenHostPath 는 아래에서 정의돼 effect deps 에 직접 못 넣는다(TDZ) — ref 로 최신
+  // 함수를 잡아 커맨드가 호출한다.
+  const openHostPathRef = useRef<
+    (alias: string, path: string, pane: PaneId) => void
+  >(() => {});
   // 설정이 바뀌면 커맨드 목록을 다시 만든다 — 영구 삭제 노출 여부가 걸려 있다.
   const permanentDeleteEnabled = useAppSettings(
     (s) => s.permanentDeleteEnabled,
@@ -816,13 +821,15 @@ function App() {
         // 사이드바에 보이는 순서 = 로컬 북마크 다음 원격 즐겨찾기.
         const bms = useBookmarks.getState().items;
         const favs = useHostFavorites.getState().items;
+        const pane = usePanes.getState().activePane;
         const bm = bms[n - 1];
         if (bm) {
-          onBookmarkActivate(bm.location);
+          void onOpenLocation(bm.location, pane);
           return;
         }
         const fav = favs[n - 1 - bms.length];
-        if (fav) onFavoriteActivate(fav);
+        if (fav)
+          openHostPathRef.current(fav.host_alias, String(fav.path), pane);
       },
       // 호스트만 걸러 보여 주는 팔레트 — 접속이 키보드만으로 끝난다.
       quickConnect: () => usePalette.getState().open("Connect"),
@@ -1001,6 +1008,9 @@ function App() {
   }, [
     setBuiltins,
     permanentDeleteEnabled,
+    cursorFolderLocation,
+    navigateTo,
+    onOpenLocation,
     openPalette,
     toggleSidebar,
     togglePreview,
@@ -1574,6 +1584,8 @@ function App() {
       onOpenLocation(location, usePanes.getState().activePane),
     [onOpenLocation],
   );
+  openHostPathRef.current = onOpenHostPath;
+
   const onFavoriteActivate = useCallback(
     (fav: HostFavorite) =>
       onOpenHostPath(
