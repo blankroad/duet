@@ -687,7 +687,11 @@
     "purgeDone": "{{count}} item(s) permanently deleted",
     "purgeFailed": "Permanent delete failed: {{err}}",
     "bookmarkAdded": "{{count}} bookmark(s) added",
-    "bookmarkLocalOnly": "Bookmarks are local-only — use ★ in the path bar for remote"
+    "bookmarkLocalOnly": "Bookmarks are local-only — use ★ in the path bar for remote",
+    "renameFailed": "Rename failed: {{err}}",
+    "removeBookmarkFailed": "Could not remove the bookmark: {{err}}",
+    "removeFavoriteFailed": "Could not remove the favorite: {{err}}",
+    "bookmarksMigrated": "Moved {{count}} SSH bookmark(s) to host favorites"
   },
   "sidebar": {
     "tasks": "Tasks",
@@ -752,7 +756,9 @@
     "filterLabel": "Filter sidebar",
     "dropHere": "Copy here",
     "dropBookmark": "Add to bookmarks",
-    "resizeTitle": "Drag to resize · double-click to reset"
+    "resizeTitle": "Drag to resize · double-click to reset",
+    "rename": "Rename…",
+    "renamePrompt": "New name"
   },
   "tasks": {
     "count": "{{count}} tasks",

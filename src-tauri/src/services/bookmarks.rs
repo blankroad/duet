@@ -80,6 +80,20 @@ impl BookmarksStore {
         Ok(snap)
     }
 
+    /// 이름만 변경 — 위치/순서/태그는 그대로. 없는 id 는 no-op.
+    pub async fn rename(&self, id: &str, name: String) -> Result<Vec<Bookmark>, DuetError> {
+        if name.trim().is_empty() {
+            return Err(DuetError::Io("bookmark name required".into()));
+        }
+        let mut v = self.inner.write().await;
+        if let Some(b) = v.iter_mut().find(|b| b.id == id) {
+            b.name = name;
+        }
+        let snap = v.clone();
+        self.write_to_disk(&snap).await?;
+        Ok(snap)
+    }
+
     /// id 로 제거. 없으면 no-op (Ok 반환).
     pub async fn remove(&self, id: &str) -> Result<Vec<Bookmark>, DuetError> {
         let mut v = self.inner.write().await;
@@ -139,6 +153,26 @@ mod tests {
             source: SourceId::Local,
             path: PathBuf::from(p),
         }
+    }
+
+    #[tokio::test]
+    async fn rename_keeps_location_and_persists() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("bm.json");
+        let s = BookmarksStore::load_from(&path).await.unwrap();
+        let loc = Location {
+            source: SourceId::Local,
+            path: PathBuf::from("/var/log"),
+        };
+        let list = s.add("logs".into(), loc.clone()).await.unwrap();
+        let id = list[0].id.clone();
+        s.rename(&id, "서버 로그".into()).await.unwrap();
+
+        let reloaded = BookmarksStore::load_from(&path).await.unwrap();
+        let items = reloaded.list().await;
+        assert_eq!(items[0].name, "서버 로그");
+        assert_eq!(items[0].location.path, loc.path);
+        assert!(reloaded.rename(&id, " ".into()).await.is_err());
     }
 
     #[tokio::test]

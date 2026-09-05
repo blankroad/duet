@@ -38,11 +38,13 @@ import {
 import {
   useBookmarks,
   removeBookmark,
+  renameBookmark,
   reorderBookmarks,
 } from "@/stores/bookmarks";
 import {
   useHostFavorites,
   removeHostFavorite,
+  renameHostFavorite,
   reorderHostFavorites,
 } from "@/stores/hostFavorites";
 import {
@@ -208,6 +210,58 @@ function otherPane(): PaneId {
   return usePanes.getState().activePane === "left" ? "right" : "left";
 }
 
+/**
+ * 행을 "한 번 클릭으로 열리고 키보드로 닿는" 행으로 만든다.
+ *
+ * Places/Recent 는 이미 `<button>` 이라 클릭 한 번에 열렸는데 북마크·즐겨찾기·호스트만
+ * `div` + 더블클릭이라 같은 사이드바 안에서 규칙이 갈렸고, 키보드로는 아예 닿지 않았다
+ * (DESIGN "키보드 1급 + 마우스 1급"). 더블클릭도 계속 받아 준다 — 손에 익은 사용자가
+ * 두 번 눌러도 같은 곳으로 갈 뿐이다.
+ */
+function openableRow(opts: {
+  onOpen: (pane: PaneId) => void;
+  onRename?: () => void;
+  onRemove?: () => void;
+}) {
+  return {
+    role: "button",
+    tabIndex: 0,
+    onClick: (e: React.MouseEvent) => opts.onOpen(targetPane(e)),
+    onDoubleClick: (e: React.MouseEvent) => {
+      // 클릭에서 이미 열었으므로 중복 이동만 막는다.
+      e.preventDefault();
+    },
+    onKeyDown: (e: React.KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        opts.onOpen(targetPane(e));
+      } else if (e.key === "F2" && opts.onRename) {
+        e.preventDefault();
+        opts.onRename();
+      } else if (e.key === "Delete" && opts.onRemove) {
+        e.preventDefault();
+        opts.onRemove();
+      }
+    },
+  } as const;
+}
+
+/**
+ * 이름 변경 프롬프트 — 북마크·즐겨찾기가 공유. 취소(null)/빈 문자열이면 아무것도 안 한다.
+ * 예전에는 이름을 바꿀 방법이 아예 없어 세 서버의 `/var/log` 가 전부 "log" 로 보였다.
+ */
+async function renamePrompt(
+  current: string,
+  apply: (name: string) => Promise<void>,
+): Promise<void> {
+  const next = await promptText({
+    title: i18n.t("sidebar.renamePrompt"),
+    initial: current,
+  });
+  if (next === null || next.trim() === "" || next === current) return;
+  await apply(next);
+}
+
 /** 로컬 path → Location. */
 function localLocation(path: string): Location {
   return { source: { kind: "local" }, path };
@@ -269,7 +323,14 @@ const rowActiveClass = "border-l-accent bg-active hover:bg-active";
  * 만들지 않는다(무한 리렌더 방지).
  */
 function usePaneAt(source: SourceId, path: string): string {
-  const key = sourceKey(source);
+  return usePaneAtKey(sourceKey(source), path);
+}
+
+/**
+ * `usePaneAt` 의 키 버전 — 원격 즐겨찾기는 alias 만 알고 SourceId(host_ip/user 포함)를
+ * 만들 수 없어서, 살아있는 연결의 connection_id 로 만든 키를 그대로 넘긴다.
+ */
+function usePaneAtKey(key: string, path: string): string {
   return usePanes((s) => {
     let out = "";
     for (const id of ["left", "right"] as const) {
@@ -977,7 +1038,10 @@ function SavedHostItem({
         ? { "data-reorder-key": host.alias, "data-reorder-group": "saved" }
         : {})}
       onMouseDown={reorder?.onMouseDown}
-      onDoubleClick={() => onActivate(host)}
+      {...openableRow({
+        onOpen: () => onActivate(host),
+        onRemove: () => void removeSavedHost(host.alias),
+      })}
       onContextMenu={(e) => openMenu(e, menu)}
       title={`${host.user}@${host.host}:${host.port}${host.key_path ? ` (key: ${host.key_path})` : ""}${nickname ? ` · ${host.alias}` : ""}`}
       className={clsx(rowClass, reorder?.dragging && "opacity-50")}
@@ -1149,6 +1213,12 @@ function BookmarkItem({
       onSelect: () => copyText(String(bookmark.location.path)),
     },
     {
+      id: "rename",
+      label: t("sidebar.rename"),
+      onSelect: () =>
+        void renamePrompt(bookmark.name, (n) => renameBookmark(bookmark.id, n)),
+    },
+    {
       id: "tags",
       label: t("sidebar.editTags"),
       onSelect: () => editTagsPrompt(bmTagKey(bookmark.id), tags),
@@ -1166,7 +1236,14 @@ function BookmarkItem({
       data-reorder-key={bookmark.id}
       data-reorder-group="bookmarks"
       onMouseDown={onMouseDown}
-      onDoubleClick={(e) => onOpen(bookmark.location, targetPane(e))}
+      {...openableRow({
+        onOpen: (pane) => onOpen(bookmark.location, pane),
+        onRename: () =>
+          void renamePrompt(bookmark.name, (n) =>
+            renameBookmark(bookmark.id, n),
+          ),
+        onRemove: () => void removeBookmark(bookmark.id),
+      })}
       onContextMenu={(e) => openMenu(e, menu)}
       title={`${sshPrefix}${bookmark.location.path}`}
       {...dropAttrs(bookmark.location.source, String(bookmark.location.path))}
@@ -1263,6 +1340,14 @@ function FavoriteItem({
 }) {
   const { t } = useTranslation();
   const path = String(fav.path);
+  // 살아있는 연결이 있으면 로컬 북마크와 같은 어휘로 현재 위치를 표시한다(L/R 배지).
+  const liveId = useConnections(
+    (s) =>
+      Object.values(s.active).find(
+        (c) => c.alias === fav.host_alias && c.state.kind === "connected",
+      )?.id ?? null,
+  );
+  const favPane = usePaneAtKey(liveId ? `ssh:${liveId}` : "", path);
   const tags = tagsFor(
     useTags((s) => s.byKey),
     favTagKey(fav.id),
@@ -1285,6 +1370,12 @@ function FavoriteItem({
       onSelect: () => copyText(path),
     },
     {
+      id: "rename",
+      label: t("sidebar.rename"),
+      onSelect: () =>
+        void renamePrompt(fav.name, (n) => renameHostFavorite(fav.id, n)),
+    },
+    {
       id: "tags",
       label: t("sidebar.editTags"),
       onSelect: () => editTagsPrompt(favTagKey(fav.id), tags),
@@ -1302,13 +1393,24 @@ function FavoriteItem({
       data-reorder-key={fav.id}
       data-reorder-group={`fav:${fav.host_alias}`}
       onMouseDown={onMouseDown}
-      onDoubleClick={(e) => onOpen(fav.host_alias, path, targetPane(e))}
+      {...openableRow({
+        onOpen: (pane) => onOpen(fav.host_alias, path, pane),
+        onRename: () =>
+          void renamePrompt(fav.name, (n) => renameHostFavorite(fav.id, n)),
+        onRemove: () => void removeHostFavorite(fav.id),
+      })}
       onContextMenu={(e) => openMenu(e, menu)}
       title={path}
-      className={clsx(rowClass, "pl-4", dragging && "opacity-50")}
+      className={clsx(
+        rowClass,
+        "pl-4",
+        dragging && "opacity-50",
+        favPane && rowActiveClass,
+      )}
     >
       <Heart size={14} className="shrink-0 text-fg-muted" />
       <RowLabel text={fav.name} />
+      <PaneBadge pane={favPane} />
       <InlineTags tags={tags} />
       <DeleteBtn
         label={t("sidebar.removeFavorite")}
@@ -1423,7 +1525,7 @@ function HostItem({
   }
   return (
     <div
-      onDoubleClick={onActivate}
+      {...openableRow({ onOpen: () => onActivate(), onRename: promptName })}
       onContextMenu={(e) => openMenu(e, menu)}
       title={`${host.user}@${host.hostname}:${host.port}${host.has_proxy_jump ? " (via jump)" : ""}${nickname ? ` · ${host.alias}` : ""}`}
       className={rowClass}

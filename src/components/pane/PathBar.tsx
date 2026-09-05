@@ -55,7 +55,7 @@ import { folderName } from "@/lib/entryMenu";
 import { pathSegments } from "@/lib/paths";
 import { useHostLabel } from "@/lib/hostLabel";
 import { bookmarkLocation } from "@/lib/bookmarkActions";
-import { useHostFavorites } from "@/stores/hostFavorites";
+import { useHostFavorites, removeHostFavorite } from "@/stores/hostFavorites";
 import { useContextMenu, type MenuEntry } from "@/stores/contextMenu";
 
 interface PathBarProps {
@@ -144,18 +144,37 @@ export function PathBar({
           }))
       : [];
 
-  const bookmarkId = useBookmarks(
-    (s) =>
-      s.items.find((b) => sameBookmarkLocation(b.location, location))?.id ??
-      null,
+  // 로컬은 북마크, 원격은 호스트 즐겨찾기 — 두 저장소가 나뉘어 있어도 ★ 하나로
+  // 같은 의미(이 폴더가 저장돼 있나 / 토글)를 갖는다. 예전엔 원격에서 ★ 이 절대
+  // 채워지지 않고 누를 때마다 즐겨찾기가 하나씩 더 생겼다.
+  const hostAlias =
+    location.source.kind === "ssh"
+      ? (location.source.connection_id.split(":")[0] ?? "")
+      : null;
+  const localBookmarkId = useBookmarks((s) =>
+    hostAlias !== null
+      ? null
+      : (s.items.find((b) => sameBookmarkLocation(b.location, location))?.id ??
+        null),
   );
+  const favoriteId = useHostFavorites((s) =>
+    hostAlias === null
+      ? null
+      : (s.items.find(
+          (f) =>
+            f.host_alias === hostAlias &&
+            String(f.path) === String(location.path),
+        )?.id ?? null),
+  );
+  const bookmarkId = hostAlias === null ? localBookmarkId : favoriteId;
   const bookmarked = bookmarkId !== null;
   const toggleBookmark = () => {
-    if (location.source.kind === "ssh") {
-      void bookmarkLocation(location, folderName(location));
+    if (hostAlias !== null) {
+      if (favoriteId) void removeHostFavorite(favoriteId);
+      else void bookmarkLocation(location, folderName(location));
       return;
     }
-    if (bookmarkId) void removeBookmark(bookmarkId);
+    if (localBookmarkId) void removeBookmark(localBookmarkId);
     else void addBookmark(folderName(location), location);
   };
 

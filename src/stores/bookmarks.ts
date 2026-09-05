@@ -4,6 +4,7 @@ import { formatErr } from "@/lib/error";
 import type { Bookmark, Location } from "@/types/bindings";
 import { useHostFavorites, addHostFavorite } from "@/stores/hostFavorites";
 import { useToast } from "@/stores/toast";
+import i18n from "@/i18n";
 
 interface State {
   items: Bookmark[];
@@ -43,7 +44,10 @@ async function migrateSshBookmarks(items: Bookmark[]): Promise<void> {
     await removeBookmark(b.id);
     moved += 1;
   }
-  if (moved > 0) useToast.getState().show(`Moved ${moved} SSH bookmark(s) to host favorites`);
+  if (moved > 0)
+    useToast
+      .getState()
+      .show(i18n.t("toast.bookmarksMigrated", { count: moved }));
 }
 
 export async function addBookmark(
@@ -58,17 +62,35 @@ export async function addBookmark(
   return false;
 }
 
+/** 이름만 변경 — 위치·순서·태그는 그대로. */
+export async function renameBookmark(id: string, name: string): Promise<void> {
+  const r = await commands.bookmarksRename(id, name);
+  if (r.status === "ok") useBookmarks.getState().setAll(r.data);
+  else
+    useToast
+      .getState()
+      .show(i18n.t("toast.renameFailed", { err: formatErr(r.error) }), "error");
+}
+
 export async function removeBookmark(id: string): Promise<void> {
   const r = await commands.bookmarksRemove(id);
   if (r.status === "ok") useBookmarks.getState().setAll(r.data);
-  else useToast.getState().show(`Remove bookmark: ${formatErr(r.error)}`, "error");
+  else
+    useToast
+      .getState()
+      .show(
+        i18n.t("toast.removeBookmarkFailed", { err: formatErr(r.error) }),
+        "error",
+      );
 }
 
 /** 드래그 재정렬 — id 순서대로. 낙관적 갱신 후 백엔드 반환값으로 정합. */
 export async function reorderBookmarks(ids: string[]): Promise<void> {
   const prev = useBookmarks.getState().items;
   const byId = new Map(prev.map((b) => [b.id, b]));
-  const optimistic = ids.map((id) => byId.get(id)).filter((b): b is Bookmark => b !== undefined);
+  const optimistic = ids
+    .map((id) => byId.get(id))
+    .filter((b): b is Bookmark => b !== undefined);
   useBookmarks.getState().setAll(optimistic);
   const r = await commands.bookmarksReorder(ids);
   if (r.status === "ok") useBookmarks.getState().setAll(r.data);

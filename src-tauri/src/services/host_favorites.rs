@@ -63,14 +63,37 @@ impl HostFavoritesStore {
         if name.trim().is_empty() {
             return Err(DuetError::Io("favorite name required".into()));
         }
+        let mut v = self.inner.write().await;
+        // 같은 (호스트, 경로)는 한 번만 — 예전엔 ★/Ctrl+D 를 누를 때마다 같은 폴더가
+        // 계속 쌓였다(프론트가 원격에서는 토글이 아니라 추가만 했기 때문).
+        if let Some(existing) = v
+            .iter()
+            .find(|f| f.host_alias == host_alias && f.path == path)
+        {
+            let _ = existing;
+            return Ok(v.clone());
+        }
         let item = HostFavorite {
             id: uuid::Uuid::now_v7().to_string(),
             host_alias,
             name,
             path,
         };
-        let mut v = self.inner.write().await;
         v.push(item);
+        let snap = v.clone();
+        self.write_to_disk(&snap).await?;
+        Ok(snap)
+    }
+
+    /// 이름만 변경 — 경로/호스트/순서/태그는 그대로. 없는 id 는 no-op.
+    pub async fn rename(&self, id: &str, name: String) -> Result<Vec<HostFavorite>, DuetError> {
+        if name.trim().is_empty() {
+            return Err(DuetError::Io("favorite name required".into()));
+        }
+        let mut v = self.inner.write().await;
+        if let Some(f) = v.iter_mut().find(|f| f.id == id) {
+            f.name = name;
+        }
         let snap = v.clone();
         self.write_to_disk(&snap).await?;
         Ok(snap)
@@ -148,6 +171,55 @@ mod tests {
         let id = list[0].id.clone();
         s.remove(&id).await.unwrap();
         assert_eq!(s.list().await.len(), 2);
+    }
+
+    /// 같은 (호스트, 경로) 를 다시 추가해도 하나만 — ★/Ctrl+D 를 두 번 눌러도
+    /// 즐겨찾기가 쌓이지 않아야 한다.
+    #[tokio::test]
+    async fn add_is_idempotent_per_host_and_path() {
+        let dir = tempdir().unwrap();
+        let s = HostFavoritesStore::load_from(&dir.path().join("hf.json"))
+            .await
+            .unwrap();
+        s.add("srv1".into(), "logs".into(), PathBuf::from("/var/log"))
+            .await
+            .unwrap();
+        let after = s
+            .add(
+                "srv1".into(),
+                "logs again".into(),
+                PathBuf::from("/var/log"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(after.len(), 1, "같은 호스트·경로는 하나만");
+        assert_eq!(after[0].name, "logs", "기존 이름을 덮어쓰지 않는다");
+        // 경로가 다르면 별개.
+        let other = s
+            .add("srv1".into(), "app".into(), PathBuf::from("/opt/app"))
+            .await
+            .unwrap();
+        assert_eq!(other.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn rename_keeps_path_and_persists() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("hf.json");
+        let s = HostFavoritesStore::load_from(&path).await.unwrap();
+        let list = s
+            .add("srv1".into(), "logs".into(), PathBuf::from("/var/log"))
+            .await
+            .unwrap();
+        let id = list[0].id.clone();
+        s.rename(&id, "프로덕션 로그".into()).await.unwrap();
+
+        let reloaded = HostFavoritesStore::load_from(&path).await.unwrap();
+        let items = reloaded.list().await;
+        assert_eq!(items[0].name, "프로덕션 로그");
+        assert_eq!(items[0].path, PathBuf::from("/var/log"));
+        assert_eq!(items[0].id, id, "이름만 바뀌고 id 는 그대로");
+        assert!(reloaded.rename(&id, "  ".into()).await.is_err());
     }
 
     #[tokio::test]

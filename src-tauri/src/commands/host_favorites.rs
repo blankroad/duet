@@ -1,4 +1,4 @@
-//! Host favorites IPC — list / add / remove.
+//! Host favorites IPC — list / add / rename / remove / reorder.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -23,6 +23,16 @@ pub async fn host_favorites_add(
     store: tauri::State<'_, Arc<HostFavoritesStore>>,
 ) -> Result<Vec<HostFavorite>, DuetError> {
     store.add(host_alias, name, path).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn host_favorites_rename(
+    id: String,
+    name: String,
+    store: tauri::State<'_, Arc<HostFavoritesStore>>,
+) -> Result<Vec<HostFavorite>, DuetError> {
+    store.rename(&id, name).await
 }
 
 #[tauri::command]
