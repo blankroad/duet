@@ -92,7 +92,9 @@ export function GeneralSection() {
   };
 
   if (loading || !settings)
-    return <div className="text-base text-fg-muted">Loading…</div>;
+    return (
+      <div className="text-base text-fg-muted">{t("settings.loading")}</div>
+    );
 
   return (
     <div className="space-y-4">
@@ -158,30 +160,30 @@ export function GeneralSection() {
 
       {/* 새 탭 기본값 */}
       <div className="flex items-center justify-between gap-2">
-        <div className="text-base">Default sort (new tabs)</div>
+        <div className="text-base">{t("settings.defaultSort")}</div>
         <select
           className={selectClass}
           value={settings.default_sort ?? "name"}
           onChange={(e) => void save({ default_sort: e.target.value })}
         >
-          <option value="name">Name</option>
-          <option value="size">Size</option>
-          <option value="mtime">Modified</option>
-          <option value="kind">Kind</option>
-          <option value="ext">Extension</option>
+          <option value="name">{t("settings.sortName")}</option>
+          <option value="size">{t("settings.sortSize")}</option>
+          <option value="mtime">{t("settings.sortMtime")}</option>
+          <option value="kind">{t("settings.sortKind")}</option>
+          <option value="ext">{t("settings.sortExt")}</option>
         </select>
       </div>
 
       <div className="flex items-center justify-between gap-2">
-        <div className="text-base">Default view (new tabs)</div>
+        <div className="text-base">{t("settings.defaultView")}</div>
         <select
           className={selectClass}
           value={settings.default_view ?? "details"}
           onChange={(e) => void save({ default_view: e.target.value })}
         >
-          <option value="details">Details</option>
-          <option value="grid">Grid</option>
-          <option value="tiles">Tiles</option>
+          <option value="details">{t("settings.viewDetails")}</option>
+          <option value="grid">{t("settings.viewGrid")}</option>
+          <option value="tiles">{t("settings.viewTiles")}</option>
         </select>
       </div>
 
@@ -193,9 +195,9 @@ export function GeneralSection() {
           className="mt-0.5"
         />
         <div className="flex-1">
-          <div className="text-base">Show hidden files by default</div>
+          <div className="text-base">{t("settings.showHidden")}</div>
           <div className="text-meta text-fg-muted">
-            Show dotfiles from the start.
+            {t("settings.showHiddenHint")}
           </div>
         </div>
       </label>
@@ -208,10 +210,9 @@ export function GeneralSection() {
           className="mt-0.5"
         />
         <div className="flex-1">
-          <div className="text-base">Open items with a single click</div>
+          <div className="text-base">{t("settings.singleClick")}</div>
           <div className="text-meta text-fg-muted">
-            Single-click opens folders and files. Off = double-click (default).
-            Hold Ctrl/Shift to select without opening.
+            {t("settings.singleClickHint")}
           </div>
         </div>
       </label>
@@ -224,10 +225,9 @@ export function GeneralSection() {
           className="mt-0.5"
         />
         <div className="flex-1">
-          <div className="text-base">Show image thumbnails</div>
+          <div className="text-base">{t("settings.thumbnails")}</div>
           <div className="text-meta text-fg-muted">
-            Render thumbnails for images (PNG/JPG/GIF/WebP/BMP) in Grid and
-            Tiles views. Cached on disk.
+            {t("settings.thumbnailsHint")}
           </div>
         </div>
       </label>
@@ -241,11 +241,9 @@ export function GeneralSection() {
             className="mt-0.5"
           />
           <div className="flex-1">
-            <div className="text-base">Use Windows file icons</div>
+            <div className="text-base">{t("settings.winIcons")}</div>
             <div className="text-meta text-fg-muted">
-              Show the same per-type icons as File Explorer for local files. Off
-              = duet&rsquo;s built-in colored glyphs. Remote (SSH) files always
-              use glyphs.
+              {t("settings.winIconsHint")}
             </div>
           </div>
         </label>
@@ -341,12 +339,11 @@ export function GeneralSection() {
             Enable permanent delete (Shift+Delete)
           </div>
           <div className="text-meta text-fg-muted">
-            Off by default. Even when on, deleting requires typing a word to
-            confirm.
+            {t("settings.permDeleteHint")}
           </div>
           {settings.permanent_delete_enabled && (
             <div className="mt-1 flex items-center gap-1 text-meta text-danger">
-              <AlertTriangle size={11} /> Permanent delete is risky.
+              <AlertTriangle size={11} /> {t("settings.permDeleteWarn")}
             </div>
           )}
         </div>
@@ -364,14 +361,9 @@ export function GeneralSection() {
               className="mt-0.5"
             />
             <div className="flex-1">
-              <div className="text-base">
-                Add &ldquo;Open in duet&rdquo; to the folder right-click menu
-              </div>
+              <div className="text-base">{t("settings.shellOpenIn")}</div>
               <div className="text-meta text-fg-muted">
-                Windows only. Adds a per-user registry entry (no admin) so
-                right-clicking a folder or drive can open it in duet. Fully
-                reversible — turning this off removes the entry. Tip: turn it
-                off before uninstalling.
+                {t("settings.shellOpenInHint")}
               </div>
             </div>
           </label>
@@ -385,15 +377,9 @@ export function GeneralSection() {
               className="mt-0.5"
             />
             <div className="flex-1">
-              <div className="text-base">
-                Open folders in duet by default (double-click)
-              </div>
+              <div className="text-base">{t("settings.shellDefault")}</div>
               <div className="text-meta text-fg-muted">
-                Makes duet the default action when you double-click a folder or
-                drive, instead of File Explorer. Enabling this also adds the
-                right-click entry above. Reversible — turning it off restores
-                Explorer. While duet is already running, opened folders appear
-                as a new tab.
+                {t("settings.shellDefaultHint")}
               </div>
             </div>
           </label>

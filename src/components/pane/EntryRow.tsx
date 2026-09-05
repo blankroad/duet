@@ -6,6 +6,7 @@ import { EntryIcon } from "@/lib/fileIcon";
 import { isParentEntry } from "@/stores/panes";
 import { InlineRenameInput } from "./InlineRenameInput";
 import clsx from "clsx";
+import i18n from "@/i18n";
 
 interface EntryRowProps {
   entry: Entry;
@@ -59,7 +60,7 @@ export function EntryRow({
         )}
         onClick={onClick}
         onDoubleClick={onDoubleClick}
-        title="Parent folder"
+        title={i18n.t("pane.parentFolder")}
       >
         <FolderUp size={14} className="shrink-0 text-fg-muted" />
         <span className="font-mono flex-1 truncate text-fg-muted">..</span>

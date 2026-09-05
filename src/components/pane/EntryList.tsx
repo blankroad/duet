@@ -2,6 +2,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useRef, type CSSProperties } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import clsx from "clsx";
+import i18n from "@/i18n";
 import type { Entry } from "@/types/bindings";
 import {
   activeTab,
@@ -46,7 +47,6 @@ interface EntryListProps {
   /** 인라인 이름변경 성공 후 목록 새로고침 (원격은 fs watcher 가 없음). */
   onRenamed: () => void;
 }
-
 
 /**
  * 가상 스크롤 파일 리스트 + 정렬 가능 컬럼 헤더.
@@ -123,7 +123,9 @@ export function EntryList({
     useContextMenu.getState().openAt(e.clientX, e.clientY, [
       {
         id: "split-ext",
-        label: splitExt ? "Hide extension column" : "Show extension column",
+        label: splitExt
+          ? i18n.t("pane.hideExtColumn")
+          : i18n.t("pane.showExtColumn"),
         onSelect: () => useUI.getState().toggleSplitExt(),
       },
     ]);
@@ -142,7 +144,8 @@ export function EntryList({
     const startX = e.clientX;
     const startW = useColumnWidths.getState()[col];
     // 왼쪽 경계를 잡고 드래그 — 왼쪽으로 끌면 그 컬럼이 넓어짐(Name 이 흡수).
-    const width = (ev: PointerEvent) => clampCol(startW + (startX - ev.clientX));
+    const width = (ev: PointerEvent) =>
+      clampCol(startW + (startX - ev.clientX));
     const move = (ev: PointerEvent) =>
       outerRef.current?.style.setProperty(`--col-${col}`, `${width(ev)}px`);
     const up = (ev: PointerEvent) => {
@@ -175,7 +178,7 @@ export function EntryList({
         onContextMenu={onHeaderContextMenu}
       >
         <ColumnHeader
-          label="Name"
+          label={i18n.t("pane.colName")}
           col="name"
           current={sortKey}
           order={sortOrder}
@@ -184,7 +187,7 @@ export function EntryList({
         />
         {splitExt && (
           <ColumnHeader
-            label="Ext"
+            label={i18n.t("pane.colExt")}
             col="ext"
             current={sortKey}
             order={sortOrder}
@@ -195,7 +198,7 @@ export function EntryList({
           />
         )}
         <ColumnHeader
-          label="Size"
+          label={i18n.t("pane.colSize")}
           col="size"
           current={sortKey}
           order={sortOrder}
@@ -205,7 +208,7 @@ export function EntryList({
           onResizeStart={startResize}
         />
         <ColumnHeader
-          label="Modified"
+          label={i18n.t("pane.colModified")}
           col="mtime"
           current={sortKey}
           order={sortOrder}
@@ -351,7 +354,7 @@ function ColumnHeader({
           onPointerDown={(e) => onResizeStart(resizeCol, e)}
           onClick={(e) => e.stopPropagation()}
           className="absolute left-0 top-0 z-10 h-full w-1.5 -translate-x-1/2 cursor-col-resize hover:bg-accent/50"
-          title="Drag to resize column"
+          title={i18n.t("pane.resizeColumn")}
         />
       )}
       <span>{label}</span>
