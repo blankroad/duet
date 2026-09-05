@@ -77,13 +77,14 @@ import {
   clipPaste,
   addSelectionToShelf,
   applyShelfTo,
+  executeTransfer,
 } from "@/lib/fileActions";
 import { useCommands } from "@/stores/commands";
 import { usePalette } from "@/stores/palette";
 import { buildBuiltins } from "@/lib/commands";
 import { useUI } from "@/stores/ui";
 import { useShelf } from "@/stores/shelf";
-import { useAppSettings } from "@/stores/settings";
+import { useAppSettings, syncAppSettings } from "@/stores/settings";
 import {
   usePanes,
   activeTab,
@@ -1084,23 +1085,15 @@ function App() {
   const onCopyConfirm = useCallback(
     async (policy: ConflictPolicy) => {
       if (dialog.kind !== "copy-confirm") return;
-      const plan = dialog.plan;
-      const r = await commands.fsCopyExecute(plan, policy);
-      if (r.status === "ok") {
-        // 실패 시(보호 경로 권한 등) 승격 재시도를 위해 plan 을 기억.
-        rememberElevatable(r.data, { op: "copy", plan, policy });
-        openDialog({
-          kind: "progress",
-          title: i18n.t("dialog.progress.copying"),
-          taskId: r.data,
-        });
-      } else {
-        closeDialog();
-        showToast(
-          i18n.t("toast.copyFailed", { err: formatErr(r.error) }),
-          "error",
-        );
-      }
+      // 확인을 건너뛰는 설정에서의 실행과 같은 경로 — 진행 모달은 느릴 때만 뜬다.
+      await executeTransfer(
+        "copy",
+        dialog.plan,
+        policy,
+        openDialog,
+        closeDialog,
+        showToast,
+      );
     },
     [dialog, openDialog, closeDialog, showToast],
   );
@@ -1338,22 +1331,14 @@ function App() {
   const onMoveConfirm = useCallback(
     async (policy: ConflictPolicy) => {
       if (dialog.kind !== "move-confirm") return;
-      const plan = dialog.plan;
-      const r = await commands.fsMoveExecute(plan, policy);
-      if (r.status === "ok") {
-        rememberElevatable(r.data, { op: "move", plan, policy });
-        openDialog({
-          kind: "progress",
-          title: i18n.t("dialog.progress.moving"),
-          taskId: r.data,
-        });
-      } else {
-        closeDialog();
-        showToast(
-          i18n.t("toast.moveFailed", { err: formatErr(r.error) }),
-          "error",
-        );
-      }
+      await executeTransfer(
+        "move",
+        dialog.plan,
+        policy,
+        openDialog,
+        closeDialog,
+        showToast,
+      );
     },
     [dialog, openDialog, closeDialog, showToast],
   );
@@ -1620,15 +1605,7 @@ function App() {
             viewMode: (r.data.default_view ?? "details") as ViewMode,
             showHidden: r.data.show_hidden_default ?? false,
           });
-          useAppSettings
-            .getState()
-            .setSingleClickOpen(r.data.single_click_open ?? false);
-          useAppSettings
-            .getState()
-            .setShowThumbnails(r.data.show_thumbnails ?? true);
-          useAppSettings
-            .getState()
-            .setOsFileIcons(r.data.os_file_icons ?? platform() === "windows");
+          syncAppSettings(r.data);
           useAppSettings
             .getState()
             .setExtIconOverrides(

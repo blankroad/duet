@@ -1,7 +1,8 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import type { Conflict, CopyPlan, EntryRef } from "@/types/bindings";
 import { CopyMoveConfirmDialog } from "./CopyMoveConfirmDialog";
+import { useAppSettings } from "@/stores/settings";
 import "@/i18n";
 
 const SRC = "/src";
@@ -53,6 +54,14 @@ function render_(
 }
 
 describe("CopyMoveConfirmDialog", () => {
+  afterEach(() => {
+    useAppSettings.setState({
+      conflictDefault: "skip",
+      rememberConflictChoice: false,
+      lastConflictChoice: null,
+    });
+  });
+
   /**
    * 회귀 방지 — 원래 이 다이얼로그는 "1개, 40 KB → /경로" 만 보여줘서 어떤 파일을
    * 복사하는지 확인할 수 없었다. 개수는 파일명을 대신하지 못한다.
@@ -123,6 +132,35 @@ describe("CopyMoveConfirmDialog", () => {
     fireEvent.click(screen.getByRole("radio", { name: "Replace" }));
     expect(screen.getByText(/cannot be undone/)).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: /Copy/ }));
+    expect(onConfirm).toHaveBeenCalledWith("replace");
+  });
+
+  /**
+   * "매번 건너뛰기가 기본이라 다시 골라야 한다"는 불편의 해소 — 기본 선택이
+   * 설정을 따른다.
+   */
+  it("충돌 기본 선택은 설정값을 따른다", () => {
+    useAppSettings.setState({ conflictDefault: "keepboth" });
+    const { onConfirm } = render_(plan({ conflicts: [conflict("a.txt")] }));
+    fireEvent.click(screen.getByRole("button", { name: /Copy/ }));
+    expect(onConfirm).toHaveBeenCalledWith("keepboth");
+  });
+
+  it("기억하기가 켜져 있으면 세션의 마지막 선택으로 시작한다", () => {
+    useAppSettings.setState({
+      conflictDefault: "skip",
+      rememberConflictChoice: true,
+    });
+    // 첫 다이얼로그에서 교체를 고르면 그 선택이 세션에 남는다.
+    render_(plan({ conflicts: [conflict("a.txt")] }));
+    fireEvent.click(screen.getByRole("radio", { name: "Replace" }));
+    fireEvent.click(screen.getByRole("button", { name: /Copy/ }));
+    expect(useAppSettings.getState().lastConflictChoice).toBe("replace");
+
+    // 다음 다이얼로그는 교체가 이미 골라진 채로 열린다.
+    const { onConfirm } = render_(plan({ conflicts: [conflict("b.txt")] }));
+    const buttons = screen.getAllByRole("button", { name: /Copy/ });
+    fireEvent.click(buttons[buttons.length - 1]!);
     expect(onConfirm).toHaveBeenCalledWith("replace");
   });
 

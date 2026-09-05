@@ -5,7 +5,7 @@ import { commands } from "@/types/bindings";
 import type { Settings, SettingsPatch } from "@/types/bindings";
 import { applyTabDefaults, type SortKey, type ViewMode } from "@/stores/panes";
 import { useTranslation } from "react-i18next";
-import { useAppSettings } from "@/stores/settings";
+import { syncAppSettings } from "@/stores/settings";
 import { useUI, type Density } from "@/stores/ui";
 import { setLang, storedLang, type LangSetting } from "@/i18n";
 import { applyTheme } from "@/lib/theme";
@@ -88,12 +88,11 @@ export function GeneralSection() {
       viewMode: (r.data.default_view ?? "details") as ViewMode,
       showHidden: r.data.show_hidden_default ?? false,
     });
-    useAppSettings.getState().setSingleClickOpen(r.data.single_click_open ?? false);
-    useAppSettings.getState().setShowThumbnails(r.data.show_thumbnails ?? true);
-    useAppSettings.getState().setOsFileIcons(r.data.os_file_icons ?? isWindows);
+    syncAppSettings(r.data);
   };
 
-  if (loading || !settings) return <div className="text-base text-fg-muted">Loading…</div>;
+  if (loading || !settings)
+    return <div className="text-base text-fg-muted">Loading…</div>;
 
   return (
     <div className="space-y-4">
@@ -124,7 +123,9 @@ export function GeneralSection() {
       <div className="flex items-center justify-between gap-2">
         <div>
           <div className="text-base">{t("settings.theme")}</div>
-          <div className="text-meta text-fg-muted">{t("settings.themeHint")}</div>
+          <div className="text-meta text-fg-muted">
+            {t("settings.themeHint")}
+          </div>
         </div>
         <select
           className={selectClass}
@@ -193,7 +194,9 @@ export function GeneralSection() {
         />
         <div className="flex-1">
           <div className="text-base">Show hidden files by default</div>
-          <div className="text-meta text-fg-muted">Show dotfiles from the start.</div>
+          <div className="text-meta text-fg-muted">
+            Show dotfiles from the start.
+          </div>
         </div>
       </label>
 
@@ -207,8 +210,8 @@ export function GeneralSection() {
         <div className="flex-1">
           <div className="text-base">Open items with a single click</div>
           <div className="text-meta text-fg-muted">
-            Single-click opens folders and files. Off = double-click (default). Hold Ctrl/Shift to
-            select without opening.
+            Single-click opens folders and files. Off = double-click (default).
+            Hold Ctrl/Shift to select without opening.
           </div>
         </div>
       </label>
@@ -223,8 +226,8 @@ export function GeneralSection() {
         <div className="flex-1">
           <div className="text-base">Show image thumbnails</div>
           <div className="text-meta text-fg-muted">
-            Render thumbnails for images (PNG/JPG/GIF/WebP/BMP) in Grid and Tiles views. Cached on
-            disk.
+            Render thumbnails for images (PNG/JPG/GIF/WebP/BMP) in Grid and
+            Tiles views. Cached on disk.
           </div>
         </div>
       </label>
@@ -240,25 +243,106 @@ export function GeneralSection() {
           <div className="flex-1">
             <div className="text-base">Use Windows file icons</div>
             <div className="text-meta text-fg-muted">
-              Show the same per-type icons as File Explorer for local files. Off = duet&rsquo;s
-              built-in colored glyphs. Remote (SSH) files always use glyphs.
+              Show the same per-type icons as File Explorer for local files. Off
+              = duet&rsquo;s built-in colored glyphs. Remote (SSH) files always
+              use glyphs.
             </div>
           </div>
         </label>
       )}
+
+      {/* 파일 작업 — 충돌 기본값과 확인 다이얼로그 (매번 같은 선택을 다시 하지 않게) */}
+      <div className="flex items-center justify-between gap-2 border-t border-border pt-3">
+        <div>
+          <div className="text-base">{t("settings.conflictDefault")}</div>
+          <div className="text-meta text-fg-muted">
+            {t("settings.conflictDefaultHint")}
+          </div>
+        </div>
+        <select
+          className={selectClass}
+          value={settings.transfer_conflict_default ?? "skip"}
+          onChange={(e) =>
+            void save({ transfer_conflict_default: e.target.value })
+          }
+        >
+          <option value="skip">{t("conflict.skip")}</option>
+          <option value="keepboth">{t("conflict.keepBoth")}</option>
+          <option value="replace">{t("conflict.replace")}</option>
+        </select>
+      </div>
+
+      <label className="flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={settings.remember_conflict_choice}
+          onChange={(e) =>
+            void save({ remember_conflict_choice: e.target.checked })
+          }
+          className="mt-0.5"
+        />
+        <div className="flex-1">
+          <div className="text-base">{t("settings.rememberConflict")}</div>
+          <div className="text-meta text-fg-muted">
+            {t("settings.rememberConflictHint")}
+          </div>
+        </div>
+      </label>
+
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <div className="text-base">{t("settings.confirmTransfer")}</div>
+          <div className="text-meta text-fg-muted">
+            {t("settings.confirmTransferHint")}
+          </div>
+        </div>
+        <select
+          className={selectClass}
+          value={settings.confirm_transfer ?? "conflicts_only"}
+          onChange={(e) => void save({ confirm_transfer: e.target.value })}
+        >
+          <option value="conflicts_only">
+            {t("settings.confirmConflictsOnly")}
+          </option>
+          <option value="always">{t("settings.confirmAlways")}</option>
+          <option value="never">{t("settings.confirmNever")}</option>
+        </select>
+      </div>
+
+      <label className="flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={settings.confirm_trash_delete}
+          onChange={(e) =>
+            void save({ confirm_trash_delete: e.target.checked })
+          }
+          className="mt-0.5"
+        />
+        <div className="flex-1">
+          <div className="text-base">{t("settings.confirmTrash")}</div>
+          <div className="text-meta text-fg-muted">
+            {t("settings.confirmTrashHint")}
+          </div>
+        </div>
+      </label>
 
       {/* 안전 */}
       <label className="flex items-start gap-2 border-t border-border pt-3">
         <input
           type="checkbox"
           checked={settings.permanent_delete_enabled}
-          onChange={(e) => void save({ permanent_delete_enabled: e.target.checked })}
+          onChange={(e) =>
+            void save({ permanent_delete_enabled: e.target.checked })
+          }
           className="mt-0.5"
         />
         <div className="flex-1">
-          <div className="text-base">Enable permanent delete (Shift+Delete)</div>
+          <div className="text-base">
+            Enable permanent delete (Shift+Delete)
+          </div>
           <div className="text-meta text-fg-muted">
-            Off by default. Even when on, deleting requires typing a word to confirm.
+            Off by default. Even when on, deleting requires typing a word to
+            confirm.
           </div>
           {settings.permanent_delete_enabled && (
             <div className="mt-1 flex items-center gap-1 text-meta text-danger">
@@ -280,11 +364,14 @@ export function GeneralSection() {
               className="mt-0.5"
             />
             <div className="flex-1">
-              <div className="text-base">Add &ldquo;Open in duet&rdquo; to the folder right-click menu</div>
+              <div className="text-base">
+                Add &ldquo;Open in duet&rdquo; to the folder right-click menu
+              </div>
               <div className="text-meta text-fg-muted">
-                Windows only. Adds a per-user registry entry (no admin) so right-clicking a
-                folder or drive can open it in duet. Fully reversible — turning this off removes
-                the entry. Tip: turn it off before uninstalling.
+                Windows only. Adds a per-user registry entry (no admin) so
+                right-clicking a folder or drive can open it in duet. Fully
+                reversible — turning this off removes the entry. Tip: turn it
+                off before uninstalling.
               </div>
             </div>
           </label>
@@ -298,12 +385,15 @@ export function GeneralSection() {
               className="mt-0.5"
             />
             <div className="flex-1">
-              <div className="text-base">Open folders in duet by default (double-click)</div>
+              <div className="text-base">
+                Open folders in duet by default (double-click)
+              </div>
               <div className="text-meta text-fg-muted">
-                Makes duet the default action when you double-click a folder or drive, instead of
-                File Explorer. Enabling this also adds the right-click entry above. Reversible —
-                turning it off restores Explorer. While duet is already running, opened folders
-                appear as a new tab.
+                Makes duet the default action when you double-click a folder or
+                drive, instead of File Explorer. Enabling this also adds the
+                right-click entry above. Reversible — turning it off restores
+                Explorer. While duet is already running, opened folders appear
+                as a new tab.
               </div>
             </div>
           </label>

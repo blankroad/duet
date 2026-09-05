@@ -1,5 +1,12 @@
 import { commands } from "@/types/bindings";
-import type { DeleteMode, EntryRef, Location } from "@/types/bindings";
+import type {
+  ConflictPolicy,
+  CopyPlan,
+  DeleteMode,
+  EntryRef,
+  Location,
+  MovePlan,
+} from "@/types/bindings";
 import {
   usePanes,
   activeTab,
@@ -8,8 +15,11 @@ import {
   PARENT_NAME,
   type PaneId,
 } from "@/stores/panes";
-import type { DialogState } from "@/stores/ui-dialogs";
+import { useUIDialogs, type DialogState } from "@/stores/ui-dialogs";
 import type { ToastFn } from "@/stores/toast";
+import { useTasks } from "@/stores/tasks";
+import { useAppSettings, initialConflictPolicy } from "@/stores/settings";
+import { rememberElevatable } from "@/lib/elevatePending";
 import i18n from "@/i18n";
 import { childLocation, sameLocation, sourceKey } from "@/lib/entryDnd";
 import { formatErr } from "@/lib/error";
@@ -371,6 +381,82 @@ export function triggerPermissions(open: OpenFn, showToast: ToastFn): void {
   });
 }
 
+/**
+ * 짧은 작업에 진행 모달이 깜빡이지 않도록 두는 유예 — 이 시간 안에 끝나면 모달을
+ * 아예 띄우지 않는다 (DESIGN "50ms 안에 끝나는 작업은 다이얼로그 없음").
+ */
+const PROGRESS_MODAL_DELAY_MS = 700;
+
+/**
+ * task 가 이 유예를 넘겨 아직 돌고 있으면 그때 진행 모달을 띄운다.
+ * 그 사이 사용자가 다른 다이얼로그를 열었으면 가로채지 않는다.
+ */
+function showProgressWhenSlow(
+  taskId: string,
+  title: string,
+  open: OpenFn,
+): void {
+  setTimeout(() => {
+    const t = useTasks.getState().tasks.get(taskId);
+    if (!t) return; // 이미 끝나 store 에서 빠짐
+    if (t.status.kind !== "queued" && t.status.kind !== "running") return;
+    if (useUIDialogs.getState().dialog.kind !== "none") return;
+    open({ kind: "progress", title, taskId });
+  }, PROGRESS_MODAL_DELAY_MS);
+}
+
+/**
+ * 복사/이동 실행 — 확인 다이얼로그에서 확정했을 때와, 확인을 건너뛰는 설정에서
+ * 바로 실행할 때가 같은 경로를 쓴다(승격 재시도용 plan 기억 + 진행 모달 규칙 공유).
+ */
+export async function executeTransfer(
+  mode: "copy" | "move",
+  plan: CopyPlan | MovePlan,
+  policy: ConflictPolicy,
+  open: OpenFn,
+  close: () => void,
+  showToast: ToastFn,
+): Promise<void> {
+  // 확인 다이얼로그는 먼저 닫는다 — 진행 모달은 느린 작업에서만 뒤늦게 뜬다.
+  close();
+  const r =
+    mode === "move"
+      ? await commands.fsMoveExecute(plan as MovePlan, policy)
+      : await commands.fsCopyExecute(plan as CopyPlan, policy);
+  if (r.status !== "ok") {
+    showToast(
+      i18n.t(mode === "move" ? "toast.moveFailed" : "toast.copyFailed", {
+        err: formatErr(r.error),
+      }),
+      "error",
+    );
+    return;
+  }
+  // 실패 시(보호 경로 권한 등) 승격 재시도를 위해 plan 을 기억.
+  rememberElevatable(
+    r.data,
+    mode === "move"
+      ? { op: "move", plan: plan as MovePlan, policy }
+      : { op: "copy", plan: plan as CopyPlan, policy },
+  );
+  showProgressWhenSlow(
+    r.data,
+    i18n.t(
+      mode === "move" ? "dialog.progress.moving" : "dialog.progress.copying",
+    ),
+    open,
+  );
+}
+
+/**
+ * 확인 다이얼로그를 띄울지 — 설정(`confirm_transfer`)에 따른다.
+ * 덮어쓸 것이 있으면(충돌) 설정과 무관하게 항상 묻는다(파괴적 결정은 사용자 몫).
+ */
+function needsTransferConfirm(hasConflicts: boolean): boolean {
+  if (hasConflicts) return true;
+  return useAppSettings.getState().confirmTransfer === "always";
+}
+
 /** targets 를 dst 로 복사/이동 plan 호출 후 확인 다이얼로그. 키보드·툴바·DnD 공유. */
 export async function planTransferTo(
   targets: EntryRef[],
@@ -378,6 +464,7 @@ export async function planTransferTo(
   mode: "copy" | "move",
   open: OpenFn,
   showToast: ToastFn,
+  close?: () => void,
 ): Promise<void> {
   // 선택/커서 대상이 없으면 조용히 끝나던 것 → 이유를 알린다 ("아무 일 없음" 방지).
   if (targets.length === 0) {
@@ -389,21 +476,46 @@ export async function planTransferTo(
     return;
   }
   try {
+    const closeFn = close ?? useUIDialogs.getState().close;
     if (mode === "move") {
       const r = await commands.fsMovePlan(targets, dst);
-      if (r.status === "ok") open({ kind: "move-confirm", plan: r.data });
-      else
+      if (r.status !== "ok") {
         showToast(
           i18n.t("toast.movePlanFailed", { err: formatErr(r.error) }),
           "error",
         );
+        return;
+      }
+      if (needsTransferConfirm(r.data.conflicts.length > 0))
+        open({ kind: "move-confirm", plan: r.data });
+      else
+        await executeTransfer(
+          "move",
+          r.data,
+          initialConflictPolicy(),
+          open,
+          closeFn,
+          showToast,
+        );
     } else {
       const r = await commands.fsCopyPlan(targets, dst);
-      if (r.status === "ok") open({ kind: "copy-confirm", plan: r.data });
-      else
+      if (r.status !== "ok") {
         showToast(
           i18n.t("toast.copyPlanFailed", { err: formatErr(r.error) }),
           "error",
+        );
+        return;
+      }
+      if (needsTransferConfirm(r.data.conflicts.length > 0))
+        open({ kind: "copy-confirm", plan: r.data });
+      else
+        await executeTransfer(
+          "copy",
+          r.data,
+          initialConflictPolicy(),
+          open,
+          closeFn,
+          showToast,
         );
     }
   } catch (e) {
@@ -577,17 +689,34 @@ export async function triggerDelete(
     return;
   }
   const r = await commands.fsDeletePlan(targets, mode);
-  if (r.status === "ok") {
-    open({
-      kind: mode === "permanent" ? "delete-danger" : "delete-confirm",
-      plan: r.data,
-    });
-  } else {
+  if (r.status !== "ok") {
     showToast(
       i18n.t("toast.deletePlanFailed", { err: formatErr(r.error) }),
       "error",
     );
+    return;
   }
+  // 휴지통 삭제는 Ctrl+Z 로 되돌아오므로 확인을 끌 수 있다(설정). 영구 삭제는
+  // 이 설정과 무관하게 항상 확인 + 단어 타이핑 — CLAUDE.md §3.
+  if (mode === "trash" && !useAppSettings.getState().confirmTrashDelete) {
+    const exec = await commands.fsDeleteExecute(r.data, "");
+    if (exec.status === "ok")
+      rememberElevatable(exec.data, {
+        op: "delete",
+        plan: r.data,
+        confirmWord: "",
+      });
+    else
+      showToast(
+        i18n.t("toast.deleteFailed", { err: formatErr(exec.error) }),
+        "error",
+      );
+    return;
+  }
+  open({
+    kind: mode === "permanent" ? "delete-danger" : "delete-confirm",
+    plan: r.data,
+  });
 }
 
 /** 가상 휴지통 비우기 — 확인(단어 타이핑) 다이얼로그를 연다. */

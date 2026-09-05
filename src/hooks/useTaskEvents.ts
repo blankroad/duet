@@ -9,6 +9,14 @@ import { takeElevatable, elevatableDestKind } from "@/lib/elevatePending";
 import { takeExtract } from "@/lib/extractPending";
 
 const isWindows = platform() === "windows";
+
+/**
+ * 성공 토스트를 띄울 최소 소요 시간 — 이보다 빨리 끝난 작업은 결과가 이미 목록에
+ * 보이므로 알리지 않는다 (DESIGN "성공 알림은 큰 작업만", 토스트 남용 금지).
+ */
+const SUCCESS_TOAST_MIN_MS = 2000;
+/** taskId → 시작 시각. enqueued 에서 넣고 종결에서 뺀다. */
+const startedAt = new Map<string, number>();
 /** DuetError Display 가 로컬 access-denied 를 나타내는지 (승격 재시도 후보). */
 const PERM_DENIED = /permission denied|os error 5|access is denied/i;
 
@@ -48,6 +56,7 @@ export function useTaskEvents() {
       switch (payload.change.kind) {
         case "enqueued":
           add(payload.change.task);
+          startedAt.set(id, Date.now());
           break;
         case "started":
           setStatus(id, { kind: "running" });
@@ -63,20 +72,28 @@ export function useTaskEvents() {
           takeElevatable(id); // 성공 → 승격/암호 재시도 후보 정리
           takeExtract(id);
           // 종결 즉시 목록에서 사라지므로 완료 확인 지점이 없던 문제 — 성공 토스트.
+          // 단 눈 깜짝할 새 끝난 작업(파일 한두 개 복사)까지 알리면 토스트가 밀려
+          // 정작 읽어야 할 에러를 밀어낸다. 오래 걸린 작업만 알린다.
+          const began = startedAt.get(id);
+          startedAt.delete(id);
+          const slow =
+            began === undefined || Date.now() - began >= SUCCESS_TOAST_MIN_MS;
           const title = useTasks.getState().tasks.get(id)?.title;
-          useToast
-            .getState()
-            .show(
-              title
-                ? i18n.t("toast.taskDone", { title })
-                : i18n.t("toast.taskDoneGeneric"),
-              "success",
-            );
+          if (slow)
+            useToast
+              .getState()
+              .show(
+                title
+                  ? i18n.t("toast.taskDone", { title })
+                  : i18n.t("toast.taskDoneGeneric"),
+                "success",
+              );
           remove(id);
           break;
         }
         case "cancelled": {
           setStatus(id, { kind: "cancelled" });
+          startedAt.delete(id);
           takeElevatable(id);
           takeExtract(id);
           const title = useTasks.getState().tasks.get(id)?.title;
@@ -91,6 +108,7 @@ export function useTaskEvents() {
           break;
         }
         case "failed": {
+          startedAt.delete(id);
           const msg = payload.change.message;
           setError(id, msg);
           setStatus(id, { kind: "failed", message: msg });

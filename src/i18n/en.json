@@ -594,7 +594,18 @@
       "reset": "Reset",
       "pressKey": "Press key…"
     },
-    "desc": "Application settings"
+    "desc": "Application settings",
+    "conflictDefault": "Default when a file already exists",
+    "conflictDefaultHint": "Which option is preselected in the copy/move dialog.",
+    "rememberConflict": "Remember my last choice for this session",
+    "rememberConflictHint": "The dialog reopens with whatever you picked last, until duet quits.",
+    "confirmTransfer": "Confirm before copying or moving",
+    "confirmTransferHint": "Replacing files always asks, whatever this is set to.",
+    "confirmConflictsOnly": "Only when something would be replaced",
+    "confirmAlways": "Always",
+    "confirmNever": "Never",
+    "confirmTrash": "Confirm before moving to the trash",
+    "confirmTrashHint": "Trashed items come back with Ctrl+Z. Permanent delete always asks."
   },
   "toast": {
     "renameSelectOne": "Rename: select exactly one item",

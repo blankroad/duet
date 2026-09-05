@@ -591,7 +591,18 @@
       "reset": "초기화",
       "pressKey": "키를 누르세요…"
     },
-    "desc": "앱 설정"
+    "desc": "앱 설정",
+    "conflictDefault": "같은 이름이 있을 때 기본 선택",
+    "conflictDefaultHint": "복사·이동 다이얼로그에서 미리 골라 둘 항목.",
+    "rememberConflict": "이번 세션 동안 마지막 선택 기억",
+    "rememberConflictHint": "직전에 고른 것이 다음 다이얼로그의 기본이 됩니다. duet 을 끄면 초기화.",
+    "confirmTransfer": "복사·이동 전 확인",
+    "confirmTransferHint": "덮어쓸 것이 있으면 이 설정과 무관하게 항상 묻습니다.",
+    "confirmConflictsOnly": "덮어쓸 것이 있을 때만",
+    "confirmAlways": "항상",
+    "confirmNever": "묻지 않음",
+    "confirmTrash": "휴지통으로 보내기 전 확인",
+    "confirmTrashHint": "휴지통은 Ctrl+Z 로 되돌아옵니다. 영구 삭제는 항상 확인합니다."
   },
   "toast": {
     "renameSelectOne": "이름 변경: 항목을 하나만 선택하세요",

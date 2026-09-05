@@ -19,6 +19,7 @@ import {
   transferSummary,
   type TransferPlan,
 } from "./TransferPlanBody";
+import { initialConflictPolicy, useAppSettings } from "@/stores/settings";
 
 const POLICY_HINT: Record<ConflictPolicy, string> = {
   skip: "conflict.skipAllHint",
@@ -52,11 +53,19 @@ export function CopyMoveConfirmDialog({
   const ctaRef = useRef<HTMLButtonElement>(null);
   const conflicts = plan.conflicts;
   const cta = t(`dialog.transfer.${kind}`);
-  const [policy, setPolicy] = useState<ConflictPolicy>("skip");
+  // 기본 선택은 설정값(디폴트 건너뛰기) — "마지막 선택 기억"이 켜져 있으면 세션의
+  // 직전 선택. 매번 같은 것을 다시 고르지 않게 한다.
+  const [policy, setPolicy] = useState<ConflictPolicy>(initialConflictPolicy);
   const [perFile, setPerFile] = useState(false);
   const [decisions, setDecisions] = useState<Record<string, ConflictPolicy>>(
-    () => Object.fromEntries(conflicts.map((c) => [c.name, "skip" as const])),
+    () => Object.fromEntries(conflicts.map((c) => [c.name, policy])),
   );
+
+  /** 고른 정책을 세션에 기록한 뒤 실행 — 다음 다이얼로그의 기본이 된다. */
+  const confirmWith = (p: ConflictPolicy) => {
+    useAppSettings.getState().setLastConflictChoice(p);
+    onConfirm(p);
+  };
 
   const cancelBtn = (
     <DialogButton hint="esc" onClick={onCancel}>
@@ -132,7 +141,7 @@ export function CopyMoveConfirmDialog({
             ref={ctaRef}
             tone={destructive ? "danger" : "primary"}
             hint="enter"
-            onClick={() => onConfirm(hasConflicts ? policy : "replace")}
+            onClick={() => confirmWith(hasConflicts ? policy : "replace")}
           >
             {cta}
           </DialogButton>

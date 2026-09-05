@@ -19,6 +19,12 @@ fn default_sort() -> String {
 fn default_view() -> String {
     "details".into()
 }
+fn default_conflict() -> String {
+    "skip".into()
+}
+fn default_confirm_transfer() -> String {
+    "conflicts_only".into()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct Settings {
@@ -53,6 +59,21 @@ pub struct Settings {
     /// Windows 로컬 파일 전용 — 원격/폴더는 내장 글리프. 디폴트: Windows 만 켬.
     #[serde(default = "default_os_file_icons")]
     pub os_file_icons: bool,
+    /// 복사/이동 충돌 다이얼로그의 기본 선택: "skip" | "keepboth" | "replace".
+    /// 디폴트 skip — 아무것도 덮어쓰지 않는 안전한 시작점(DESIGN.md).
+    #[serde(default = "default_conflict")]
+    pub transfer_conflict_default: String,
+    /// 충돌 정책을 세션 동안 기억할지 — 마지막에 고른 값이 다음 다이얼로그의 기본이 된다.
+    #[serde(default)]
+    pub remember_conflict_choice: bool,
+    /// 복사/이동 확인 다이얼로그를 언제 띄울지: "always" | "conflicts_only" | "never".
+    /// 디폴트 conflicts_only — 덮어쓸 게 없으면 확인 없이 바로 시작(탐색기/파인더/DOpus).
+    #[serde(default = "default_confirm_transfer")]
+    pub confirm_transfer: String,
+    /// 휴지통 삭제에 확인 다이얼로그를 띄울지. 디폴트 true.
+    /// (영구 삭제는 이 설정과 무관하게 항상 확인 + 단어 타이핑 — CLAUDE.md §3.)
+    #[serde(default = "default_true")]
+    pub confirm_trash_delete: bool,
     // ── 아래 맵 필드들은 항상 struct 마지막에 (TOML 은 table 뒤에 scalar 못 옴) ──
     /// 확장자(소문자, 점 없음) → 아이콘 팔레트 이름. 유저가 설정에서 지정. 내장 매핑보다 우선.
     #[serde(default)]
@@ -83,6 +104,10 @@ impl Default for Settings {
             single_click_open: false,
             show_thumbnails: true,
             os_file_icons: default_os_file_icons(),
+            transfer_conflict_default: default_conflict(),
+            remember_conflict_choice: false,
+            confirm_transfer: default_confirm_transfer(),
+            confirm_trash_delete: true,
             ext_icon_overrides: HashMap::new(),
             ext_app_overrides: HashMap::new(),
         }
@@ -101,6 +126,10 @@ pub struct SettingsPatch {
     pub single_click_open: Option<bool>,
     pub show_thumbnails: Option<bool>,
     pub os_file_icons: Option<bool>,
+    pub transfer_conflict_default: Option<String>,
+    pub remember_conflict_choice: Option<bool>,
+    pub confirm_transfer: Option<String>,
+    pub confirm_trash_delete: Option<bool>,
     pub ext_icon_overrides: Option<HashMap<String, String>>,
     pub ext_app_overrides: Option<HashMap<String, String>>,
 }
@@ -169,6 +198,18 @@ impl SettingsStore {
         }
         if let Some(v) = patch.os_file_icons {
             s.os_file_icons = v;
+        }
+        if let Some(v) = patch.transfer_conflict_default {
+            s.transfer_conflict_default = v;
+        }
+        if let Some(v) = patch.remember_conflict_choice {
+            s.remember_conflict_choice = v;
+        }
+        if let Some(v) = patch.confirm_transfer {
+            s.confirm_transfer = v;
+        }
+        if let Some(v) = patch.confirm_trash_delete {
+            s.confirm_trash_delete = v;
         }
         if let Some(v) = patch.ext_icon_overrides {
             s.ext_icon_overrides = v;
