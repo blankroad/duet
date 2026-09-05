@@ -3536,35 +3536,75 @@ async fn copy_execute_same_host(
     let mut copied = Vec::new();
     let mut copied_from: Vec<PathBuf> = Vec::new();
     let mut outcome: Result<(), DuetError> = Ok(());
+
+    /// 충돌 항목을 정책대로 미리 해석한 결과 — 아래 복사 루프가 그대로 따른다.
+    enum Resolved {
+        /// 충돌 없음 — dst 부모에 basename 으로 그대로.
+        Plain,
+        /// Skip — 이 항목은 아예 복사하지 않는다.
+        Skip,
+        /// KeepBoth — 비어 있는 새 이름으로 복사(둘 다 유지).
+        NewName(PathBuf),
+        /// Replace — 기존을 .bak 으로 비운 뒤 제자리에 복사.
+        Replaced,
+    }
+
+    // 정책 해석(+Replace backup). 예전에는 정책과 무관하게 충돌 대상을 전부 .bak 으로
+    // 옮긴 뒤 rsync `--ignore-existing`/`cp -n` 을 걸어서, **Skip 을 골라도 경로가 비어
+    // 있으니 그냥 복사**되고 .bak 만 남았다(KeepBoth 도 덮어쓰기로 폴백). relay 경로와
+    // 같은 의미가 되도록 여기서 항목별로 결정한다.
+    let mut resolved: Vec<Resolved> = Vec::with_capacity(plan.items.len());
+    let mut skipped = 0u32;
     for it in &plan.items {
-        // 항목 경계 cancel check (backup pre-loop)
+        // 항목 경계 cancel check (정책 해석 pre-loop)
         if cancel_token.is_cancelled() {
             outcome = Err(DuetError::Cancelled);
             break;
         }
-        let step: Result<(), DuetError> = async {
+        let step: Result<Resolved, DuetError> = async {
             let dst_path = crate::fs::posix_join(&plan.dst.path, &it.name);
-            if dst_fs.metadata(&dst_path).await.is_ok() {
-                let backup = pick_backup_path(&dst_fs, &plan.dst.path, &it.name).await?;
-                dst_fs.rename(&dst_path, &backup).await?;
-                backups.push(BackupRestore {
-                    backup_path: backup,
-                    original_path: dst_path,
-                });
+            if dst_fs.metadata(&dst_path).await.is_err() {
+                return Ok(Resolved::Plain);
             }
-            Ok(())
+            match policy {
+                ConflictPolicy::Skip => Ok(Resolved::Skip),
+                ConflictPolicy::KeepBoth => Ok(Resolved::NewName(
+                    dedup_dst_name(&dst_fs, &plan.dst.path, &it.name).await,
+                )),
+                ConflictPolicy::Replace => {
+                    let backup = pick_backup_path(&dst_fs, &plan.dst.path, &it.name).await?;
+                    dst_fs.rename(&dst_path, &backup).await?;
+                    backups.push(BackupRestore {
+                        backup_path: backup,
+                        original_path: dst_path,
+                    });
+                    Ok(Resolved::Replaced)
+                }
+            }
         }
         .await;
-        if let Err(e) = step {
-            outcome = Err(e);
-            break;
+        match step {
+            Ok(r) => {
+                if matches!(r, Resolved::Skip) {
+                    skipped += 1;
+                }
+                resolved.push(r);
+            }
+            Err(e) => {
+                outcome = Err(e);
+                break;
+            }
         }
     }
 
-    for it in &plan.items {
-        // backup 루프가 중간 실패했으면 copy 진행 안 함 (부분 backup 상태로 복사 금지).
+    for (it, res) in plan.items.iter().zip(resolved.iter()) {
+        // 해석 루프가 중간 실패했으면 copy 진행 안 함 (부분 backup 상태로 복사 금지).
         if outcome.is_err() {
             break;
+        }
+        // Skip 으로 결정된 항목은 건드리지 않는다(기존 파일 보존).
+        if matches!(res, Resolved::Skip) {
+            continue;
         }
         // 항목 경계 cancel check (copy main loop)
         if cancel_token.is_cancelled() {
@@ -3573,34 +3613,32 @@ async fn copy_execute_same_host(
         }
         let step: Result<(), DuetError> = async {
             let src_path = crate::fs::posix_join(&it.location.path, &it.name);
-            let dst_path = crate::fs::posix_join(&plan.dst.path, &it.name);
+            let dst_path = match res {
+                Resolved::NewName(p) => p.clone(),
+                _ => crate::fs::posix_join(&plan.dst.path, &it.name),
+            };
             let src_arg = shell_escape_path(&src_path)?;
 
-            // same-host 충돌 정책(rsync/cp): Skip=기존 보존(--ignore-existing / cp -n),
-            // 그 외(Replace/KeepBoth)는 rsync/cp 기본(덮어쓰기). KeepBoth 는 same-host
-            // 에선 미지원 → 기본 덮어쓰기로 폴백(relay 경로에서만 새이름 생성).
-            let skip_existing = policy == ConflictPolicy::Skip;
             let cmd = if use_rsync {
                 // rsync 는 SRC(trailing-slash 없음) 를 DEST *디렉토리* 안에 basename
                 // 으로 생성한다. 따라서 dst.path.join(name) (= 최종 경로) 을 주면
                 // dir 복사 시 한 단계 더 중첩됨 (dst/many/many/). 부모 디렉토리
                 // (plan.dst.path) 를 줘야 dst/<name> 으로 떨어진다 — file/dir 동일.
-                let dst_parent_arg = shell_escape_path(&plan.dst.path)?;
-                let ignore = if skip_existing {
-                    " --ignore-existing"
-                } else {
-                    ""
+                //
+                // KeepBoth 만 예외: 최종 이름이 basename 과 다르므로 **없는 경로**인
+                // 최종 경로를 준다 — rsync 는 DEST 가 없으면 그 이름으로 만든다.
+                let dest_arg = match res {
+                    Resolved::NewName(p) => shell_escape_path(p)?,
+                    _ => shell_escape_path(&plan.dst.path)?,
                 };
                 // --out-format=DUETF:%n 로 전송 파일명을 한 줄씩 찍게 해 현재 파일명 표시.
                 // (progress2 의 집계 라인과 구분되도록 DUETF: 접두 sentinel.)
-                format!(
-                    "rsync -a --info=progress2{ignore} --out-format=DUETF:%n -- {src_arg} {dst_parent_arg}"
-                )
+                format!("rsync -a --info=progress2 --out-format=DUETF:%n -- {src_arg} {dest_arg}")
             } else {
                 // cp 는 DEST 를 새 이름으로 취급 → 최종 경로를 그대로 준다.
+                // (Skip 은 위에서 항목째 제외, KeepBoth 는 dst_path 가 이미 새 이름.)
                 let dst_arg = shell_escape_path(&dst_path)?;
-                let noclobber = if skip_existing { " -n" } else { "" };
-                format!("cp -a{noclobber} -- {src_arg} {dst_arg}")
+                format!("cp -a -- {src_arg} {dst_arg}")
             };
 
             // progress emit throttle: 1초
@@ -3687,8 +3725,13 @@ async fn copy_execute_same_host(
     // §4 (A4): 충돌 backup + 부분 복사분이라도 journal 에 기록한 뒤 에러 전파 —
     // backup 후 copy 실패 시 .bak 고아 + undo 미기록(Ctrl+Z 복원 불가) 버그 수정.
     if copied.is_empty() && backups.is_empty() {
-        outcome?;
-        return Err(DuetError::Io("copy affected nothing".into()));
+        if outcome.is_err() {
+            return Err(outcome.err().unwrap());
+        }
+        // 전부 skip(충돌 회피)이면 의도된 no-op — 에러 아님(relay 경로와 동일).
+        if skipped == 0 {
+            return Err(DuetError::Io("copy affected nothing".into()));
+        }
     }
     let count = copied.len() as u32;
     let undo = UndoAction::UndoCopy {
