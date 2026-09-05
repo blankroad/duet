@@ -380,6 +380,40 @@ async fn plan_transfer(
     })
 }
 
+/// 항목별 실패들을 **하나의** 에러로 묶는다.
+///
+/// 예전에는 첫 실패에서 루프를 끊어 뒤 항목을 시도조차 안 했다(1000개 중 3번째가
+/// 권한 오류면 997개가 안 갔다). 이제 끝까지 시도하고 여기서 요약한다.
+/// 실패 종류가 모두 같으면 그 종류를 유지한다 — 프론트의 승격(UAC/sudo) 재시도가
+/// `PermissionDenied` kind 로 분기하기 때문.
+fn combine_failures(failures: Vec<(String, DuetError)>) -> DuetError {
+    let names: Vec<String> = failures
+        .iter()
+        .take(5)
+        .map(|(name, e)| format!("{name}: {e}"))
+        .collect();
+    let more = failures.len().saturating_sub(names.len());
+    let detail = if more > 0 {
+        format!("{} and {more} more", names.join("; "))
+    } else {
+        names.join("; ")
+    };
+    let msg = format!("{} item(s) failed — {detail}", failures.len());
+    let same_kind = failures
+        .windows(2)
+        .all(|w| std::mem::discriminant(&w[0].1) == std::mem::discriminant(&w[1].1));
+    match failures.into_iter().next() {
+        Some((_, first)) if same_kind => match first {
+            DuetError::PermissionDenied(_) => DuetError::PermissionDenied(msg),
+            DuetError::NotFound(_) => DuetError::NotFound(msg),
+            DuetError::Ssh(_) => DuetError::Ssh(msg),
+            DuetError::CrossDevice(_) => DuetError::CrossDevice(msg),
+            _ => DuetError::Io(msg),
+        },
+        _ => DuetError::Io(msg),
+    }
+}
+
 pub async fn copy_execute(
     src_fs: &dyn FileSystem,
     dst_fs: &dyn FileSystem,
@@ -489,6 +523,8 @@ async fn copy_execute_relay(
     let mut skipped = 0u32;
     // 교체된 **폴더**의 백업 — undo 로 원래 폴더를 되돌리기 위해 journal 에 싣는다.
     let mut kept_backups: Vec<BackupRestore> = Vec::new();
+    // 항목별 실패 — 끝까지 시도한 뒤 combine_failures 로 한 번에 보고한다.
+    let mut failures: Vec<(String, DuetError)> = Vec::new();
     let mut outcome: Result<(), DuetError> = Ok(());
     for (idx, it) in plan.items.iter().enumerate() {
         // 항목 경계 cancel check
@@ -614,11 +650,17 @@ async fn copy_execute_relay(
         match step {
             Ok(true) => skipped += 1, // 충돌 skip
             Ok(false) => {}
-            Err(e) => {
-                outcome = Err(e);
+            // 취소는 즉시 멈춘다. 그 외 실패는 모아 두고 남은 항목을 계속 처리한다
+            // — 한 항목의 권한 오류로 나머지 전부를 버리지 않기 위해.
+            Err(DuetError::Cancelled) => {
+                outcome = Err(DuetError::Cancelled);
                 break;
             }
+            Err(e) => failures.push((it.name.clone(), e)),
         }
+    }
+    if outcome.is_ok() && !failures.is_empty() {
+        outcome = Err(combine_failures(std::mem::take(&mut failures)));
     }
 
     // §4: 부분 진행분(복사 완료분)이라도 journal 에 기록한 뒤 에러 전파.
@@ -779,6 +821,8 @@ pub async fn move_execute(
     let mut skipped = 0u32;
     // 교체된 **폴더**의 백업 — undo 로 원래 폴더를 되돌리기 위해 journal 에 싣는다.
     let mut kept_backups: Vec<BackupRestore> = Vec::new();
+    // 항목별 실패 — 끝까지 시도한 뒤 한 번에 보고.
+    let mut failures: Vec<(String, DuetError)> = Vec::new();
     let mut outcome: Result<(), DuetError> = Ok(());
     for (idx, it) in plan.items.iter().enumerate() {
         // 항목 경계 cancel check
@@ -940,11 +984,16 @@ pub async fn move_execute(
         match step {
             Ok(true) => skipped += 1, // 충돌 skip
             Ok(false) => {}
-            Err(e) => {
-                outcome = Err(e);
+            // copy 와 같은 규칙 — 취소만 즉시 멈추고, 나머지 실패는 모아서 계속.
+            Err(DuetError::Cancelled) => {
+                outcome = Err(DuetError::Cancelled);
                 break;
             }
+            Err(e) => failures.push((it.name.clone(), e)),
         }
+    }
+    if outcome.is_ok() && !failures.is_empty() {
+        outcome = Err(combine_failures(std::mem::take(&mut failures)));
     }
 
     // §4: 부분 진행분(이동 완료분)이라도 journal 에 기록한 뒤 에러 전파.
@@ -4333,6 +4382,61 @@ mod tests {
         }
         assert!(!has_bak, "move Replace 도 .bak 을 남기지 않아야 함");
         assert_eq!(count, 1, "dst 에는 덮어쓴 항목 1개만 남아야 함");
+    }
+
+    /// 한 항목이 실패해도 나머지는 계속 복사돼야 한다.
+    /// 예전에는 첫 실패에서 루프를 끊어, 1000개 중 3번째가 실패하면 997개가 안 갔다.
+    #[tokio::test]
+    async fn copy_continues_after_one_item_fails() {
+        use crate::core::copy_strategy::CopyStrategy;
+        let dir = TempDir::new().unwrap();
+        let src = dir.path().join("src");
+        let dst = dir.path().join("dst");
+        tokio::fs::create_dir_all(&src).await.unwrap();
+        tokio::fs::create_dir_all(&dst).await.unwrap();
+        tokio::fs::write(src.join("a.txt"), b"A").await.unwrap();
+        tokio::fs::write(src.join("c.txt"), b"C").await.unwrap();
+        // b 는 plan 에만 있고 실제로는 없는 항목 — 복사 시 실패한다.
+        let items = ["a.txt", "b-missing.txt", "c.txt"]
+            .into_iter()
+            .map(|n| mk_target(&src, n))
+            .collect::<Vec<_>>();
+        let plan = CopyPlan {
+            src_source: SourceId::Local,
+            dst: Location {
+                source: SourceId::Local,
+                path: dst.clone(),
+            },
+            items,
+            conflicts: vec![],
+            total_size_bytes: 2,
+            strategy: CopyStrategy::LocalToLocal,
+        };
+        let (ctx, _cd) = mk_ctx().await;
+        let local = LocalFs::new();
+        let err = copy_execute(
+            &local,
+            &local,
+            plan,
+            ConflictPolicy::Skip,
+            &ctx,
+            tokio_util::sync::CancellationToken::new(),
+            None,
+        )
+        .await
+        .expect_err("실패 항목이 있으므로 에러로 보고돼야 함");
+
+        // 실패는 요약해 보고하되, 나머지 두 개는 실제로 복사돼 있어야 한다.
+        assert!(
+            err.to_string().contains("b-missing.txt"),
+            "실패한 이름이 메시지에 있어야 함: {err}"
+        );
+        assert_eq!(tokio::fs::read(dst.join("a.txt")).await.unwrap(), b"A");
+        assert_eq!(
+            tokio::fs::read(dst.join("c.txt")).await.unwrap(),
+            b"C",
+            "실패 항목 뒤의 항목도 복사돼야 함"
+        );
     }
 
     /// 폴더를 폴더 위에 Replace — 파일과 달리 되돌릴 수 있어야 한다(§4 폴더 예외).
