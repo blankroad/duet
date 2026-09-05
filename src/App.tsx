@@ -759,6 +759,10 @@ function App() {
   useShellWarm();
 
   const setBuiltins = useCommands((s) => s.setBuiltins);
+  // 설정이 바뀌면 커맨드 목록을 다시 만든다 — 영구 삭제 노출 여부가 걸려 있다.
+  const permanentDeleteEnabled = useAppSettings(
+    (s) => s.permanentDeleteEnabled,
+  );
   const openPalette = usePalette((s) => s.open);
   const toggleSidebar = useUI((s) => s.toggleSidebar);
   const togglePreview = useUI((s) => s.togglePreview);
@@ -771,6 +775,7 @@ function App() {
 
   useEffect(() => {
     const builtins = buildBuiltins({
+      permanentDeleteEnabled,
       openTab: () =>
         usePanes.getState().openTab(usePanes.getState().activePane),
       closeActiveTab: () => {
@@ -945,6 +950,7 @@ function App() {
     setBuiltins(builtins);
   }, [
     setBuiltins,
+    permanentDeleteEnabled,
     openPalette,
     toggleSidebar,
     togglePreview,

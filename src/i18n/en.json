@@ -720,12 +720,16 @@
     "trashOnlyPutBack": "Items in the trash can only be put back",
     "purgeDone": "{{count}} item(s) permanently deleted",
     "purgeFailed": "Permanent delete failed: {{err}}",
-    "bookmarkAdded": "{{count}} bookmark(s) added",
+    "bookmarkAdded": "Bookmarked “{{name}}”",
     "bookmarkLocalOnly": "Bookmarks are local-only — use ★ in the path bar for remote",
     "renameFailed": "Rename failed: {{err}}",
     "removeBookmarkFailed": "Could not remove the bookmark: {{err}}",
     "removeFavoriteFailed": "Could not remove the favorite: {{err}}",
-    "bookmarksMigrated": "Moved {{count}} SSH bookmark(s) to host favorites"
+    "bookmarksMigrated": "Moved {{count}} SSH bookmark(s) to host favorites",
+    "noActiveConnection": "No active connection for this folder",
+    "bookmarkedOnHost": "Bookmarked on {{host}}: {{name}}",
+    "bookmarkFailed": "Could not add the bookmark",
+    "alreadyBookmarked": "“{{name}}” is already bookmarked"
   },
   "sidebar": {
     "tasks": "Tasks",

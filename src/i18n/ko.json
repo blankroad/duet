@@ -717,12 +717,16 @@
     "trashOnlyPutBack": "휴지통에서는 제자리로 복원만 가능합니다",
     "purgeDone": "{{count}}개 영구 삭제됨",
     "purgeFailed": "영구 삭제 실패: {{err}}",
-    "bookmarkAdded": "북마크 {{count}}개 추가됨",
+    "bookmarkAdded": "“{{name}}” 북마크됨",
     "bookmarkLocalOnly": "북마크는 로컬 폴더만 — 원격은 경로 표시줄의 ★ 로 추가하세요",
     "renameFailed": "이름 바꾸기 실패: {{err}}",
     "removeBookmarkFailed": "북마크를 지우지 못했습니다: {{err}}",
     "removeFavoriteFailed": "즐겨찾기를 지우지 못했습니다: {{err}}",
-    "bookmarksMigrated": "SSH 북마크 {{count}}개를 호스트 즐겨찾기로 옮겼습니다"
+    "bookmarksMigrated": "SSH 북마크 {{count}}개를 호스트 즐겨찾기로 옮겼습니다",
+    "noActiveConnection": "이 폴더의 연결을 찾을 수 없습니다",
+    "bookmarkedOnHost": "{{host}} 에 북마크: {{name}}",
+    "bookmarkFailed": "북마크를 추가하지 못했습니다",
+    "alreadyBookmarked": "“{{name}}” 은 이미 북마크되어 있습니다"
   },
   "sidebar": {
     "tasks": "작업",

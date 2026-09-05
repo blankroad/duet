@@ -113,6 +113,8 @@ export interface BuiltinDeps {
   newFile: () => void;
   delete: () => void;
   deletePerm: () => void;
+  /** 영구 삭제 설정 — 꺼져 있으면 커맨드 자체를 등록하지 않는다. */
+  permanentDeleteEnabled: boolean;
   copyPath: () => void;
   copyName: () => void;
   calcDirSize: () => void;
@@ -486,13 +488,19 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
       defaultKey: "Delete",
       action: deps.delete,
     },
-    {
-      id: "file.deletePerm",
-      label: "Delete permanently",
-      category: "File",
-      defaultKey: "Shift+Delete",
-      action: deps.deletePerm,
-    },
+    // 영구 삭제는 설정에서 켠 경우에만 등록한다(CLAUDE.md §3) — 꺼져 있는데 팔레트에
+    // 보이고 누르면 백엔드가 거부해 에러 토스트로 끝나던 것.
+    ...(deps.permanentDeleteEnabled
+      ? [
+          {
+            id: "file.deletePerm",
+            label: "Delete permanently",
+            category: "File",
+            defaultKey: "Shift+Delete",
+            action: deps.deletePerm,
+          } as Command,
+        ]
+      : []),
     {
       id: "file.clipCopy",
       label: "Copy",

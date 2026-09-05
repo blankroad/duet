@@ -52,6 +52,9 @@ interface AppSettingsState {
   /** 휴지통 삭제 확인 다이얼로그 (디폴트 true). 영구 삭제는 항상 확인 — CLAUDE.md §3. */
   confirmTrashDelete: boolean;
   setConfirmTrashDelete: (v: boolean) => void;
+  /** 영구 삭제 사용 여부 (디폴트 false). 꺼져 있으면 메뉴·커맨드에 아예 안 나온다. */
+  permanentDeleteEnabled: boolean;
+  setPermanentDeleteEnabled: (v: boolean) => void;
 }
 
 /**
@@ -85,6 +88,8 @@ export const useAppSettings = create<AppSettingsState>((set) => ({
   setConfirmTransfer: (v) => set({ confirmTransfer: v }),
   confirmTrashDelete: true,
   setConfirmTrashDelete: (v) => set({ confirmTrashDelete: v }),
+  permanentDeleteEnabled: false,
+  setPermanentDeleteEnabled: (v) => set({ permanentDeleteEnabled: v }),
 }));
 
 /** backend Settings → 프론트 미러 동기화 (부팅·저장 시 공통). */
@@ -97,4 +102,5 @@ export function syncAppSettings(s: Settings): void {
   st.setRememberConflictChoice(s.remember_conflict_choice ?? false);
   st.setConfirmTransfer(asConfirmTransfer(s.confirm_transfer));
   st.setConfirmTrashDelete(s.confirm_trash_delete ?? true);
+  st.setPermanentDeleteEnabled(s.permanent_delete_enabled ?? false);
 }

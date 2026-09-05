@@ -4,6 +4,7 @@ import { Loader } from "lucide-react";
 import { TabBar } from "./TabBar";
 import { PathBar } from "./PathBar";
 import { isVirtualTrash } from "@/lib/trashView";
+import { parentPath } from "@/lib/entryDnd";
 import { PaneFilterBar } from "./PaneFilterBar";
 import { SelectPatternBar } from "./SelectPatternBar";
 import { ConnectionBanner } from "./ConnectionBanner";
@@ -139,6 +140,10 @@ export function Pane({
         onBack={() => onBack(id)}
         onForward={() => onForward(id)}
         onUp={goUp}
+        canUp={
+          // 아카이브 루트는 "빠져나가기" 가 있으니 활성, 그 외엔 부모 경로 유무.
+          tab.archive !== undefined || parentPath(tab.location.path) !== null
+        }
         onSegmentClick={(p) => onNavigate(id, p)}
         onRefresh={() => onRefresh(id)}
         onUpdateArchive={tab.archive ? () => onUpdateArchive(id) : undefined}

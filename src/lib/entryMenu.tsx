@@ -34,6 +34,7 @@ import {
   Link2,
 } from "lucide-react";
 import i18n from "@/i18n";
+import { useAppSettings } from "@/stores/settings";
 import { commands } from "@/types/bindings";
 import type { Entry, Location } from "@/types/bindings";
 import { formatErr } from "@/lib/error";
@@ -440,15 +441,19 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
       danger: true,
       onSelect: () => void triggerDelete("trash", open, showToast),
     },
-    {
+  );
+  // 영구 삭제는 설정에서 켠 경우에만 노출한다(CLAUDE.md §3). 예전에는 꺼져 있어도
+  // danger 항목이 그대로 보이고, 누르면 백엔드가 거부해 에러 토스트로 끝났다.
+  if (useAppSettings.getState().permanentDeleteEnabled) {
+    items.push({
       id: "delete-perm",
       label: i18n.t("menu.deletePermanently"),
       icon: <Trash size={ICON} />,
       shortcut: "Shift+Del",
       danger: true,
       onSelect: () => void triggerDelete("permanent", open, showToast),
-    },
-  );
+    });
+  }
 
   return items;
 }

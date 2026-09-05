@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Loader, Search, X, RefreshCw } from "lucide-react";
 import { commands } from "@/types/bindings";
+import { formatErr } from "@/lib/error";
 import type { SearchHit } from "@/types/bindings";
 import { useSearch } from "@/stores/search";
 import { useIndexStatus } from "@/stores/indexStatus";
@@ -94,7 +95,7 @@ export function SearchPanel({
           : await commands.indexSearch(root, trimmed, opts);
         if (seq !== seqRef.current) return; // 더 새 검색이 시작됨 → 이 응답은 버림
         if (r.status === "ok") setResults(r.data ?? []);
-        else setError(r.error.kind);
+        else setError(formatErr(r.error));
       })();
     }, 200);
     return () => clearTimeout(timer);

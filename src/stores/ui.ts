@@ -8,6 +8,8 @@ import type { PaneId } from "@/stores/panes";
 
 const COLLAPSE_KEY = "duet.sidebar.collapsed";
 const SPLITEXT_KEY = "duet.view.splitExt";
+const SIDEBAR_KEY = "duet.view.sidebarOpen";
+const PREVIEW_KEY = "duet.view.previewOpen";
 const SYNCBROWSE_KEY = "duet.view.syncBrowse";
 const DENSITY_KEY = "duet.view.density";
 const SINGLEPANE_KEY = "duet.view.singlePane";
@@ -37,12 +39,13 @@ function loadDensity(): Density {
   }
 }
 
-/** boolean UI 설정 localStorage 로드 (비민감). */
-function loadBool(key: string): boolean {
+/** boolean UI 설정 localStorage 로드 (비민감). 저장된 값이 없으면 `fallback`. */
+function loadBool(key: string, fallback = false): boolean {
   try {
-    return localStorage.getItem(key) === "1";
+    const v = localStorage.getItem(key);
+    return v === null ? fallback : v === "1";
   } catch {
-    return false;
+    return fallback;
   }
 }
 function saveBool(key: string, v: boolean): void {
@@ -118,10 +121,22 @@ interface UIState {
 }
 
 export const useUI = create<UIState>((set) => ({
-  sidebarOpen: true,
-  toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
-  previewOpen: true,
-  togglePreview: () => set((s) => ({ previewOpen: !s.previewOpen })),
+  // 레이아웃 토글도 영속 — 닫아 둔 패널이 재시작마다 돌아오던 문제(정보 패널은
+  // 기본 260px 를 다시 차지했다). 저장된 값이 없으면 기존 기본값(둘 다 열림).
+  sidebarOpen: loadBool(SIDEBAR_KEY, true),
+  toggleSidebar: () =>
+    set((s) => {
+      const sidebarOpen = !s.sidebarOpen;
+      saveBool(SIDEBAR_KEY, sidebarOpen);
+      return { sidebarOpen };
+    }),
+  previewOpen: loadBool(PREVIEW_KEY, true),
+  togglePreview: () =>
+    set((s) => {
+      const previewOpen = !s.previewOpen;
+      saveBool(PREVIEW_KEY, previewOpen);
+      return { previewOpen };
+    }),
   quickLookOpen: false,
   toggleQuickLook: () => set((s) => ({ quickLookOpen: !s.quickLookOpen })),
   closeQuickLook: () => set({ quickLookOpen: false }),

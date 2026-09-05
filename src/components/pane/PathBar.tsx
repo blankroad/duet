@@ -69,6 +69,8 @@ interface PathBarProps {
   onBack: () => void;
   onForward: () => void;
   onUp?: () => void;
+  /** 위로 갈 곳이 있는가 — 루트에서는 버튼이 눌리는 것처럼 보이면 안 된다. */
+  canUp?: boolean;
   onRefresh?: () => void;
   onSegmentClick?: (path: string) => void;
   /** 아카이브 browse 중 "Update archive" — 편집을 원본 아카이브로 repack. */
@@ -95,6 +97,7 @@ export function PathBar({
   onBack,
   onForward,
   onUp,
+  canUp = true,
   onRefresh,
   onSegmentClick,
   onUpdateArchive,
@@ -250,8 +253,8 @@ export function PathBar({
       </button>
       <button
         onClick={onUp}
-        className="rounded p-1 hover:bg-border"
-        disabled={!onUp}
+        className="rounded p-1 hover:bg-border disabled:opacity-30"
+        disabled={!onUp || !canUp}
         aria-label={t("pathbar.up")}
       >
         <ArrowUp size={14} />
