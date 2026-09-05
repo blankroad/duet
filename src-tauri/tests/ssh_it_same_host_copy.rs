@@ -8,7 +8,7 @@
 mod ssh_common;
 
 use duet_lib::core::copy_strategy::CopyStrategy;
-use duet_lib::core::ops::{copy_execute, copy_plan, ConflictPolicy};
+use duet_lib::core::ops::{copy_execute, copy_plan, move_execute, move_plan, ConflictPolicy};
 use duet_lib::fs::SshFs;
 use duet_lib::services::journal::UndoAction;
 use duet_lib::types::DuetError;
@@ -133,19 +133,22 @@ async fn same_host_copy_conflict_creates_backup() {
     .await
     .expect("conflict copy failed");
 
-    // 기존 dst 파일이 .bak.<ts> 로 백업됨 (MVP-2 일관).
+    // 파일 교체는 영구 덮어쓰기 — .bak 을 남기지 않는다 (CLAUDE.md §4, relay 와 동일).
     let bak_count = ssh_common::stdout_str(
         &sess.conn,
         &format!("ls -1 '{dst}'/big.bin.bak.* 2>/dev/null | wc -l"),
     )
     .await;
-    assert_eq!(bak_count, "1", "충돌 backup 파일이 없음");
+    assert_eq!(bak_count, "0", "파일 교체는 .bak 을 남기지 않아야 함");
 
-    // journal 에 UndoCopy + backups_to_restore 기록.
+    // journal 은 UndoCopy 이되 파일 백업 복원은 없음.
     match entry.undo {
         UndoAction::UndoCopy {
             backups_to_restore, ..
-        } => assert_eq!(backups_to_restore.len(), 1, "backup 기록 누락"),
+        } => assert!(
+            backups_to_restore.is_empty(),
+            "파일 교체는 복원 백업을 남기지 않아야 함"
+        ),
         other => panic!("expected UndoCopy, got {other:?}"),
     }
 
@@ -153,6 +156,180 @@ async fn same_host_copy_conflict_creates_backup() {
     let src_hash = ssh_common::sha256_file(&sess.conn, &format!("{src}/big.bin")).await;
     let dst_hash = ssh_common::sha256_file(&sess.conn, &format!("{dst}/big.bin")).await;
     assert_eq!(src_hash, dst_hash);
+}
+
+/// 건너뛰기를 고르면 서버측 복사도 기존 파일을 건드리지 않아야 한다.
+/// (예전에는 정책과 무관하게 .bak 으로 비운 뒤 복사해서 Skip 이 무력화됐다.)
+#[tokio::test]
+#[ignore = "docker sshd 필요 — scripts/ssh-it.sh"]
+async fn same_host_copy_skip_preserves_existing() {
+    if ssh_common::skip_if_disabled() {
+        return;
+    }
+    let host = ssh_common::Host::from_env();
+    let sess = ssh_common::connect_password(&host).await;
+    let (_base, src, dst) = seed(&sess, "skip", 100_000).await;
+    ssh_common::run(&sess.conn, &format!("echo OLD > '{dst}/big.bin'")).await;
+
+    let ssh_fs = SshFs::new(sess.conn.clone());
+    let items = vec![ssh_common::entry(sess.source.clone(), &src, "big.bin")];
+    let dst_loc = ssh_common::loc(sess.source.clone(), &dst);
+    let plan = copy_plan(&ssh_fs, &ssh_fs, items, dst_loc).await.unwrap();
+
+    let (ctx, _cfg) = ssh_common::mk_ctx(sess.pool.clone()).await;
+    copy_execute(
+        &ssh_fs,
+        &ssh_fs,
+        plan,
+        ConflictPolicy::Skip,
+        &ctx,
+        CancellationToken::new(),
+        None,
+    )
+    .await
+    .expect("skip copy should be a no-op, not an error");
+
+    // 기존 내용 그대로 + .bak 잔여물 없음.
+    let content = ssh_common::stdout_str(&sess.conn, &format!("cat '{dst}/big.bin'")).await;
+    assert_eq!(content, "OLD", "건너뛰기인데 기존 파일이 바뀜");
+    let leftovers = ssh_common::stdout_str(
+        &sess.conn,
+        &format!("ls -1 '{dst}'/big.bin.bak.* 2>/dev/null | wc -l"),
+    )
+    .await;
+    assert_eq!(leftovers, "0", "건너뛰기는 .bak 을 만들지 않아야 함");
+}
+
+/// 둘 다 유지 — 서버측 복사도 새 이름(`big (1).bin`)을 만들어야 한다.
+#[tokio::test]
+#[ignore = "docker sshd 필요 — scripts/ssh-it.sh"]
+async fn same_host_copy_keep_both_creates_new_name() {
+    if ssh_common::skip_if_disabled() {
+        return;
+    }
+    let host = ssh_common::Host::from_env();
+    let sess = ssh_common::connect_password(&host).await;
+    let (_base, src, dst) = seed(&sess, "keepboth", 100_000).await;
+    ssh_common::run(&sess.conn, &format!("echo OLD > '{dst}/big.bin'")).await;
+
+    let ssh_fs = SshFs::new(sess.conn.clone());
+    let items = vec![ssh_common::entry(sess.source.clone(), &src, "big.bin")];
+    let dst_loc = ssh_common::loc(sess.source.clone(), &dst);
+    let plan = copy_plan(&ssh_fs, &ssh_fs, items, dst_loc).await.unwrap();
+
+    let (ctx, _cfg) = ssh_common::mk_ctx(sess.pool.clone()).await;
+    copy_execute(
+        &ssh_fs,
+        &ssh_fs,
+        plan,
+        ConflictPolicy::KeepBoth,
+        &ctx,
+        CancellationToken::new(),
+        None,
+    )
+    .await
+    .expect("keep-both copy failed");
+
+    // 기존은 그대로, 새 이름으로 사본이 생긴다.
+    let content = ssh_common::stdout_str(&sess.conn, &format!("cat '{dst}/big.bin'")).await;
+    assert_eq!(content, "OLD", "둘 다 유지인데 기존 파일이 바뀜");
+    let src_hash = ssh_common::sha256_file(&sess.conn, &format!("{src}/big.bin")).await;
+    let copy_hash = ssh_common::sha256_file(&sess.conn, &format!("{dst}/big (1).bin")).await;
+    assert_eq!(src_hash, copy_hash, "새 이름 사본이 원본과 달라짐");
+}
+
+/// 폴더 교체는 되돌릴 수 있어야 한다 — 백업 폴더 보존 + journal 기록 (§4 폴더 예외).
+#[tokio::test]
+#[ignore = "docker sshd 필요 — scripts/ssh-it.sh"]
+async fn same_host_copy_dir_conflict_keeps_backup() {
+    if ssh_common::skip_if_disabled() {
+        return;
+    }
+    let host = ssh_common::Host::from_env();
+    let sess = ssh_common::connect_password(&host).await;
+    let home = ssh_common::home(&sess.conn).await;
+    let base = format!("{home}/it-copy-dirconflict");
+    let src = format!("{base}/src");
+    let dst = format!("{base}/dst");
+    ssh_common::run(
+        &sess.conn,
+        &format!(
+            "rm -rf '{base}' && mkdir -p '{src}/d' '{dst}/d' && \
+             echo NEW > '{src}/d/new.txt' && echo OLD > '{dst}/d/only-old.txt'"
+        ),
+    )
+    .await;
+
+    let ssh_fs = SshFs::new(sess.conn.clone());
+    let items = vec![ssh_common::entry(sess.source.clone(), &src, "d")];
+    let dst_loc = ssh_common::loc(sess.source.clone(), &dst);
+    let plan = copy_plan(&ssh_fs, &ssh_fs, items, dst_loc).await.unwrap();
+
+    let (ctx, _cfg) = ssh_common::mk_ctx(sess.pool.clone()).await;
+    let entry = copy_execute(
+        &ssh_fs,
+        &ssh_fs,
+        plan,
+        ConflictPolicy::Replace,
+        &ctx,
+        CancellationToken::new(),
+        None,
+    )
+    .await
+    .expect("dir conflict copy failed");
+
+    // 백업 폴더가 남아 있고(기존에만 있던 파일 포함) journal 이 복원을 기록한다.
+    let bak_count = ssh_common::stdout_str(
+        &sess.conn,
+        &format!("ls -1d '{dst}'/d.bak.* 2>/dev/null | wc -l"),
+    )
+    .await;
+    assert_eq!(bak_count, "1", "폴더 교체 백업이 없음");
+    match entry.undo {
+        UndoAction::UndoCopy {
+            backups_to_restore, ..
+        } => assert_eq!(backups_to_restore.len(), 1, "폴더 백업 기록 누락"),
+        other => panic!("expected UndoCopy, got {other:?}"),
+    }
+}
+
+/// 같은 연결 안에서의 이동은 SFTP rename 한 번 — 서버 안에서 끝나고 이 PC 를 안 거친다.
+#[tokio::test]
+#[ignore = "docker sshd 필요 — scripts/ssh-it.sh"]
+async fn same_host_move_renames_on_server() {
+    if ssh_common::skip_if_disabled() {
+        return;
+    }
+    let host = ssh_common::Host::from_env();
+    let sess = ssh_common::connect_password(&host).await;
+    let (_base, src, dst) = seed(&sess, "move", 200_000).await;
+    let src_hash = ssh_common::sha256_file(&sess.conn, &format!("{src}/big.bin")).await;
+
+    let ssh_fs = SshFs::new(sess.conn.clone());
+    let items = vec![ssh_common::entry(sess.source.clone(), &src, "big.bin")];
+    let dst_loc = ssh_common::loc(sess.source.clone(), &dst);
+    let plan = move_plan(&ssh_fs, &ssh_fs, items, dst_loc).await.unwrap();
+    assert_eq!(plan.strategy, CopyStrategy::SshSameHost);
+    assert!(plan.is_same_fs, "같은 연결이면 same-fs 여야 함");
+
+    let (ctx, _cfg) = ssh_common::mk_ctx(sess.pool.clone()).await;
+    move_execute(
+        &ssh_fs,
+        &ssh_fs,
+        plan,
+        ConflictPolicy::Skip,
+        &ctx,
+        CancellationToken::new(),
+        None,
+    )
+    .await
+    .expect("same-host move should be supported on one connection");
+
+    let moved_hash = ssh_common::sha256_file(&sess.conn, &format!("{dst}/big.bin")).await;
+    assert_eq!(moved_hash, src_hash, "이동 후 내용이 달라짐");
+    let src_left =
+        ssh_common::stdout_str(&sess.conn, &format!("ls -1 '{src}' 2>/dev/null | wc -l")).await;
+    assert_eq!(src_left, "0", "이동이므로 원본이 남으면 안 됨");
 }
 
 #[tokio::test]

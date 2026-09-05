@@ -704,11 +704,14 @@ pub async fn move_execute(
     if plan.items.is_empty() {
         return Err(DuetError::Io("plan has no items".into()));
     }
-    // MVP-3 v1: same-host SSH move 는 미지원 (다른 user 에서 rename 안 되는 케이스 등).
-    // 후속에서 same_host_copy + trash 헬퍼 분리 후 지원.
-    if plan.strategy == CopyStrategy::SshSameHost {
+    // same-host SSH move: **같은 연결**(= 같은 SourceId, is_same_fs) 이면 SFTP rename
+    // 한 번으로 서버 안에서 끝난다 — 원격 서버 정리에서 가장 흔한 작업이라 지원한다.
+    // 서로 다른 연결(같은 머신이지만 다른 세션/유저)은 아직 막는다: rename 을 어느 쪽
+    // 세션 권한으로 할지가 애매하고, 실패하면 아래 needs_copy 가 relay(이 PC 경유)로
+    // 떨어져 "같은 호스트 전송이 이 PC 를 거치는" 금지 폴백이 되기 때문.
+    if plan.strategy == CopyStrategy::SshSameHost && !plan.is_same_fs {
         return Err(DuetError::NotSupported(
-            "same-host SSH move: MVP-3 v2 후속".into(),
+            "same-host move across two different connections — open both panes on the same connection".into(),
         ));
     }
 
@@ -836,6 +839,15 @@ pub async fn move_execute(
                 } else {
                     true
                 };
+                // 원격 같은 호스트에서 rename 이 거부되면(서버 안에서 마운트가 다른 경우)
+                // 아래 폴백은 이 PC 를 왕복하는 relay 다 — DESIGN "같은 호스트 전송이 이
+                // PC 를 거치는 폴백 금지". 조용히 느려지느니 명시적으로 실패시킨다.
+                if needs_copy && plan.strategy == CopyStrategy::SshSameHost {
+                    return Err(DuetError::NotSupported(
+                        "move across filesystems on the remote host — copy, then delete the source"
+                            .into(),
+                    ));
+                }
                 if needs_copy {
                     // rename 이 cross-device 로 거부된 경우 = plan 이 건너뛴 총량이 이제
                     // 필요해졌다. 딱 한 번, 남은 전체 항목에 대해 잰다. 확인은 이미 끝났고
