@@ -49,9 +49,11 @@ export function ConflictPerFileList({
       </div>
       <ul className="divide-y divide-border overflow-hidden rounded-panel border border-border">
         {conflicts.map((c) => {
+          // 받는 위치의 기존 항목 종류로 그린다 — 폴더 교체는 의미가 달라(통째 교체)
+          // 한눈에 구분돼야 한다.
           const { Icon, className } = iconForEntry({
             name: c.name,
-            kind: "file",
+            kind: c.dst_is_dir ? "dir" : "file",
           });
           return (
             <li key={c.name} className="flex flex-col gap-1 px-2.5 py-1.5">
@@ -63,6 +65,11 @@ export function ConflictPerFileList({
                 >
                   {c.name}
                 </span>
+                {c.dst_is_dir && (
+                  <span className="shrink-0 rounded bg-subtle px-1.5 text-meta text-fg-muted">
+                    {t("conflict.folderBadge")}
+                  </span>
+                )}
                 <Segmented
                   size="md"
                   value={decisions[c.name] ?? "skip"}

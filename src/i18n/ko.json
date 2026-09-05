@@ -26,7 +26,9 @@
     "perFileTitle": "{{cta}} — 파일별로 선택",
     "perFileSummary": "충돌 {{count}}개 · 나머지 {{rest}}개는 그대로",
     "replaceWarn": "교체 {{count}}개 — 기존 파일이 영구 덮어써지며 되돌릴 수 없음",
-    "tally": "교체 {{nReplace}} · 건너뛰기 {{nSkip}} · 둘 다 유지 {{nKeep}}"
+    "tally": "교체 {{nReplace}} · 건너뛰기 {{nSkip}} · 둘 다 유지 {{nKeep}}",
+    "folderBadge": "폴더",
+    "replaceFolderNote": "폴더는 병합이 아니라 통째로 교체됩니다 — 기존 폴더에만 있던 파일은 사라집니다. Ctrl+Z 로 되돌릴 수 있습니다."
   },
   "dialog": {
     "progress": {

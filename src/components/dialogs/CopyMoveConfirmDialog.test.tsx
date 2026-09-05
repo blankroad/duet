@@ -10,10 +10,11 @@ const ref = (name: string): EntryRef => ({
   location: { source: { kind: "local" }, path: SRC },
   name,
 });
-const conflict = (name: string): Conflict => ({
+const conflict = (name: string, dstIsDir = false): Conflict => ({
   name,
   dst_path: `${DST}/${name}`,
   will_become_backup: "",
+  dst_is_dir: dstIsDir,
   dst_size: 10,
   dst_modified_ms: 1000,
   src_size: 20,

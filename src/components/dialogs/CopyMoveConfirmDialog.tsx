@@ -1,6 +1,12 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, Copy, ListChecks, MoveRight } from "lucide-react";
+import {
+  AlertTriangle,
+  Copy,
+  FolderSymlink,
+  ListChecks,
+  MoveRight,
+} from "lucide-react";
 import clsx from "clsx";
 import type { ConflictPolicy } from "@/types/bindings";
 import { DialogShell } from "./DialogShell";
@@ -109,6 +115,9 @@ export function CopyMoveConfirmDialog({
 
   const hasConflicts = conflicts.length > 0;
   const destructive = hasConflicts && policy === "replace";
+  // 폴더 충돌은 "덮어쓰기"가 아니라 폴더 통째 교체다 — 기존 폴더에만 있던 파일이
+  // 사라진다는 걸 교체를 고른 순간 말해 준다(백엔드는 되돌릴 수 있게 백업을 남긴다).
+  const replacingFolder = destructive && conflicts.some((c) => c.dst_is_dir);
   return (
     <DialogShell
       title={cta}
@@ -163,6 +172,12 @@ export function CopyMoveConfirmDialog({
                 {t("conflict.perFile")}
               </button>
             </div>
+            {replacingFolder && (
+              <div className="flex items-start gap-1.5 text-meta text-fg-muted">
+                <FolderSymlink size={12} className="mt-0.5 shrink-0" />
+                <span>{t("conflict.replaceFolderNote")}</span>
+              </div>
+            )}
           </div>
         </DialogBand>
       )}

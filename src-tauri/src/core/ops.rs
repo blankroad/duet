@@ -67,6 +67,10 @@ pub struct Conflict {
     pub name: String,
     pub dst_path: PathBuf,
     pub will_become_backup: PathBuf,
+    /// 받는 위치의 기존 항목이 **폴더**인지 — 교체의 의미가 파일과 다르다.
+    /// 폴더 교체는 병합이 아니라 폴더 전체를 갈아끼우므로(기존에만 있던 파일도 사라짐)
+    /// UI 가 이를 명시하고, 실행부는 되돌릴 수 있게 백업을 남긴다(§4 폴더 예외).
+    pub dst_is_dir: bool,
     /// 기존(덮어써질) 대상 파일 메타 — 충돌 다이얼로그의 새↔기존 비교 표시용.
     pub dst_size: Option<u64>,
     pub dst_modified_ms: Option<i64>,
@@ -347,6 +351,7 @@ async fn plan_transfer(
                 name: it.name.clone(),
                 dst_path: dst_path.clone(),
                 will_become_backup: dst_fs.join(&dst.path, &backup_name(&it.name)),
+                dst_is_dir: dst_meta.kind == crate::types::EntryKind::Dir,
                 dst_size: dst_meta.size,
                 dst_modified_ms: dst_meta.modified_ms,
                 src_size: src_meta.as_ref().and_then(|m| m.size),
@@ -482,6 +487,8 @@ async fn copy_execute_relay(
     let mut copied = Vec::new();
     let mut copied_from: Vec<PathBuf> = Vec::new();
     let mut skipped = 0u32;
+    // 교체된 **폴더**의 백업 — undo 로 원래 폴더를 되돌리기 위해 journal 에 싣는다.
+    let mut kept_backups: Vec<BackupRestore> = Vec::new();
     let mut outcome: Result<(), DuetError> = Ok(());
     for (idx, it) in plan.items.iter().enumerate() {
         // 항목 경계 cancel check
@@ -507,16 +514,21 @@ async fn copy_execute_relay(
             let src_path = src_fs.join(&it.location.path, &it.name);
             let mut dst_path = dst_fs.join(&plan.dst.path, &it.name);
 
-            // 충돌 시 policy 분기: Replace=영구덮어쓰기, Skip=건너뜀, KeepBoth=새이름.
+            // 충돌 시 policy 분기: Replace=덮어쓰기, Skip=건너뜀, KeepBoth=새이름.
             // Replace 는 기존 대상을 임시 백업으로 옮겨 경로를 비운다(복사 실패 시 롤백용).
             let mut replaced_backup: Option<std::path::PathBuf> = None;
-            if dst_fs.metadata(&dst_path).await.is_ok() {
+            // 기존 대상이 폴더였나 — 폴더 교체는 병합이 아니라 폴더를 통째로 갈아끼우는
+            // 것이라 기존에만 있던 파일까지 사라진다. 파일 덮어쓰기와 달리 되돌릴 수
+            // 있어야 하므로(§4 폴더 예외) 성공해도 백업을 지우지 않고 journal 에 남긴다.
+            let mut replaced_is_dir = false;
+            if let Ok(dst_meta) = dst_fs.metadata(&dst_path).await {
                 match policy {
                     ConflictPolicy::Skip => return Ok(true), // skip = 복사 안 함
                     ConflictPolicy::KeepBoth => {
                         dst_path = dedup_dst_name(dst_fs, &plan.dst.path, &it.name).await;
                     }
                     ConflictPolicy::Replace => {
+                        replaced_is_dir = dst_meta.kind == crate::types::EntryKind::Dir;
                         let backup = pick_backup_path(dst_fs, &plan.dst.path, &it.name).await?;
                         dst_fs.rename(&dst_path, &backup).await?;
                         replaced_backup = Some(backup);
@@ -559,16 +571,25 @@ async fn copy_execute_relay(
                 }
                 Err(e) => Err(e),
             };
-            // Replace 백업 정리: 성공이면 영구 삭제(.bak 안 남김·undo 없음 — §4 예외,
-            // 사용자 승인 2026-06), 실패면 원위치로 롤백(원본 보존).
+            // Replace 백업 정리: 파일은 영구 삭제(.bak 안 남김·undo 없음 — §4 예외,
+            // 사용자 승인 2026-06), **폴더는 보존 + journal**(§4 폴더 예외 — 폴더 교체는
+            // 기존 폴더 전체를 잃는 일이라 되돌릴 수 있어야 한다).
+            // 실패면 원위치로 롤백(원본 보존).
             match copy_result {
                 Ok(()) => {
                     if let Some(b) = replaced_backup.take() {
-                        // 복사는 이미 성공 — 백업 정리 실패는 치명적이지 않다(가시적 `.bak`
-                        // 잔여물만 남음). 여기서 `?` 로 실패하면 '완료된 복사'가 에러로
-                        // 보고되고 journal 미기록→undo 불가가 되므로, 정리 실패는 무시하고
-                        // 성공을 그대로 진행한다.
-                        let _ = dst_fs.remove(&b).await;
+                        if replaced_is_dir {
+                            kept_backups.push(BackupRestore {
+                                backup_path: b,
+                                original_path: dst_path.clone(),
+                            });
+                        } else {
+                            // 복사는 이미 성공 — 백업 정리 실패는 치명적이지 않다(가시적
+                            // `.bak` 잔여물만 남음). 여기서 `?` 로 실패하면 '완료된 복사'가
+                            // 에러로 보고되고 journal 미기록→undo 불가가 되므로, 정리
+                            // 실패는 무시하고 성공을 그대로 진행한다.
+                            let _ = dst_fs.remove(&b).await;
+                        }
                     }
                 }
                 Err(e) => {
@@ -601,7 +622,7 @@ async fn copy_execute_relay(
     }
 
     // §4: 부분 진행분(복사 완료분)이라도 journal 에 기록한 뒤 에러 전파.
-    if copied.is_empty() {
+    if copied.is_empty() && kept_backups.is_empty() {
         if outcome.is_err() {
             return Err(outcome.err().unwrap());
         }
@@ -614,8 +635,9 @@ async fn copy_execute_relay(
     let undo = UndoAction::UndoCopy {
         target_source: plan.dst.source.clone(),
         copied,
-        // Replace 덮어쓰기는 복원하지 않음(사용자 승인 §4 예외) — 항상 비어 있음.
-        backups_to_restore: Vec::new(),
+        // 파일 덮어쓰기는 복원하지 않음(사용자 승인 §4 예외). 폴더 교체만 백업을 남겨
+        // undo 로 원래 폴더를 되돌린다(§4 폴더 예외).
+        backups_to_restore: kept_backups,
         src_source: Some(plan.src_source.clone()),
         copied_from,
     };
@@ -752,6 +774,8 @@ pub async fn move_execute(
 
     let mut moved = Vec::new();
     let mut skipped = 0u32;
+    // 교체된 **폴더**의 백업 — undo 로 원래 폴더를 되돌리기 위해 journal 에 싣는다.
+    let mut kept_backups: Vec<BackupRestore> = Vec::new();
     let mut outcome: Result<(), DuetError> = Ok(());
     for (idx, it) in plan.items.iter().enumerate() {
         // 항목 경계 cancel check
@@ -779,16 +803,19 @@ pub async fn move_execute(
             let src_path = src_fs.join(&it.location.path, &it.name);
             let mut dst_path = dst_fs.join(&plan.dst.path, &it.name);
 
-            // 충돌 policy 분기 (copy 와 동일): Replace=영구덮어쓰기, Skip=건너뜀, KeepBoth=새이름.
+            // 충돌 policy 분기 (copy 와 동일): Replace=덮어쓰기, Skip=건너뜀, KeepBoth=새이름.
             // Replace 는 기존 대상을 임시 백업으로 옮겨 경로를 비운다(이동 실패 시 롤백용).
             let mut replaced_backup: Option<std::path::PathBuf> = None;
-            if dst_fs.metadata(&dst_path).await.is_ok() {
+            // 폴더 교체는 되돌릴 수 있게 백업 보존(§4 폴더 예외) — copy 와 같은 규칙.
+            let mut replaced_is_dir = false;
+            if let Ok(dst_meta) = dst_fs.metadata(&dst_path).await {
                 match policy {
                     ConflictPolicy::Skip => return Ok(true),
                     ConflictPolicy::KeepBoth => {
                         dst_path = dedup_dst_name(dst_fs, &plan.dst.path, &it.name).await;
                     }
                     ConflictPolicy::Replace => {
+                        replaced_is_dir = dst_meta.kind == crate::types::EntryKind::Dir;
                         let backup = pick_backup_path(dst_fs, &plan.dst.path, &it.name).await?;
                         dst_fs.rename(&dst_path, &backup).await?;
                         replaced_backup = Some(backup);
@@ -862,10 +889,19 @@ pub async fn move_execute(
             match move_result {
                 Ok(()) => {
                     if let Some(b) = replaced_backup.take() {
-                        // 이동은 이미 성공 — 백업 정리 실패는 치명적이지 않다(가시적 `.bak`
-                        // 잔여물만). `?` 로 실패하면 '완료된 이동'이 에러로 보고되고 journal
-                        // 미기록→undo 불가가 되므로, 정리 실패는 무시하고 성공을 진행한다.
-                        let _ = dst_fs.remove(&b).await;
+                        if replaced_is_dir {
+                            // 폴더 교체는 백업 보존 + journal → Ctrl+Z 로 원래 폴더 복원.
+                            kept_backups.push(BackupRestore {
+                                backup_path: b,
+                                original_path: dst_path.clone(),
+                            });
+                        } else {
+                            // 이동은 이미 성공 — 백업 정리 실패는 치명적이지 않다(가시적
+                            // `.bak` 잔여물만). `?` 로 실패하면 '완료된 이동'이 에러로
+                            // 보고되고 journal 미기록→undo 불가가 되므로, 정리 실패는
+                            // 무시하고 성공을 진행한다.
+                            let _ = dst_fs.remove(&b).await;
+                        }
                     }
                 }
                 Err(e) => {
@@ -900,7 +936,7 @@ pub async fn move_execute(
     }
 
     // §4: 부분 진행분(이동 완료분)이라도 journal 에 기록한 뒤 에러 전파.
-    if moved.is_empty() {
+    if moved.is_empty() && kept_backups.is_empty() {
         if outcome.is_err() {
             return Err(outcome.err().unwrap());
         }
@@ -914,8 +950,9 @@ pub async fn move_execute(
         src_source: plan.src_source.clone(),
         dst_source: plan.dst.source.clone(),
         moved,
-        // Replace 덮어쓰기는 복원하지 않음(사용자 승인 §4 예외) — 항상 비어 있음.
-        backups_to_restore: Vec::new(),
+        // 파일 덮어쓰기는 복원하지 않음(사용자 승인 §4 예외). 폴더 교체만 백업을 남겨
+        // undo 로 원래 폴더를 되돌린다(§4 폴더 예외).
+        backups_to_restore: kept_backups,
     };
     let op = OpKind::Move {
         count,
@@ -3549,6 +3586,10 @@ async fn copy_execute_same_host(
         Replaced,
     }
 
+    // Replace 로 비워 둔 백업 — 성공 시 파일은 영구 삭제(§4 예외), 폴더는 journal 로
+    // 남겨 undo 가능하게(§4 폴더 예외). 실패 시엔 종류와 무관하게 journal(복원용).
+    let mut pending_backups: Vec<(BackupRestore, bool)> = Vec::new();
+
     // 정책 해석(+Replace backup). 예전에는 정책과 무관하게 충돌 대상을 전부 .bak 으로
     // 옮긴 뒤 rsync `--ignore-existing`/`cp -n` 을 걸어서, **Skip 을 골라도 경로가 비어
     // 있으니 그냥 복사**되고 .bak 만 남았다(KeepBoth 도 덮어쓰기로 폴백). relay 경로와
@@ -3563,21 +3604,25 @@ async fn copy_execute_same_host(
         }
         let step: Result<Resolved, DuetError> = async {
             let dst_path = crate::fs::posix_join(&plan.dst.path, &it.name);
-            if dst_fs.metadata(&dst_path).await.is_err() {
+            let Ok(dst_meta) = dst_fs.metadata(&dst_path).await else {
                 return Ok(Resolved::Plain);
-            }
+            };
             match policy {
                 ConflictPolicy::Skip => Ok(Resolved::Skip),
                 ConflictPolicy::KeepBoth => Ok(Resolved::NewName(
                     dedup_dst_name(&dst_fs, &plan.dst.path, &it.name).await,
                 )),
                 ConflictPolicy::Replace => {
+                    let is_dir = dst_meta.kind == crate::types::EntryKind::Dir;
                     let backup = pick_backup_path(&dst_fs, &plan.dst.path, &it.name).await?;
                     dst_fs.rename(&dst_path, &backup).await?;
-                    backups.push(BackupRestore {
-                        backup_path: backup,
-                        original_path: dst_path,
-                    });
+                    pending_backups.push((
+                        BackupRestore {
+                            backup_path: backup,
+                            original_path: dst_path,
+                        },
+                        is_dir,
+                    ));
                     Ok(Resolved::Replaced)
                 }
             }
@@ -3719,6 +3764,17 @@ async fn copy_execute_same_host(
         if let Err(e) = step {
             outcome = Err(e);
             break;
+        }
+    }
+
+    // Replace 백업 정리 — 성공했을 때만 파일 백업을 영구 삭제한다(§4 예외, .bak 안 남김).
+    // 폴더 백업은 남겨 journal 에 싣는다(§4 폴더 예외 — 폴더 교체는 되돌릴 수 있어야).
+    // 실패했으면 종류와 무관하게 전부 journal 로 보내 undo 가 복원할 수 있게 한다.
+    for (b, is_dir) in pending_backups {
+        if outcome.is_ok() && !is_dir {
+            let _ = dst_fs.remove(&b.backup_path).await;
+        } else {
+            backups.push(b);
         }
     }
 
@@ -4265,6 +4321,82 @@ mod tests {
         }
         assert!(!has_bak, "move Replace 도 .bak 을 남기지 않아야 함");
         assert_eq!(count, 1, "dst 에는 덮어쓴 항목 1개만 남아야 함");
+    }
+
+    /// 폴더를 폴더 위에 Replace — 파일과 달리 되돌릴 수 있어야 한다(§4 폴더 예외).
+    /// 폴더 교체는 병합이 아니라 통째 교체라, 기존에만 있던 파일이 영구히 사라지면 안 된다.
+    #[tokio::test]
+    async fn copy_dir_conflict_replace_keeps_recoverable_backup() {
+        use crate::core::copy_strategy::CopyStrategy;
+        let dir = TempDir::new().unwrap();
+        let src = dir.path().join("src");
+        let dst = dir.path().join("dst");
+        tokio::fs::create_dir_all(src.join("d")).await.unwrap();
+        tokio::fs::create_dir_all(dst.join("d")).await.unwrap();
+        tokio::fs::write(src.join("d/new.txt"), b"NEW")
+            .await
+            .unwrap();
+        // 기존 폴더에만 있는 파일 — 교체로 사라지지만 undo 로 돌아와야 한다.
+        tokio::fs::write(dst.join("d/only-old.txt"), b"OLD")
+            .await
+            .unwrap();
+
+        let items = vec![EntryRef {
+            location: Location {
+                source: SourceId::Local,
+                path: src.clone(),
+            },
+            name: "d".into(),
+        }];
+        let plan = CopyPlan {
+            src_source: SourceId::Local,
+            dst: Location {
+                source: SourceId::Local,
+                path: dst.clone(),
+            },
+            items,
+            conflicts: vec![],
+            total_size_bytes: 3,
+            strategy: CopyStrategy::LocalToLocal,
+        };
+        let (ctx, _cd) = mk_ctx().await;
+        let local = LocalFs::new();
+        let entry = copy_execute(
+            &local,
+            &local,
+            plan,
+            ConflictPolicy::Replace,
+            &ctx,
+            tokio_util::sync::CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+
+        // 새 폴더가 자리를 차지하고, 기존 폴더는 .bak 으로 남아 있다.
+        assert_eq!(
+            tokio::fs::read(dst.join("d/new.txt")).await.unwrap(),
+            b"NEW"
+        );
+        assert!(
+            !dst.join("d/only-old.txt").exists(),
+            "폴더 교체이므로 기존 폴더의 파일은 새 폴더에 없다"
+        );
+        let UndoAction::UndoCopy {
+            backups_to_restore, ..
+        } = &entry.undo
+        else {
+            panic!("UndoCopy 여야 함");
+        };
+        assert_eq!(
+            backups_to_restore.len(),
+            1,
+            "폴더 교체는 백업을 journal 에 남겨 undo 가능해야 함"
+        );
+        assert!(
+            backups_to_restore[0].backup_path.exists(),
+            "백업 폴더가 실제로 남아 있어야 함"
+        );
     }
 
     #[tokio::test]

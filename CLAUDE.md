@@ -44,6 +44,13 @@ commands → services → core → fs → platform
 (journal 미기록=undo 없음) / 실패 시 롤백(원본 복원)". Skip/KeepBoth 는 비파괴라 영향 없음.
 (sync/repack 의 덮어쓰기는 여전히 .bak 보존 + undo 가능 — 이 예외는 copy/move 한정.)
 
+**폴더 교체는 이 예외에서 제외 (2026-09):** 위 예외는 "기존 **파일** 덮어쓰기" 범위다.
+받는 위치의 기존 항목이 **폴더**면 Replace 는 병합이 아니라 폴더를 통째로 갈아끼우므로
+기존 폴더에만 있던 파일까지 사라진다 — 파일 하나 덮어쓰기와 손실 규모가 다르다. 그래서
+폴더 교체는 성공해도 백업을 지우지 않고 journal 에 실어 **Ctrl+Z 로 복원 가능**하게 둔다
+(relay·same-host 양쪽 동일). UI 는 충돌 목록에 "폴더" 배지와 통째 교체 안내를 표시한다.
+(탐색기/파인더식 폴더 **병합**은 후속 — 병합은 항목별 undo 추적 설계가 필요하다.)
+
 ### 5. SSH 자격증명은 메모리/로그에 노출 금지
 
 - SSH agent (`SSH_AUTH_SOCK`) 또는 `~/.ssh/config` IdentityFile 우선 — 가능한 비밀번호 사용 자체를 회피

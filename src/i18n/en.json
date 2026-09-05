@@ -26,7 +26,9 @@
     "perFileTitle": "{{cta}} — choose per file",
     "perFileSummary": "{{count}} conflict(s) · {{rest}} other(s) unaffected",
     "replaceWarn": "Replace {{count}} — existing files are overwritten permanently and cannot be undone",
-    "tally": "Replace {{nReplace}} · Skip {{nSkip}} · Keep both {{nKeep}}"
+    "tally": "Replace {{nReplace}} · Skip {{nSkip}} · Keep both {{nKeep}}",
+    "folderBadge": "Folder",
+    "replaceFolderNote": "Folders are replaced whole, not merged — files only in the existing folder disappear. Undo (Ctrl+Z) restores them."
   },
   "dialog": {
     "progress": {
