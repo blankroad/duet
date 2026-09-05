@@ -62,7 +62,7 @@ describe("PreviewInspector 폴더 크기", () => {
     seedPane({ assets: 1_500_000_000 });
     render(<PreviewInspector entry={DIR} location={ENTRY_LOC} paneId="left" />);
 
-    expect(rowValue("Size")).toBe("1.4 GB");
+    expect(rowValue("Size")).toBe("1.4 GiB");
     expect(fsDirSize).not.toHaveBeenCalled(); // 자동 계산 금지
   });
 
@@ -81,7 +81,7 @@ describe("PreviewInspector 폴더 크기", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Calculate" }));
 
-    await waitFor(() => expect(rowValue("Size")).toBe("4.0 KB"));
+    await waitFor(() => expect(rowValue("Size")).toBe("4.0 KiB"));
     expect(fsDirSize).toHaveBeenCalledWith({
       source: { kind: "local" },
       path: "/work/assets",
@@ -95,7 +95,7 @@ describe("PreviewInspector 폴더 크기", () => {
     render(<PreviewInspector entry={DIR} location={ENTRY_LOC} paneId="left" />);
 
     await waitFor(() => expect(rowValue("Items")).toBe("3 items"));
-    expect(rowValue("Size")).toBe("4.0 KB");
+    expect(rowValue("Size")).toBe("4.0 KiB");
   });
 
   it("파일은 Entry.size 를 그대로 쓰고 계산 버튼이 없다", () => {
@@ -109,7 +109,7 @@ describe("PreviewInspector 폴더 크기", () => {
       />,
     );
 
-    expect(rowValue("Size")).toBe("2.0 KB");
+    expect(rowValue("Size")).toBe("2.0 KiB");
     expect(screen.queryByRole("button", { name: "Calculate" })).toBeNull();
     expect(screen.queryByText("Items")).toBeNull();
   });

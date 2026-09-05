@@ -83,6 +83,8 @@ export interface BuiltinDeps {
   focusFilter: () => void;
   openSearch: () => void;
   // select (glob/substring pattern)
+  /** F4 — 커서 파일을 편집기로 (원격은 편집 라운드트립). */
+  editFile: () => void;
   /** 커서 폴더를 반대 패널에서 열기 (없으면 현재 폴더). */
   openInOtherPane: () => void;
   /** 커서 폴더를 새 탭에서 열기. */

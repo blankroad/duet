@@ -25,6 +25,12 @@ fn default_conflict() -> String {
 fn default_confirm_transfer() -> String {
     "conflicts_only".into()
 }
+fn default_size_units() -> String {
+    "binary".into()
+}
+fn default_date_format() -> String {
+    "relative".into()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct Settings {
@@ -74,6 +80,22 @@ pub struct Settings {
     /// (영구 삭제는 이 설정과 무관하게 항상 확인 + 단어 타이핑 — CLAUDE.md §3.)
     #[serde(default = "default_true")]
     pub confirm_trash_delete: bool,
+    /// 크기 표기: "binary"(1 KB = 1024 B) | "decimal"(1 kB = 1000 B) | "bytes"(그대로).
+    /// 디폴트 binary — 값은 그대로 두고 라벨만 KiB 로 바로잡는다.
+    #[serde(default = "default_size_units")]
+    pub size_units: String,
+    /// 날짜 표기: "relative"(오늘=시각, 올해=월 일) | "locale" | "iso".
+    #[serde(default = "default_date_format")]
+    pub date_format: String,
+    /// 목록에서 폴더를 항상 위에. 디폴트 true (DESIGN.md — 설정으로 변경 가능).
+    #[serde(default = "default_true")]
+    pub dirs_first: bool,
+    /// F4 외부 편집기 실행 파일 경로. 비우면 OS 기본 연결 프로그램.
+    #[serde(default)]
+    pub editor_command: String,
+    /// "터미널 열기" 에 쓸 터미널 앱. 비우면 OS 기본.
+    #[serde(default)]
+    pub terminal_command: String,
     // ── 아래 맵 필드들은 항상 struct 마지막에 (TOML 은 table 뒤에 scalar 못 옴) ──
     /// 확장자(소문자, 점 없음) → 아이콘 팔레트 이름. 유저가 설정에서 지정. 내장 매핑보다 우선.
     #[serde(default)]
@@ -108,6 +130,11 @@ impl Default for Settings {
             remember_conflict_choice: false,
             confirm_transfer: default_confirm_transfer(),
             confirm_trash_delete: true,
+            size_units: default_size_units(),
+            date_format: default_date_format(),
+            dirs_first: true,
+            editor_command: String::new(),
+            terminal_command: String::new(),
             ext_icon_overrides: HashMap::new(),
             ext_app_overrides: HashMap::new(),
         }
@@ -130,6 +157,11 @@ pub struct SettingsPatch {
     pub remember_conflict_choice: Option<bool>,
     pub confirm_transfer: Option<String>,
     pub confirm_trash_delete: Option<bool>,
+    pub size_units: Option<String>,
+    pub date_format: Option<String>,
+    pub dirs_first: Option<bool>,
+    pub editor_command: Option<String>,
+    pub terminal_command: Option<String>,
     pub ext_icon_overrides: Option<HashMap<String, String>>,
     pub ext_app_overrides: Option<HashMap<String, String>>,
 }
@@ -210,6 +242,21 @@ impl SettingsStore {
         }
         if let Some(v) = patch.confirm_trash_delete {
             s.confirm_trash_delete = v;
+        }
+        if let Some(v) = patch.size_units {
+            s.size_units = v;
+        }
+        if let Some(v) = patch.date_format {
+            s.date_format = v;
+        }
+        if let Some(v) = patch.dirs_first {
+            s.dirs_first = v;
+        }
+        if let Some(v) = patch.editor_command {
+            s.editor_command = v;
+        }
+        if let Some(v) = patch.terminal_command {
+            s.terminal_command = v;
         }
         if let Some(v) = patch.ext_icon_overrides {
             s.ext_icon_overrides = v;

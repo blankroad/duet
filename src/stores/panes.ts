@@ -811,12 +811,24 @@ const collator = new Intl.Collator(undefined, {
   sensitivity: "base",
 });
 
+/**
+ * 폴더를 항상 위에 둘지 — 설정(`dirs_first`) 미러. DESIGN.md 는 처음부터
+ * "설정으로 변경 가능" 이라 했는데 코드엔 하드코딩돼 있었다(최근 수정순으로
+ * 폴더·파일을 섞어 보는 게 불가능했다).
+ */
+let dirsFirstEnabled = true;
+
+export function setDirsFirst(v: boolean): void {
+  dirsFirstEnabled = v;
+}
+
 function sortEntries(
   entries: Entry[],
   key: SortKey,
   order: SortOrder,
 ): Entry[] {
   const dirsFirst = (a: Entry, b: Entry) => {
+    if (!dirsFirstEnabled) return 0;
     if (a.kind !== b.kind) {
       if (a.kind === "dir") return -1;
       if (b.kind === "dir") return 1;

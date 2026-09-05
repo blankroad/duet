@@ -63,7 +63,7 @@ describe("CopyMoveConfirmDialog", () => {
   });
 
   /**
-   * 회귀 방지 — 원래 이 다이얼로그는 "1개, 40 KB → /경로" 만 보여줘서 어떤 파일을
+   * 회귀 방지 — 원래 이 다이얼로그는 "1개, 40 KiB → /경로" 만 보여줘서 어떤 파일을
    * 복사하는지 확인할 수 없었다. 개수는 파일명을 대신하지 못한다.
    */
   it("항목 이름을 모두 목록으로 보여준다", () => {
@@ -88,7 +88,7 @@ describe("CopyMoveConfirmDialog", () => {
       plan({ items: [ref("a.txt"), ref("b.txt")], total_size_bytes: 40960 }),
     );
     const text = document.body.textContent ?? "";
-    expect(text).toContain("2 item(s) · 40 KB");
+    expect(text).toContain("2 item(s) · 40 KiB");
     expect(text).toContain("Local copy");
   });
 

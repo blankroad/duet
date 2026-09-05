@@ -249,6 +249,68 @@ export function GeneralSection() {
         </label>
       )}
 
+      {/* 목록 표기 — 크기 단위·날짜 형식·폴더 우선 */}
+      <div className="flex items-center justify-between gap-2 border-t border-border pt-3">
+        <div>
+          <div className="text-base">{t("settings.sizeUnits")}</div>
+          <div className="text-meta text-fg-muted">
+            {t("settings.sizeUnitsHint")}
+          </div>
+        </div>
+        <select
+          className={selectClass}
+          value={settings.size_units ?? "binary"}
+          onChange={(e) => void save({ size_units: e.target.value })}
+        >
+          <option value="binary">{t("settings.sizeBinary")}</option>
+          <option value="decimal">{t("settings.sizeDecimal")}</option>
+          <option value="bytes">{t("settings.sizeBytes")}</option>
+        </select>
+      </div>
+
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-base">{t("settings.dateFormat")}</div>
+        <select
+          className={selectClass}
+          value={settings.date_format ?? "relative"}
+          onChange={(e) => void save({ date_format: e.target.value })}
+        >
+          <option value="relative">{t("settings.dateRelative")}</option>
+          <option value="locale">{t("settings.dateLocale")}</option>
+          <option value="iso">{t("settings.dateIso")}</option>
+        </select>
+      </div>
+
+      <label className="flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={settings.dirs_first}
+          onChange={(e) => void save({ dirs_first: e.target.checked })}
+          className="mt-0.5"
+        />
+        <div className="flex-1">
+          <div className="text-base">{t("settings.dirsFirst")}</div>
+          <div className="text-meta text-fg-muted">
+            {t("settings.dirsFirstHint")}
+          </div>
+        </div>
+      </label>
+
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="text-base">{t("settings.editor")}</div>
+          <div className="text-meta text-fg-muted">
+            {t("settings.editorHint")}
+          </div>
+        </div>
+        <input
+          className={`${selectClass} w-56`}
+          value={settings.editor_command ?? ""}
+          placeholder={t("settings.editorPlaceholder")}
+          onChange={(e) => void save({ editor_command: e.target.value })}
+        />
+      </div>
+
       {/* 파일 작업 — 충돌 기본값과 확인 다이얼로그 (매번 같은 선택을 다시 하지 않게) */}
       <div className="flex items-center justify-between gap-2 border-t border-border pt-3">
         <div>

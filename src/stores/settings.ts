@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { platform } from "@tauri-apps/plugin-os";
 import type { ConflictPolicy, Settings } from "@/types/bindings";
+import { setFormatOptions } from "@/lib/format";
+import { setDirsFirst } from "@/stores/panes";
 
 /** 복사/이동 확인 다이얼로그를 언제 띄울지. backend `confirm_transfer` 미러. */
 export type ConfirmTransfer = "always" | "conflicts_only" | "never";
@@ -95,6 +97,15 @@ export const useAppSettings = create<AppSettingsState>((set) => ({
 /** backend Settings → 프론트 미러 동기화 (부팅·저장 시 공통). */
 export function syncAppSettings(s: Settings): void {
   const st = useAppSettings.getState();
+  // 표기·정렬은 store 가 아니라 모듈 지역 값으로 — 목록의 모든 행이 매 렌더
+  // store 를 읽지 않게(수천 행 렌더 비용).
+  setFormatOptions(
+    (["binary", "decimal", "bytes"] as const).find((u) => u === s.size_units) ??
+      "binary",
+    (["relative", "locale", "iso"] as const).find((d) => d === s.date_format) ??
+      "relative",
+  );
+  setDirsFirst(s.dirs_first ?? true);
   st.setSingleClickOpen(s.single_click_open ?? false);
   st.setShowThumbnails(s.show_thumbnails ?? true);
   st.setOsFileIcons(s.os_file_icons ?? platform() === "windows");

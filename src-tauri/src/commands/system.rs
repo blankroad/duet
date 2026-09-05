@@ -264,6 +264,8 @@ mod resolve_path_tests {
 #[specta::specta]
 pub async fn open_path(
     location: Location,
+    // with_editor=true 면 확장자 연결 대신 **설정한 편집기**로 연다 (F4 — 편집).
+    with_editor: Option<bool>,
     pool: tauri::State<'_, Arc<ConnectionPool>>,
     settings: tauri::State<'_, Arc<SettingsStore>>,
 ) -> Result<(), DuetError> {
@@ -272,13 +274,21 @@ pub async fn open_path(
         SourceId::Local => crate::platform::local_abs(location.path.clone()),
         SourceId::Ssh { .. } => download_to_temp(&location, pool.inner()).await?,
     };
+    let cfg = settings.get().await;
+    // F4: 설정한 편집기가 있으면 그것으로. 비어 있으면 OS 기본으로 폴백한다.
+    let editor = with_editor
+        .unwrap_or(false)
+        .then(|| cfg.editor_command.clone())
+        .filter(|e| !e.trim().is_empty());
     // 확장자별 연결 프로그램 override (소문자 확장자, 점 없음). 없으면 OS 기본.
-    let app_overrides = settings.get().await.ext_app_overrides;
-    let app_override = target
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(str::to_lowercase)
-        .and_then(|ext| app_overrides.get(&ext).cloned());
+    let app_overrides = cfg.ext_app_overrides;
+    let app_override = editor.or_else(|| {
+        target
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(str::to_lowercase)
+            .and_then(|ext| app_overrides.get(&ext).cloned())
+    });
     // 작업 디렉토리를 파일의 부모로 설정해 연다(탐색기 동작 — .bat/스크립트가 제 폴더에서
     // 실행). OS 런처는 blocking 이라 spawn_blocking.
     tokio::task::spawn_blocking(move || match app_override {

@@ -55,7 +55,7 @@ export function PreviewView({
         <Suspense fallback={<Centered>Loading…</Centered>}>
           <PreviewPdf
             url={previewStreamUrl(location)}
-            onFallback={() => void commands.openPath(location)}
+            onFallback={() => void commands.openPath(location, false)}
           />
         </Suspense>
       );
@@ -94,7 +94,7 @@ function NoPreview({ label, location }: { label: string; location: Location }) {
         <span>{label}</span>
         <button
           type="button"
-          onClick={() => void commands.openPath(location)}
+          onClick={() => void commands.openPath(location, false)}
           className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
         >
           Open in default app
@@ -121,7 +121,7 @@ function MediaPreview({
           <span>Cannot play {kind} here</span>
           <button
             type="button"
-            onClick={() => void commands.openPath(location)}
+            onClick={() => void commands.openPath(location, false)}
             className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
           >
             Open in default app

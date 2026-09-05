@@ -636,7 +636,21 @@
     "shellOpenInHint": "Windows 전용. 사용자 단위 레지스트리 항목을 추가합니다(관리자 권한 불필요). 폴더나 드라이브를 우클릭해 duet 으로 열 수 있습니다. 끄면 항목이 제거됩니다. 제거 전에 꺼 두세요.",
     "shellDefault": "폴더를 기본으로 duet 에서 열기 (더블클릭)",
     "shellDefaultHint": "폴더·드라이브를 더블클릭할 때 탐색기 대신 duet 이 열립니다. 켜면 위 우클릭 항목도 함께 등록됩니다. 끄면 탐색기로 돌아갑니다. duet 이 이미 켜져 있으면 새 탭으로 열립니다.",
-    "loading": "불러오는 중…"
+    "loading": "불러오는 중…",
+    "sizeUnits": "파일 크기 단위",
+    "sizeUnitsHint": "이진은 탐색기와, 십진은 파인더와 같은 값입니다.",
+    "sizeBinary": "1 KiB = 1024 바이트",
+    "sizeDecimal": "1 kB = 1000 바이트",
+    "sizeBytes": "바이트 그대로",
+    "dateFormat": "날짜 형식",
+    "dateRelative": "상대 (오늘 / 올해)",
+    "dateLocale": "시스템 형식",
+    "dateIso": "2024-06-01 14:32",
+    "dirsFirst": "폴더를 항상 위에",
+    "dirsFirstHint": "끄면 폴더도 파일과 함께 정렬됩니다(최근 수정순으로 볼 때 유용).",
+    "editor": "F4 편집기",
+    "editorHint": "비우면 파일에 연결된 프로그램으로 엽니다.",
+    "editorPlaceholder": "예: /Applications/VS Code.app"
   },
   "toast": {
     "renameSelectOne": "이름 변경: 항목을 하나만 선택하세요",
@@ -726,7 +740,8 @@
     "noActiveConnection": "이 폴더의 연결을 찾을 수 없습니다",
     "bookmarkedOnHost": "{{host}} 에 북마크: {{name}}",
     "bookmarkFailed": "북마크를 추가하지 못했습니다",
-    "alreadyBookmarked": "“{{name}}” 은 이미 북마크되어 있습니다"
+    "alreadyBookmarked": "“{{name}}” 은 이미 북마크되어 있습니다",
+    "editSelectFile": "편집할 파일에 커서를 두세요"
   },
   "sidebar": {
     "tasks": "작업",

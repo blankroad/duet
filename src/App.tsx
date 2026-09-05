@@ -471,6 +471,7 @@ function App() {
       void (async () => {
         const r = await commands.openPath(
           childLocation(tab.location, entry.name),
+          false,
         );
         if (r.status === "error")
           showToast(
@@ -810,6 +811,32 @@ function App() {
   useEffect(() => {
     const builtins = buildBuiltins({
       permanentDeleteEnabled,
+      // F4 — 커서 파일을 편집기로. 원격은 기존 편집 라운드트립(다운로드→저장 시 재업로드).
+      editFile: () => {
+        const st = usePanes.getState();
+        const id = st.activePane;
+        const tab = activeTab(st, id);
+        const entry = computeDisplayed(tab)[tab.cursorIndex];
+        if (!entry || entry.kind === "dir" || isParentEntry(entry)) {
+          showToast(i18n.t("toast.editSelectFile"));
+          return;
+        }
+        const loc = childLocation(tab.location, entry.name);
+        void (async () => {
+          const r =
+            tab.location.source.kind === "ssh"
+              ? await commands.sshEditOpen(loc)
+              : await commands.openPath(loc, true);
+          if (r.status === "error")
+            showToast(
+              i18n.t("toast.cannotOpen", {
+                name: entry.name,
+                err: formatErr(r.error),
+              }),
+              "error",
+            );
+        })();
+      },
       // 커서가 폴더면 그 폴더를, 아니면 현재 폴더를 반대 패널/새 탭에서 연다.
       openInOtherPane: () => {
         const st = usePanes.getState();

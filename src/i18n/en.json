@@ -639,7 +639,21 @@
     "shellOpenInHint": "Windows only. Adds a per-user registry entry (no admin) so right-clicking a folder or drive can open it in duet. Fully reversible — turning this off removes the entry. Tip: turn it off before uninstalling.",
     "shellDefault": "Open folders in duet by default (double-click)",
     "shellDefaultHint": "Makes duet the default action when you double-click a folder or drive, instead of File Explorer. Enabling this also adds the right-click entry above. Reversible — turning it off restores Explorer. While duet is already running, opened folders appear as a new tab.",
-    "loading": "Loading…"
+    "loading": "Loading…",
+    "sizeUnits": "File size units",
+    "sizeUnitsHint": "Binary matches Windows; decimal matches Finder.",
+    "sizeBinary": "1 KiB = 1024 bytes",
+    "sizeDecimal": "1 kB = 1000 bytes",
+    "sizeBytes": "Exact bytes",
+    "dateFormat": "Date format",
+    "dateRelative": "Relative (today / this year)",
+    "dateLocale": "System format",
+    "dateIso": "2024-06-01 14:32",
+    "dirsFirst": "Keep folders at the top",
+    "dirsFirstHint": "Off = folders sort together with files (useful for “most recent first”).",
+    "editor": "Editor for F4",
+    "editorHint": "Leave empty to use the program the file is associated with.",
+    "editorPlaceholder": "e.g. /Applications/VS Code.app"
   },
   "toast": {
     "renameSelectOne": "Rename: select exactly one item",
@@ -729,7 +743,8 @@
     "noActiveConnection": "No active connection for this folder",
     "bookmarkedOnHost": "Bookmarked on {{host}}: {{name}}",
     "bookmarkFailed": "Could not add the bookmark",
-    "alreadyBookmarked": "“{{name}}” is already bookmarked"
+    "alreadyBookmarked": "“{{name}}” is already bookmarked",
+    "editSelectFile": "Put the cursor on a file to edit"
   },
   "sidebar": {
     "tasks": "Tasks",
