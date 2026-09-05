@@ -21,6 +21,55 @@ pub struct SearchOpts {
     /// true 면 파일 *내용* 검색(grep), false 면 파일명 검색.
     #[serde(default)]
     pub content: bool,
+    /// 이 크기 이상만 (바이트). 디렉토리는 크기 조건을 적용하지 않는다.
+    #[serde(default)]
+    pub min_size: Option<u64>,
+    /// 이 크기 이하만 (바이트).
+    #[serde(default)]
+    pub max_size: Option<u64>,
+    /// 이 시각 이후 수정된 것만 (Unix epoch ms).
+    #[serde(default)]
+    pub modified_after_ms: Option<i64>,
+    /// 이 시각 이전에 수정된 것만 (Unix epoch ms).
+    #[serde(default)]
+    pub modified_before_ms: Option<i64>,
+    /// 파일만 / 폴더만 — None 이면 둘 다.
+    #[serde(default)]
+    pub only_kind: Option<EntryKind>,
+}
+
+impl SearchOpts {
+    /// 이름이 걸린 뒤 적용하는 메타 필터 — "지난주 이후 수정된 100MB 이상 *.log"
+    /// 같은 질의가 목적. 크기 조건은 파일에만 적용한다(디렉토리 크기는 미상).
+    pub fn accepts(&self, kind: EntryKind, size: u64, modified_ms: Option<i64>) -> bool {
+        if let Some(k) = self.only_kind {
+            if k != kind {
+                return false;
+            }
+        }
+        if kind == EntryKind::File {
+            if self.min_size.is_some_and(|m| size < m) {
+                return false;
+            }
+            if self.max_size.is_some_and(|m| size > m) {
+                return false;
+            }
+        }
+        match (modified_ms, self.modified_after_ms, self.modified_before_ms) {
+            (Some(t), after, before) => {
+                if after.is_some_and(|a| t < a) {
+                    return false;
+                }
+                if before.is_some_and(|b| t > b) {
+                    return false;
+                }
+                true
+            }
+            // 수정시각을 못 읽은 항목은 시간 조건이 걸려 있으면 제외한다.
+            (None, None, None) => true,
+            (None, _, _) => false,
+        }
+    }
 }
 
 impl Default for SearchOpts {
@@ -30,6 +79,11 @@ impl Default for SearchOpts {
             include_hidden: false,
             max_results: 500,
             content: false,
+            min_size: None,
+            max_size: None,
+            modified_after_ms: None,
+            modified_before_ms: None,
+            only_kind: None,
         }
     }
 }
@@ -120,6 +174,9 @@ impl SearchBackend for LocalFilenameSearch {
                     .and_then(|m| m.modified().ok())
                     .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                     .map(|d| d.as_millis() as i64);
+                if !opts.accepts(kind, size, modified_ms) {
+                    continue;
+                }
                 hits.push(SearchHit {
                     location: Location {
                         source: SourceId::Local,
@@ -362,8 +419,28 @@ impl SearchBackend for SshFilenameSearch {
         } else {
             r"-not -path '*/.*'"
         };
+        // 종류/크기/수정시각 조건은 find 자체에 태워 서버에서 걸러 낸다 —
+        // 결과를 다 받아 와서 거르면 상한(head -n) 에 걸려 정작 원하는 게 잘린다.
+        let type_clause = match opts.only_kind {
+            Some(EntryKind::Dir) => "-type d".to_string(),
+            Some(EntryKind::File) => "-type f".to_string(),
+            _ => "\\( -type f -o -type d -o -type l \\)".to_string(),
+        };
+        let mut extra = String::new();
+        if let Some(min) = opts.min_size {
+            extra.push_str(&format!(" -size +{}c", min.saturating_sub(1)));
+        }
+        if let Some(max) = opts.max_size {
+            extra.push_str(&format!(" -size -{}c", max.saturating_add(1)));
+        }
+        if let Some(after) = opts.modified_after_ms {
+            extra.push_str(&format!(" -newermt '@{}'", after / 1000));
+        }
+        if let Some(before) = opts.modified_before_ms {
+            extra.push_str(&format!(" ! -newermt '@{}'", before / 1000));
+        }
         let cmd = format!(
-            "find {root_arg} {hidden_clause} \\( -type f -o -type d -o -type l \\) {name_flag} '*{pat_escaped}*' 2>/dev/null | head -n {max}",
+            "find {root_arg} {hidden_clause} {type_clause}{extra} {name_flag} '*{pat_escaped}*' 2>/dev/null | head -n {max}",
             max = opts.max_results
         );
 
@@ -429,6 +506,37 @@ pub fn parse_find_output(
 
 #[cfg(test)]
 mod tests {
+
+    /// 메타 필터 — "지난주 이후 수정된 100MB 이상" 같은 질의의 핵심.
+    #[test]
+    fn accepts_filters_by_size_kind_and_time() {
+        let base = SearchOpts {
+            min_size: Some(1000),
+            ..Default::default()
+        };
+        assert!(base.accepts(EntryKind::File, 1000, Some(0)));
+        assert!(!base.accepts(EntryKind::File, 999, Some(0)));
+        // 폴더는 크기 조건을 적용하지 않는다(크기 미상).
+        assert!(base.accepts(EntryKind::Dir, 0, Some(0)));
+
+        let only_dirs = SearchOpts {
+            only_kind: Some(EntryKind::Dir),
+            ..Default::default()
+        };
+        assert!(only_dirs.accepts(EntryKind::Dir, 0, Some(0)));
+        assert!(!only_dirs.accepts(EntryKind::File, 0, Some(0)));
+
+        let recent = SearchOpts {
+            modified_after_ms: Some(1_000),
+            ..Default::default()
+        };
+        assert!(recent.accepts(EntryKind::File, 0, Some(2_000)));
+        assert!(!recent.accepts(EntryKind::File, 0, Some(500)));
+        // 시간 조건이 있는데 mtime 을 못 읽었으면 제외.
+        assert!(!recent.accepts(EntryKind::File, 0, None));
+        // 조건이 없으면 mtime 이 없어도 통과.
+        assert!(SearchOpts::default().accepts(EntryKind::File, 0, None));
+    }
     use super::*;
     use std::fs;
     use tempfile::tempdir;

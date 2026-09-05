@@ -843,7 +843,17 @@
     "minChars": "min 2 chars",
     "hits": "{{count}} hits",
     "close": "Close search",
-    "truncated": "showing 500 — refine query for more"
+    "truncated": "showing 500 — refine query for more",
+    "filters": "Filters",
+    "kindAny": "Files and folders",
+    "kindFile": "Files only",
+    "kindDir": "Folders only",
+    "sizeAny": "Any size",
+    "timeAny": "Any time",
+    "time1d": "Last 24 hours",
+    "time7d": "Last 7 days",
+    "time30d": "Last 30 days",
+    "clearFilters": "Clear"
   },
   "launcher": {
     "addApp": "Add application",

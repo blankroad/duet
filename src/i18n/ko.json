@@ -840,7 +840,17 @@
     "minChars": "2자 이상 입력",
     "hits": "{{count}}건",
     "close": "검색 닫기",
-    "truncated": "500건까지만 표시 — 검색어를 좁혀보세요"
+    "truncated": "500건까지만 표시 — 검색어를 좁혀보세요",
+    "filters": "필터",
+    "kindAny": "파일·폴더",
+    "kindFile": "파일만",
+    "kindDir": "폴더만",
+    "sizeAny": "크기 무관",
+    "timeAny": "기간 무관",
+    "time1d": "최근 24시간",
+    "time7d": "최근 7일",
+    "time30d": "최근 30일",
+    "clearFilters": "지우기"
   },
   "launcher": {
     "addApp": "앱 추가",

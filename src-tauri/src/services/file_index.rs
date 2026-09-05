@@ -396,6 +396,11 @@ fn run_query(
             None => continue,
         };
         let mtime = idx.mtimes[i];
+        let modified_ms = if mtime == i64::MIN { None } else { Some(mtime) };
+        // 크기·수정시각·종류 필터 — 인덱스가 이미 들고 있는 값이라 추가 I/O 없음.
+        if !opts.accepts(u8_to_kind(idx.kinds[i]), idx.sizes[i], modified_ms) {
+            continue;
+        }
         hits.push(SearchHit {
             location: Location {
                 source: source.clone(),
@@ -404,7 +409,7 @@ fn run_query(
             name,
             kind: u8_to_kind(idx.kinds[i]),
             size: idx.sizes[i],
-            modified_ms: if mtime == i64::MIN { None } else { Some(mtime) },
+            modified_ms,
         });
         if hits.len() >= opts.max_results {
             break;

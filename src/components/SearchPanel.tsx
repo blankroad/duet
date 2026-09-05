@@ -3,6 +3,8 @@ import { useTranslation } from "react-i18next";
 import { Loader, Search, X, RefreshCw } from "lucide-react";
 import { commands } from "@/types/bindings";
 import { formatErr } from "@/lib/error";
+import { formatSize, formatTime } from "@/lib/format";
+import type { EntryKind } from "@/types/bindings";
 import type { SearchHit } from "@/types/bindings";
 import { useSearch } from "@/stores/search";
 import { useIndexStatus } from "@/stores/indexStatus";
@@ -15,6 +17,36 @@ import { useIndexStatus } from "@/stores/indexStatus";
  * - ESC = close
  * - 패턴 < 2자: "min 2 chars" 안내 (서버 부하 방지)
  */
+type MinSize = "any" | "1M" | "10M" | "100M" | "1G";
+type Since = "any" | "1d" | "7d" | "30d";
+
+const filterClass =
+  "rounded border border-border bg-base px-1 py-0.5 text-meta focus:border-accent focus:outline-none";
+
+const MIN_SIZE_BYTES: Record<MinSize, number | null> = {
+  any: null,
+  "1M": 1024 ** 2,
+  "10M": 10 * 1024 ** 2,
+  "100M": 100 * 1024 ** 2,
+  "1G": 1024 ** 3,
+};
+
+const SINCE_DAYS: Record<Since, number | null> = {
+  any: null,
+  "1d": 1,
+  "7d": 7,
+  "30d": 30,
+};
+
+function minSizeBytes(v: MinSize): number | null {
+  return MIN_SIZE_BYTES[v];
+}
+
+function sinceMs(v: Since): number | null {
+  const days = SINCE_DAYS[v];
+  return days === null ? null : Date.now() - days * 24 * 60 * 60 * 1000;
+}
+
 export function SearchPanel({
   onPickHit,
 }: {
@@ -46,6 +78,10 @@ export function SearchPanel({
   };
 
   const inputRef = useRef<HTMLInputElement>(null);
+  // 결과를 좁히는 필터 — 값은 셀렉트의 문자열, IPC 로는 바이트/epoch 로 변환한다.
+  const [minSize, setMinSize] = useState<MinSize>("any");
+  const [since, setSince] = useState<Since>("any");
+  const [onlyKind, setOnlyKind] = useState<EntryKind | null>(null);
   // 요청 경합 가드 — 매 검색마다 증가. 응답 도착 시 최신 seq 아니면 버림
   // (느린 첫-빌드 응답이 더 새 쿼리 결과를 덮어쓰는 버그 방지).
   const seqRef = useRef(0);
@@ -86,6 +122,13 @@ export function SearchPanel({
       include_hidden: false,
       max_results: 500,
       content,
+      // "지난주 이후 수정된 100MB 이상" 같은 질의 — 예전엔 이름만으로 500개를
+      // 받아 놓고 눈으로 골라야 했다.
+      min_size: minSizeBytes(minSize),
+      max_size: null,
+      modified_after_ms: sinceMs(since),
+      modified_before_ms: null,
+      only_kind: onlyKind,
     };
     const timer = setTimeout(() => {
       void (async () => {
@@ -104,6 +147,9 @@ export function SearchPanel({
     root,
     query,
     content,
+    minSize,
+    since,
+    onlyKind,
     reindexNonce,
     setResults,
     setStatus,
@@ -198,6 +244,57 @@ export function SearchPanel({
           <X size={12} />
         </button>
       </div>
+      {/* 필터 바 — 이름만으로 좁히기 어려운 질의를 위해. */}
+      <div className="flex h-7 items-center gap-2 border-t border-border px-3 text-meta text-fg-muted">
+        <span>{t("search.filters")}</span>
+        <select
+          className={filterClass}
+          value={onlyKind ?? "any"}
+          onChange={(e) =>
+            setOnlyKind(
+              e.target.value === "any" ? null : (e.target.value as EntryKind),
+            )
+          }
+        >
+          <option value="any">{t("search.kindAny")}</option>
+          <option value="file">{t("search.kindFile")}</option>
+          <option value="dir">{t("search.kindDir")}</option>
+        </select>
+        <select
+          className={filterClass}
+          value={minSize}
+          onChange={(e) => setMinSize(e.target.value as MinSize)}
+        >
+          <option value="any">{t("search.sizeAny")}</option>
+          <option value="1M">≥ 1 MB</option>
+          <option value="10M">≥ 10 MB</option>
+          <option value="100M">≥ 100 MB</option>
+          <option value="1G">≥ 1 GB</option>
+        </select>
+        <select
+          className={filterClass}
+          value={since}
+          onChange={(e) => setSince(e.target.value as Since)}
+        >
+          <option value="any">{t("search.timeAny")}</option>
+          <option value="1d">{t("search.time1d")}</option>
+          <option value="7d">{t("search.time7d")}</option>
+          <option value="30d">{t("search.time30d")}</option>
+        </select>
+        {(onlyKind !== null || minSize !== "any" || since !== "any") && (
+          <button
+            type="button"
+            className="rounded px-1.5 text-accent hover:underline"
+            onClick={() => {
+              setOnlyKind(null);
+              setMinSize("any");
+              setSince("any");
+            }}
+          >
+            {t("search.clearFilters")}
+          </button>
+        )}
+      </div>
       {error && (
         <div className="border-t border-border px-3 py-1 text-meta text-danger">
           {error}
@@ -213,8 +310,17 @@ export function SearchPanel({
               className="flex w-full items-center gap-2 px-3 py-1 text-left text-base hover:bg-border"
             >
               <span className="font-mono">{hit.name}</span>
-              <span className="ml-auto truncate text-meta text-fg-muted">
+              <span className="ml-auto min-w-0 truncate text-meta text-fg-muted">
                 {hit.location.path}
+              </span>
+              {/* 원격 find 결과는 크기·시각이 미상(0/None) — 그때는 빈칸. */}
+              <span className="w-20 shrink-0 text-right text-meta tabular-nums text-fg-muted">
+                {hit.kind === "file" && hit.size > 0
+                  ? formatSize(hit.size)
+                  : ""}
+              </span>
+              <span className="w-24 shrink-0 text-right text-meta tabular-nums text-fg-muted">
+                {formatTime(hit.modified_ms)}
               </span>
             </button>
           ))}
