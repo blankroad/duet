@@ -58,6 +58,8 @@ import {
 } from "@/lib/entryDnd";
 import { isArchiveName } from "@/lib/archive";
 import { basename } from "@/lib/paths";
+import { useBookmarks } from "@/stores/bookmarks";
+import { useHostFavorites } from "@/stores/hostFavorites";
 import {
   resolveActiveTargets,
   triggerCompare,
@@ -91,6 +93,7 @@ import {
   usePanes,
   activeTab,
   computeDisplayed,
+  isParentEntry,
   applyTabDefaults,
   type PaneId,
   type SortKey,
@@ -496,6 +499,18 @@ function App() {
     }
   }, [leftTab, rightTab, onRefresh]);
 
+  /**
+   * 커서가 폴더면 그 폴더, 아니면 현재 폴더의 Location — "반대 패널에서 열기" 와
+   * "새 탭에서 열기" 가 공유한다(TC 의 Ctrl+←/→, Ctrl+↑ 자리).
+   */
+  const cursorFolderLocation = useCallback((id: PaneId): Location => {
+    const tab = activeTab(usePanes.getState(), id);
+    const entry = computeDisplayed(tab)[tab.cursorIndex];
+    if (entry && entry.kind === "dir" && !isParentEntry(entry))
+      return childLocation(tab.location, entry.name);
+    return tab.location;
+  }, []);
+
   const onBack = useCallback(
     (id: PaneId) => {
       const loc = usePanes.getState().back(id);
@@ -776,6 +791,41 @@ function App() {
   useEffect(() => {
     const builtins = buildBuiltins({
       permanentDeleteEnabled,
+      // 커서가 폴더면 그 폴더를, 아니면 현재 폴더를 반대 패널/새 탭에서 연다.
+      openInOtherPane: () => {
+        const st = usePanes.getState();
+        const id = st.activePane;
+        const opp: PaneId = id === "left" ? "right" : "left";
+        void navigateTo(opp, cursorFolderLocation(id));
+        st.setActivePane(opp);
+      },
+      openInNewTab: () => {
+        const st = usePanes.getState();
+        const id = st.activePane;
+        const target = cursorFolderLocation(id);
+        st.openTab(id);
+        void navigateTo(id, target);
+      },
+      gotoTab: (n) => {
+        const st = usePanes.getState();
+        const id = st.activePane;
+        const p = st.panes[id];
+        if (n - 1 < p.tabs.length) st.selectTab(id, n - 1);
+      },
+      gotoBookmark: (n) => {
+        // 사이드바에 보이는 순서 = 로컬 북마크 다음 원격 즐겨찾기.
+        const bms = useBookmarks.getState().items;
+        const favs = useHostFavorites.getState().items;
+        const bm = bms[n - 1];
+        if (bm) {
+          onBookmarkActivate(bm.location);
+          return;
+        }
+        const fav = favs[n - 1 - bms.length];
+        if (fav) onFavoriteActivate(fav);
+      },
+      // 호스트만 걸러 보여 주는 팔레트 — 접속이 키보드만으로 끝난다.
+      quickConnect: () => usePalette.getState().open("Connect"),
       openTab: () =>
         usePanes.getState().openTab(usePanes.getState().activePane),
       closeActiveTab: () => {
@@ -1537,6 +1587,7 @@ function App() {
   // 모든 callback 정의 후 dynamic commands hook 등록
   useDynamicCommands({
     onSavedActivate,
+    onHostActivate,
     onBookmarkActivate,
     onFavoriteActivate,
     onAliasExecute,

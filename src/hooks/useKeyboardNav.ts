@@ -12,6 +12,9 @@ import { useUIDialogs } from "@/stores/ui-dialogs";
 import { usePalette } from "@/stores/palette";
 import { useSearch } from "@/stores/search";
 import { useUI } from "@/stores/ui";
+import { useKeymap } from "@/stores/keymap";
+import { useCommands } from "@/stores/commands";
+import { formatKeyEvent } from "@/lib/keyEvent";
 
 /**
  * Esc 의 주인이 따로 있는가 — 다이얼로그·팔레트·검색·QuickLook 이 열려 있으면 그쪽이
@@ -35,6 +38,51 @@ const anchors = new Map<string, number>();
 function anchorKey(id: PaneId): string {
   const p = usePanes.getState().panes[id];
   return `${id}:${p.activeTabIndex}`;
+}
+
+/**
+ * 타이핑으로 이름 점프(type-ahead) — 탐색기/파인더/ForkLift 의 근육 기억.
+ * 1초 안에 이어 친 글자는 접두사로 누적된다. `/` 는 계속 빠른 필터를 연다.
+ */
+const TYPEAHEAD_RESET_MS = 1000;
+let typeahead = { buf: "", at: 0 };
+
+/**
+ * 그 키에 이미 커맨드가 매여 있나 — 사용자가 맨 글자 하나를 단축키로 바꿔 뒀다면
+ * 커맨드가 이기고 이름 점프는 하지 않는다(둘 다 실행되면 안 된다).
+ */
+function boundToCommand(e: KeyboardEvent): boolean {
+  const keystr = formatKeyEvent(e);
+  if (!keystr) return false;
+  if (useKeymap.getState().bindings.some((b) => b.key === keystr)) return true;
+  const { builtins, dynamic } = useCommands.getState();
+  return [...builtins, ...dynamic].some(
+    (c) => c.defaultKey === keystr || c.altKeys?.includes(keystr),
+  );
+}
+
+/** 접두사로 시작하는 첫 항목으로 커서 이동. 없으면 아무 일도 안 한다. */
+function typeaheadJump(id: PaneId, ch: string): void {
+  const now = Date.now();
+  typeahead =
+    now - typeahead.at > TYPEAHEAD_RESET_MS
+      ? { buf: ch, at: now }
+      : { buf: typeahead.buf + ch, at: now };
+  const state = usePanes.getState();
+  const tab = activeTab(state, id);
+  const list = computeDisplayed(tab);
+  const prefix = typeahead.buf.toLowerCase();
+  // 같은 글자를 반복하면 다음 후보로 순환(탐색기 동작).
+  const start =
+    typeahead.buf.length === 1 ? tab.cursorIndex + 1 : tab.cursorIndex;
+  for (let i = 0; i < list.length; i++) {
+    const idx = (Math.max(0, start) + i) % list.length;
+    const e = list[idx];
+    if (e && !isParentEntry(e) && e.name.toLowerCase().startsWith(prefix)) {
+      state.setCursor(id, idx);
+      return;
+    }
+  }
 }
 
 /** 한 페이지 = 뷰포트에 들어가는 행 수(대략). 그리드는 행 단위로 맞춘다. */
@@ -202,6 +250,20 @@ export function useKeyboardNav(
             onQuickLook(id);
           }
           break;
+      }
+
+      // 위 switch 가 처리하지 않은 **문자 한 글자** → 이름 점프.
+      // 수식키 조합은 커맨드 몫이라 건드리지 않는다.
+      if (
+        e.key.length === 1 &&
+        e.key !== " " &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        !boundToCommand(e)
+      ) {
+        e.preventDefault();
+        typeaheadJump(id, e.key);
       }
     };
 

@@ -82,6 +82,16 @@ export interface BuiltinDeps {
   focusFilter: () => void;
   openSearch: () => void;
   // select (glob/substring pattern)
+  /** 커서 폴더를 반대 패널에서 열기 (없으면 현재 폴더). */
+  openInOtherPane: () => void;
+  /** 커서 폴더를 새 탭에서 열기. */
+  openInNewTab: () => void;
+  /** N 번째 탭으로 (1-based). */
+  gotoTab: (n: number) => void;
+  /** 사이드바 N 번째 북마크로 (1-based). */
+  gotoBookmark: (n: number) => void;
+  /** 호스트만 필터한 팔레트 (빠른 접속). */
+  quickConnect: () => void;
   selectAll: () => void;
   clearSelection: () => void;
   invertSelection: () => void;
@@ -131,6 +141,31 @@ export interface BuiltinDeps {
   openHistory: () => void;
   // ssh
   setupKeyAuth: () => void;
+}
+
+/** Alt+1..9 → N 번째 탭. 브라우저·DOpus·ForkLift 공통 관례. */
+function tabGotoCommands(deps: BuiltinDeps): Command[] {
+  return Array.from({ length: 9 }, (_, i) => ({
+    id: `tab.goto${i + 1}`,
+    label: `Go to tab ${i + 1}`,
+    category: "Tab" as const,
+    defaultKey: `Alt+${i + 1}`,
+    action: () => deps.gotoTab(i + 1),
+  }));
+}
+
+/**
+ * Ctrl+Alt+1..9 → 사이드바 N 번째 북마크. TC 핫리스트·DOpus "Go FAVORITE=N" 자리.
+ * (Alt+1..9 는 탭 이동이 가져갔다 — 둘 다 키맵에서 바꿀 수 있다.)
+ */
+function bookmarkGotoCommands(deps: BuiltinDeps): Command[] {
+  return Array.from({ length: 9 }, (_, i) => ({
+    id: `bookmark.goto${i + 1}`,
+    label: `Go to bookmark ${i + 1}`,
+    category: "Navigation" as const,
+    defaultKey: `Ctrl+Alt+${i + 1}`,
+    action: () => deps.gotoBookmark(i + 1),
+  }));
 }
 
 export function buildBuiltins(deps: BuiltinDeps): Command[] {
@@ -333,6 +368,29 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
       category: "Search",
       defaultKey: "Ctrl+Shift+F",
       action: deps.openSearch,
+    },
+    {
+      id: "pane.openInOther",
+      label: "Open folder in other pane",
+      category: "Navigation",
+      defaultKey: "Ctrl+Right",
+      action: deps.openInOtherPane,
+    },
+    {
+      id: "tab.openInNew",
+      label: "Open folder in new tab",
+      category: "Tab",
+      defaultKey: "Ctrl+Up",
+      action: deps.openInNewTab,
+    },
+    ...tabGotoCommands(deps),
+    ...bookmarkGotoCommands(deps),
+    {
+      id: "connection.quick",
+      label: "Quick connect (search hosts)",
+      category: "Connection",
+      defaultKey: "Ctrl+Shift+K",
+      action: deps.quickConnect,
     },
     {
       id: "select.all",

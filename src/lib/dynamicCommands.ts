@@ -1,14 +1,23 @@
 import { useEffect, useRef } from "react";
 import { useCommands } from "@/stores/commands";
 import { useSavedHosts } from "@/stores/savedHosts";
+import { useConnections } from "@/stores/connections";
+import { useHostNicknames } from "@/stores/hostNicknames";
 import { useBookmarks } from "@/stores/bookmarks";
 import { useHostFavorites } from "@/stores/hostFavorites";
 import { useUserAliases } from "@/stores/userAliases";
 import type { Command } from "@/lib/commands";
-import type { Location, SavedHost, HostFavorite, UserAlias } from "@/types/bindings";
+import type {
+  Location,
+  SavedHost,
+  HostFavorite,
+  UserAlias,
+} from "@/types/bindings";
 
 export interface DynamicDeps {
   onSavedActivate: (host: SavedHost) => void;
+  /** `~/.ssh/config` 호스트 접속 (alias). */
+  onHostActivate: (alias: string) => void;
   onBookmarkActivate: (location: Location) => void;
   onFavoriteActivate: (favorite: HostFavorite) => void;
   onAliasExecute: (alias: UserAlias) => void;
@@ -22,6 +31,10 @@ export interface DynamicDeps {
  */
 export function useDynamicCommands(deps: DynamicDeps) {
   const savedHosts = useSavedHosts((s) => s.hosts);
+  // `~/.ssh/config` 호스트 — 예전엔 팔레트에 저장 호스트만 있어서 config 호스트는
+  // 키보드로 접속할 방법이 아예 없었다(사이드바 더블클릭 전용).
+  const configHosts = useConnections((s) => s.hosts);
+  const nicknames = useHostNicknames((s) => s.byAlias);
   const bookmarks = useBookmarks((s) => s.items);
   const hostFavorites = useHostFavorites((s) => s.items);
   const userAliases = useUserAliases((s) => s.items);
@@ -33,6 +46,15 @@ export function useDynamicCommands(deps: DynamicDeps) {
   useEffect(() => {
     const d = depsRef.current;
     const cmds: Command[] = [
+      ...configHosts.map((h) => ({
+        id: `host.connectConfig:${h.alias}`,
+        // 별명을 쓰되 alias 로도 찾을 수 있게 둘 다 담는다.
+        label: `Connect: ${nicknames[h.alias] ?? h.alias}${
+          nicknames[h.alias] ? ` (${h.alias})` : ""
+        }`,
+        category: "Connection" as const,
+        action: () => depsRef.current.onHostActivate(h.alias),
+      })),
       ...savedHosts.map((h) => ({
         id: `host.connect:${h.alias}`,
         label: `Connect: ${h.alias}`,
@@ -60,5 +82,13 @@ export function useDynamicCommands(deps: DynamicDeps) {
     ];
     void d; // eslint: 직접 capture 안 하지만 ref 통해 사용
     setDynamic(cmds);
-  }, [savedHosts, bookmarks, hostFavorites, userAliases, setDynamic]);
+  }, [
+    savedHosts,
+    configHosts,
+    nicknames,
+    bookmarks,
+    hostFavorites,
+    userAliases,
+    setDynamic,
+  ]);
 }

@@ -17,6 +17,9 @@ export function CommandPalette() {
   const { t } = useTranslation();
   const isOpen = usePalette((s) => s.isOpen);
   const close = usePalette((s) => s.close);
+  const initialQuery = usePalette((s) => s.initialQuery);
+  const recent = usePalette((s) => s.recent);
+  const remember = usePalette((s) => s.remember);
   const all = useAllCommands();
   const bindings = useKeymap((s) => s.bindings);
   const [query, setQuery] = useState("");
@@ -25,28 +28,41 @@ export function CommandPalette() {
 
   useEffect(() => {
     if (isOpen) {
-      setQuery("");
+      setQuery(initialQuery);
       setCursor(0);
       const timer = setTimeout(() => inputRef.current?.focus(), 0);
       return () => clearTimeout(timer);
     }
-  }, [isOpen]);
+  }, [isOpen, initialQuery]);
 
   // 번역된 라벨로 검색/표시 — 언어 전환 시 t 가 바뀌며 자동 재계산.
   const ranked = useMemo(() => {
     const scored = all
-      .map((c) => ({
-        cmd: c,
-        label: commandLabel(c, t),
-        score: fuzzyScore(query, commandLabel(c, t)),
-      }))
-      .filter(
-        (x): x is { cmd: Command; label: string; score: number } =>
-          x.score !== null,
+      .map((c) => {
+        const label = commandLabel(c, t);
+        // 번역 라벨·원문 라벨·id 모두에서 찾는다 — 한국어 UI 에서 "hidden" 같은
+        // 영어 키워드로도 찾을 수 있게(예전엔 번역 라벨 하나만 봤다).
+        const score = Math.max(
+          fuzzyScore(query, label) ?? -Infinity,
+          fuzzyScore(query, c.label) ?? -Infinity,
+          fuzzyScore(query, c.id) ?? -Infinity,
+        );
+        return { cmd: c, label, score };
+      })
+      .filter((x) => x.score !== -Infinity);
+    if (query.trim() === "") {
+      // 빈 검색어 — 최근 쓴 것부터. 그 다음은 등록 순서 그대로.
+      const rank = new Map(recent.map((id, i) => [id, i]));
+      scored.sort(
+        (a, b) =>
+          (rank.get(a.cmd.id) ?? Number.MAX_SAFE_INTEGER) -
+          (rank.get(b.cmd.id) ?? Number.MAX_SAFE_INTEGER),
       );
-    scored.sort((a, b) => b.score - a.score);
+    } else {
+      scored.sort((a, b) => b.score - a.score);
+    }
     return scored.map((x) => ({ cmd: x.cmd, label: x.label }));
-  }, [all, query, t]);
+  }, [all, query, t, recent]);
 
   useEffect(() => {
     if (cursor >= ranked.length) setCursor(0);
@@ -55,6 +71,7 @@ export function CommandPalette() {
   if (!isOpen) return null;
 
   const execute = (cmd: Command) => {
+    remember(cmd.id);
     close();
     cmd.action();
   };
