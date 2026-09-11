@@ -7,7 +7,6 @@ import {
   ListChecks,
   MoveRight,
 } from "lucide-react";
-import clsx from "clsx";
 import type { ConflictPolicy } from "@/types/bindings";
 import { DialogShell } from "./DialogShell";
 import { DialogButton } from "./DialogButton";
@@ -19,12 +18,12 @@ import {
   transferSummary,
   type TransferPlan,
 } from "./TransferPlanBody";
+import { useKeyHint } from "@/lib/keyHint";
 import { initialConflictPolicy, useAppSettings } from "@/stores/settings";
 
-const POLICY_HINT: Record<ConflictPolicy, string> = {
+const POLICY_HINT = {
   skip: "conflict.skipAllHint",
   keepboth: "conflict.keepBothAllHint",
-  replace: "conflict.replaceAllHint",
 };
 
 /**
@@ -33,7 +32,7 @@ const POLICY_HINT: Record<ConflictPolicy, string> = {
  * - 충돌 없음: [취소] [복사].
  * - 충돌 있음(일괄): 경고 밴드 안에서 정책을 세그먼트로 고르고(기본 건너뛰기 —
  *   아무것도 덮어쓰거나 새로 만들지 않는 안전한 시작점) 주 버튼은 그대로 [복사].
- *   교체를 고르면 힌트와 주 버튼이 danger 로 바뀐다 — 영구 덮어쓰기(undo 불가).
+ *   파일 교체는 영구 덮어쓰기, 폴더 교체는 통째 교체 후 되돌리기 가능.
  * - 파일별: "파일별로 선택…" 으로 전환 → 항목마다 정책 → onConfirmPerFile(decisions).
  */
 export function CopyMoveConfirmDialog({
@@ -50,6 +49,7 @@ export function CopyMoveConfirmDialog({
   onConfirmPerFile: (decisions: Record<string, ConflictPolicy>) => void;
 }) {
   const { t } = useTranslation();
+  const undoKey = useKeyHint("edit.undo");
   const ctaRef = useRef<HTMLButtonElement>(null);
   const conflicts = plan.conflicts;
   const cta = t(`dialog.transfer.${kind}`);
@@ -59,6 +59,40 @@ export function CopyMoveConfirmDialog({
   const [perFile, setPerFile] = useState(false);
   const [decisions, setDecisions] = useState<Record<string, ConflictPolicy>>(
     () => Object.fromEntries(conflicts.map((c) => [c.name, policy])),
+  );
+
+  // 손실/복원 의미는 소스가 아니라 받는 위치의 기존 항목 종류로 판단한다.
+  const tally = { replace: 0, skip: 0, keepboth: 0 };
+  let replacedFiles = 0;
+  let replacedFolders = 0;
+  for (const c of conflicts) {
+    const choice = perFile ? (decisions[c.name] ?? "skip") : policy;
+    tally[choice]++;
+    if (choice === "replace") {
+      if (c.dst_is_dir) replacedFolders++;
+      else replacedFiles++;
+    }
+  }
+  const replacementWarnings = (
+    <>
+      {replacedFiles > 0 && (
+        <div className="flex items-start gap-1.5 text-meta text-danger">
+          <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+          <span>{t("conflict.replaceWarn", { count: replacedFiles })}</span>
+        </div>
+      )}
+      {replacedFolders > 0 && (
+        <div className="flex items-start gap-1.5 text-meta text-fg-muted">
+          <FolderSymlink size={12} className="mt-0.5 shrink-0" />
+          <span>
+            {t("conflict.replaceFolderNote", { count: replacedFolders })}{" "}
+            {t(undoKey ? "conflict.folderUndoKey" : "conflict.folderUndo", {
+              key: undoKey,
+            })}
+          </span>
+        </div>
+      )}
+    </>
   );
 
   /** 고른 정책을 세션에 기록한 뒤 실행 — 다음 다이얼로그의 기본이 된다. */
@@ -74,8 +108,6 @@ export function CopyMoveConfirmDialog({
   );
 
   if (perFile) {
-    const tally = { replace: 0, skip: 0, keepboth: 0 };
-    for (const c of conflicts) tally[decisions[c.name] ?? "skip"]++;
     return (
       <DialogShell
         title={t("conflict.perFileTitle", { cta })}
@@ -112,21 +144,13 @@ export function CopyMoveConfirmDialog({
             setDecisions(Object.fromEntries(conflicts.map((c) => [c.name, p])))
           }
         />
-        {tally.replace > 0 && (
-          <div className="flex items-center gap-1.5 text-meta text-danger">
-            <AlertTriangle size={12} className="shrink-0" />
-            <span>{t("conflict.replaceWarn", { count: tally.replace })}</span>
-          </div>
-        )}
+        {replacementWarnings}
       </DialogShell>
     );
   }
 
   const hasConflicts = conflicts.length > 0;
-  const destructive = hasConflicts && policy === "replace";
-  // 폴더 충돌은 "덮어쓰기"가 아니라 폴더 통째 교체다 — 기존 폴더에만 있던 파일이
-  // 사라진다는 걸 교체를 고른 순간 말해 준다(백엔드는 되돌릴 수 있게 백업을 남긴다).
-  const replacingFolder = destructive && conflicts.some((c) => c.dst_is_dir);
+  const destructive = tally.replace > 0;
   return (
     <DialogShell
       title={cta}
@@ -165,28 +189,25 @@ export function CopyMoveConfirmDialog({
               onChange={setPolicy}
             />
             <div className="flex items-center gap-2.5">
-              <span
-                className={clsx(
-                  "min-w-0 flex-1 text-meta",
-                  destructive ? "text-danger" : "text-fg-muted",
-                )}
-              >
-                {t(POLICY_HINT[policy])}
-              </span>
+              {policy !== "replace" && (
+                <span className="min-w-0 flex-1 text-meta text-fg-muted">
+                  {t(POLICY_HINT[policy])}
+                </span>
+              )}
               <button
                 type="button"
-                onClick={() => setPerFile(true)}
+                onClick={() => {
+                  setDecisions(
+                    Object.fromEntries(conflicts.map((c) => [c.name, policy])),
+                  );
+                  setPerFile(true);
+                }}
                 className="shrink-0 text-meta text-accent hover:underline"
               >
                 {t("conflict.perFile")}
               </button>
             </div>
-            {replacingFolder && (
-              <div className="flex items-start gap-1.5 text-meta text-fg-muted">
-                <FolderSymlink size={12} className="mt-0.5 shrink-0" />
-                <span>{t("conflict.replaceFolderNote")}</span>
-              </div>
-            )}
+            {replacementWarnings}
           </div>
         </DialogBand>
       )}

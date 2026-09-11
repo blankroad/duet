@@ -1,9 +1,17 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  within,
+  cleanup,
+} from "@testing-library/react";
 import type { Conflict, CopyPlan, EntryRef } from "@/types/bindings";
 import { CopyMoveConfirmDialog } from "./CopyMoveConfirmDialog";
 import { useAppSettings } from "@/stores/settings";
 import "@/i18n";
+import { useKeymap } from "@/stores/keymap";
+import { displayKey } from "@/lib/keyDisplay";
 
 const SRC = "/src";
 const DST = "/Users/ctmctm/Documents/very/long/path/to/target";
@@ -55,6 +63,8 @@ function render_(
 
 describe("CopyMoveConfirmDialog", () => {
   afterEach(() => {
+    cleanup();
+    useKeymap.getState().setAll([]);
     useAppSettings.setState({
       conflictDefault: "skip",
       rememberConflictChoice: false,
@@ -182,5 +192,80 @@ describe("CopyMoveConfirmDialog", () => {
       "a.txt": "replace",
       "b.txt": "skip",
     });
+  });
+
+  it.each([false, true])(
+    "파일/폴더 교체 범위별 경고와 복원 안내 (항목별=%s)",
+    (perFile) => {
+      useKeymap.getState().setAll([{ command_id: "edit.undo", key: "Alt+U" }]);
+      render_(
+        plan({
+          items: [ref("a.txt"), ref("folder")],
+          conflicts: [conflict("a.txt"), conflict("folder", true)],
+        }),
+      );
+      fireEvent.click(screen.getByRole("radio", { name: "Replace" }));
+      if (perFile) fireEvent.click(screen.getByText(/Choose per file/));
+      expect(
+        screen.getByText(/Replace 1 file\(s\).*cannot be undone/),
+      ).toBeDefined();
+      expect(
+        screen.getByText(/Replace 1 folder\(s\) whole, without merging/),
+      ).toBeDefined();
+      expect(screen.getByText(/Undo.*restores/).textContent).toContain(
+        displayKey("Alt+U"),
+      );
+      expect(screen.getByRole("button", { name: /Copy/ }).className).toContain(
+        "bg-danger",
+      );
+      if (perFile) {
+        const fileRow = screen.getByText("a.txt").closest("li")!;
+        fireEvent.click(within(fileRow).getByRole("radio", { name: "Skip" }));
+        expect(screen.queryByText(/cannot be undone/)).toBeNull();
+        expect(screen.getByText(/Replace 1 folder\(s\) whole/)).toBeDefined();
+        expect(
+          screen.getByRole("button", { name: /Copy/ }).className,
+        ).toContain("bg-danger");
+        fireEvent.click(
+          within(fileRow).getByRole("radio", { name: "Keep both" }),
+        );
+        const folderRow = screen.getByText("folder").closest("li")!;
+        fireEvent.click(within(folderRow).getByRole("radio", { name: "Skip" }));
+        expect(screen.queryByText(/whole, without merging/)).toBeNull();
+      } else {
+        fireEvent.click(screen.getByRole("radio", { name: "Keep both" }));
+        expect(screen.queryByText(/cannot be undone/)).toBeNull();
+        expect(screen.queryByText(/whole, without merging/)).toBeNull();
+      }
+    },
+  );
+
+  it.each([false, true])(
+    "폴더만 교체하면 영구 손실 경고 없이 Undo를 안내 (항목별=%s)",
+    (perFile) => {
+      render_(
+        plan({ items: [ref("folder")], conflicts: [conflict("folder", true)] }),
+      );
+      if (perFile) fireEvent.click(screen.getByText(/Choose per file/));
+      fireEvent.click(screen.getAllByRole("radio", { name: "Replace" })[0]!);
+      expect(screen.queryByText(/cannot be undone/)).toBeNull();
+      expect(screen.getByText(/Replace 1 folder\(s\) whole/)).toBeDefined();
+      expect(screen.getByText(/Use Undo to restore/)).toBeDefined();
+      expect(screen.queryByText(/Ctrl\+Z/)).toBeNull();
+      expect(screen.getByRole("button", { name: /Copy/ }).className).toContain(
+        "bg-danger",
+      );
+    },
+  );
+
+  it("파일만 교체할 때 폴더 복원 안내는 표시하지 않는다", () => {
+    render_(plan({ conflicts: [conflict("a.txt")] }));
+    fireEvent.click(screen.getByRole("radio", { name: "Replace" }));
+    expect(screen.queryByText(/restore.*folder/)).toBeNull();
+    fireEvent.click(screen.getByText(/Choose per file/));
+    expect(
+      screen.getByText(/Replace 1 file\(s\).*cannot be undone/),
+    ).toBeDefined();
+    expect(screen.queryByText(/restore.*folder/)).toBeNull();
   });
 });

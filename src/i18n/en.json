@@ -12,7 +12,6 @@
   },
   "conflict": {
     "exist": "{{count}} item(s) with the same name already exist at the destination",
-    "replaceAllHint": "Overwrite existing (permanent — cannot be undone)",
     "skipAllHint": "Don't copy conflicting items",
     "keepBothAllHint": "Copy with a new name — name (1).ext",
     "perFile": "Choose per file…",
@@ -25,10 +24,12 @@
     "existsBadge": "Exists",
     "perFileTitle": "{{cta}} — choose per file",
     "perFileSummary": "{{count}} conflict(s) · {{rest}} other(s) unaffected",
-    "replaceWarn": "Replace {{count}} — existing files are overwritten permanently and cannot be undone",
+    "replaceWarn": "Replace {{count}} file(s) — existing files are overwritten permanently and cannot be undone",
     "tally": "Replace {{nReplace}} · Skip {{nSkip}} · Keep both {{nKeep}}",
     "folderBadge": "Folder",
-    "replaceFolderNote": "Folders are replaced whole, not merged — files only in the existing folder disappear. Undo (Ctrl+Z) restores them."
+    "replaceFolderNote": "Replace {{count}} folder(s) whole, without merging. Files only in the existing folders disappear.",
+    "folderUndoKey": "Undo ({{key}}) restores the previous folders.",
+    "folderUndo": "Use Undo to restore the previous folders."
   },
   "dialog": {
     "progress": {
