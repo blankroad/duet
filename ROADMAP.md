@@ -115,7 +115,7 @@
 ## 장기 (Maybe)
 
 - [x] 파일 미리보기 (이미지, 텍스트, PDF/미디어 스트리밍, Quick Look)
-- [x] 압축/해제 (zip, tar.gz) + 아카이브 내부 탐색(browse) + 편집 후 repack
+- [x] 압축/해제 (압축 zip·tar.gz / 해제는 tar.bz2·tar.xz·tar.zst·7z·rar·단일 파일까지) + 아카이브 내부 탐색(browse) + 편집 후 repack
 - [x] 폴더 비교 (folder diff) — 두 패널 재귀 비교(좌측만/우측만/최신/다름/동일)
 - [~] 동기화 모드 — local↔local 단방향 미러(추가 전용) + 비교 기반 안전 양방향 머지
       (한쪽-전용 파일 양방향 복사, 충돌·삭제 미변경). same-host rsync sync /

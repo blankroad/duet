@@ -314,8 +314,12 @@ duet의 가장 중요한 부분.
 ### 12. 압축 / 해제 / 아카이브 내부 탐색
 
 - **압축**: `.zip`(deflate) / `.tar.gz`(flate2). 다중 선택 → CompressDialog 에서 이름·포맷.
-- **해제**: zip / tar / tar.gz / gz. zip-slip(경로 탈출) 가드. 충돌 시 기존 대상 백업 후
-  추출. **로컬은 Rust crate, 원격은 서버측 `unzip`/`tar` exec**(본인 PC 대역폭 0).
+- **해제**: zip(Deflate·Deflate64, 암호 ZipCrypto·AES) / tar / tar.gz·tar.bz2·tar.xz·tar.zst
+  (`.tgz` `.tbz2` `.tbz` `.txz` `.tzst` 포함) / 7z / rar / 단일 파일 .gz·.bz2·.xz·.zst.
+  zip-slip(경로 탈출) 가드. 충돌 시 기존 대상 백업 후 추출. 단일 파일 압축은 폴더 없이
+  파일로 풀린다. **로컬은 Rust crate, 원격은 서버측 `unzip`/`tar` exec**(본인 PC 대역폭 0)
+  — 원격은 zip·tar 계열만(7z/rar/단일 파일은 로컬 전용이라 원격에선 메뉴를 숨긴다).
+  서버에 `unzip`/`zip` 이 없거나 AES 암호 zip 이면 원인을 알려주는 에러로 안내.
 - **아카이브 내부 탐색(browse)**: 아카이브에 들어가면 임시 추출 후 일반 폴더처럼 탐색.
   - 로컬: `temp/duet-archive/<token>/`, 원격: `~/.duet-tmp/browse-<token>/`(서버측).
   - 정리: 로컬은 앱 시작 시, 원격은 연결 종료 시 회수.
@@ -548,7 +552,7 @@ SSH 통합 테스트는 기본 **256MB / 2000개**로 돌고, `DUET_SSH_IT_BYTES
 ## 기술 스택
 
 - **백엔드**: Rust + Tauri 2 + tokio + `russh`/`russh-sftp` + `russh-keys`
-  - 휴지통 `trash`, 변경감지 `notify`, 디렉토리 워킹 `ignore`, 압축 `zip`/`tar`/`flate2`
+  - 휴지통 `trash`, 변경감지 `notify`, 디렉토리 워킹 `ignore`, 압축 `zip`/`tar`/`flate2`/`bzip2`/`lzma-rust2`/`ruzstd`/`sevenz-rust2`/`unrar`
   - 자격증명 `keyring`(OS keychain) + `age`(vault), 설정 `toml`/`serde`
   - 로깅 `tracing`, 에러 `thiserror`/`anyhow`
   - Windows 전용: `systemicons`(아이콘) · `winreg`(레지스트리) · `windows`(IContextMenu COM)
