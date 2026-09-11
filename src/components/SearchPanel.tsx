@@ -57,6 +57,7 @@ export function SearchPanel({
   const root = useSearch((s) => s.root);
   const query = useSearch((s) => s.query);
   const content = useSearch((s) => s.content);
+  const metadataUnavailable = root?.source.kind === "ssh" && !content;
   const results = useSearch((s) => s.results);
   const status = useSearch((s) => s.status);
   const error = useSearch((s) => s.error);
@@ -124,11 +125,11 @@ export function SearchPanel({
       content,
       // "지난주 이후 수정된 100MB 이상" 같은 질의 — 예전엔 이름만으로 500개를
       // 받아 놓고 눈으로 골라야 했다.
-      min_size: minSizeBytes(minSize),
+      min_size: metadataUnavailable ? null : minSizeBytes(minSize),
       max_size: null,
-      modified_after_ms: sinceMs(since),
+      modified_after_ms: metadataUnavailable ? null : sinceMs(since),
       modified_before_ms: null,
-      only_kind: onlyKind,
+      only_kind: metadataUnavailable ? null : onlyKind,
     };
     const timer = setTimeout(() => {
       void (async () => {
@@ -147,6 +148,7 @@ export function SearchPanel({
     root,
     query,
     content,
+    metadataUnavailable,
     minSize,
     since,
     onlyKind,
@@ -245,11 +247,16 @@ export function SearchPanel({
         </button>
       </div>
       {/* 필터 바 — 이름만으로 좁히기 어려운 질의를 위해. */}
-      <div className="flex h-7 items-center gap-2 border-t border-border px-3 text-meta text-fg-muted">
+      <div className="flex min-h-7 flex-wrap items-center gap-2 border-t border-border px-3 py-1 text-meta text-fg-muted">
         <span>{t("search.filters")}</span>
         <select
           className={filterClass}
-          value={onlyKind ?? "any"}
+          aria-label={t("search.kindAny")}
+          aria-describedby={
+            metadataUnavailable ? "search-metadata-note" : undefined
+          }
+          disabled={metadataUnavailable}
+          value={metadataUnavailable ? "any" : (onlyKind ?? "any")}
           onChange={(e) =>
             setOnlyKind(
               e.target.value === "any" ? null : (e.target.value as EntryKind),
@@ -262,7 +269,12 @@ export function SearchPanel({
         </select>
         <select
           className={filterClass}
-          value={minSize}
+          aria-label={t("search.sizeAny")}
+          aria-describedby={
+            metadataUnavailable ? "search-metadata-note" : undefined
+          }
+          disabled={metadataUnavailable}
+          value={metadataUnavailable ? "any" : minSize}
           onChange={(e) => setMinSize(e.target.value as MinSize)}
         >
           <option value="any">{t("search.sizeAny")}</option>
@@ -273,7 +285,12 @@ export function SearchPanel({
         </select>
         <select
           className={filterClass}
-          value={since}
+          aria-label={t("search.timeAny")}
+          aria-describedby={
+            metadataUnavailable ? "search-metadata-note" : undefined
+          }
+          disabled={metadataUnavailable}
+          value={metadataUnavailable ? "any" : since}
           onChange={(e) => setSince(e.target.value as Since)}
         >
           <option value="any">{t("search.timeAny")}</option>
@@ -281,19 +298,25 @@ export function SearchPanel({
           <option value="7d">{t("search.time7d")}</option>
           <option value="30d">{t("search.time30d")}</option>
         </select>
-        {(onlyKind !== null || minSize !== "any" || since !== "any") && (
-          <button
-            type="button"
-            className="rounded px-1.5 text-accent hover:underline"
-            onClick={() => {
-              setOnlyKind(null);
-              setMinSize("any");
-              setSince("any");
-            }}
-          >
-            {t("search.clearFilters")}
-          </button>
+        {metadataUnavailable && (
+          <span id="search-metadata-note">
+            {t("search.remoteMetadataUnavailable")}
+          </span>
         )}
+        {!metadataUnavailable &&
+          (onlyKind !== null || minSize !== "any" || since !== "any") && (
+            <button
+              type="button"
+              className="rounded px-1.5 text-accent hover:underline"
+              onClick={() => {
+                setOnlyKind(null);
+                setMinSize("any");
+                setSince("any");
+              }}
+            >
+              {t("search.clearFilters")}
+            </button>
+          )}
       </div>
       {error && (
         <div className="border-t border-border px-3 py-1 text-meta text-danger">

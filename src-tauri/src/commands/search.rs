@@ -96,8 +96,9 @@ pub async fn search_cancel(active: tauri::State<'_, Arc<ActiveSearch>>) -> Resul
 
 // ===== 파일명 인덱스(Everything 식 즉시·오프라인) 검색 =====
 
-/// 원격 호스트 트리를 `find` 1회로 인덱스용 경로 목록 수집. (kind 는 파일명 인덱스라
-/// File 로 근사 — parse_find_output 과 동일. 표시 아이콘만 영향, 검색/네비는 무관.)
+/// 원격 호스트 트리를 `find` 1회로 인덱스용 경로 목록 수집.
+/// 종류/크기/수정시각은 미수집 placeholder — 메타 필터는 FileIndex::query 에서 거부한다.
+/// 조건 없는 이름 검색 결과의 종류 표시는 아직 File 로 근사한다.
 async fn build_remote_index(
     conn: &Arc<ActiveConnection>,
     root: &Path,
@@ -168,14 +169,17 @@ pub async fn index_search(
         // 전역 아직 빌드 전 → 현재 폴더 온디맨드로 폴백(즉시성 유지).
     }
     // 1) 폴더/원격 캐시 있으면 즉시 — 라이브 연결 불필요.
-    if let Some(hits) = index.query(&root.source, &root.path, &pattern, &opts).await {
+    if let Some(hits) = index
+        .query(&root.source, &root.path, &pattern, &opts)
+        .await?
+    {
         return Ok(hits);
     }
     // 2) 아직 인덱스 없음 → 온디맨드 빌드 후 재쿼리.
     build_index_for(&root, pool.inner(), index.inner()).await?;
     Ok(index
         .query(&root.source, &root.path, &pattern, &opts)
-        .await
+        .await?
         .unwrap_or_default())
 }
 

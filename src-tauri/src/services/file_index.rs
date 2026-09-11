@@ -341,25 +341,39 @@ impl FileIndex {
     }
 
     /// 인덱스 쿼리 — 라이브 연결 불필요(캐시만으로). 메모리에 없으면 디스크에서 로드.
-    /// 둘 다 없으면 `None`(호출자가 빌드 후 재시도).
+    /// 둘 다 없으면 `None`(호출자가 빌드 후 재시도). 원격 인덱스는 경로만 수집하므로
+    /// 메타 필터 요청은 캐시 유무와 관계없이 명시적 오류로 거부한다.
     pub async fn query(
         &self,
         source: &SourceId,
         root: &Path,
         pattern: &str,
         opts: &SearchOpts,
-    ) -> Option<Vec<SearchHit>> {
+    ) -> Result<Option<Vec<SearchHit>>, DuetError> {
+        if matches!(source, SourceId::Ssh { .. })
+            && (opts.only_kind.is_some()
+                || opts.min_size.is_some()
+                || opts.max_size.is_some()
+                || opts.modified_after_ms.is_some()
+                || opts.modified_before_ms.is_some())
+        {
+            return Err(DuetError::NotSupported(
+                "Remote filename indexes do not contain file type, size, or modification time. Clear these filters to search by name.".into(),
+            ));
+        }
         let key = index_key(source, root);
         {
             let guard = self.inner.read().await;
             if let Some(idx) = guard.get(&key) {
-                return Some(run_query(idx, source, pattern, opts));
+                return Ok(Some(run_query(idx, source, pattern, opts)));
             }
         }
-        let loaded = self.load_from_disk(&key).await?;
+        let Some(loaded) = self.load_from_disk(&key).await else {
+            return Ok(None);
+        };
         let hits = run_query(&loaded, source, pattern, opts);
         self.inner.write().await.insert(key, loaded);
-        Some(hits)
+        Ok(Some(hits))
     }
 }
 
@@ -531,6 +545,7 @@ mod tests {
                 &SearchOpts::default(),
             )
             .await
+            .unwrap()
             .expect("indexed");
         let mut names: Vec<&str> = hits.iter().map(|h| h.name.as_str()).collect();
         names.sort_unstable();
@@ -552,7 +567,7 @@ mod tests {
                 &SearchOpts::default(),
             )
             .await;
-        assert!(r.is_none());
+        assert!(r.unwrap().is_none());
     }
 
     #[tokio::test]
@@ -570,6 +585,7 @@ mod tests {
                 &SearchOpts::default(),
             )
             .await
+            .unwrap()
             .unwrap();
         assert_eq!(ci.len(), 1);
         let cs = idx
@@ -583,6 +599,7 @@ mod tests {
                 },
             )
             .await
+            .unwrap()
             .unwrap();
         assert_eq!(cs.len(), 0);
     }
@@ -647,6 +664,140 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn remote_metadata_filters_fail_before_cache_lookup_and_after_disk_reload() {
+        let cache = tempdir().unwrap();
+        let root = Path::new("/fixture");
+        let source = ssh_source();
+        let idx = FileIndex::new(cache.path().to_path_buf());
+        let filters = [
+            SearchOpts {
+                only_kind: Some(EntryKind::Dir),
+                ..Default::default()
+            },
+            SearchOpts {
+                only_kind: Some(EntryKind::File),
+                ..Default::default()
+            },
+            SearchOpts {
+                min_size: Some(1),
+                ..Default::default()
+            },
+            // Unknown size must not masquerade as an actual zero-byte file.
+            SearchOpts {
+                max_size: Some(0),
+                ..Default::default()
+            },
+            SearchOpts {
+                modified_after_ms: Some(0),
+                ..Default::default()
+            },
+            SearchOpts {
+                modified_before_ms: Some(1000),
+                ..Default::default()
+            },
+        ];
+        for opts in &filters {
+            assert!(matches!(
+                idx.query(&source, root, "item", opts).await,
+                Err(DuetError::NotSupported(_))
+            ));
+        }
+        idx.store(
+            index_key(&source, root),
+            vec![IndexedPath {
+                path: root.join("item"),
+                kind: EntryKind::File,
+                size: 0,
+                modified_ms: None,
+            }],
+        )
+        .await
+        .unwrap();
+        let reloaded = FileIndex::new(cache.path().to_path_buf());
+        for index in [&idx, &reloaded] {
+            for opts in &filters {
+                assert!(matches!(
+                    index.query(&source, root, "item", opts).await,
+                    Err(DuetError::NotSupported(_))
+                ));
+            }
+            // Offline name-only search remains available from memory and disk.
+            let hits = index
+                .query(&source, root, "item", &SearchOpts::default())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(hits.len(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn local_index_keeps_real_zero_size_kind_and_date_filters() {
+        let cache = tempdir().unwrap();
+        let root = Path::new("/fixture");
+        let idx = FileIndex::new(cache.path().to_path_buf());
+        idx.store(
+            index_key(&SourceId::Local, root),
+            vec![
+                IndexedPath {
+                    path: root.join("item_empty"),
+                    kind: EntryKind::File,
+                    size: 0,
+                    modified_ms: Some(1000),
+                },
+                IndexedPath {
+                    path: root.join("item_large"),
+                    kind: EntryKind::File,
+                    size: 2000,
+                    modified_ms: Some(2000),
+                },
+                IndexedPath {
+                    path: root.join("item_dir"),
+                    kind: EntryKind::Dir,
+                    size: 0,
+                    modified_ms: Some(2000),
+                },
+            ],
+        )
+        .await
+        .unwrap();
+        for (opts, expected) in [
+            (
+                SearchOpts {
+                    max_size: Some(0),
+                    only_kind: Some(EntryKind::File),
+                    ..Default::default()
+                },
+                "item_empty",
+            ),
+            (
+                SearchOpts {
+                    min_size: Some(1000),
+                    modified_after_ms: Some(1500),
+                    only_kind: Some(EntryKind::File),
+                    ..Default::default()
+                },
+                "item_large",
+            ),
+            (
+                SearchOpts {
+                    only_kind: Some(EntryKind::Dir),
+                    ..Default::default()
+                },
+                "item_dir",
+            ),
+        ] {
+            let hits = idx
+                .query(&SourceId::Local, root, "item", &opts)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(hits.len(), 1);
+            assert_eq!(hits[0].name, expected);
+        }
+    }
+
+    #[tokio::test]
     async fn store_from_paths_and_query() {
         let cache = tempdir().unwrap();
         let idx = FileIndex::new(cache.path().to_path_buf());
@@ -678,6 +829,7 @@ mod tests {
                 &SearchOpts::default(),
             )
             .await
+            .unwrap()
             .unwrap();
         assert_eq!(hits.len(), 2);
     }

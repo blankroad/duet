@@ -851,7 +851,8 @@
     "time1d": "최근 24시간",
     "time7d": "최근 7일",
     "time30d": "최근 30일",
-    "clearFilters": "지우기"
+    "clearFilters": "지우기",
+    "remoteMetadataUnavailable": "원격 파일명 검색에서는 종류·크기·수정일 필터를 사용할 수 없습니다."
   },
   "launcher": {
     "addApp": "앱 추가",

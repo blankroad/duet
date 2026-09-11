@@ -854,7 +854,8 @@
     "time1d": "Last 24 hours",
     "time7d": "Last 7 days",
     "time30d": "Last 30 days",
-    "clearFilters": "Clear"
+    "clearFilters": "Clear",
+    "remoteMetadataUnavailable": "Kind, size, and modified-date filters are unavailable for remote filename searches."
   },
   "launcher": {
     "addApp": "Add application",
