@@ -1,3 +1,4 @@
+import { PathBreadcrumbs } from "./PathBreadcrumbs";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useKeyHint } from "@/lib/keyHint";
@@ -234,134 +235,109 @@ export function PathBar({
   };
 
   return (
-    <div className="flex h-8 items-center gap-1 border-b border-border bg-subtle px-2 text-base">
-      <button
-        type="button"
-        onClick={onBack}
-        disabled={!canBack}
-        className="rounded p-1 text-fg-muted hover:bg-border hover:text-fg disabled:opacity-30"
-        aria-label={t("pathbar.back")}
-        title={t("pathbar.backTitle", { key: kBack })}
-      >
-        <ArrowLeft size={14} />
-      </button>
-      <button
-        type="button"
-        onClick={onForward}
-        disabled={!canForward}
-        className="rounded p-1 text-fg-muted hover:bg-border hover:text-fg disabled:opacity-30"
-        aria-label={t("pathbar.forward")}
-        title={t("pathbar.forwardTitle", { key: kForward })}
-      >
-        <ArrowRight size={14} />
-      </button>
-      <button
-        onClick={onUp}
-        className="rounded p-1 hover:bg-border disabled:opacity-30"
-        disabled={!onUp || !canUp}
-        aria-label={t("pathbar.up")}
-      >
-        <ArrowUp size={14} />
-      </button>
-      {trash ? (
-        <div className="ml-2 flex min-w-0 items-center gap-1.5 truncate">
-          <Trash2 size={13} className="shrink-0 text-fg-muted" />
-          <span className="text-base text-fg">{t("pathbar.trash")}</span>
-        </div>
-      ) : archive ? (
-        <div className="ml-2 flex items-center gap-0.5 font-mono truncate">
-          <FileArchive size={13} className="mr-1 shrink-0 text-accent" />
-          <button
-            onClick={() => onSegmentClick?.(archive.root)}
-            className="rounded px-1 hover:bg-border"
-            title={t("pathbar.archiveReadOnlyTitle", { name: archive.label })}
-          >
-            {archive.label}
-          </button>
-          {archiveSegments.map((s) => (
-            <span key={s.path} className="flex items-center">
-              <span className="text-fg-muted">/</span>
-              <button
-                onClick={() => onSegmentClick?.(s.path)}
-                className="rounded px-1 hover:bg-border"
-              >
-                {s.label}
-              </button>
-            </span>
-          ))}
-          {onUpdateArchive ? (
-            <button
-              onClick={onUpdateArchive}
-              className="ml-1 shrink-0 rounded bg-accent/10 px-1.5 text-meta text-accent hover:bg-accent/20"
-              title={t("pathbar.updateArchiveTitle")}
-            >
-              {t("pathbar.updateArchive")}
-            </button>
-          ) : (
-            <span className="ml-1 shrink-0 rounded bg-subtle px-1 text-meta text-fg-muted">
-              {t("pathbar.readOnly")}
-            </span>
-          )}
-        </div>
-      ) : editing ? (
-        <input
-          ref={inputRef}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              submitPath();
-            } else if (e.key === "Escape") {
-              e.preventDefault();
-              setEditing(false);
-            }
-          }}
-          onBlur={() => setEditing(false)}
-          spellCheck={false}
-          placeholder={t("pathbar.pathPlaceholder")}
-          aria-label={t("pathbar.goToPath")}
-          className="ml-2 min-w-0 flex-1 rounded border border-accent bg-subtle px-2 py-0.5 font-mono text-base focus:outline-none"
-        />
-      ) : (
-        <>
-          <span
-            title={sourceTitle}
-            aria-label={sourceTitle}
-            className="ml-2 flex shrink-0 items-center text-fg-muted"
-          >
-            {isLocal ? <Monitor size={14} /> : <Server size={14} />}
-          </span>
-          <div className="ml-1 flex items-center gap-0.5 font-mono truncate">
-            {!winLocal && (
-              <button
-                onClick={() => onSegmentClick?.("/")}
-                className="rounded px-1 hover:bg-border"
-              >
-                /
-              </button>
-            )}
-            {crumbs.map((c, i) => (
-              <span key={c.path} className="flex items-center">
-                <button
-                  onClick={() => onSegmentClick?.(c.path)}
-                  className="rounded px-1 hover:bg-border"
-                >
-                  {c.label}
-                </button>
-                {i < crumbs.length - 1 && (
-                  <span className="text-fg-muted">/</span>
-                )}
-              </span>
-            ))}
+    <div className="path-bar grid shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-1 border-b border-border bg-subtle px-1 text-base">
+      <div className="flex shrink-0 items-center">
+        <button
+          type="button"
+          onClick={onBack}
+          disabled={!canBack}
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded p-1 text-fg-muted hover:bg-border hover:text-fg disabled:opacity-30"
+          aria-label={t("pathbar.back")}
+          title={t("pathbar.backTitle", { key: kBack })}
+        >
+          <ArrowLeft size={14} />
+        </button>
+        <button
+          type="button"
+          onClick={onForward}
+          disabled={!canForward}
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded p-1 text-fg-muted hover:bg-border hover:text-fg disabled:opacity-30"
+          aria-label={t("pathbar.forward")}
+          title={t("pathbar.forwardTitle", { key: kForward })}
+        >
+          <ArrowRight size={14} />
+        </button>
+        <button
+          onClick={onUp}
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded p-1 hover:bg-border disabled:opacity-30"
+          disabled={!onUp || !canUp}
+          aria-label={t("pathbar.up")}
+        >
+          <ArrowUp size={14} />
+        </button>
+      </div>
+      <div className="flex min-w-0 items-center gap-1">
+        {trash ? (
+          <div className="ml-2 flex min-w-0 items-center gap-1.5 truncate">
+            <Trash2 size={13} className="shrink-0 text-fg-muted" />
+            <span className="text-base text-fg">{t("pathbar.trash")}</span>
           </div>
-        </>
-      )}
-      <div className="ml-auto flex items-center">
+        ) : archive ? (
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-0.5 font-mono">
+            <FileArchive size={13} className="mr-1 shrink-0 text-accent" />
+            <PathBreadcrumbs
+              showPaths={false}
+              items={[
+                { label: archive.label, path: archive.root },
+                ...archiveSegments,
+              ]}
+              onNavigate={onSegmentClick}
+            />
+            {onUpdateArchive ? (
+              <button
+                onClick={onUpdateArchive}
+                className="ml-1 shrink-0 rounded bg-accent/10 px-1.5 text-meta text-accent hover:bg-accent/20"
+                title={t("pathbar.updateArchiveTitle")}
+              >
+                {t("pathbar.updateArchive")}
+              </button>
+            ) : (
+              <span className="ml-1 shrink-0 rounded bg-subtle px-1 text-meta text-fg-muted">
+                {t("pathbar.readOnly")}
+              </span>
+            )}
+          </div>
+        ) : editing ? (
+          <input
+            ref={inputRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                submitPath();
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                setEditing(false);
+              }
+            }}
+            onBlur={() => setEditing(false)}
+            spellCheck={false}
+            placeholder={t("pathbar.pathPlaceholder")}
+            aria-label={t("pathbar.goToPath")}
+            className="ml-2 min-w-0 flex-1 rounded border border-accent bg-subtle px-2 py-0.5 font-mono text-base focus:outline-none"
+          />
+        ) : (
+          <>
+            <span
+              title={sourceTitle}
+              aria-label={sourceTitle}
+              className="ml-2 flex shrink-0 items-center text-fg-muted"
+            >
+              {isLocal ? <Monitor size={14} /> : <Server size={14} />}
+            </span>
+            <PathBreadcrumbs
+              items={winLocal ? crumbs : [{ label: "/", path: "/" }, ...crumbs]}
+              onNavigate={onSegmentClick}
+            />
+          </>
+        )}
+      </div>
+      <div className="path-actions ml-auto flex shrink-0 items-center">
         {onNewTab && (
           <button
             onClick={onNewTab}
-            className="rounded p-1 hover:bg-border"
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded p-1 hover:bg-border"
             aria-label={t("tabs.newTab")}
             title={t("pathbar.newTabTitle", { key: kNewTab })}
           >
@@ -371,7 +347,7 @@ export function PathBar({
         {!archive && !editing && (
           <button
             onClick={startEdit}
-            className="rounded p-1 hover:bg-border"
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded p-1 hover:bg-border"
             aria-label={t("pathbar.editPath")}
             title={t("pathbar.editPathTitle")}
           >
@@ -382,7 +358,7 @@ export function PathBar({
         {!archive && (
           <button
             onClick={openFavorites}
-            className="rounded p-1 hover:bg-border"
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded p-1 hover:bg-border"
             aria-label={t("pathbar.favorites")}
             title={t("pathbar.favoritesTitle")}
           >
@@ -393,7 +369,7 @@ export function PathBar({
         {!archive && (
           <button
             onClick={toggleBookmark}
-            className="rounded p-1 hover:bg-border"
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded p-1 hover:bg-border"
             aria-label={
               bookmarked
                 ? t("sidebar.removeBookmark")
@@ -414,7 +390,7 @@ export function PathBar({
         )}
         <button
           onClick={onRefresh}
-          className="rounded p-1 hover:bg-border"
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded p-1 hover:bg-border"
           aria-label={t("menu.refresh")}
         >
           <RotateCw size={14} />

@@ -72,13 +72,20 @@ export function StatusBar() {
       ? trashItemFor(focused.name)?.original_path
       : undefined;
 
+  const summary = [
+    counts,
+    totalSize > 0 ? formatSize(totalSize) : null,
+    selectedCount > 0
+      ? `${t("statusbar.selected", { count: selectedCount })} (${formatSize(selectedSize)})`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
     <footer className="flex h-6 items-center gap-3 border-t border-border px-3 text-meta text-fg-muted">
-      <span className="shrink-0">
-        {counts}
-        {totalSize > 0 && ` · ${formatSize(totalSize)}`}
-        {selectedCount > 0 &&
-          ` • ${t("statusbar.selected", { count: selectedCount })} (${formatSize(selectedSize)})`}
+      <span className="min-w-0 max-w-[50%] truncate" title={summary}>
+        {summary}
       </span>
       <span className="min-w-0 flex-1 truncate text-center">
         {focused && focusedMeta && (
@@ -93,7 +100,9 @@ export function StatusBar() {
           </>
         )}
       </span>
-      <span className="shrink-0">{sourceLabel}</span>
+      <span className="min-w-0 max-w-[25%] truncate" title={sourceLabel}>
+        {sourceLabel}
+      </span>
     </footer>
   );
 }

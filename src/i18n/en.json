@@ -526,7 +526,8 @@
     "syncBrowseOn": "Synchronized browsing: ON — panes navigate together",
     "syncBrowseOff": "Synchronized browsing: OFF",
     "hideHidden": "Hide hidden files ({{key}})",
-    "showHidden": "Show hidden files ({{key}})"
+    "showHidden": "Show hidden files ({{key}})",
+    "viewOptions": "View"
   },
   "shelf": {
     "title": "Shelf",
@@ -769,7 +770,7 @@
     "ejectName": "Eject {{name}}",
     "recent": "Recent",
     "clearRecents": "Clear recents",
-    "noRecent": "(no recent folders)",
+    "noRecent": "Visited folders appear here.",
     "copiedText": "Copied: {{text}}",
     "saved": "Saved",
     "newGroup": "New group…",
@@ -791,7 +792,7 @@
     "removeSavedHost": "Remove saved host {{alias}}",
     "bookmarks": "Bookmarks",
     "bookmarkActiveTab": "Bookmark active tab",
-    "noBookmarks": "(none — + to bookmark active tab)",
+    "noBookmarks": "No saved folders yet.",
     "noTagMatch": "(no items match the tag filter)",
     "local": "Local",
     "remote": "Remote",
@@ -801,7 +802,7 @@
     "openConnect": "Open (connect if needed)",
     "removeFavorite": "Remove favorite",
     "hosts": "Hosts",
-    "noHosts": "(no hosts — Connect to host…)",
+    "noHosts": "No hosts yet.",
     "state": {
       "connected": "connected",
       "connecting": "connecting",
@@ -814,7 +815,9 @@
     "rename": "Rename…",
     "renamePrompt": "New name",
     "disconnect": "Disconnect",
-    "reloadSshConfig": "Reload ~/.ssh/config"
+    "reloadSshConfig": "Reload ~/.ssh/config",
+    "connectHost": "Connect to host",
+    "addCurrentFolder": "Add current folder"
   },
   "tasks": {
     "count": "{{count}} tasks",
@@ -887,6 +890,7 @@
     "title": "Command palette"
   },
   "pathbar": {
+    "parentFolders": "Parent folders",
     "back": "Back",
     "backTitle": "Back ({{key}})",
     "forward": "Forward",

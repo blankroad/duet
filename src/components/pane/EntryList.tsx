@@ -133,7 +133,21 @@ export function EntryList({
 
   // 컬럼 폭(Ext/Size/Modified) — 헤더 경계 드래그로 조절. CSS 변수(--col-*)로 헤더·행이
   // 공유해 항상 정렬. 드래그 중엔 변수만 직접 갱신(리렌더 X), 놓을 때 store 커밋(영속).
+  const headerRef = useRef<HTMLDivElement>(null);
   const outerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const body = parentRef.current;
+    const header = headerRef.current;
+    if (!body || !header) return;
+    const align = () => {
+      header.style.paddingRight = `${body.offsetWidth - body.clientWidth}px`;
+      header.scrollLeft = body.scrollLeft;
+    };
+    const observer = new ResizeObserver(align);
+    observer.observe(body);
+    align();
+    return () => observer.disconnect();
+  }, []);
   const colExt = useColumnWidths((s) => s.ext);
   const colSize = useColumnWidths((s) => s.size);
   const colMtime = useColumnWidths((s) => s.mtime);
@@ -162,9 +176,10 @@ export function EntryList({
   return (
     <div
       ref={outerRef}
-      className="flex flex-1 min-h-0 flex-col"
+      className="flex flex-1 min-h-0 min-w-0 flex-col"
       style={
         {
+          "--list-min-width": `calc(180px + var(--col-size) + var(--col-mtime)${splitExt ? " + var(--col-ext) + 8px" : ""})`,
           "--col-ext": `${colExt}px`,
           "--col-size": `${colSize}px`,
           "--col-mtime": `${colMtime}px`,
@@ -174,52 +189,69 @@ export function EntryList({
       {/* 컬럼 폭은 CSS 변수(--col-*)로 헤더·행이 공유 → 항상 정렬. 간격 gap-2 px-2 동일.
           Name flex-1, Ext/Size/Modified 는 var 폭(드래그 조절). 우측 컬럼은 justify-end. */}
       <div
-        className="flex h-6 shrink-0 items-center gap-2 border-b border-border bg-subtle px-2 text-meta text-fg-muted"
-        onContextMenu={onHeaderContextMenu}
+        ref={headerRef}
+        className="shrink-0 overflow-hidden"
+        onScroll={(e) => {
+          if (
+            parentRef.current &&
+            parentRef.current.scrollLeft !== e.currentTarget.scrollLeft
+          )
+            parentRef.current.scrollLeft = e.currentTarget.scrollLeft;
+        }}
       >
-        <ColumnHeader
-          label={i18n.t("pane.colName")}
-          col="name"
-          current={sortKey}
-          order={sortOrder}
-          onClick={onSortClick}
-          className="min-w-0 flex-1"
-        />
-        {splitExt && (
+        <div
+          style={{ minWidth: "var(--list-min-width)" }}
+          className="flex h-6 shrink-0 items-center gap-2 border-b border-border bg-subtle px-2 text-meta text-fg-muted"
+          onContextMenu={onHeaderContextMenu}
+        >
           <ColumnHeader
-            label={i18n.t("pane.colExt")}
-            col="ext"
+            label={i18n.t("pane.colName")}
+            col="name"
             current={sortKey}
             order={sortOrder}
             onClick={onSortClick}
-            className="w-[var(--col-ext)]"
-            resizeCol="ext"
+            className="min-w-0 flex-1"
+          />
+          {splitExt && (
+            <ColumnHeader
+              label={i18n.t("pane.colExt")}
+              col="ext"
+              current={sortKey}
+              order={sortOrder}
+              onClick={onSortClick}
+              className="w-[var(--col-ext)]"
+              resizeCol="ext"
+              onResizeStart={startResize}
+            />
+          )}
+          <ColumnHeader
+            label={i18n.t("pane.colSize")}
+            col="size"
+            current={sortKey}
+            order={sortOrder}
+            onClick={onSortClick}
+            className="w-[var(--col-size)] justify-end"
+            resizeCol="size"
             onResizeStart={startResize}
           />
-        )}
-        <ColumnHeader
-          label={i18n.t("pane.colSize")}
-          col="size"
-          current={sortKey}
-          order={sortOrder}
-          onClick={onSortClick}
-          className="w-[var(--col-size)] justify-end"
-          resizeCol="size"
-          onResizeStart={startResize}
-        />
-        <ColumnHeader
-          label={i18n.t("pane.colModified")}
-          col="mtime"
-          current={sortKey}
-          order={sortOrder}
-          onClick={onSortClick}
-          className="w-[var(--col-mtime)] justify-end"
-          resizeCol="mtime"
-          onResizeStart={startResize}
-        />
+          <ColumnHeader
+            label={i18n.t("pane.colModified")}
+            col="mtime"
+            current={sortKey}
+            order={sortOrder}
+            onClick={onSortClick}
+            className="w-[var(--col-mtime)] justify-end"
+            resizeCol="mtime"
+            onResizeStart={startResize}
+          />
+        </div>
       </div>
       <div
         ref={parentRef}
+        onScroll={(e) => {
+          if (headerRef.current)
+            headerRef.current.scrollLeft = e.currentTarget.scrollLeft;
+        }}
         data-drop-pane={id}
         className={clsx(
           "flex-1 min-h-0 overflow-auto",
@@ -234,6 +266,7 @@ export function EntryList({
       >
         <div
           style={{
+            minWidth: "var(--list-min-width)",
             height: `${virtualizer.getTotalSize()}px`,
             position: "relative",
           }}

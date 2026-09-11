@@ -1,3 +1,4 @@
+import { useContextMenu, type MenuEntry } from "@/stores/contextMenu";
 import {
   FolderPlus,
   Copy,
@@ -9,6 +10,8 @@ import {
   Eye,
   EyeOff,
   FolderSync,
+  Check,
+  ChevronDown,
 } from "lucide-react";
 import clsx from "clsx";
 import { useTranslation } from "react-i18next";
@@ -56,91 +59,159 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
   const open = useUIDialogs((s) => s.open);
   const showToast = useToast((s) => s.show);
 
+  const runHere = (action: () => void) => {
+    usePanes.getState().setActivePane(id);
+    action();
+  };
+  const openViewMenu = (event: React.MouseEvent<HTMLButtonElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    usePanes.getState().setActivePane(id);
+    const entries: MenuEntry[] = [
+      ...(["details", "grid", "tiles"] as const).map((mode) => ({
+        id: mode,
+        label: t(
+          mode === "details"
+            ? "toolbar.viewDetails"
+            : mode === "grid"
+              ? "toolbar.viewGrid"
+              : "toolbar.viewTiles",
+        ),
+        icon:
+          mode === viewMode ? <Check size={14} /> : <span className="w-3.5" />,
+        onSelect: () => runHere(() => setViewMode(id, mode)),
+      })),
+      { kind: "separator" },
+      {
+        id: "sync",
+        label: t(syncBrowse ? "toolbar.syncBrowseOn" : "toolbar.syncBrowseOff"),
+        icon: syncBrowse ? <Check size={14} /> : <FolderSync size={14} />,
+        onSelect: () => runHere(toggleSyncBrowse),
+      },
+      {
+        id: "hidden",
+        label: t("menu.toggleHidden"),
+        commandId: "view.toggleHidden",
+        icon: showHidden ? <Check size={14} /> : <EyeOff size={14} />,
+        onSelect: () => runHere(() => toggleShowHidden(id)),
+      },
+    ];
+    useContextMenu.getState().openAt(rect.left, rect.bottom + 4, entries);
+  };
+
   return (
-    <div className="flex h-8 shrink-0 items-center gap-0.5 border-b border-border px-1.5">
+    <div className="flex h-8 shrink-0 items-center min-w-0 gap-0.5 border-b border-border px-1.5">
       <ToolButton
         label={t("toolbar.newFolder", { key: kNewFolder })}
-        onClick={() => triggerMkdir(open)}
+        onClick={() => runHere(() => triggerMkdir(open))}
+        shortLabel={t("menu.newFolder")}
+        alwaysLabel
       >
         <FolderPlus size={15} />
       </ToolButton>
       <ToolButton
         label={t("toolbar.copy", { key: kCopy })}
-        onClick={() => void triggerCopy(open, showToast)}
+        onClick={() => runHere(() => void triggerCopy(open, showToast))}
+        shortLabel={t("menu.copy")}
       >
         <Copy size={15} />
       </ToolButton>
       <ToolButton
         label={t("toolbar.move", { key: kMove })}
-        onClick={() => void triggerMove(open, showToast)}
+        onClick={() => runHere(() => void triggerMove(open, showToast))}
+        shortLabel={t("shelf.move")}
       >
         <MoveRight size={15} />
       </ToolButton>
       <ToolButton
         label={t("toolbar.deleteTrash", { key: kDelete })}
-        onClick={() => void triggerDelete("trash", open, showToast)}
+        onClick={() =>
+          runHere(() => void triggerDelete("trash", open, showToast))
+        }
+        shortLabel={t("menu.delete")}
       >
         <Trash2 size={15} />
       </ToolButton>
 
       <div className="flex-1" />
 
-      <ViewButton
-        label={t("toolbar.viewDetails")}
-        mode="details"
-        current={viewMode}
-        onClick={() => setViewMode(id, "details")}
-      >
-        <List size={15} />
-      </ViewButton>
-      <ViewButton
-        label={t("toolbar.viewGrid")}
-        mode="grid"
-        current={viewMode}
-        onClick={() => setViewMode(id, "grid")}
-      >
-        <LayoutGrid size={15} />
-      </ViewButton>
-      <ViewButton
-        label={t("toolbar.viewTiles")}
-        mode="tiles"
-        current={viewMode}
-        onClick={() => setViewMode(id, "tiles")}
-      >
-        <Rows3 size={15} />
-      </ViewButton>
+      <div className="toolbar-view-buttons items-center gap-0.5">
+        <ViewButton
+          label={t("toolbar.viewDetails")}
+          mode="details"
+          current={viewMode}
+          onClick={() => setViewMode(id, "details")}
+        >
+          <List size={15} />
+        </ViewButton>
+        <ViewButton
+          label={t("toolbar.viewGrid")}
+          mode="grid"
+          current={viewMode}
+          onClick={() => setViewMode(id, "grid")}
+        >
+          <LayoutGrid size={15} />
+        </ViewButton>
+        <ViewButton
+          label={t("toolbar.viewTiles")}
+          mode="tiles"
+          current={viewMode}
+          onClick={() => setViewMode(id, "tiles")}
+        >
+          <Rows3 size={15} />
+        </ViewButton>
 
-      <Divider />
+        <Divider />
 
-      <ToolButton
-        label={
-          syncBrowse ? t("toolbar.syncBrowseOn") : t("toolbar.syncBrowseOff")
-        }
-        active={syncBrowse}
-        onClick={() => toggleSyncBrowse()}
+        <ToolButton
+          label={
+            syncBrowse ? t("toolbar.syncBrowseOn") : t("toolbar.syncBrowseOff")
+          }
+          active={syncBrowse}
+          onClick={() => toggleSyncBrowse()}
+        >
+          <FolderSync size={15} />
+        </ToolButton>
+        <ToolButton
+          label={
+            showHidden
+              ? t("toolbar.hideHidden", { key: kHidden })
+              : t("toolbar.showHidden", { key: kHidden })
+          }
+          active={showHidden}
+          onClick={() => toggleShowHidden(id)}
+        >
+          {showHidden ? <Eye size={15} /> : <EyeOff size={15} />}
+        </ToolButton>
+      </div>
+      <button
+        type="button"
+        className="toolbar-view-menu h-7 shrink-0 items-center gap-1 rounded-panel px-1.5 text-fg-muted hover:bg-subtle hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+        onClick={openViewMenu}
+        aria-haspopup="menu"
+        aria-label={t("toolbar.viewOptions")}
+        title={t("toolbar.viewOptions")}
       >
-        <FolderSync size={15} />
-      </ToolButton>
-      <ToolButton
-        label={
-          showHidden
-            ? t("toolbar.hideHidden", { key: kHidden })
-            : t("toolbar.showHidden", { key: kHidden })
-        }
-        active={showHidden}
-        onClick={() => toggleShowHidden(id)}
-      >
-        {showHidden ? <Eye size={15} /> : <EyeOff size={15} />}
-      </ToolButton>
+        {viewMode === "details" ? (
+          <List size={15} />
+        ) : viewMode === "grid" ? (
+          <LayoutGrid size={15} />
+        ) : (
+          <Rows3 size={15} />
+        )}
+        <span>{t("toolbar.viewOptions")}</span>
+        <ChevronDown size={12} />
+      </button>
     </div>
   );
 }
 
 function Divider() {
-  return <div className="mx-1 h-4 w-px bg-border" />;
+  return <div className="mx-1 h-4 w-px shrink-0 bg-border" />;
 }
 
 interface ToolButtonProps {
+  shortLabel?: string;
+  alwaysLabel?: boolean;
   label: string;
   active?: boolean;
   disabled?: boolean;
@@ -149,6 +220,8 @@ interface ToolButtonProps {
 }
 
 function ToolButton({
+  shortLabel,
+  alwaysLabel,
   label,
   active,
   disabled,
@@ -160,15 +233,21 @@ function ToolButton({
       type="button"
       title={label}
       aria-label={label}
+      aria-pressed={active}
       disabled={disabled}
       onClick={onClick}
       className={clsx(
-        "flex h-7 w-7 items-center justify-center rounded-panel transition-colors",
+        "flex h-7 min-w-7 shrink-0 items-center justify-center gap-1 rounded-panel px-1.5 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent",
         "hover:bg-subtle disabled:opacity-30 disabled:hover:bg-transparent",
         active ? "text-accent" : "text-fg-muted hover:text-fg",
       )}
     >
       {children}
+      {shortLabel && (
+        <span className={alwaysLabel ? "" : "toolbar-action-label"}>
+          {shortLabel}
+        </span>
+      )}
     </button>
   );
 }

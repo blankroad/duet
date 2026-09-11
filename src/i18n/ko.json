@@ -523,7 +523,8 @@
     "syncBrowseOn": "동기화 브라우징: 켜짐 — 양 패널 동반 이동",
     "syncBrowseOff": "동기화 브라우징: 꺼짐",
     "hideHidden": "숨김 파일 숨기기 ({{key}})",
-    "showHidden": "숨김 파일 표시 ({{key}})"
+    "showHidden": "숨김 파일 표시 ({{key}})",
+    "viewOptions": "보기"
   },
   "shelf": {
     "title": "선반",
@@ -766,7 +767,7 @@
     "ejectName": "{{name}} 꺼내기",
     "recent": "최근",
     "clearRecents": "최근 목록 지우기",
-    "noRecent": "(최근 폴더 없음)",
+    "noRecent": "방문한 폴더가 여기에 표시됩니다.",
     "copiedText": "복사됨: {{text}}",
     "saved": "저장됨",
     "newGroup": "새 그룹…",
@@ -788,7 +789,7 @@
     "removeSavedHost": "저장된 호스트 {{alias}} 제거",
     "bookmarks": "북마크",
     "bookmarkActiveTab": "활성 탭 북마크",
-    "noBookmarks": "(없음 — + 로 활성 탭 북마크)",
+    "noBookmarks": "저장된 폴더가 없습니다.",
     "noTagMatch": "(태그 필터와 일치하는 항목 없음)",
     "local": "로컬",
     "remote": "원격",
@@ -798,7 +799,7 @@
     "openConnect": "열기 (필요 시 연결)",
     "removeFavorite": "즐겨찾기 제거",
     "hosts": "호스트",
-    "noHosts": "(호스트 없음 — 호스트에 연결…)",
+    "noHosts": "등록된 호스트가 없습니다.",
     "state": {
       "connected": "연결됨",
       "connecting": "연결 중",
@@ -811,7 +812,9 @@
     "rename": "이름 바꾸기…",
     "renamePrompt": "새 이름",
     "disconnect": "연결 끊기",
-    "reloadSshConfig": "~/.ssh/config 다시 읽기"
+    "reloadSshConfig": "~/.ssh/config 다시 읽기",
+    "connectHost": "호스트 연결",
+    "addCurrentFolder": "현재 폴더 추가"
   },
   "tasks": {
     "count": "작업 {{count}}개",
@@ -884,6 +887,7 @@
     "title": "커맨드 팔레트"
   },
   "pathbar": {
+    "parentFolders": "상위 폴더",
     "back": "뒤로",
     "backTitle": "뒤로 ({{key}})",
     "forward": "앞으로",

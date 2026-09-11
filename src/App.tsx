@@ -37,7 +37,7 @@ import { PromptDialogHost } from "@/components/dialogs/PromptDialog";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { Toast } from "@/components/Toast";
 import { SearchPanel } from "@/components/SearchPanel";
-import { PreviewPane } from "@/components/pane/PreviewPane";
+import { WorkspaceLayout } from "@/components/WorkspaceLayout";
 import { QuickLook } from "@/components/pane/QuickLook";
 import { TopBar } from "@/components/TopBar";
 import { DragGhost } from "@/components/pane/DragGhost";
@@ -815,7 +815,6 @@ function App() {
   const openPalette = usePalette((s) => s.open);
   const toggleSidebar = useUI((s) => s.toggleSidebar);
   const togglePreview = useUI((s) => s.togglePreview);
-  const previewOpen = useUI((s) => s.previewOpen);
   const quickLookOpen = useUI((s) => s.quickLookOpen);
   // 단일 패널 모드 — 활성 패널만 렌더. 숨긴 쪽 상태는 panes store 에 보존되고
   // Tab(활성 패널 전환)이 곧 "보이는 패널 교체"가 된다.
@@ -1798,17 +1797,20 @@ function App() {
       <TopBar />
       <SearchPanel onPickHit={onPickHit} />
 
-      <main className="flex flex-1 min-h-0 gap-1.5 p-1.5">
-        <Sidebar
-          onHostActivate={onHostActivate}
-          onAdHocOpen={onAdHocOpen}
-          onSavedActivate={onSavedActivate}
-          onOpenLocation={onOpenLocation}
-          onOpenHostPath={onOpenHostPath}
-          onAddBookmark={onAddBookmark}
-          onTrashActivate={onTrashActivate}
-          onEject={onEject}
-        />
+      <WorkspaceLayout
+        sidebar={
+          <Sidebar
+            onHostActivate={onHostActivate}
+            onAdHocOpen={onAdHocOpen}
+            onSavedActivate={onSavedActivate}
+            onOpenLocation={onOpenLocation}
+            onOpenHostPath={onOpenHostPath}
+            onAddBookmark={onAddBookmark}
+            onTrashActivate={onTrashActivate}
+            onEject={onEject}
+          />
+        }
+      >
         {(!singlePane || visiblePane === "left") && (
           <Pane
             id="left"
@@ -1840,8 +1842,7 @@ function App() {
             onReconnect={onPaneReconnect}
           />
         )}
-        {previewOpen && <PreviewPane />}
-      </main>
+      </WorkspaceLayout>
 
       <TasksBar />
       <StatusBar />

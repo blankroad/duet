@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { X, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { usePanes, type PaneId } from "@/stores/panes";
@@ -19,66 +20,96 @@ export function TabBar({ id }: { id: PaneId }) {
   const closeTab = usePanes((s) => s.closeTab);
   const selectTab = usePanes((s) => s.selectTab);
 
+  const stripRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const strip = stripRef.current;
+    const tab = strip?.children[activeIndex] as HTMLElement | undefined;
+    if (!strip || !tab) return;
+    // 창/보조 패널 크기가 바뀌어도 활성 탭을 노출한다.
+    const reveal = () => {
+      if (tab.offsetLeft < strip.scrollLeft) strip.scrollLeft = tab.offsetLeft;
+      else if (
+        tab.offsetLeft + tab.offsetWidth >
+        strip.scrollLeft + strip.clientWidth
+      )
+        strip.scrollLeft = tab.offsetLeft + tab.offsetWidth - strip.clientWidth;
+    };
+    reveal();
+    const observer = new ResizeObserver(reveal);
+    observer.observe(strip);
+    observer.observe(tab);
+    return () => observer.disconnect();
+  }, [activeIndex, tabs.length]);
+
   if (tabs.length <= 1) return null;
 
   return (
     <div className="flex h-7 shrink-0 items-stretch border-b border-border bg-subtle text-meta">
-      {tabs.map((t, i) => {
-        const active = i === activeIndex;
-        const label = labelOf(t.location.path);
-        // 원격 탭은 호스트를 앞에 — 로컬 /var/log 탭과 원격 /var/log 탭이
-        // 이름만으로는 구분되지 않았다.
-        const host =
-          t.location.source.kind === "ssh"
-            ? (t.location.source.connection_id.split(":")[0] ?? "")
-            : null;
-        return (
-          <div
-            key={t.id}
-            onClick={() => selectTab(id, i)}
-            // 가운데 클릭으로 닫기 — auxclick 이 마우스 가운데 버튼의 표준 경로.
-            onAuxClick={(e) => {
-              if (e.button === 1) {
-                e.preventDefault();
-                closeTab(id, i);
-              }
-            }}
-            onContextMenu={(e) => openTabMenu(e, id, i)}
-            title={t.location.path}
-            className={clsx(
-              "group flex cursor-default items-center gap-1 border-l-2 px-2 hover:bg-border",
-              active
-                ? "border-l-accent bg-base text-fg"
-                : "border-l-transparent text-fg-muted",
-            )}
-          >
-            <span className="flex max-w-[12rem] items-baseline gap-1 truncate">
-              {host && (
-                <span className="shrink-0 text-fg-muted/70">{host}:</span>
-              )}
-              <span className="truncate">{label}</span>
-            </span>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                closeTab(id, i);
+      <div
+        ref={stripRef}
+        className="relative flex min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        {tabs.map((t, i) => {
+          const active = i === activeIndex;
+          const label = labelOf(t.location.path);
+          // 원격 탭은 호스트를 앞에 — 로컬 /var/log 탭과 원격 /var/log 탭이
+          // 이름만으로는 구분되지 않았다.
+          const host =
+            t.location.source.kind === "ssh"
+              ? (t.location.source.connection_id.split(":")[0] ?? "")
+              : null;
+          return (
+            <div
+              key={t.id}
+              onClick={() => selectTab(id, i)}
+              // 가운데 클릭으로 닫기 — auxclick 이 마우스 가운데 버튼의 표준 경로.
+              onAuxClick={(e) => {
+                if (e.button === 1) {
+                  e.preventDefault();
+                  closeTab(id, i);
+                }
               }}
+              onContextMenu={(e) => openTabMenu(e, id, i)}
+              title={t.location.path}
               className={clsx(
-                "rounded p-0.5 opacity-0 hover:bg-border focus:opacity-100 group-hover:opacity-100",
-                tabs.length <= 1 && "pointer-events-none opacity-30",
+                "group flex min-w-0 max-w-[min(14rem,100%)] shrink-0 cursor-default items-center gap-1 border-l-2 pl-2 pr-0.5 hover:bg-border",
+                active
+                  ? "border-l-accent bg-base text-fg"
+                  : "border-l-transparent text-fg-muted",
               )}
-              aria-label={tr("tabs.closeTab")}
             >
-              <X size={11} />
-            </button>
-          </div>
-        );
-      })}
+              <span className="flex min-w-0 items-baseline gap-1">
+                {host && (
+                  <span className="max-w-[7rem] truncate text-fg-muted/70">
+                    {host}:
+                  </span>
+                )}
+                <span className="truncate">{label}</span>
+              </span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  closeTab(id, i);
+                }}
+                className={clsx(
+                  "flex h-6 w-6 shrink-0 items-center justify-center rounded hover:bg-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent",
+                  active
+                    ? "opacity-100"
+                    : "opacity-0 focus:opacity-100 group-hover:opacity-100",
+                )}
+                aria-label={tr("tabs.closeTab")}
+              >
+                <X size={11} />
+              </button>
+            </div>
+          );
+        })}
+      </div>
       <button
         type="button"
         onClick={() => openTab(id)}
-        className="flex items-center px-2 text-fg-muted hover:bg-border hover:text-fg"
+        className="flex w-7 shrink-0 items-center justify-center text-fg-muted hover:bg-border hover:text-fg"
         aria-label={tr("tabs.newTab")}
         title={tr("tabs.newTab")}
       >

@@ -319,6 +319,9 @@ textarea,
   width: 10px;
   height: 10px;
 }
+::-webkit-scrollbar-corner {
+  background: hsl(var(--bg-base));
+}
 ::-webkit-scrollbar-track {
   background: transparent;
 }
@@ -328,4 +331,39 @@ textarea,
 }
 ::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--fg-muted));
+}
+
+/* 패널 폭을 기준으로 경로 조작부를 다음 줄에 배치한다. */
+.pane-container {
+  container-type: inline-size;
+  container-name: pane;
+}
+.path-bar {
+  min-height: 32px;
+}
+@container pane (max-width: 420px) {
+  .path-actions {
+    grid-column: 1 / -1;
+    padding-bottom: 2px;
+  }
+}
+
+/* 좁은 패널은 보기 메뉴, 넓은 패널은 직접 조작 버튼과 작업 라벨. */
+.toolbar-view-buttons,
+.toolbar-action-label {
+  display: none;
+}
+.toolbar-view-menu {
+  display: flex;
+}
+@container pane (min-width: 560px) {
+  .toolbar-view-buttons {
+    display: flex;
+  }
+  .toolbar-action-label {
+    display: inline;
+  }
+  .toolbar-view-menu {
+    display: none;
+  }
 }

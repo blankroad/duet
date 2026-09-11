@@ -124,7 +124,7 @@ export function Pane({
   return (
     <div
       className={clsx(
-        "flex flex-1 flex-col min-h-0 overflow-hidden rounded-panel border transition duration-150",
+        "pane-container flex flex-1 flex-col min-h-0 min-w-0 overflow-hidden rounded-panel border transition duration-150",
         // 활성: 살짝 떠 보이게(elevation 그림자) + 얇은 강조색 1px 테두리.
         // 비활성: 평평(그림자 없음) + 은은한 회색 테두리. border 폭은 동일 → 레이아웃 불변.
         isActive ? "border-accent shadow-raised" : "border-border",

@@ -126,7 +126,7 @@ function PreviewBody({ state }: { state: LoadState }) {
  * 대상 = 호버한 항목(있으면) 아니면 활성 패널 cursor. 파일이면 미리보기 렌더,
  * 폴더면 속성만. 파일 읽기는 백엔드 커맨드 경유 (CLAUDE.md §1).
  */
-export function PreviewPane() {
+export function PreviewPane({ below = false }: { below?: boolean }) {
   const { t } = useTranslation();
   const togglePreview = useUI((s) => s.togglePreview);
   const hover = usePreviewHover((s) => s.target);
@@ -143,17 +143,24 @@ export function PreviewPane() {
   return (
     <div
       className="relative flex shrink-0 flex-col overflow-hidden rounded-panel border border-border"
-      style={{ width }}
+      style={{ width: below ? "100%" : width, height: "100%" }}
     >
       {/* 왼쪽 가장자리를 끌어 폭 조절 — 정보 패널은 보조라 기본은 좁게(260px). */}
-      <div
-        onPointerDown={(e) =>
-          beginWidthDrag(e, "left", usePreviewWidth.getState().width, setWidth)
-        }
-        onDoubleClick={reset}
-        title={t("preview.resizeTitle")}
-        className="absolute left-0 top-0 z-10 h-full w-1 cursor-col-resize hover:bg-accent/50"
-      />
+      {!below && (
+        <div
+          onPointerDown={(e) =>
+            beginWidthDrag(
+              e,
+              "left",
+              usePreviewWidth.getState().width,
+              setWidth,
+            )
+          }
+          onDoubleClick={reset}
+          title={t("preview.resizeTitle")}
+          className="absolute left-0 top-0 z-10 h-full w-1 cursor-col-resize hover:bg-accent/50"
+        />
+      )}
       <div className="flex h-8 shrink-0 items-center justify-between border-b border-border px-2">
         <span className="truncate text-meta text-fg-muted">
           {t("preview.info")}
@@ -163,7 +170,7 @@ export function PreviewPane() {
           title={t("preview.closeTitle")}
           aria-label={t("preview.close")}
           onClick={() => togglePreview()}
-          className="flex h-5 w-5 items-center justify-center rounded-panel text-fg-muted hover:bg-subtle hover:text-fg"
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-panel text-fg-muted hover:bg-subtle hover:text-fg"
         >
           <X size={13} />
         </button>

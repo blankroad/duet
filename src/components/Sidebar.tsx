@@ -146,7 +146,10 @@ export function Sidebar({
   if (!open) return null;
 
   return (
-    <div className="relative flex min-h-0 shrink-0" style={{ width }}>
+    <div
+      className="relative flex min-h-0 shrink-0"
+      style={{ width, maxWidth: "100%" }}
+    >
       <aside className="flex w-full min-h-0 flex-col overflow-y-auto border-r border-border bg-subtle pb-2 text-base">
         {/* 태스크 진행은 TasksBar(하단, 사이드바 접힘과 무관)로 일원화 — 중복 제거. */}
         <SidebarFilter />
@@ -187,7 +190,13 @@ function SidebarResizer() {
   const setWidth = useSidebarWidth((s) => s.setWidth);
   const reset = useSidebarWidth((s) => s.reset);
   const onPointerDown = (e: React.PointerEvent) =>
-    beginWidthDrag(e, "right", useSidebarWidth.getState().width, setWidth);
+    beginWidthDrag(
+      e,
+      "right",
+      e.currentTarget.parentElement?.getBoundingClientRect().width ??
+        useSidebarWidth.getState().width,
+      setWidth,
+    );
   return (
     <div
       onPointerDown={onPointerDown}
@@ -705,7 +714,7 @@ function RecentSection({
       }
     >
       {allItems.length === 0 ? (
-        <Item label={t("sidebar.noRecent")} muted />
+        <EmptyState message={t("sidebar.noRecent")} />
       ) : (
         items.map((r, i) => (
           <RecentItem
@@ -1143,7 +1152,11 @@ function BookmarksSection({
           </div>
         )}
         {totalAll === 0 ? (
-          <Item label={t("sidebar.noBookmarks")} muted />
+          <EmptyState
+            message={t("sidebar.noBookmarks")}
+            actionLabel={t("sidebar.addCurrentFolder")}
+            onAction={onAdd}
+          />
         ) : total === 0 ? (
           <Item label={t("sidebar.noTagMatch")} muted />
         ) : (
@@ -1475,7 +1488,11 @@ function HostsSection({
       }
     >
       {allHosts.length === 0 && savedCount === 0 ? (
-        <Item label={t("sidebar.noHosts")} muted />
+        <EmptyState
+          message={t("sidebar.noHosts")}
+          actionLabel={t("sidebar.connectHost")}
+          onAction={onAdHocOpen}
+        />
       ) : (
         <>
           {hosts.length > 0 && <SubLabel>~/.ssh/config</SubLabel>}
@@ -1719,6 +1736,33 @@ function Item({ label, muted }: { label: string; muted?: boolean }) {
       )}
     >
       {label}
+    </div>
+  );
+}
+
+/** 빈 목록은 짧은 설명과 다음 행동을 함께 제공한다. */
+function EmptyState({
+  message,
+  actionLabel,
+  onAction,
+}: {
+  message: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
+  return (
+    <div className="px-2 py-1.5 text-meta leading-5 text-fg-muted">
+      <p>{message}</p>
+      {actionLabel && onAction && (
+        <button
+          type="button"
+          onClick={onAction}
+          className="mt-1 flex min-h-6 max-w-full items-center gap-1 rounded px-1 text-left text-accent hover:bg-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+        >
+          <Plus size={12} className="shrink-0" />
+          <span>{actionLabel}</span>
+        </button>
+      )}
     </div>
   );
 }
