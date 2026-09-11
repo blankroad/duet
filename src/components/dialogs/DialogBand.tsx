@@ -30,9 +30,11 @@ export function DialogBand({
         c.box,
       )}
     >
-      <div className="flex items-center gap-2 text-base text-fg">
-        <AlertTriangle size={14} className={clsx("shrink-0", c.icon)} />
-        <span className="min-w-0">{message}</span>
+      <div className="flex min-w-0 items-start gap-2 text-base text-fg">
+        <AlertTriangle size={14} className={clsx("mt-0.5 shrink-0", c.icon)} />
+        <span className="min-w-0 flex-1 whitespace-pre-wrap [overflow-wrap:anywhere]">
+          {message}
+        </span>
       </div>
       {children}
     </div>

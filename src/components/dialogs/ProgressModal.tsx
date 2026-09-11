@@ -123,7 +123,7 @@ function ProgressStats({ p }: { p: ProgressInfo }) {
         )}
       </div>
       {/* 수치는 tabular-nums — 빠르게 갱신될 때 자릿수 흔들림으로 읽기 어려워짐 방지. */}
-      <div className="flex justify-between gap-3 text-meta tabular-nums text-fg-muted">
+      <div className="flex flex-wrap justify-between gap-x-3 gap-y-1 text-meta tabular-nums text-fg-muted">
         <span className="truncate">
           {formatSize(p.bytes_done)}
           {p.bytes_total

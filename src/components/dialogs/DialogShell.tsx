@@ -118,7 +118,7 @@ export function DialogShell({
             if (!dismissOnOutsideClick) e.preventDefault();
           }}
           className={clsx(
-            "fixed left-1/2 top-1/2 flex max-h-[85vh] w-full -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-panel border border-border bg-base shadow-raised focus:outline-none",
+            "fixed left-1/2 top-1/2 flex max-h-[85vh] w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-panel border border-border bg-base shadow-raised focus:outline-none",
             z,
             WIDTH[width],
             height === "tall" && "h-[32rem]",
@@ -126,7 +126,7 @@ export function DialogShell({
         >
           <div
             className={clsx(
-              "flex items-start gap-2.5 px-4 pt-3.5",
+              "flex shrink-0 flex-wrap items-start gap-2.5 px-4 pt-3.5",
               divided && "border-b border-border pb-3",
             )}
           >
@@ -143,7 +143,7 @@ export function DialogShell({
             <div className="flex min-w-0 flex-1 flex-col">
               <Dialog.Title
                 className={clsx(
-                  "text-title",
+                  "text-title [overflow-wrap:anywhere]",
                   titleTone === "danger" ? "text-danger" : "text-fg",
                 )}
               >
@@ -176,7 +176,7 @@ export function DialogShell({
           {hasFooter && (
             <div
               className={clsx(
-                "flex items-center gap-2 p-4",
+                "flex shrink-0 flex-wrap items-center justify-end gap-2 p-4",
                 divided && "border-t border-border pt-3",
               )}
             >

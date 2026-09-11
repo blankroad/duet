@@ -45,8 +45,13 @@ export function ConnectionBanner({
         role="status"
         className="flex h-7 shrink-0 items-center gap-2 border-b border-border bg-subtle px-2 text-meta text-fg-muted"
       >
-        <Loader size={12} className="animate-spin" aria-hidden />
-        <span className="truncate">{t("banner.connecting", { label })}</span>
+        <Loader size={12} className="shrink-0 animate-spin" aria-hidden />
+        <span
+          className="min-w-0 truncate"
+          title={t("banner.connecting", { label })}
+        >
+          {t("banner.connecting", { label })}
+        </span>
       </div>
     );
   }
@@ -57,11 +62,14 @@ export function ConnectionBanner({
     <div
       role="alert"
       className={clsx(
-        "flex h-7 shrink-0 items-center gap-2 border-b border-danger/40 bg-danger/10 px-2 text-meta",
+        "flex min-h-7 shrink-0 flex-wrap items-center gap-2 border-b border-danger/40 bg-danger/10 px-2 py-1 text-meta",
       )}
     >
       <Unplug size={12} className="shrink-0 text-danger" aria-hidden />
-      <span className="min-w-0 truncate text-fg" title={message}>
+      <span
+        className="min-w-0 flex-1 truncate text-fg"
+        title={`${label} — ${message}`}
+      >
         {state.kind === "error"
           ? t("banner.connectionLost")
           : t("banner.disconnected")}{" "}
@@ -70,7 +78,7 @@ export function ConnectionBanner({
       <button
         type="button"
         onClick={() => onReconnect(alias, id)}
-        className="ml-auto flex shrink-0 items-center gap-1 rounded-panel border border-border bg-base px-2 py-0.5 text-meta hover:bg-subtle"
+        className="ml-auto flex min-h-6 shrink-0 items-center gap-1 rounded-panel border border-border bg-base px-2 py-0.5 text-meta hover:bg-subtle"
       >
         <RefreshCw size={11} aria-hidden />
         {t("banner.reconnect")}
