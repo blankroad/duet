@@ -42,6 +42,8 @@ describe("fileInfo", () => {
     expect(kindLabel(mk("a.pdf"))).toBe("PDF document");
     expect(kindLabel(mk("a.PNG"))).toBe("PNG image");
     expect(kindLabel(mk("a.xyz"))).toBe("XYZ file");
+    expect(kindLabel(mk("a.7z"))).toBe("7-Zip archive");
+    expect(kindLabel(mk("a.tar.zst"))).toBe("Zstandard archive");
     expect(kindLabel(mk("noext"))).toBe("File");
     expect(kindLabel(mk("d", "dir"))).toBe("Folder");
     expect(kindLabel(mk("l", "symlink"))).toBe("Alias (symlink)");

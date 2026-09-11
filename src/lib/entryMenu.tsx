@@ -39,7 +39,7 @@ import { commands } from "@/types/bindings";
 import type { Entry, Location } from "@/types/bindings";
 import { formatErr } from "@/lib/error";
 import { basename } from "@/lib/paths";
-import { isArchiveName } from "@/lib/archive";
+import { canExtractArchive } from "@/lib/archive";
 import {
   usePanes,
   type PaneId,
@@ -270,7 +270,8 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
     items.push(sep());
   }
 
-  if (!isDir && !multi && isArchiveName(entry.name)) {
+  // 원격은 서버 unzip/tar 로 풀리는 포맷만 — 7z/rar 등은 눌러도 거부되니 숨긴다.
+  if (!isDir && !multi && canExtractArchive(entry.name, location.source)) {
     items.push(
       {
         id: "extract",

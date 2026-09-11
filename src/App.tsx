@@ -56,7 +56,7 @@ import {
   parentLocation,
   sameLocationDir,
 } from "@/lib/entryDnd";
-import { isArchiveName } from "@/lib/archive";
+import { canExtractArchive } from "@/lib/archive";
 import { basename } from "@/lib/paths";
 import { useBookmarks } from "@/stores/bookmarks";
 import { useHostFavorites } from "@/stores/hostFavorites";
@@ -450,7 +450,8 @@ function App() {
         return;
       }
       // 아카이브 파일 — 임시 추출 후 그 폴더로 진입(탐색기처럼 내부 열람).
-      if (isArchiveName(entry.name)) {
+      // 원격에서 못 푸는 포맷(7z/rar/단일 파일)은 아래 일반 파일 열기로 넘어간다.
+      if (canExtractArchive(entry.name, tab.location.source)) {
         const archive = { location: tab.location, name: entry.name };
         void (async () => {
           // 1차는 암호 없이 — 암호 zip 이면 NeedPassword → 암호 입력 다이얼로그.

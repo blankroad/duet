@@ -4,6 +4,7 @@ import { Loader } from "lucide-react";
 import { TabBar } from "./TabBar";
 import { PathBar } from "./PathBar";
 import { isVirtualTrash } from "@/lib/trashView";
+import { canRepackArchive } from "@/lib/archive";
 import { parentPath } from "@/lib/entryDnd";
 import { PaneFilterBar } from "./PaneFilterBar";
 import { SelectPatternBar } from "./SelectPatternBar";
@@ -146,7 +147,12 @@ export function Pane({
         }
         onSegmentClick={(p) => onNavigate(id, p)}
         onRefresh={() => onRefresh(id)}
-        onUpdateArchive={tab.archive ? () => onUpdateArchive(id) : undefined}
+        onUpdateArchive={
+          // repack 은 .zip / .tar.gz 만 — 그 외 포맷은 버튼 대신 "읽기 전용" 배지.
+          tab.archive && canRepackArchive(tab.archive.label)
+            ? () => onUpdateArchive(id)
+            : undefined
+        }
         editNonce={editPathNonce}
         editActive={editPathPane === id}
         onNewTab={() => openTab(id)}

@@ -1,7 +1,8 @@
 //! 아카이브 압축 해제 / 생성.
 //!
-//! 로컬은 Rust crate (`zip`/`tar`/`flate2`) 로, 원격(SSH)은 호스트의
-//! `unzip`/`tar`/`zip` 을 russh exec 로 실행 (시스템 ssh 호출 X — CLAUDE.md §9).
+//! 로컬은 Rust crate (`zip`/`tar` + 코덱 `flate2`/`bzip2`/`lzma-rust2`/`ruzstd`, 7z 는
+//! `sevenz-rust2`, rar 는 `unrar`) 로, 원격(SSH)은 호스트의 `unzip`/`tar`/`zip` 을
+//! russh exec 로 실행 (시스템 ssh 호출 X — CLAUDE.md §9). 원격은 zip·tar 계열만.
 //! 같은-호스트 원칙: 원격 아카이브는 로컬 PC 를 경유하지 않고 호스트에서 직접 처리.
 //!
 //! plan/execute 두 단계 (CLAUDE.md §3/§4). execute 는 journal 에 기록하여
@@ -12,10 +13,11 @@ use crate::core::ops::{self, OpCtx};
 use crate::fs::{FileSystem, SshFs};
 use crate::services::connection_pool::ConnectionPool;
 use crate::services::journal::{BackupRestore, JournalEntry, OpKind, UndoAction};
-use crate::ssh::remote_exec::exec;
+use crate::ssh::remote_exec::{exec, ExecOutput};
 use crate::types::{ConnectionId, DuetError, EntryKind, EntryRef, Location, SourceId};
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use std::io::{BufRead, Read};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
@@ -27,8 +29,20 @@ pub enum ArchiveFormat {
     Zip,
     Tar,
     TarGz,
+    /// `.tar.bz2` / `.tbz2` / `.tbz`.
+    TarBz2,
+    /// `.tar.xz` / `.txz`.
+    TarXz,
+    /// `.tar.zst` / `.tzst`.
+    TarZst,
     /// 단일 파일 gzip (`file.txt.gz`).
     Gz,
+    /// 단일 파일 bzip2 (`file.txt.bz2`).
+    Bz2,
+    /// 단일 파일 xz (`file.txt.xz`).
+    Xz,
+    /// 단일 파일 zstd (`file.txt.zst`).
+    Zst,
     /// 7-Zip — 읽기 전용(browse/extract). 생성/repack 비대상. 로컬 전용(원격 호스트에
     /// 7z 바이너리 보장 못 함).
     SevenZ,
@@ -54,36 +68,108 @@ impl CompressFormat {
     }
 }
 
-/// 파일 이름 확장자로 아카이브 포맷 판정. 아카이브가 아니면 None.
-pub fn detect_format(name: &str) -> Option<ArchiveFormat> {
-    let lower = name.to_ascii_lowercase();
-    if lower.ends_with(".tar.gz") || lower.ends_with(".tgz") {
-        Some(ArchiveFormat::TarGz)
-    } else if lower.ends_with(".tar") {
-        Some(ArchiveFormat::Tar)
-    } else if lower.ends_with(".zip") {
-        Some(ArchiveFormat::Zip)
-    } else if lower.ends_with(".gz") {
-        Some(ArchiveFormat::Gz)
-    } else if lower.ends_with(".7z") {
-        Some(ArchiveFormat::SevenZ)
-    } else if lower.ends_with(".rar") {
-        Some(ArchiveFormat::Rar)
-    } else {
-        None
+/// tar 스트림·단일 파일에 씌운 압축 코덱.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Codec {
+    Gzip,
+    Bzip2,
+    Xz,
+    Zstd,
+}
+
+/// 포맷의 구조 — 해제·호스트 명령 분기를 포맷 12종이 아니라 이 갈래로 한다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Layout {
+    Zip,
+    /// tar + 압축 코덱 (무압축 tar 는 None).
+    Tar(Option<Codec>),
+    /// 압축된 단일 파일 — 풀면 파일 하나.
+    Single(Codec),
+    SevenZ,
+    Rar,
+}
+
+impl ArchiveFormat {
+    fn layout(self) -> Layout {
+        match self {
+            ArchiveFormat::Zip => Layout::Zip,
+            ArchiveFormat::Tar => Layout::Tar(None),
+            ArchiveFormat::TarGz => Layout::Tar(Some(Codec::Gzip)),
+            ArchiveFormat::TarBz2 => Layout::Tar(Some(Codec::Bzip2)),
+            ArchiveFormat::TarXz => Layout::Tar(Some(Codec::Xz)),
+            ArchiveFormat::TarZst => Layout::Tar(Some(Codec::Zstd)),
+            ArchiveFormat::Gz => Layout::Single(Codec::Gzip),
+            ArchiveFormat::Bz2 => Layout::Single(Codec::Bzip2),
+            ArchiveFormat::Xz => Layout::Single(Codec::Xz),
+            ArchiveFormat::Zst => Layout::Single(Codec::Zstd),
+            ArchiveFormat::SevenZ => Layout::SevenZ,
+            ArchiveFormat::Rar => Layout::Rar,
+        }
+    }
+
+    /// 원격(SSH) 호스트에서 해제·탐색 가능한지 — 호스트의 `unzip`/`tar` 로 풀리는 zip·tar
+    /// 계열만. 7z/rar(호스트 바이너리 보장 불가)와 단일 파일 압축은 로컬 전용.
+    pub fn supports_remote(self) -> bool {
+        matches!(self.layout(), Layout::Zip | Layout::Tar(_))
+    }
+
+    /// 편집 후 재압축(repack)에 쓸 생성 포맷 — 원본과 같은 포맷으로 다시 만들 수 있는
+    /// zip·tar.gz 만. 나머지는 사용자 파일 포맷을 임의로 바꾸지 않도록 None.
+    pub fn repack_format(self) -> Option<CompressFormat> {
+        match self {
+            ArchiveFormat::Zip => Some(CompressFormat::Zip),
+            ArchiveFormat::TarGz => Some(CompressFormat::TarGz),
+            _ => None,
+        }
     }
 }
 
-/// 아카이브 이름에서 해제 디렉토리 이름 도출 (`data.tar.gz` → `data`).
+/// 확장자(소문자, 앞 `.` 포함) → 포맷. **긴 접미사가 먼저** — `.tar.gz` 가 `.gz` 보다
+/// 앞서야 `data.tar.gz` 가 단일 파일 gzip 으로 오판되지 않는다. 판정과 해제 이름 도출이
+/// 이 표 하나를 쓴다. 프론트 `src/lib/archive.ts` 도 같은 집합을 들고 있어 테스트
+/// (`frontend_archive_lists_match_backend`)로 대조한다.
+const SUFFIXES: &[(&str, ArchiveFormat)] = &[
+    (".tar.gz", ArchiveFormat::TarGz),
+    (".tgz", ArchiveFormat::TarGz),
+    (".tar.bz2", ArchiveFormat::TarBz2),
+    (".tbz2", ArchiveFormat::TarBz2),
+    (".tbz", ArchiveFormat::TarBz2),
+    (".tar.xz", ArchiveFormat::TarXz),
+    (".txz", ArchiveFormat::TarXz),
+    (".tar.zst", ArchiveFormat::TarZst),
+    (".tzst", ArchiveFormat::TarZst),
+    (".tar", ArchiveFormat::Tar),
+    (".zip", ArchiveFormat::Zip),
+    (".7z", ArchiveFormat::SevenZ),
+    (".rar", ArchiveFormat::Rar),
+    (".gz", ArchiveFormat::Gz),
+    (".bz2", ArchiveFormat::Bz2),
+    (".xz", ArchiveFormat::Xz),
+    (".zst", ArchiveFormat::Zst),
+];
+
+/// name 에 맞는 접미사와 포맷 (대소문자 무시). 아카이브가 아니면 None.
+fn match_suffix(name: &str) -> Option<(&'static str, ArchiveFormat)> {
+    let lower = name.to_ascii_lowercase();
+    SUFFIXES
+        .iter()
+        .find(|(suf, _)| lower.ends_with(suf))
+        .copied()
+}
+
+/// 파일 이름 확장자로 아카이브 포맷 판정. 아카이브가 아니면 None.
+pub fn detect_format(name: &str) -> Option<ArchiveFormat> {
+    match_suffix(name).map(|(_, fmt)| fmt)
+}
+
+/// 아카이브 이름에서 해제 결과 이름 도출 (`data.tar.gz` → `data`, `log.txt.gz` → `log.txt`).
 /// 알려진 확장자가 없거나 결과가 비면 `<name>.extracted`.
 pub fn archive_stem(name: &str) -> String {
-    let lower = name.to_ascii_lowercase();
-    for suf in [".tar.gz", ".tgz", ".tar", ".zip", ".gz", ".7z", ".rar"] {
-        if lower.ends_with(suf) {
-            let stem = &name[..name.len() - suf.len()];
-            if !stem.is_empty() {
-                return stem.to_string();
-            }
+    if let Some((suf, _)) = match_suffix(name) {
+        // 접미사가 ASCII 라 소문자화 전후 바이트 길이가 같다 — 원본 name 을 그대로 자른다.
+        let stem = &name[..name.len() - suf.len()];
+        if !stem.is_empty() {
+            return stem.to_string();
         }
     }
     crate::fs::suffixed_name(name, ".extracted")
@@ -99,7 +185,8 @@ pub struct ExtractPlan {
     pub archive_dir: Location,
     pub archive_name: String,
     pub format: ArchiveFormat,
-    /// 해제 결과가 들어갈 디렉토리 (`archive_dir/<stem>`).
+    /// 해제 결과 위치 — 보통 새로 만들 디렉토리(`archive_dir/<stem>`). 단일 파일 압축
+    /// (`.gz`/`.bz2`/`.xz`/`.zst`)은 폴더 없이 풀린 파일 경로(`archive_dir/<stem>`) 자체.
     pub dest_dir: std::path::PathBuf,
     /// dest_dir 가 이미 존재 (execute 시 backup 후 진행).
     pub conflict: bool,
@@ -111,6 +198,10 @@ pub async fn extract_plan(
 ) -> Result<ExtractPlan, DuetError> {
     let format = detect_format(&archive.name)
         .ok_or_else(|| DuetError::Io(format!("unsupported archive: {}", archive.name)))?;
+    // 원격은 호스트 unzip/tar 로 풀리는 포맷만 — 충돌 백업 등 아무것도 건드리기 전에 거부.
+    if matches!(archive.location.source, SourceId::Ssh { .. }) && !format.supports_remote() {
+        return Err(remote_unsupported());
+    }
     // fs.join — 원격은 POSIX, 로컬은 네이티브. PathBuf::join 은 Windows 클라이언트에서
     // 원격 경로에 `\` 를 섞는다(§7).
     let archive_path = fs.join(&archive.location.path, &archive.name);
@@ -162,8 +253,13 @@ pub async fn extract_execute(
 
     // mkdir 이후의 실패(암호 zip 의 NeedPassword, 취소 등)는 아래에서 롤백 — 안 하면
     // 빈/부분 dest 폴더가 남고, 충돌로 옮겨둔 기존 폴더도 backup 이름에 갇힌다.
+    // 단일 파일 압축(.gz 등)은 폴더 없이 archive_dir 에 `<stem>` 파일로 바로 푼다
+    // (예전엔 `log.txt/log.txt` 처럼 폴더가 한 겹 더 생겼다). 그 경로가 plan.dest_dir.
+    let single = matches!(plan.format.layout(), Layout::Single(_));
     let extracted: Result<(), DuetError> = async {
-        fs.mkdir(&plan.dest_dir).await?;
+        if !single {
+            fs.mkdir(&plan.dest_dir).await?;
+        }
 
         if cancel_token.is_cancelled() {
             return Err(DuetError::Cancelled);
@@ -171,7 +267,12 @@ pub async fn extract_execute(
 
         match &plan.source {
             SourceId::Local => {
-                extract_local(&archive_path, &plan.dest_dir, plan.format, password).await
+                let into = if single {
+                    plan.archive_dir.path.as_path()
+                } else {
+                    plan.dest_dir.as_path()
+                };
+                extract_local(&archive_path, into, plan.format, password).await
             }
             SourceId::Ssh { connection_id, .. } => {
                 let pool = ctx.pool.as_ref().ok_or_else(|| {
@@ -246,8 +347,8 @@ fn extract_local_blocking(
 ) -> Result<(), DuetError> {
     let file =
         std::fs::File::open(archive).map_err(|e| DuetError::Io(format!("open archive: {e}")))?;
-    match fmt {
-        ArchiveFormat::Zip => {
+    match fmt.layout() {
+        Layout::Zip => {
             let mut zip =
                 zip::ZipArchive::new(file).map_err(|e| DuetError::Io(format!("zip open: {e}")))?;
             // 암호화 항목이 하나라도 있으면(by_index_raw=복호화 안 함) 암호 경로로.
@@ -262,35 +363,80 @@ fn extract_local_blocking(
                     .map_err(|e| DuetError::Io(format!("zip extract: {e}")))?;
             }
         }
-        ArchiveFormat::Tar => {
-            let mut tar = tar::Archive::new(file);
+        Layout::Tar(codec) => {
+            let mut tar = tar::Archive::new(decode_reader(file, codec)?);
             tar.unpack(dest)
                 .map_err(|e| DuetError::Io(format!("tar extract: {e}")))?;
         }
-        ArchiveFormat::TarGz => {
-            let gz = flate2::read::GzDecoder::new(file);
-            let mut tar = tar::Archive::new(gz);
-            tar.unpack(dest)
-                .map_err(|e| DuetError::Io(format!("tar.gz extract: {e}")))?;
-        }
-        ArchiveFormat::Gz => {
-            // 단일 파일 gzip → dest/<.gz 제거한 이름>.
-            let mut gz = flate2::read::GzDecoder::new(file);
+        Layout::Single(codec) => {
+            // 단일 파일 → dest/<압축 확장자 뗀 이름>.
             let out_name = archive
-                .file_stem()
+                .file_name()
                 .and_then(|s| s.to_str())
-                .ok_or_else(|| DuetError::Io("invalid gz name".into()))?;
-            let out_path = dest.join(out_name);
-            let mut out = std::fs::File::create(&out_path)
+                .map(archive_stem)
+                .ok_or_else(|| DuetError::Io("invalid archive name".into()))?;
+            let mut reader = decode_reader(file, Some(codec))?;
+            let mut out = std::fs::File::create(dest.join(out_name))
                 .map_err(|e| DuetError::Io(format!("create output: {e}")))?;
-            std::io::copy(&mut gz, &mut out)
-                .map_err(|e| DuetError::Io(format!("gz decompress: {e}")))?;
+            std::io::copy(&mut reader, &mut out)
+                .map_err(|e| DuetError::Io(format!("decompress: {e}")))?;
         }
         // 경로 기반 API — 위에서 연 file 은 사용 안 함(존재/읽기 가능 검증만 겸함).
-        ArchiveFormat::SevenZ => extract_sevenz(archive, dest, password)?,
-        ArchiveFormat::Rar => extract_rar(archive, dest, password)?,
+        Layout::SevenZ => extract_sevenz(archive, dest, password)?,
+        Layout::Rar => extract_rar(archive, dest, password)?,
     }
     Ok(())
+}
+
+/// 코덱에 맞는 스트리밍 해제 reader (None = 무압축 tar). 멤버·스트림·프레임이 여러 개
+/// 이어 붙은 파일도 끝까지 푼다 — `gzip -d`·`bzip2 -d`·`xz -d`·`zstd -d` 와 같은 의미.
+fn decode_reader(file: std::fs::File, codec: Option<Codec>) -> Result<Box<dyn Read>, DuetError> {
+    let buf = std::io::BufReader::new(file);
+    Ok(match codec {
+        None => Box::new(buf),
+        Some(Codec::Gzip) => Box::new(flate2::bufread::MultiGzDecoder::new(buf)),
+        Some(Codec::Bzip2) => Box::new(bzip2::bufread::MultiBzDecoder::new(buf)),
+        Some(Codec::Xz) => Box::new(lzma_rust2::XzReader::new(buf, true)),
+        Some(Codec::Zstd) => Box::new(ZstdFrames::new(buf)?),
+    })
+}
+
+/// 여러 프레임이 이어 붙은 zstd 스트림 reader. ruzstd `StreamingDecoder` 는 프레임
+/// 하나만 풀므로, 한 프레임이 끝나면 입력이 남아 있는 한 다음 프레임을 이어 연다.
+struct ZstdFrames<R: BufRead> {
+    /// 현재 프레임 디코더 — 입력을 다 읽으면 None.
+    frame: Option<ruzstd::decoding::StreamingDecoder<R, ruzstd::decoding::FrameDecoder>>,
+}
+
+impl<R: BufRead> ZstdFrames<R> {
+    fn new(inner: R) -> Result<Self, DuetError> {
+        let frame = ruzstd::decoding::StreamingDecoder::new(inner)
+            .map_err(|e| DuetError::Io(format!("zstd: {e}")))?;
+        Ok(Self { frame: Some(frame) })
+    }
+}
+
+impl<R: BufRead> Read for ZstdFrames<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        while let Some(frame) = self.frame.as_mut() {
+            let n = frame.read(buf)?;
+            if n > 0 || buf.is_empty() {
+                return Ok(n);
+            }
+            // 프레임 끝 — 남은 입력이 있으면 다음 프레임, 없으면 EOF.
+            let mut inner = match self.frame.take() {
+                Some(done) => done.into_inner(),
+                None => break,
+            };
+            if inner.fill_buf()?.is_empty() {
+                return Ok(0);
+            }
+            let next = ruzstd::decoding::StreamingDecoder::new(inner)
+                .map_err(|e| std::io::Error::other(format!("zstd: {e}")))?;
+            self.frame = Some(next);
+        }
+        Ok(0)
+    }
 }
 
 /// 7z 해제 — sevenz-rust2 (순수 Rust). 암호 아카이브인데 password 없으면 NeedPassword.
@@ -395,7 +541,7 @@ fn extract_zip_with_password(
     Ok(())
 }
 
-/// 호스트의 unzip/tar 해제 명령 문자열 (인자 shell-escape). Gz 는 미지원.
+/// 호스트의 unzip/tar 해제 명령 문자열 (인자 shell-escape). 원격은 zip·tar 계열만.
 /// `password` 가 있으면 zip 은 `unzip -P`. 암호 zip 인데 password 없으면 `-P ""` 로
 /// (대화형 프롬프트 hang 방지 — 틀린 암호로 즉시 실패해 caller 가 NeedPassword 판정).
 fn remote_extract_command(
@@ -406,76 +552,110 @@ fn remote_extract_command(
 ) -> Result<String, DuetError> {
     let a = shell_escape_path(archive)?;
     let d = shell_escape_path(dest)?;
-    Ok(match fmt {
-        ArchiveFormat::Zip => {
+    Ok(match fmt.layout() {
+        Layout::Zip => {
             let p = shell_escape_str(password.unwrap_or(""))?;
             format!("unzip -P {p} -o {a} -d {d}")
         }
-        ArchiveFormat::Tar => format!("tar -xf {a} -C {d}"),
-        ArchiveFormat::TarGz => format!("tar -xzf {a} -C {d}"),
-        ArchiveFormat::Gz => {
-            return Err(DuetError::NotSupported(
-                "remote single-file .gz extract".into(),
-            ))
-        }
-        // 원격 호스트에 7z/unrar 바이너리 보장 못 함 — 로컬 전용.
-        ArchiveFormat::SevenZ | ArchiveFormat::Rar => {
-            return Err(DuetError::NotSupported(
-                "remote 7z/rar extract is not supported (local only)".into(),
-            ))
-        }
+        Layout::Tar(codec) => format!("tar {}-xf {a} -C {d}", tar_codec_flag(codec)),
+        Layout::Single(_) | Layout::SevenZ | Layout::Rar => return Err(remote_unsupported()),
     })
 }
 
-/// 한 호스트 셸 명령을 russh exec 로 실행 (시스템 ssh X). exit!=0 → Ssh 에러.
-async fn run_host_command(
+/// 호스트 tar 의 압축 해제 옵션 (뒤 공백 포함, 무압축은 빈 문자열). GNU tar·bsdtar 공통:
+/// `-z` gzip, `-j` bzip2, `-J` xz, `--zstd` zstd (GNU tar 1.31+ / libarchive 3.3.3+).
+fn tar_codec_flag(codec: Option<Codec>) -> &'static str {
+    match codec {
+        None => "",
+        Some(Codec::Gzip) => "-z ",
+        Some(Codec::Bzip2) => "-j ",
+        Some(Codec::Xz) => "-J ",
+        Some(Codec::Zstd) => "--zstd ",
+    }
+}
+
+/// 원격에서 처리하지 않는 포맷의 에러 — 호스트에 7z/unrar 바이너리를 보장 못 하고,
+/// 단일 파일 압축은 원격 해제 경로를 두지 않았다.
+fn remote_unsupported() -> DuetError {
+    DuetError::NotSupported(
+        "remote extract supports only zip/tar archives (7z, rar, .gz/.bz2/.xz/.zst are local only)"
+            .into(),
+    )
+}
+
+/// 이 포맷을 원격에서 처리하는 호스트 프로그램 — exit 127(설치 안 됨) 안내용.
+fn host_prog(fmt: ArchiveFormat) -> &'static str {
+    match fmt.layout() {
+        Layout::Zip => "unzip",
+        _ => "tar",
+    }
+}
+
+/// 호스트 셸 명령을 russh exec 로 실행하고 출력 반환 (시스템 ssh X). exit 판정은 caller.
+async fn exec_on_host(
     pool: &Arc<ConnectionPool>,
     connection_id: &ConnectionId,
     cmd: &str,
-) -> Result<(), DuetError> {
+) -> Result<ExecOutput, DuetError> {
     let conn = pool.get(connection_id).await?;
     let session_mutex = conn
         .session
         .as_ref()
         .ok_or_else(|| DuetError::ConnectionFailed("no live session".into()))?;
     let handle = session_mutex.lock().await;
-    let out = exec(&handle, cmd).await?;
+    exec(&handle, cmd).await
+}
+
+/// 호스트 명령 실패(exit != 0)를 에러로. `prog` 는 이 명령이 요구하는 호스트 프로그램 —
+/// 셸 exit 127(command not found)이면 셸 원문 대신 "서버에 설치 안 됨" 으로 안내한다
+/// (최소 설치 리눅스엔 unzip/zip 이 없는 경우가 흔하다).
+fn host_failure(out: &ExecOutput, prog: &str) -> DuetError {
+    if out.exit_status == 127 {
+        return DuetError::NotSupported(format!("`{prog}` is not installed on the remote host"));
+    }
+    DuetError::Ssh(format!(
+        "host command failed (exit {}): {}",
+        out.exit_status,
+        String::from_utf8_lossy(&out.stderr).trim()
+    ))
+}
+
+/// 한 호스트 셸 명령을 실행 (exit!=0 → 에러). `prog` 는 [`host_failure`] 안내용.
+async fn run_host_command(
+    pool: &Arc<ConnectionPool>,
+    connection_id: &ConnectionId,
+    cmd: &str,
+    prog: &str,
+) -> Result<(), DuetError> {
+    let out = exec_on_host(pool, connection_id, cmd).await?;
     if out.exit_status != 0 {
-        return Err(DuetError::Ssh(format!(
-            "host command failed (exit {}): {}",
-            out.exit_status,
-            String::from_utf8_lossy(&out.stderr).trim()
-        )));
+        return Err(host_failure(&out, prog));
     }
     Ok(())
 }
 
-/// zip 추출용 호스트 명령 실행 — Info-ZIP `unzip` 의 exit 82(="bad decryption
-/// password") 를 `NeedPassword` 로 매핑해 프론트가 암호를 받아 재시도하게 한다.
-/// 다른 unzip 구현이 82 를 안 쓰면 그냥 일반 Ssh 에러로 폴백(best-effort).
+/// zip 추출용 호스트 명령 실행 — Info-ZIP `unzip` 의 exit 코드를 매핑한다.
+/// - 82(bad decryption password) → `NeedPassword` (프론트가 암호를 받아 재시도)
+/// - 81(unsupported compression/decryption) → `NotSupported`. 대표적으로 AES 암호 zip —
+///   Info-ZIP 6.0 은 AES 를 못 풀어 암호가 맞아도 81("need PK compat. v5.1")이라
+///   암호를 다시 묻는 건 소용없다.
+///
+/// 다른 unzip 구현이 이 코드를 안 쓰면 일반 에러로 폴백(best-effort).
 async fn run_unzip_command(
     pool: &Arc<ConnectionPool>,
     connection_id: &ConnectionId,
     cmd: &str,
 ) -> Result<(), DuetError> {
-    let conn = pool.get(connection_id).await?;
-    let session_mutex = conn
-        .session
-        .as_ref()
-        .ok_or_else(|| DuetError::ConnectionFailed("no live session".into()))?;
-    let handle = session_mutex.lock().await;
-    let out = exec(&handle, cmd).await?;
-    if out.exit_status != 0 {
-        if out.exit_status == 82 {
-            return Err(DuetError::NeedPassword);
-        }
-        return Err(DuetError::Ssh(format!(
-            "host command failed (exit {}): {}",
-            out.exit_status,
-            String::from_utf8_lossy(&out.stderr).trim()
-        )));
+    let out = exec_on_host(pool, connection_id, cmd).await?;
+    match out.exit_status {
+        0 => Ok(()),
+        82 => Err(DuetError::NeedPassword),
+        81 => Err(DuetError::NotSupported(
+            "the remote host's unzip cannot extract this zip (AES encryption or an unsupported compression method)"
+                .into(),
+        )),
+        _ => Err(host_failure(&out, "unzip")),
     }
-    Ok(())
 }
 
 /// 아카이브 엔트리가 추출 dest 밖으로 탈출하는지 — 절대경로(`/`·`\\`·드라이브)거나
@@ -495,42 +675,23 @@ fn entry_escapes(entry: &str) -> bool {
 /// 호스트의 아카이브 *목록* 명령 (이름만). 추출 전 검증용.
 fn remote_list_command(archive: &Path, fmt: ArchiveFormat) -> Result<String, DuetError> {
     let a = shell_escape_path(archive)?;
-    Ok(match fmt {
-        ArchiveFormat::Zip => format!("unzip -Z1 {a}"),
-        ArchiveFormat::Tar => format!("tar -tf {a}"),
-        ArchiveFormat::TarGz => format!("tar -tzf {a}"),
-        ArchiveFormat::Gz => {
-            return Err(DuetError::NotSupported(
-                "remote single-file .gz extract".into(),
-            ))
-        }
-        ArchiveFormat::SevenZ | ArchiveFormat::Rar => {
-            return Err(DuetError::NotSupported(
-                "remote 7z/rar is not supported (local only)".into(),
-            ))
-        }
+    Ok(match fmt.layout() {
+        Layout::Zip => format!("unzip -Z1 {a}"),
+        Layout::Tar(codec) => format!("tar {}-tf {a}", tar_codec_flag(codec)),
+        Layout::Single(_) | Layout::SevenZ | Layout::Rar => return Err(remote_unsupported()),
     })
 }
 
-/// 한 호스트 셸 명령을 실행하고 stdout 반환 (exit!=0 → Err).
+/// 한 호스트 셸 명령을 실행하고 stdout 반환 (exit!=0 → 에러). `prog` 는 [`host_failure`] 안내용.
 async fn run_host_command_stdout(
     pool: &Arc<ConnectionPool>,
     connection_id: &ConnectionId,
     cmd: &str,
+    prog: &str,
 ) -> Result<String, DuetError> {
-    let conn = pool.get(connection_id).await?;
-    let session_mutex = conn
-        .session
-        .as_ref()
-        .ok_or_else(|| DuetError::ConnectionFailed("no live session".into()))?;
-    let handle = session_mutex.lock().await;
-    let out = exec(&handle, cmd).await?;
+    let out = exec_on_host(pool, connection_id, cmd).await?;
     if out.exit_status != 0 {
-        return Err(DuetError::Ssh(format!(
-            "host command failed (exit {}): {}",
-            out.exit_status,
-            String::from_utf8_lossy(&out.stderr).trim()
-        )));
+        return Err(host_failure(&out, prog));
     }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
@@ -545,7 +706,7 @@ async fn validate_remote_archive(
     fmt: ArchiveFormat,
 ) -> Result<(), DuetError> {
     let list_cmd = remote_list_command(archive, fmt)?;
-    let listing = run_host_command_stdout(pool, connection_id, &list_cmd).await?;
+    let listing = run_host_command_stdout(pool, connection_id, &list_cmd, host_prog(fmt)).await?;
     for entry in listing.lines() {
         let entry = entry.trim();
         if entry.is_empty() {
@@ -572,9 +733,9 @@ async fn extract_remote(
     validate_remote_archive(pool, connection_id, archive, fmt).await?;
     let cmd = remote_extract_command(archive, dest, fmt, password)?;
     // zip 은 암호 실패(unzip exit 82)를 NeedPassword 로 — 프론트 재시도.
-    match fmt {
-        ArchiveFormat::Zip => run_unzip_command(pool, connection_id, &cmd).await,
-        _ => run_host_command(pool, connection_id, &cmd).await,
+    match fmt.layout() {
+        Layout::Zip => run_unzip_command(pool, connection_id, &cmd).await,
+        _ => run_host_command(pool, connection_id, &cmd, host_prog(fmt)).await,
     }
 }
 
@@ -640,9 +801,9 @@ pub async fn open_for_browse(
                 remote_extract_command(&archive_path, &dest, format, password.as_deref())?,
             );
             // zip 은 암호 실패(unzip exit 82)를 NeedPassword 로 — 프론트 재시도.
-            match format {
-                ArchiveFormat::Zip => run_unzip_command(pool, connection_id, &cmd).await?,
-                _ => run_host_command(pool, connection_id, &cmd).await?,
+            match format.layout() {
+                Layout::Zip => run_unzip_command(pool, connection_id, &cmd).await?,
+                _ => run_host_command(pool, connection_id, &cmd, host_prog(format)).await?,
             }
             Ok(Location {
                 source: archive.location.source.clone(),
@@ -699,7 +860,7 @@ pub async fn reap_remote_browse_dirs(
         let Ok(escaped) = shell_escape_path(root) else {
             continue;
         };
-        let _ = run_host_command(pool, connection_id, &format!("rm -rf {escaped}")).await;
+        let _ = run_host_command(pool, connection_id, &format!("rm -rf {escaped}"), "rm").await;
     }
 }
 
@@ -840,7 +1001,7 @@ pub async fn compress_execute(
 /// 원본 아카이브는 dest 충돌로 처리돼 `.bak.<ts>` 로 보존되고 Ctrl+Z(UndoCopy)로
 /// 복원된다(§4 — 모든 OS 에서 reliable. macOS 로컬 trash-restore 미지원 회피).
 ///
-/// 원본이 `.tar`/`.gz` 면 `CompressFormat` 으로 매핑 불가 → `NotSupported`
+/// 원본이 zip·tar.gz 가 아니면 같은 포맷으로 다시 만들 수 없어 `NotSupported`
 /// (사용자 파일 포맷을 임의로 바꾸지 않음). 원격은 host-side 압축(PC 경유 0).
 pub async fn repack_plan(
     fs: &dyn FileSystem,
@@ -855,26 +1016,13 @@ pub async fn repack_plan(
     }
     let fmt = detect_format(&original_archive.name)
         .ok_or_else(|| DuetError::Io(format!("not an archive: {}", original_archive.name)))?;
-    let format = match fmt {
-        ArchiveFormat::Zip => CompressFormat::Zip,
-        ArchiveFormat::TarGz => CompressFormat::TarGz,
-        ArchiveFormat::Tar => {
-            return Err(DuetError::NotSupported(
-                "repack into .tar is not supported (only .zip / .tar.gz)".into(),
-            ))
-        }
-        ArchiveFormat::Gz => {
-            return Err(DuetError::NotSupported(
-                "repack into .gz is not supported (only .zip / .tar.gz)".into(),
-            ))
-        }
-        // 읽기 전용 포맷 — 7z 생성 비대상, rar 는 라이선스상 생성 불가.
-        ArchiveFormat::SevenZ | ArchiveFormat::Rar => {
-            return Err(DuetError::NotSupported(
-                "repack into .7z/.rar is not supported (read-only formats)".into(),
-            ))
-        }
-    };
+    // .tar/.tar.xz/.gz 등은 생성 포맷이 없고, 7z/rar 는 읽기 전용(rar 는 라이선스상 생성 불가).
+    let format = fmt.repack_format().ok_or_else(|| {
+        DuetError::NotSupported(format!(
+            "repack into {} is not supported (only .zip / .tar.gz)",
+            original_archive.name
+        ))
+    })?;
     let entries = fs.list(&browse_root.path).await?;
     if entries.is_empty() {
         return Err(DuetError::Io("nothing to repack (folder is empty)".into()));
@@ -1001,11 +1149,6 @@ async fn compress_remote(
         .pool
         .as_ref()
         .ok_or_else(|| DuetError::Io("OpCtx.pool required for remote compress".into()))?;
-    let conn = pool.get(connection_id).await?;
-    let session_mutex = conn
-        .session
-        .as_ref()
-        .ok_or_else(|| DuetError::ConnectionFailed("no live session".into()))?;
 
     let dir = shell_escape_path(src_dir)?;
     let dest_arg = shell_escape_path(dest)?;
@@ -1015,25 +1158,18 @@ async fn compress_remote(
         name_args.push(' ');
         name_args.push_str(&shell_escape_path(Path::new(n))?);
     }
-    let cmd = match fmt {
-        CompressFormat::Zip => {
-            format!("cd {dir} && zip -r -q {dest_arg} --{name_args}")
-        }
-        CompressFormat::TarGz => {
-            format!("cd {dir} && tar -czf {dest_arg} --{name_args}")
-        }
+    // prog = 호스트에 필요한 프로그램 — 없으면(exit 127) "설치 안 됨" 으로 안내.
+    let (cmd, prog) = match fmt {
+        CompressFormat::Zip => (
+            format!("cd {dir} && zip -r -q {dest_arg} --{name_args}"),
+            "zip",
+        ),
+        CompressFormat::TarGz => (
+            format!("cd {dir} && tar -czf {dest_arg} --{name_args}"),
+            "tar",
+        ),
     };
-
-    let handle = session_mutex.lock().await;
-    let out = exec(&handle, &cmd).await?;
-    if out.exit_status != 0 {
-        return Err(DuetError::Ssh(format!(
-            "compress failed (exit {}): {}",
-            out.exit_status,
-            String::from_utf8_lossy(&out.stderr).trim()
-        )));
-    }
-    Ok(())
+    run_host_command(pool, connection_id, &cmd, prog).await
 }
 
 #[cfg(test)]
@@ -1084,7 +1220,17 @@ mod tests {
         assert_eq!(detect_format("a.tar"), Some(ArchiveFormat::Tar));
         assert_eq!(detect_format("a.tar.gz"), Some(ArchiveFormat::TarGz));
         assert_eq!(detect_format("a.TGZ"), Some(ArchiveFormat::TarGz));
+        assert_eq!(detect_format("a.tar.bz2"), Some(ArchiveFormat::TarBz2));
+        assert_eq!(detect_format("a.tbz2"), Some(ArchiveFormat::TarBz2));
+        assert_eq!(detect_format("a.tbz"), Some(ArchiveFormat::TarBz2));
+        assert_eq!(detect_format("a.Tar.Xz"), Some(ArchiveFormat::TarXz));
+        assert_eq!(detect_format("a.txz"), Some(ArchiveFormat::TarXz));
+        assert_eq!(detect_format("a.tar.zst"), Some(ArchiveFormat::TarZst));
+        assert_eq!(detect_format("a.tzst"), Some(ArchiveFormat::TarZst));
         assert_eq!(detect_format("a.txt.gz"), Some(ArchiveFormat::Gz));
+        assert_eq!(detect_format("a.txt.bz2"), Some(ArchiveFormat::Bz2));
+        assert_eq!(detect_format("a.txt.xz"), Some(ArchiveFormat::Xz));
+        assert_eq!(detect_format("a.txt.zst"), Some(ArchiveFormat::Zst));
         assert_eq!(detect_format("a.7z"), Some(ArchiveFormat::SevenZ));
         assert_eq!(detect_format("A.RAR"), Some(ArchiveFormat::Rar));
         assert_eq!(detect_format("notes.txt"), None);
@@ -1099,6 +1245,9 @@ mod tests {
         assert_eq!(archive_stem("file.txt.gz"), "file.txt");
         assert_eq!(archive_stem("data.7z"), "data");
         assert_eq!(archive_stem("data.rar"), "data");
+        assert_eq!(archive_stem("data.tar.xz"), "data");
+        assert_eq!(archive_stem("Data.TBZ2"), "Data");
+        assert_eq!(archive_stem("log.txt.zst"), "log.txt");
         assert_eq!(archive_stem(".zip"), ".zip.extracted");
         assert_eq!(archive_stem("plain"), "plain.extracted");
     }
@@ -1418,13 +1567,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn repack_plan_rejects_tar_and_gz() {
+    async fn repack_plan_rejects_formats_it_cannot_recreate() {
         let dir = tempfile::tempdir().unwrap();
         let browse = dir.path().join("b");
         std::fs::create_dir_all(&browse).unwrap();
         std::fs::write(browse.join("x"), b"x").unwrap();
         let fs = crate::fs::LocalFs::new();
-        for name in ["data.tar", "log.txt.gz"] {
+        for name in [
+            "data.tar",
+            "log.txt.gz",
+            "data.tar.xz",
+            "data.7z",
+            "data.rar",
+        ] {
             let browse_root = Location {
                 source: SourceId::Local,
                 path: browse.clone(),
@@ -1442,5 +1597,218 @@ mod tests {
                 "{name} should be NotSupported"
             );
         }
+    }
+
+    /// 테스트 아카이브 경로 (생성 방법은 `tests/fixtures/archive/README.md`).
+    fn fixture(name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/archive")
+            .join(name)
+    }
+
+    /// CLI(bzip2/xz/zstd)로 만든 tar.bz2 / tar.xz / tar.zst 를 로컬 crate 로 해제.
+    #[test]
+    fn tar_codec_fixtures_extract_locally() {
+        for (name, fmt) in [
+            ("sample.tar.bz2", ArchiveFormat::TarBz2),
+            ("sample.tar.xz", ArchiveFormat::TarXz),
+            ("sample.tar.zst", ArchiveFormat::TarZst),
+        ] {
+            let dest = tempfile::tempdir().unwrap();
+            extract_local_blocking(&fixture(name), dest.path(), fmt, None)
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+            let a = std::fs::read_to_string(dest.path().join("a.txt")).unwrap();
+            assert_eq!(a, "alpha\n".repeat(400), "{name}");
+            let b = std::fs::read_to_string(dest.path().join("sub/b.txt")).unwrap();
+            assert_eq!(b, "beta", "{name}");
+        }
+    }
+
+    /// 단일 파일 압축 — 따로 압축해 이어 붙인 멤버·스트림·프레임 2개를 끝까지 푼다
+    /// (`gzip -d` 등과 같은 의미). 결과는 dest/<압축 확장자 뗀 이름>.
+    #[test]
+    fn single_file_codecs_decode_every_member() {
+        for (name, fmt) in [
+            ("two.txt.gz", ArchiveFormat::Gz),
+            ("two.txt.bz2", ArchiveFormat::Bz2),
+            ("two.txt.xz", ArchiveFormat::Xz),
+            ("two.txt.zst", ArchiveFormat::Zst),
+        ] {
+            let dest = tempfile::tempdir().unwrap();
+            extract_local_blocking(&fixture(name), dest.path(), fmt, None)
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+            let out = std::fs::read_to_string(dest.path().join("two.txt")).unwrap();
+            assert_eq!(out, "first\nsecond\n", "{name}");
+        }
+    }
+
+    /// Deflate64 방식 zip (7-Zip `-mm=Deflate64` 로 생성 — Windows 가 큰 파일에 쓰는 방식).
+    #[test]
+    fn deflate64_zip_extracts_locally() {
+        let dest = tempfile::tempdir().unwrap();
+        extract_local_blocking(&fixture("d64.zip"), dest.path(), ArchiveFormat::Zip, None).unwrap();
+        let a = std::fs::read_to_string(dest.path().join("a.txt")).unwrap();
+        assert_eq!(a, "alpha\n".repeat(400));
+        let b = std::fs::read_to_string(dest.path().join("sub/b.txt")).unwrap();
+        assert_eq!(b, "beta");
+    }
+
+    /// 단일 파일 압축 해제는 폴더 없이 `<stem>` 파일로 바로 풀린다 (`two.txt/two.txt` 아님).
+    #[tokio::test]
+    async fn extract_execute_single_file_writes_file_directly() {
+        use crate::fs::LocalFs;
+
+        let root = tempfile::tempdir().unwrap();
+        let work = root.path().join("work");
+        std::fs::create_dir(&work).unwrap();
+        std::fs::copy(fixture("two.txt.gz"), work.join("two.txt.gz")).unwrap();
+        let settings =
+            crate::services::settings::SettingsStore::load_from(&root.path().join("s.toml"))
+                .await
+                .unwrap();
+        let journal = crate::services::journal::Journal::load_from(&root.path().join("j.jsonl"))
+            .await
+            .unwrap();
+        let ctx = OpCtx {
+            settings,
+            journal,
+            pool: None,
+            app: None,
+        };
+        let local = LocalFs::new();
+        let entry = EntryRef {
+            location: Location {
+                source: SourceId::Local,
+                path: work.clone(),
+            },
+            name: "two.txt.gz".into(),
+        };
+        let plan = extract_plan(&local, entry).await.unwrap();
+        assert_eq!(plan.dest_dir, work.join("two.txt"));
+        extract_execute(&local, plan, None, &ctx, CancellationToken::new())
+            .await
+            .unwrap();
+        let out = work.join("two.txt");
+        assert!(out.is_file(), "should be a file, not a folder");
+        assert_eq!(std::fs::read_to_string(&out).unwrap(), "first\nsecond\n");
+    }
+
+    /// 원격 위치의 로컬 전용 포맷(7z/rar/단일 파일)은 plan 단계에서 거부 — 충돌 백업 등
+    /// 아무것도 건드리지 않는다.
+    #[tokio::test]
+    async fn extract_plan_rejects_local_only_formats_on_remote() {
+        let fs = crate::fs::LocalFs::new();
+        let ssh = SourceId::Ssh {
+            connection_id: ConnectionId("c1".into()),
+            host_ip: std::net::IpAddr::from([127, 0, 0, 1]),
+            user: "u".into(),
+        };
+        for name in ["a.7z", "a.rar", "log.txt.gz", "log.txt.zst"] {
+            let entry = EntryRef {
+                location: Location {
+                    source: ssh.clone(),
+                    path: PathBuf::from("/srv"),
+                },
+                name: name.into(),
+            };
+            let r = extract_plan(&fs, entry).await;
+            assert!(matches!(r, Err(DuetError::NotSupported(_))), "{name}");
+        }
+    }
+
+    /// 원격 tar 명령은 코덱별 옵션(-z/-j/-J/--zstd)을 쓴다 — 로컬 bsdtar 로 네 옵션의
+    /// 목록·해제를 확인했고, GNU tar 도 같은 옵션(--zstd 는 1.31+).
+    #[test]
+    fn remote_tar_commands_use_codec_flags() {
+        let src = Path::new("/srv/x.tar.zst");
+        let dest = Path::new("/srv/x");
+        assert_eq!(
+            remote_extract_command(src, dest, ArchiveFormat::TarZst, None).unwrap(),
+            "tar --zstd -xf '/srv/x.tar.zst' -C '/srv/x'"
+        );
+        assert_eq!(
+            remote_extract_command(src, dest, ArchiveFormat::TarGz, None).unwrap(),
+            "tar -z -xf '/srv/x.tar.zst' -C '/srv/x'"
+        );
+        let list = |p: &str, fmt| remote_list_command(Path::new(p), fmt).unwrap();
+        assert_eq!(list("/a.tar", ArchiveFormat::Tar), "tar -tf '/a.tar'");
+        assert_eq!(
+            list("/a.tbz2", ArchiveFormat::TarBz2),
+            "tar -j -tf '/a.tbz2'"
+        );
+        assert_eq!(list("/a.txz", ArchiveFormat::TarXz), "tar -J -tf '/a.txz'");
+        for fmt in [
+            ArchiveFormat::SevenZ,
+            ArchiveFormat::Rar,
+            ArchiveFormat::Gz,
+            ArchiveFormat::Zst,
+        ] {
+            assert!(!fmt.supports_remote(), "{fmt:?}");
+            assert!(matches!(
+                remote_extract_command(src, dest, fmt, None),
+                Err(DuetError::NotSupported(_))
+            ));
+            assert!(matches!(
+                remote_list_command(src, fmt),
+                Err(DuetError::NotSupported(_))
+            ));
+        }
+    }
+
+    /// 호스트에 프로그램이 없으면(exit 127) 셸 원문 대신 설치 안내, 그 외 실패는 Ssh 에러.
+    #[test]
+    fn host_failure_explains_missing_program() {
+        let out = |exit_status| ExecOutput {
+            exit_status,
+            stdout: Vec::new(),
+            stderr: b"sh: 1: unzip: not found".to_vec(),
+        };
+        match host_failure(&out(127), "unzip") {
+            DuetError::NotSupported(m) => assert!(m.contains("`unzip`"), "{m}"),
+            other => panic!("expected NotSupported, got {other}"),
+        }
+        assert!(matches!(host_failure(&out(2), "tar"), DuetError::Ssh(_)));
+    }
+
+    /// 프론트 `src/lib/archive.ts` 의 접미사 목록이 백엔드 표·능력과 같은지 — 메뉴 노출
+    /// (해제·원격·repack)이 실제 지원과 어긋나지 않게 한다. 한쪽만 고치면 여기서 깨진다.
+    #[test]
+    fn frontend_archive_lists_match_backend() {
+        use std::collections::BTreeSet;
+        let ts = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/lib/archive.ts"),
+        )
+        .unwrap();
+        // `const NAME = [ "…", … ]` 안의 따옴표 문자열들.
+        let ts_list = |name: &str| -> BTreeSet<String> {
+            let head = format!("const {name} = [");
+            let start = ts
+                .find(&head)
+                .unwrap_or_else(|| panic!("{name} not found in archive.ts"))
+                + head.len();
+            let body = &ts[start..];
+            let body = &body[..body.find(']').unwrap()];
+            body.split('"')
+                .skip(1)
+                .step_by(2)
+                .map(str::to_string)
+                .collect()
+        };
+        let backend = |keep: fn(ArchiveFormat) -> bool| -> BTreeSet<String> {
+            SUFFIXES
+                .iter()
+                .filter(|(_, f)| keep(*f))
+                .map(|(s, _)| s.to_string())
+                .collect()
+        };
+        assert_eq!(ts_list("REMOTE_SUFFIXES"), backend(|f| f.supports_remote()));
+        assert_eq!(
+            ts_list("LOCAL_ONLY_SUFFIXES"),
+            backend(|f| !f.supports_remote())
+        );
+        assert_eq!(
+            ts_list("REPACK_SUFFIXES"),
+            backend(|f| f.repack_format().is_some())
+        );
     }
 }

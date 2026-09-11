@@ -43,9 +43,20 @@ opener = { version = "0.7", features = ["reveal"] }  # 기본 앱으로 열기 /
 
 # === Archive (로컬 압축/해제 — 원격은 호스트 unzip/tar exec) ===
 # §6(2026-06): aes-crypto 추가 — 암호 걸린 zip(AES) 해독용. ZipCrypto(레거시)는 내장.
-zip = { version = "2", default-features = false, features = ["deflate", "aes-crypto"] }
+# §6(2026-09): deflate64 추가 — Windows 가 큰 파일에 쓰는 Deflate64 방식 zip 해제용.
+#   deflate64 crate(MIT, 순수 Rust, 의존성 0, total 57M / recent90d 13M dl). zip 2→8
+#   업그레이드(bzip2·LZMA·XZ·PPMd 방식까지)는 API 이전 부담이 커 보류.
+zip = { version = "2", default-features = false, features = ["deflate", "deflate64", "aes-crypto"] }
 tar = "0.4"
 flate2 = "1"
+# === .tar.bz2 / .tar.xz / .tar.zst 로컬 해제 (§6 승인 2026-09, 사용자 선택) ===
+# bzip2·lzma-rust2: sevenz-rust2 경유로 이미 Cargo.lock 에 있음 — 직접 선언만(새 다운로드 0).
+#   bzip2 0.6 기본 백엔드는 순수 Rust(libbz2-rs-sys). lzma-rust2 는 xz feature 의 XzReader.
+# ruzstd: 순수 Rust zstd 디코더(MIT, total 64M / recent90d 15M dl, 2026-07 유지보수).
+#   대안 zstd(C libzstd 바인딩, 382M dl)는 더 빠르지만 C 빌드 — 순수 Rust 선호로 ruzstd.
+bzip2 = "0.6"
+lzma-rust2 = { version = "0.16", default-features = false, features = ["std", "optimization", "xz"] }
+ruzstd = "0.9"
 # === 7z/rar 읽기 전용 (§6 승인 2026-07, 사용자 선택) ===
 # sevenz-rust2: 순수 Rust 7z 해제(LZMA/LZMA2+AES256). total 551k / recent90d 266k dl,
 #   2026-07 활발 유지보수. 대안 sevenz-rust(1.09M dl)는 2024-07 이후 방치 — 후속작 채택.
