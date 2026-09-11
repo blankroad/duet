@@ -313,36 +313,16 @@ pub async fn ssh_edit_open(
             "edit roundtrip is only for remote files".into(),
         ));
     };
-    let fs = fs_for(&location.source, pool.inner()).await?;
-    let meta = fs.metadata(&location.path).await?;
-    if meta.kind != EntryKind::File {
-        return Err(DuetError::Io("can only edit regular files".into()));
-    }
-    let name = location
-        .path
-        .file_name()
-        .ok_or_else(|| DuetError::Io("remote path has no file name".into()))?;
-    let temp = crate::services::edit_session::edit_temp_path(connection_id, name);
-    if let Some(parent) = temp.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .map_err(|e| DuetError::Io(format!("create edit temp dir: {e}")))?;
-    }
-    let bytes = fs.read_full(&location.path).await?;
-    tokio::fs::write(&temp, &bytes)
-        .await
-        .map_err(|e| DuetError::Io(format!("write edit temp: {e}")))?;
-    let to_open = temp.clone();
-    tokio::task::spawn_blocking(move || opener::open(&to_open))
-        .await
-        .map_err(|e| DuetError::Io(format!("open task join: {e}")))?
-        .map_err(|e| DuetError::Io(format!("open failed: {e}")))?;
-    crate::services::edit_session::spawn_edit_watch(
+    let temp = crate::services::edit_session::prepare_remote_edit(
         pool.inner().clone(),
         connection_id.clone(),
         location.path.clone(),
-        temp,
-    );
+    )
+    .await?;
+    tokio::task::spawn_blocking(move || opener::open(&temp))
+        .await
+        .map_err(|e| DuetError::Io(format!("open task join: {e}")))?
+        .map_err(|e| DuetError::Io(format!("open failed: {e}")))?;
     Ok(())
 }
 
