@@ -5,6 +5,8 @@
 
 pub mod local;
 pub mod ssh;
+#[cfg(test)]
+pub(crate) mod testing;
 
 use crate::types::{DuetError, Entry, SourceId};
 use async_trait::async_trait;
@@ -43,6 +45,15 @@ pub trait FileSystem: Send + Sync {
         base.join(name)
     }
 
+    /// Validate one new child name, never a path or parent traversal.
+    fn validate_new_name(&self, name: &str) -> Result<(), DuetError> {
+        if name.trim().is_empty() || matches!(name, "." | "..") || name.contains(['/', '\\', '\0'])
+        {
+            return Err(DuetError::Io("invalid entry name".into()));
+        }
+        Ok(())
+    }
+
     /// 디렉토리 항목 나열. 정렬은 호출자 책임.
     async fn list(&self, path: &Path) -> Result<Vec<Entry>, DuetError>;
 
@@ -56,6 +67,14 @@ pub trait FileSystem: Send + Sync {
     }
     async fn rename(&self, from: &Path, to: &Path) -> Result<(), DuetError>;
     async fn mkdir(&self, path: &Path) -> Result<(), DuetError>;
+    /// Create a new empty file atomically; existing files and links must never be replaced.
+    async fn create_new_file(&self, _path: &Path) -> Result<(), DuetError> {
+        Err(DuetError::NotSupported("exclusive file creation".into()))
+    }
+    /// Remove only an empty directory, without traversing children or following links.
+    async fn remove_empty_dir(&self, _path: &Path) -> Result<(), DuetError> {
+        Err(DuetError::NotSupported("empty directory removal".into()))
+    }
     async fn trash(
         &self,
         path: &Path,
@@ -80,6 +99,31 @@ pub trait FileSystem: Send + Sync {
                 Ok(loc) => done.push((p.clone(), loc)),
                 Err(e) => return (done, Some(e)),
             }
+        }
+        (done, None)
+    }
+    /// Finish the current item before stopping; report every item and preserve partial results.
+    async fn trash_many_cancellable(
+        &self,
+        paths: &[std::path::PathBuf],
+        batch_id: &str,
+        cancel: &CancellationToken,
+        on_progress: &(dyn Fn(u32, Option<std::path::PathBuf>) + Send + Sync),
+    ) -> (
+        Vec<(std::path::PathBuf, crate::types::TrashLocation)>,
+        Option<DuetError>,
+    ) {
+        let mut done = Vec::with_capacity(paths.len());
+        for path in paths {
+            if cancel.is_cancelled() {
+                return (done, Some(DuetError::Cancelled));
+            }
+            on_progress(done.len() as u32, Some(path.clone()));
+            match self.trash(path, batch_id).await {
+                Ok(loc) => done.push((path.clone(), loc)),
+                Err(e) => return (done, Some(e)),
+            }
+            on_progress(done.len() as u32, None);
         }
         (done, None)
     }

@@ -143,7 +143,7 @@ pub async fn fs_delete_execute(
             title,
             host_key,
             affected,
-            Box::new(move |_cancel_token, progress| {
+            Box::new(move |cancel_token, progress| {
                 Box::pin(async move {
                     let fs = fs_for(&plan_for_run.source, &pool_inner).await?;
                     let octx = ctx(
@@ -152,12 +152,13 @@ pub async fn fs_delete_execute(
                         pool_inner.clone(),
                         app_for_run.clone(),
                     );
-                    let entry = ops::delete_execute(
+                    let entry = ops::delete_execute_cancellable(
                         &*fs,
                         plan_for_run,
                         &octx,
                         &confirm_word,
                         Some(progress),
+                        &cancel_token,
                     )
                     .await?;
                     Ok(emit_pushed(&app_for_run, entry))

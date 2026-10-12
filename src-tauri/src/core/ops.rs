@@ -193,6 +193,26 @@ pub async fn delete_execute(
     confirm_word: &str,
     progress: Option<crate::services::task_queue::ProgressEmitter>,
 ) -> Result<JournalEntry, DuetError> {
+    delete_execute_cancellable(
+        fs,
+        plan,
+        ctx,
+        confirm_word,
+        progress,
+        &tokio_util::sync::CancellationToken::new(),
+    )
+    .await
+}
+
+/// Delete with cooperative cancellation; journal completed items even when stopped or failed.
+pub async fn delete_execute_cancellable(
+    fs: &dyn FileSystem,
+    plan: DeletePlan,
+    ctx: &OpCtx,
+    confirm_word: &str,
+    progress: Option<crate::services::task_queue::ProgressEmitter>,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> Result<JournalEntry, DuetError> {
     if matches!(plan.mode, DeleteMode::Permanent) {
         let s = ctx.settings.get().await;
         if !s.permanent_delete_enabled {
@@ -225,7 +245,23 @@ pub async fn delete_execute(
                 .iter()
                 .map(|t| fs.join(&t.location.path, &t.name))
                 .collect();
-            let (moved, err) = fs.trash_many(&paths, &batch_id).await;
+            let on_progress = |done, path: Option<std::path::PathBuf>| {
+                if let Some(p) = progress.as_ref() {
+                    p.emit(count_progress(
+                        done,
+                        total,
+                        path.map(|p| {
+                            p.file_name()
+                                .unwrap_or(p.as_os_str())
+                                .to_string_lossy()
+                                .into_owned()
+                        }),
+                    ));
+                }
+            };
+            let (moved, err) = fs
+                .trash_many_cancellable(&paths, &batch_id, cancel, &on_progress)
+                .await;
             let outcome: Result<(), DuetError> = match err {
                 Some(e) => Err(e),
                 None => Ok(()),
@@ -259,6 +295,7 @@ pub async fn delete_execute(
                 items,
             };
             let entry = ctx.journal.push(op, undo).await?;
+            notify_partial_delete(ctx, &entry, &outcome);
             outcome?;
             Ok(entry)
         }
@@ -266,6 +303,10 @@ pub async fn delete_execute(
             let mut removed = 0u32;
             let mut outcome: Result<(), DuetError> = Ok(());
             for (idx, t) in plan.targets.iter().enumerate() {
+                if cancel.is_cancelled() {
+                    outcome = Err(DuetError::Cancelled);
+                    break;
+                }
                 if let Some(p) = progress.as_ref() {
                     p.emit(count_progress(idx as u32, total, Some(t.name.clone())));
                 }
@@ -288,9 +329,26 @@ pub async fn delete_execute(
                 location: plan.source_location.clone(),
             };
             let entry = ctx.journal.push(op, UndoAction::Irreversible).await?;
+            notify_partial_delete(ctx, &entry, &outcome);
             outcome?;
             Ok(entry)
         }
+    }
+}
+
+// Failed/cancelled tasks do not reach the command's success notification. Expose the
+// partial journal immediately so History and Undo stay in sync with completed items.
+fn notify_partial_delete(ctx: &OpCtx, entry: &JournalEntry, outcome: &Result<(), DuetError>) {
+    if outcome.is_ok() {
+        return;
+    }
+    if let Some(app) = &ctx.app {
+        use tauri_specta::Event;
+        let _ = crate::services::journal_events::JournalChangedEvent {
+            entry: entry.clone(),
+            change: "push".into(),
+        }
+        .emit(app);
     }
 }
 
@@ -3350,10 +3408,10 @@ pub async fn mkdir(
     name: String,
     ctx: &OpCtx,
 ) -> Result<JournalEntry, DuetError> {
-    if name.contains('/') || name.is_empty() {
-        return Err(DuetError::Io(format!("invalid name: {name}")));
-    }
-    let path = parent.path.join(&name);
+    fs.validate_new_name(&name)?;
+    let path = fs.join(&parent.path, &name);
+    // Friendly duplicate-name errors; mkdir itself remains the final atomic guard.
+    ensure_entry_absent(fs, &path, &name).await?;
     fs.mkdir(&path).await?;
     ctx.journal
         .push(
@@ -3512,23 +3570,19 @@ pub async fn make_symlink(
 
 /// 빈 파일 생성 — undo 는 (여전히 비어 있을 때만) 파일 제거.
 ///
-/// 이미 뭔가 있는 자리면 에러 — `write_full` 은 truncate 라 기존 파일을 날릴 수
-/// 있으므로 생성 전 존재 확인이 필수다.
+/// 존재 확인은 오류 안내용이다. 최종 생성은 exclusive open으로 경쟁 상황에서도
+/// 기존 파일·심볼릭 링크를 덮어쓰지 않는다.
 pub async fn create_file(
     fs: &dyn FileSystem,
     parent: Location,
     name: String,
     ctx: &OpCtx,
 ) -> Result<JournalEntry, DuetError> {
-    if name.is_empty() || name.contains('/') || name.contains('\\') {
-        return Err(DuetError::Io(format!("invalid name: {name}")));
-    }
+    fs.validate_new_name(&name)?;
     let path = fs.join(&parent.path, &name);
     // symlink_metadata — 깨진 심볼릭 링크가 있는 자리도 "이미 있음"으로 본다.
-    if fs.symlink_metadata(&path).await.is_ok() {
-        return Err(DuetError::Io(format!("already exists: {name}")));
-    }
-    fs.write_full(&path, &[]).await?;
+    ensure_entry_absent(fs, &path, &name).await?;
+    fs.create_new_file(&path).await?;
     ctx.journal
         .push(
             OpKind::NewFile {
@@ -3541,6 +3595,18 @@ pub async fn create_file(
             },
         )
         .await
+}
+
+async fn ensure_entry_absent(
+    fs: &dyn FileSystem,
+    path: &std::path::Path,
+    name: &str,
+) -> Result<(), DuetError> {
+    match fs.symlink_metadata(path).await {
+        Ok(_) => Err(DuetError::Io(format!("already exists: {name}"))),
+        Err(DuetError::NotFound(_)) => Ok(()),
+        Err(e) => Err(e),
+    }
 }
 
 // === Helpers ===
@@ -3903,6 +3969,24 @@ mod tests {
             },
             dir,
         )
+    }
+
+    #[tokio::test]
+    async fn creation_uses_filesystem_join_for_both_files_and_directories() {
+        let dir = TempDir::new().unwrap();
+        let mut fs = crate::fs::testing::TestFs::new(dir.path());
+        fs.override_join = true;
+        let parent = Location {
+            source: SourceId::Local,
+            path: "/must-use-filesystem-join".into(),
+        };
+        let (ctx, _keep) = mk_ctx().await;
+        mkdir(&fs, parent.clone(), "folder".into(), &ctx)
+            .await
+            .unwrap();
+        create_file(&fs, parent, "file".into(), &ctx).await.unwrap();
+        assert!(dir.path().join("folder").is_dir());
+        assert!(dir.path().join("file").is_file());
     }
 
     /// chmod — 비재귀는 UndoChmod(이전 mode 기록), 재귀는 Irreversible.
@@ -5471,5 +5555,55 @@ mod tests {
         assert!(matches!(r, Err(DuetError::Ssh(_))), "일시적 오류는 전파");
         assert!(pruned.is_empty(), "prune 안 함");
         assert!(mock.trashed.lock().unwrap().is_empty(), "휴지통 호출 없음");
+    }
+    #[tokio::test]
+    async fn delete_cancellation_stops_between_items_and_journals_completed_items() {
+        let dir = TempDir::new().unwrap();
+        for name in ["a", "b"] {
+            tokio::fs::write(dir.path().join(name), b"keep")
+                .await
+                .unwrap();
+        }
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let mut fs = crate::fs::testing::TestFs::new(dir.path());
+        fs.cancel_after_trash = Some(cancel.clone());
+        let targets = vec![mk_target(dir.path(), "a"), mk_target(dir.path(), "b")];
+        let plan = delete_plan(&fs, targets, DeleteMode::Trash).await.unwrap();
+        let (ctx, _keep) = mk_ctx().await;
+        let result = delete_execute_cancellable(&fs, plan, &ctx, "", None, &cancel).await;
+        assert!(matches!(result, Err(DuetError::Cancelled)));
+        assert!(!dir.path().join("a").exists());
+        assert_eq!(
+            tokio::fs::read(dir.path().join("b")).await.unwrap(),
+            b"keep"
+        );
+        let history = ctx.journal.history(10).await;
+        assert_eq!(history.len(), 1);
+        match &history[0].undo {
+            UndoAction::RestoreFromTrash { items, .. } => assert_eq!(items.len(), 1),
+            other => panic!("expected partial trash journal, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn mkdir_rejects_path_names_and_preserves_existing_directory() {
+        let dir = TempDir::new().unwrap();
+        let parent = Location {
+            source: SourceId::Local,
+            path: dir.path().to_path_buf(),
+        };
+        let (ctx, _keep) = mk_ctx().await;
+        for name in [".", "..", "../outside", "..\\outside"] {
+            assert!(mkdir(&LocalFs, parent.clone(), name.into(), &ctx)
+                .await
+                .is_err());
+        }
+        mkdir(&LocalFs, parent.clone(), "검증 폴더".into(), &ctx)
+            .await
+            .unwrap();
+        assert!(mkdir(&LocalFs, parent, "검증 폴더".into(), &ctx)
+            .await
+            .is_err());
+        assert!(dir.path().join("검증 폴더").is_dir());
     }
 }

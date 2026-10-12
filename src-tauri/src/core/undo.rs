@@ -27,6 +27,52 @@ pub enum UndoKind {
     Error,
 }
 
+/// Never permanently remove a file checked before a concurrent writer can change it.
+async fn undo_new_file(
+    fs: &dyn FileSystem,
+    source: &SourceId,
+    path: &std::path::Path,
+) -> UndoOutcome {
+    match fs.symlink_metadata(path).await {
+        Ok(m) if matches!(m.kind, crate::types::EntryKind::File) && m.size == Some(0) => {}
+        Ok(_) => return skipped("File changed or is no longer empty — undo skipped"),
+        Err(DuetError::NotFound(_)) => return skipped("File already gone — undo skipped"),
+        Err(e) => return error("inspect new file", e),
+    }
+    // If a writer races the check, the content remains recoverable in the trash.
+    if let Err(e) = fs
+        .trash(path, &crate::services::trash::new_batch_id())
+        .await
+    {
+        return error("move new file to trash", e);
+    }
+    ok_with_locs(
+        source,
+        path.parent().map(|p| p.to_path_buf()).into_iter().collect(),
+    )
+}
+
+async fn undo_new_dir(
+    fs: &dyn FileSystem,
+    source: &SourceId,
+    path: &std::path::Path,
+) -> UndoOutcome {
+    match fs.list(path).await {
+        Ok(entries) if !entries.is_empty() => return skipped("Directory not empty — undo skipped"),
+        Ok(_) => {}
+        Err(DuetError::NotFound(_)) => return skipped("Directory already gone — undo skipped"),
+        Err(e) => return error("inspect new directory", e),
+    }
+    // rmdir itself refuses children added after the list; recursive remove is unsafe here.
+    if let Err(e) = fs.remove_empty_dir(path).await {
+        return error("remove empty directory", e);
+    }
+    ok_with_locs(
+        source,
+        path.parent().map(|p| p.to_path_buf()).into_iter().collect(),
+    )
+}
+
 async fn fs_for(
     source: &SourceId,
     pool: &Arc<ConnectionPool>,
@@ -101,24 +147,7 @@ pub async fn execute_undo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
                 Ok(f) => f,
                 Err(e) => return error("source unreachable", e),
             };
-            // 만든 뒤 내용이 생겼으면 제거 = 데이터 손실 — 빈 파일일 때만 되돌린다.
-            match fs.symlink_metadata(path).await {
-                Ok(m) if matches!(m.kind, crate::types::EntryKind::File) => {
-                    if m.size.unwrap_or(0) > 0 {
-                        return skipped("File is no longer empty — undo skipped");
-                    }
-                }
-                Ok(_) => return skipped("Not a file anymore — undo skipped"),
-                Err(_) => return skipped("File already gone — undo skipped"),
-            }
-            if let Err(e) = fs.remove(path).await {
-                return error("remove file", e);
-            }
-            let mut refresh = std::collections::HashSet::new();
-            if let Some(p) = path.parent() {
-                refresh.insert(p.to_path_buf());
-            }
-            ok_with_locs(source, refresh)
+            undo_new_file(&*fs, source, path).await
         }
         UndoAction::RestoreFromTrash { source, items } => {
             let fs = match fs_for(source, pool).await {
@@ -310,29 +339,7 @@ pub async fn execute_undo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
                 Ok(f) => f,
                 Err(e) => return error("source unreachable", e),
             };
-            let entries = fs.list(path).await.unwrap_or_default();
-            if !entries.is_empty() {
-                return UndoOutcome {
-                    kind: UndoKind::Skipped,
-                    message: Some("Directory not empty — undo skipped".into()),
-                    refreshed_locations: vec![],
-                };
-            }
-            if let Err(e) = fs.remove(path).await {
-                return error("rmdir", e);
-            }
-            UndoOutcome {
-                kind: UndoKind::Ok,
-                message: None,
-                refreshed_locations: path
-                    .parent()
-                    .map(|p| Location {
-                        source: source.clone(),
-                        path: p.to_path_buf(),
-                    })
-                    .into_iter()
-                    .collect(),
-            }
+            undo_new_dir(&*fs, source, path).await
         }
         UndoAction::UndoBidirMerge {
             left_source,
@@ -664,7 +671,7 @@ pub async fn execute_redo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
             if fs.symlink_metadata(path).await.is_ok() {
                 return skipped("Item already exists — redo skipped");
             }
-            if let Err(e) = fs.write_full(path, &[]).await {
+            if let Err(e) = fs.create_new_file(path).await {
                 return error("create file", e);
             }
             let mut refresh = std::collections::HashSet::new();
@@ -1059,7 +1066,8 @@ mod tests {
             source: SourceId::Local,
             path: empty.clone(),
         });
-        let outcome = execute_undo(&entry, &pool).await;
+        let fixture = crate::fs::testing::TestFs::new(dir.path());
+        let outcome = undo_new_file(&fixture, &SourceId::Local, &empty).await;
         assert!(matches!(outcome.kind, UndoKind::Ok));
         assert!(!empty.exists());
 
@@ -1279,6 +1287,32 @@ mod tests {
         });
         let outcome = execute_undo(&entry, &pool).await;
         assert!(matches!(outcome.kind, UndoKind::Skipped));
+        assert!(target.exists());
+    }
+    #[tokio::test]
+    async fn undo_new_file_preserves_a_concurrent_edit_in_trash() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("empty");
+        tokio::fs::write(&file, b"").await.unwrap();
+        let mut fs = crate::fs::testing::TestFs::new(dir.path());
+        fs.late_write = true;
+        let outcome = undo_new_file(&fs, &SourceId::Local, &file).await;
+        assert!(matches!(outcome.kind, UndoKind::Ok));
+        assert_eq!(
+            tokio::fs::read(dir.path().join("recovered")).await.unwrap(),
+            b"concurrent edit"
+        );
+    }
+
+    #[tokio::test]
+    async fn undo_mkdir_keeps_directory_when_listing_fails() {
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("new");
+        tokio::fs::create_dir(&target).await.unwrap();
+        let mut fs = crate::fs::testing::TestFs::new(dir.path());
+        fs.fail_list = true;
+        let outcome = undo_new_dir(&fs, &SourceId::Local, &target).await;
+        assert!(matches!(outcome.kind, UndoKind::Error));
         assert!(target.exists());
     }
 }

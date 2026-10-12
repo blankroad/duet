@@ -376,6 +376,27 @@ impl FileSystem for SshFs {
             .map_err(|e| map_sftp_error(e, path_str))
     }
 
+    async fn create_new_file(&self, path: &Path) -> Result<(), DuetError> {
+        use tokio::io::AsyncWriteExt;
+        let sftp = self.open_sftp().await?;
+        let path = remote_path_str(path)?;
+        let mut file = sftp
+            .open_with_flags(path.clone(), new_file_flags())
+            .await
+            .map_err(|e| map_sftp_error(e, &path))?;
+        file.shutdown()
+            .await
+            .map_err(|e| DuetError::Ssh(format!("sftp close: {e}")))
+    }
+
+    async fn remove_empty_dir(&self, path: &Path) -> Result<(), DuetError> {
+        let sftp = self.open_sftp().await?;
+        let path = remote_path_str(path)?;
+        sftp.remove_dir(path.clone())
+            .await
+            .map_err(|e| map_sftp_error(e, &path))
+    }
+
     async fn trash(
         &self,
         path: &Path,
@@ -637,6 +658,12 @@ fn remote_path_str(path: &Path) -> Result<String, DuetError> {
     Ok(s.to_string())
 }
 
+/// SFTP v3 exclusive creation, deliberately without TRUNCATE.
+fn new_file_flags() -> russh_sftp::protocol::OpenFlags {
+    use russh_sftp::protocol::OpenFlags;
+    OpenFlags::CREATE | OpenFlags::EXCLUDE | OpenFlags::WRITE
+}
+
 /// POSIX shell single-quote escape (exec 인자 안전화). NUL 은 거부.
 ///
 /// `core::copy_strategy::shell_escape_path` 와 동일 로직 — §2(fs→core 역방향
@@ -786,6 +813,14 @@ mod tests {
     // 컴파일 시그니처 + 에러 매핑 단위 테스트만.
 
     use super::*;
+
+    #[test]
+    fn new_file_flags_require_exclusive_creation_without_truncation() {
+        use russh_sftp::protocol::OpenFlags;
+        let flags = new_file_flags();
+        assert!(flags.contains(OpenFlags::CREATE | OpenFlags::EXCLUDE | OpenFlags::WRITE));
+        assert!(!flags.contains(OpenFlags::TRUNCATE));
+    }
 
     #[test]
     fn ssh_fs_constructor_compiles() {

@@ -12,6 +12,7 @@ use std::path::Path;
 #[cfg(target_os = "macos")]
 mod macos;
 
+pub mod entry_name;
 mod file_clipboard;
 
 #[cfg(windows)]

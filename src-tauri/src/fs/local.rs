@@ -27,6 +27,10 @@ impl FileSystem for LocalFs {
         SourceId::Local
     }
 
+    fn validate_new_name(&self, name: &str) -> Result<(), DuetError> {
+        crate::platform::entry_name::validate_local_name(name)
+    }
+
     async fn metadata(&self, path: &Path) -> Result<crate::types::EntryMeta, DuetError> {
         let m = tokio::fs::symlink_metadata(path)
             .await
@@ -70,6 +74,20 @@ impl FileSystem for LocalFs {
         tokio::fs::create_dir(path).await.map_err(DuetError::from)
     }
 
+    async fn create_new_file(&self, path: &Path) -> Result<(), DuetError> {
+        tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .await
+            .map(|_| ())
+            .map_err(DuetError::from)
+    }
+
+    async fn remove_empty_dir(&self, path: &Path) -> Result<(), DuetError> {
+        tokio::fs::remove_dir(path).await.map_err(DuetError::from)
+    }
+
     async fn trash(
         &self,
         path: &Path,
@@ -108,7 +126,35 @@ impl FileSystem for LocalFs {
         }
     }
 
-    /// 배치 복원 — 휴지통 목록 조회 1회로 여러 항목을 되돌린다(항목당 1회이던 것).
+    /// OS 배치를 유지하면서 배치 경계에서 취소와 진행률을 보고한다.
+    async fn trash_many_cancellable(
+        &self,
+        paths: &[std::path::PathBuf],
+        batch_id: &str,
+        cancel: &tokio_util::sync::CancellationToken,
+        on_progress: &(dyn Fn(u32, Option<std::path::PathBuf>) + Send + Sync),
+    ) -> (
+        Vec<(std::path::PathBuf, crate::types::TrashLocation)>,
+        Option<DuetError>,
+    ) {
+        // Keep the native batch optimization, but bound the interval before checking cancel.
+        let mut done = Vec::with_capacity(paths.len());
+        for chunk in paths.chunks(32) {
+            if cancel.is_cancelled() {
+                return (done, Some(DuetError::Cancelled));
+            }
+            on_progress(done.len() as u32, chunk.first().cloned());
+            let (moved, error) = self.trash_many(chunk, batch_id).await;
+            done.extend(moved);
+            on_progress(done.len() as u32, None);
+            if error.is_some() {
+                return (done, error);
+            }
+        }
+        (done, None)
+    }
+
+    /// 배치 복원 — 휴지통 목록 조회 1회로 여러 항목을 되돌린다.
     async fn restore_many(
         &self,
         items: &[(crate::types::TrashLocation, std::path::PathBuf)],
@@ -889,6 +935,40 @@ mod tests {
         fs::create_dir(dir.path().join("x")).await.unwrap();
         let result = local.mkdir(&dir.path().join("x")).await;
         assert!(result.is_err(), "기존 디렉토리에 mkdir 은 실패해야 함");
+    }
+
+    #[tokio::test]
+    async fn exclusive_creation_preserves_existing_and_has_one_winner() {
+        let dir = TempDir::new().unwrap();
+        let local = LocalFs::new();
+        let path = dir.path().join("new.txt");
+        let (a, b) = tokio::join!(local.create_new_file(&path), local.create_new_file(&path));
+        assert_ne!(a.is_ok(), b.is_ok());
+        fs::write(&path, b"keep").await.unwrap();
+        assert!(local.create_new_file(&path).await.is_err());
+        assert_eq!(fs::read(&path).await.unwrap(), b"keep");
+        assert!(local.create_new_file(dir.path()).await.is_err());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn exclusive_creation_rejects_dangling_symlink() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("link");
+        std::os::unix::fs::symlink("missing", &path).unwrap();
+        assert!(LocalFs::new().create_new_file(&path).await.is_err());
+        assert!(!dir.path().join("missing").exists());
+    }
+
+    #[tokio::test]
+    async fn empty_dir_removal_never_removes_children() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("folder");
+        fs::create_dir(&path).await.unwrap();
+        fs::write(path.join("late.txt"), b"keep").await.unwrap();
+        let local = LocalFs::new();
+        assert!(local.remove_empty_dir(&path).await.is_err());
+        assert_eq!(fs::read(path.join("late.txt")).await.unwrap(), b"keep");
     }
 
     #[tokio::test]
