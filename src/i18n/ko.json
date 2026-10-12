@@ -42,7 +42,8 @@
       "updatingArchive": "아카이브 업데이트 중…",
       "dest": "받는 위치",
       "done": "완료",
-      "eta": "{{time}} 남음"
+      "eta": "{{time}} 남음",
+      "stopping": "중지 요청됨 · 현재 항목 또는 시스템 작업이 끝나면 중지합니다."
     },
     "mkdir": {
       "title": "새 폴더",
@@ -329,7 +330,8 @@
     "deleteConfirm": {
       "title": "휴지통으로 삭제할까요?",
       "undoHint": "휴지통으로 이동합니다 — <1>{{key}}</1> 또는 휴지통에서 되돌릴 수 있음",
-      "undoHintRemote": "원격 휴지통(<2>~/.duet-trash</2>)으로 이동합니다 — <1>{{key}}</1> 로 되돌릴 수 있음"
+      "undoHintRemote": "원격 휴지통(<2>~/.duet-trash</2>)으로 이동합니다 — <1>{{key}}</1> 로 되돌릴 수 있음",
+      "undoHintMac": "Finder의 휴지통에서 복원할 수 있습니다."
     },
     "deleteDanger": {
       "title": "영구 삭제할까요?",
@@ -400,6 +402,16 @@
       "body": "휴지통에서 지우면 되돌릴 수 없습니다.",
       "cta": "영구 삭제",
       "emptyCta": "비우기"
+    },
+    "newEntry": {
+      "invalidName": "한 개의 파일/폴더 이름을 입력하세요. 경로 구분자와 . 또는 ..는 사용할 수 없습니다.",
+      "invalidWindowsName": "Windows에서 사용할 수 없는 이름입니다. 예약어, 금지 문자, 끝의 점·공백을 확인하세요.",
+      "exists": "같은 이름의 항목이 이미 있습니다. 다른 이름을 입력하세요.",
+      "creating": "만드는 중…",
+      "createAndEdit": "만들고 편집",
+      "created": "{{name}} 생성 완료 · {{path}}",
+      "refreshFailed": "항목은 생성했지만 목록을 새로 고치지 못했습니다: {{err}}",
+      "editFailed": "파일은 생성했지만 편집기를 열지 못했습니다: {{err}}"
     }
   },
   "history": {
@@ -475,7 +487,9 @@
     "viewGrid": "그리드",
     "viewTiles": "타일",
     "emptyTrash": "휴지통 비우기…",
-    "openRecycleBin": "탐색기에서 휴지통 열기"
+    "openRecycleBin": "탐색기에서 휴지통 열기",
+    "newFolderInside": "이 폴더 안에 새 폴더",
+    "newFileInside": "이 폴더 안에 새 파일"
   },
   "cheatsheet": {
     "title": "키보드 단축키",
@@ -524,7 +538,8 @@
     "syncBrowseOff": "동기화 브라우징: 꺼짐",
     "hideHidden": "숨김 파일 숨기기 ({{key}})",
     "showHidden": "숨김 파일 표시 ({{key}})",
-    "viewOptions": "보기"
+    "viewOptions": "보기",
+    "newFile": "새 파일 ({{key}})"
   },
   "shelf": {
     "title": "선반",
@@ -901,15 +916,15 @@
     "goToPath": "경로로 이동",
     "newTabTitle": "새 탭 ({{key}})",
     "editPath": "경로 편집",
-    "editPathTitle": "경로 편집 / 위치로 이동 (Ctrl+L)",
+    "editPathTitle": "경로 편집 / 위치로 이동 ({{key}})",
     "favorites": "즐겨찾기",
     "favoritesTitle": "즐겨찾기 — 저장된 폴더로 이동",
     "noFavorites": "즐겨찾기 없음",
     "addThisFolder": "이 폴더 추가",
     "removeThisFolder": "이 폴더 제거",
     "bookmarkThisFolder": "이 폴더 북마크",
-    "bookmarkTitle": "이 폴더 북마크 (Ctrl+D)",
-    "bookmarkedTitle": "북마크됨 (Ctrl+D)",
+    "bookmarkTitle": "이 폴더 북마크 ({{key}})",
+    "bookmarkedTitle": "북마크됨 ({{key}})",
     "swapPanes": "패널 교환 (왼쪽 ↔ 오른쪽)",
     "swapPanesTitle": "패널 교환 (좌 ↔ 우) — {{key}}",
     "trash": "휴지통"

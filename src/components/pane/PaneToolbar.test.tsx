@@ -4,11 +4,12 @@ import { PaneToolbar } from "./PaneToolbar";
 import { ContextMenu } from "@/components/ContextMenu";
 import { usePanes, activeTab } from "@/stores/panes";
 import { useContextMenu } from "@/stores/contextMenu";
-import { triggerMkdir, triggerDelete } from "@/lib/fileActions";
+import { triggerMkdir, triggerNewFile, triggerDelete } from "@/lib/fileActions";
 import i18n from "@/i18n";
 
 vi.mock("@/lib/fileActions", () => ({
   triggerMkdir: vi.fn(),
+  triggerNewFile: vi.fn(),
   triggerCopy: vi.fn(),
   triggerMove: vi.fn(),
   triggerDelete: vi.fn(),
@@ -32,6 +33,8 @@ it("키보드 클릭도 해당 패널을 활성화한 뒤 파일 작업을 실�
   // fireEvent.click은 mousedown을 합성하지 않는다: 패널 바깥의 키보드 포커스 경로.
   fireEvent.click(screen.getByRole("button", { name: /^New folder/ }));
   expect(triggerMkdir).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole("button", { name: /^New file/ }));
+  expect(triggerNewFile).toHaveBeenCalledOnce();
   fireEvent.click(screen.getByRole("button", { name: /^Delete to trash/ }));
   expect(triggerDelete).toHaveBeenCalledWith(
     "trash",

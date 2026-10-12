@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { render, screen, act, fireEvent } from "@testing-library/react";
 import type { ProgressInfo, TaskDto } from "@/types/bindings";
 import "@/i18n";
 
@@ -44,7 +44,9 @@ function render_() {
 }
 
 describe("ProgressModal", () => {
-  beforeEach(() => useTasks.setState({ tasks: new Map() }));
+  beforeEach(() =>
+    useTasks.setState({ tasks: new Map(), cancelling: new Set() }),
+  );
 
   it("파일명을 경로와 섞지 않고 단독으로 보여준다", () => {
     seedTask();
@@ -110,5 +112,29 @@ describe("ProgressModal", () => {
     expect(screen.getByText(LONG_NAME)).toBeDefined();
     expect(screen.getByText("1 / 3")).toBeDefined();
     expect(screen.getByTitle(DST)).toBeDefined();
+  });
+  it("delete cancellation remains visible and shared after backgrounding", async () => {
+    const { commands } = await import("@/types/bindings");
+    vi.mocked(commands.taskCancel).mockResolvedValue({
+      status: "ok",
+      data: null,
+    });
+    seedTask({
+      kind: "delete",
+      progress: {
+        ...PROGRESS,
+        files_done: 1,
+        current_file: null,
+        bytes_done: 0,
+        bytes_total: 0,
+      },
+    });
+    render_();
+    expect(screen.queryByText(/^0 B/)).toBeNull();
+    const cancel = screen.getByRole("button", { name: /^Cancel/ });
+    await act(async () => fireEvent.click(cancel));
+    expect((cancel as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("status").textContent).toContain("Stop requested");
+    expect(useTasks.getState().cancelling.has("t1")).toBe(true);
   });
 });

@@ -42,7 +42,8 @@
       "updatingArchive": "Updating archive…",
       "dest": "To",
       "done": "copied",
-      "eta": "ETA {{time}}"
+      "eta": "ETA {{time}}",
+      "stopping": "Stop requested. Waiting for the current item or system operation to finish."
     },
     "mkdir": {
       "title": "New folder",
@@ -332,7 +333,8 @@
     "deleteConfirm": {
       "title": "Delete to trash?",
       "undoHint": "Moves to the trash — undo with <1>{{key}}</1> or restore from the trash",
-      "undoHintRemote": "Moves to the remote trash (<2>~/.duet-trash</2>) — undo with <1>{{key}}</1>"
+      "undoHintRemote": "Moves to the remote trash (<2>~/.duet-trash</2>) — undo with <1>{{key}}</1>",
+      "undoHintMac": "Restore deleted items using Finder’s Trash."
     },
     "deleteDanger": {
       "title": "Permanently delete?",
@@ -403,6 +405,16 @@
       "body": "Items removed from the trash cannot be recovered.",
       "cta": "Delete permanently",
       "emptyCta": "Empty trash"
+    },
+    "newEntry": {
+      "invalidName": "Enter a single name, without path separators, . or ...",
+      "invalidWindowsName": "This name is unavailable on Windows. Check reserved names, characters and trailing dots or spaces.",
+      "exists": "An item with this name already exists. Choose another name.",
+      "creating": "Creating…",
+      "createAndEdit": "Create and edit",
+      "created": "Created {{name}} in {{path}}",
+      "refreshFailed": "The item was created, but the folder could not refresh: {{err}}",
+      "editFailed": "The file was created, but the editor could not open: {{err}}"
     }
   },
   "history": {
@@ -478,7 +490,9 @@
     "viewGrid": "Grid",
     "viewTiles": "Tiles",
     "emptyTrash": "Empty trash…",
-    "openRecycleBin": "Open Recycle Bin in Explorer"
+    "openRecycleBin": "Open Recycle Bin in Explorer",
+    "newFolderInside": "New folder inside this folder",
+    "newFileInside": "New file inside this folder"
   },
   "cheatsheet": {
     "title": "Keyboard shortcuts",
@@ -527,7 +541,8 @@
     "syncBrowseOff": "Synchronized browsing: OFF",
     "hideHidden": "Hide hidden files ({{key}})",
     "showHidden": "Show hidden files ({{key}})",
-    "viewOptions": "View"
+    "viewOptions": "View",
+    "newFile": "New file ({{key}})"
   },
   "shelf": {
     "title": "Shelf",
@@ -904,15 +919,15 @@
     "goToPath": "Go to path",
     "newTabTitle": "New tab ({{key}})",
     "editPath": "Edit path",
-    "editPathTitle": "Edit path / go to location (Ctrl+L)",
+    "editPathTitle": "Edit path / go to location ({{key}})",
     "favorites": "Favorites",
     "favoritesTitle": "Favorites — go to a saved folder",
     "noFavorites": "No favorites yet",
     "addThisFolder": "Add this folder",
     "removeThisFolder": "Remove this folder",
     "bookmarkThisFolder": "Bookmark this folder",
-    "bookmarkTitle": "Bookmark this folder (Ctrl+D)",
-    "bookmarkedTitle": "Bookmarked (Ctrl+D)",
+    "bookmarkTitle": "Bookmark this folder ({{key}})",
+    "bookmarkedTitle": "Bookmarked ({{key}})",
     "swapPanes": "Swap panels (left ↔ right)",
     "swapPanesTitle": "Swap panels (left ↔ right) — {{key}}",
     "trash": "Trash"

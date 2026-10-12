@@ -102,7 +102,11 @@ export async function triggerUndo(showToast: ToastFn): Promise<void> {
   if (r.status === "ok")
     showToast(
       r.data.message ?? i18n.t("toast.undone", { kind: r.data.kind }),
-      "success",
+      r.data.kind === "ok"
+        ? "success"
+        : r.data.kind === "error"
+          ? "error"
+          : "info",
     );
   else
     showToast(i18n.t("toast.undoFailed", { err: formatErr(r.error) }), "error");
@@ -118,6 +122,7 @@ export async function triggerRedo(showToast: ToastFn): Promise<void> {
     else
       showToast(
         r.data.message ?? i18n.t("toast.redoKind", { kind: r.data.kind }),
+        r.data.kind === "error" ? "error" : "info",
       );
   } else {
     showToast(i18n.t("toast.redoFailed", { err: formatErr(r.error) }), "error");
@@ -337,15 +342,17 @@ export async function triggerSync(
 }
 
 /** F7 — 활성 패널 현재 디렉토리에 새 폴더. */
-export function triggerMkdir(open: OpenFn): void {
+export function triggerMkdir(open: OpenFn, parent?: Location): void {
   const { tab } = resolveActiveTargets();
-  open({ kind: "mkdir", parent: tab.location });
+  if (isVirtualTrash(parent ?? tab.location)) return;
+  open({ kind: "mkdir", parent: parent ?? tab.location, tabId: tab.id });
 }
 
 /** Shift+F4 — 활성 패널 현재 디렉토리에 새 빈 파일. */
-export function triggerNewFile(open: OpenFn): void {
+export function triggerNewFile(open: OpenFn, parent?: Location): void {
   const { tab } = resolveActiveTargets();
-  open({ kind: "new-file", parent: tab.location });
+  if (isVirtualTrash(parent ?? tab.location)) return;
+  open({ kind: "new-file", parent: parent ?? tab.location, tabId: tab.id });
 }
 
 /** 활성 폴더에 심볼릭 링크 생성 다이얼로그. (로컬 Windows 는 호출부에서 미노출.) */

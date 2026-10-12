@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Loader, X, ChevronDown, ChevronUp } from "lucide-react";
-import { commands } from "@/types/bindings";
+import { useTaskCancel } from "@/hooks/useTaskCancel";
 import type { TaskDto } from "@/types/bindings";
 import { useTasks, selectActive } from "@/stores/tasks";
 import { formatSize } from "@/lib/format";
@@ -74,6 +74,7 @@ function taskLabel(task: TaskDto, t: (k: string) => string): string {
 
 function TaskRow({ task }: { task: TaskDto }) {
   const { t } = useTranslation();
+  const { cancelling, cancel } = useTaskCancel(task.id);
   const pct = task.progress?.percent ?? 0;
   const label = taskLabel(task, t);
   return (
@@ -81,7 +82,7 @@ function TaskRow({ task }: { task: TaskDto }) {
       <Loader size={11} className="shrink-0 animate-spin text-fg-muted" />
       {/* tooltip 은 backend 전체 요약(출발→목적지) — 라벨보다 정보가 많다. */}
       <span className="min-w-0 flex-1 truncate text-fg" title={task.title}>
-        {label}
+        {cancelling ? t("dialog.progress.stopping") : label}
       </span>
       {task.progress && (
         <>
@@ -92,8 +93,10 @@ function TaskRow({ task }: { task: TaskDto }) {
             />
           </div>
           <span className="min-w-0 max-w-[40%] truncate text-fg-muted">
-            {formatSize(task.progress.bytes_done)}
-            {task.progress.bytes_total
+            {task.kind === "delete"
+              ? `${task.progress.files_done} / ${task.progress.files_total}`
+              : formatSize(task.progress.bytes_done)}
+            {task.kind !== "delete" && task.progress.bytes_total
               ? ` / ${formatSize(task.progress.bytes_total)}`
               : ""}
             {task.progress.speed_bps
@@ -104,7 +107,8 @@ function TaskRow({ task }: { task: TaskDto }) {
       )}
       <button
         type="button"
-        onClick={() => commands.taskCancel(task.id)}
+        disabled={cancelling}
+        onClick={() => void cancel()}
         className="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded text-fg-muted hover:bg-border hover:text-danger focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
         aria-label={t("sidebar.cancelTask")}
         title={t("sidebar.cancelTask")}

@@ -4,7 +4,8 @@ import { Undo2 } from "lucide-react";
 import { formatSize } from "@/lib/format";
 import { shortenPath } from "@/lib/paths";
 import { useHostLabel } from "@/lib/hostLabel";
-import { displayKey } from "@/lib/keyDisplay";
+import { useKeyHint } from "@/lib/keyHint";
+import { platform } from "@tauri-apps/plugin-os";
 import { resolvePlanItems } from "@/lib/planItems";
 import type { DeletePlan } from "@/types/bindings";
 import { ItemList } from "./ItemList";
@@ -14,6 +15,7 @@ import { ItemList } from "./ItemList";
  * "안전한 작업은 무마찰" 톤을 유지한다 (원격은 `~/.duet-trash` 로 이동 — CLAUDE.md §3).
  */
 export function DeletePlanBody({ plan }: { plan: DeletePlan }) {
+  const undoKey = useKeyHint("edit.undo");
   const items = useMemo(() => resolvePlanItems(plan.targets), [plan]);
   const remote = plan.source.kind !== "local";
   return (
@@ -27,9 +29,11 @@ export function DeletePlanBody({ plan }: { plan: DeletePlan }) {
               i18nKey={
                 remote
                   ? "dialog.deleteConfirm.undoHintRemote"
-                  : "dialog.deleteConfirm.undoHint"
+                  : platform() === "macos"
+                    ? "dialog.deleteConfirm.undoHintMac"
+                    : "dialog.deleteConfirm.undoHint"
               }
-              values={{ key: displayKey("Ctrl+Z") }}
+              values={{ key: undoKey }}
               components={{
                 1: (
                   <kbd className="rounded-[3px] border border-border bg-subtle px-1 font-mono text-fg" />

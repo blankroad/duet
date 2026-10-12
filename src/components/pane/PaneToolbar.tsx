@@ -1,6 +1,7 @@
 import { useContextMenu, type MenuEntry } from "@/stores/contextMenu";
 import {
   FolderPlus,
+  FilePlus2,
   Copy,
   MoveRight,
   Trash2,
@@ -30,7 +31,10 @@ import {
   triggerDelete,
   triggerMove,
   triggerMkdir,
+  triggerNewFile,
 } from "@/lib/fileActions";
+
+import { isVirtualTrash } from "@/lib/trashView";
 
 interface PaneToolbarProps {
   id: PaneId;
@@ -44,6 +48,8 @@ interface PaneToolbarProps {
  * 모든 액션은 키보드와 동일 경로(파괴적 액션 lib/fileActions, 뷰/hidden panes store).
  */
 export function PaneToolbar({ id }: PaneToolbarProps) {
+  const kNewFile = useKeyHint("file.newFile");
+  const canCreate = usePanes((s) => !isVirtualTrash(activeTab(s, id).location));
   const kNewFolder = useKeyHint("file.newFolder");
   const kCopy = useKeyHint("file.copy");
   const kMove = useKeyHint("file.move");
@@ -101,12 +107,22 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
   return (
     <div className="flex h-8 shrink-0 items-center min-w-0 gap-0.5 border-b border-border px-1.5">
       <ToolButton
+        disabled={!canCreate}
         label={t("toolbar.newFolder", { key: kNewFolder })}
         onClick={() => runHere(() => triggerMkdir(open))}
         shortLabel={t("menu.newFolder")}
         alwaysLabel
       >
         <FolderPlus size={15} />
+      </ToolButton>
+      <ToolButton
+        label={t("toolbar.newFile", { key: kNewFile })}
+        disabled={!canCreate}
+        onClick={() => runHere(() => triggerNewFile(open))}
+        shortLabel={t("menu.newFile")}
+        alwaysLabel
+      >
+        <FilePlus2 size={15} />
       </ToolButton>
       <ToolButton
         label={t("toolbar.copy", { key: kCopy })}
@@ -244,7 +260,11 @@ function ToolButton({
     >
       {children}
       {shortLabel && (
-        <span className={alwaysLabel ? "" : "toolbar-action-label"}>
+        <span
+          className={
+            alwaysLabel ? "toolbar-create-label" : "toolbar-action-label"
+          }
+        >
           {shortLabel}
         </span>
       )}

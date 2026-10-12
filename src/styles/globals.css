@@ -342,6 +342,9 @@ textarea,
   min-height: 32px;
 }
 @container pane (max-width: 420px) {
+  .toolbar-create-label {
+    display: none;
+  }
   .path-actions {
     grid-column: 1 / -1;
     padding-bottom: 2px;

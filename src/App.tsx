@@ -1,3 +1,4 @@
+import { useCreateEntry } from "@/hooks/useCreateEntry";
 import { useEffect, useCallback, useState, useRef } from "react";
 import { Pane } from "@/components/pane/Pane";
 import { SwapPanesButton } from "@/components/pane/SwapPanesButton";
@@ -789,10 +790,12 @@ function App() {
    * fs:changed 로 새로고침되므로 여기서 다루지 않음. 비교는 분리자 무관 정규화.
    */
   const refreshAffected = useCallback(
-    (locations: Location[]) => {
+    (locations: Location[], skipTabId?: string) => {
       const state = usePanes.getState();
       for (const id of ["left", "right"] as const) {
-        const loc = activeTab(state, id).location;
+        const tab = activeTab(state, id);
+        if (tab.id === skipTabId) continue;
+        const loc = tab.location;
         if (locations.some((l) => sameLocationDir(l, loc))) onRefresh(id);
       }
     },
@@ -1092,36 +1095,10 @@ function App() {
     [dialog, closeDialog, refreshAffected, showToast],
   );
 
-  const onMkdirSubmit = useCallback(
-    async (name: string) => {
-      if (dialog.kind !== "mkdir") return;
-      const parent = dialog.parent;
-      closeDialog();
-      const r = await commands.fsMkdir(parent, name);
-      if (r.status === "ok") refreshAffected([parent]);
-      else
-        showToast(
-          i18n.t("toast.mkdirFailed", { err: formatErr(r.error) }),
-          "error",
-        );
-    },
-    [dialog, closeDialog, refreshAffected, showToast],
-  );
-
-  const onNewFileSubmit = useCallback(
-    async (name: string) => {
-      if (dialog.kind !== "new-file") return;
-      const parent = dialog.parent;
-      closeDialog();
-      const r = await commands.fsCreateFile(parent, name);
-      if (r.status === "ok") refreshAffected([parent]);
-      else
-        showToast(
-          i18n.t("toast.newFileFailed", { err: formatErr(r.error) }),
-          "error",
-        );
-    },
-    [dialog, closeDialog, refreshAffected, showToast],
+  const onCreateEntrySubmit = useCreateEntry(
+    dialog,
+    listEntries,
+    refreshAffected,
   );
 
   const onCompressSubmit = useCallback(
@@ -1871,7 +1848,7 @@ function App() {
           kind="dir"
           parent={dialog.parent}
           onClose={closeDialog}
-          onSubmit={onMkdirSubmit}
+          onSubmit={onCreateEntrySubmit}
         />
       )}
       {dialog.kind === "new-file" && (
@@ -1879,7 +1856,7 @@ function App() {
           kind="file"
           parent={dialog.parent}
           onClose={closeDialog}
-          onSubmit={onNewFileSubmit}
+          onSubmit={onCreateEntrySubmit}
         />
       )}
       {dialog.kind === "compress" && (

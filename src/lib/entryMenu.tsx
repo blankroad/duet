@@ -389,17 +389,27 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
       : []),
     {
       id: "mkdir",
-      label: i18n.t("menu.newFolder"),
+      label: i18n.t(
+        !multi && entry.kind === "dir"
+          ? "menu.newFolderInside"
+          : "menu.newFolder",
+      ),
       icon: <FolderPlus size={ICON} />,
-      commandId: "file.newFolder",
-      onSelect: () => triggerMkdir(open),
+      ...(!multi && entry.kind === "dir"
+        ? {}
+        : { commandId: "file.newFolder" }),
+      onSelect: () =>
+        triggerMkdir(open, !multi && entry.kind === "dir" ? child : location),
     },
     {
       id: "new-file",
-      label: i18n.t("menu.newFile"),
+      label: i18n.t(
+        !multi && entry.kind === "dir" ? "menu.newFileInside" : "menu.newFile",
+      ),
       icon: <FilePlus size={ICON} />,
-      commandId: "file.newFile",
-      onSelect: () => triggerNewFile(open),
+      ...(!multi && entry.kind === "dir" ? {} : { commandId: "file.newFile" }),
+      onSelect: () =>
+        triggerNewFile(open, !multi && entry.kind === "dir" ? child : location),
     },
     {
       id: "bookmark",

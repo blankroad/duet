@@ -107,6 +107,8 @@ export function PathBar({
   editActive,
   onNewTab,
 }: PathBarProps) {
+  const kEditPath = useKeyHint("pane.editPath");
+  const kBookmark = useKeyHint("bookmark.toggle");
   const kBack = useKeyHint("nav.back");
   const kForward = useKeyHint("nav.forward");
   const kNewTab = useKeyHint("tab.new");
@@ -349,7 +351,7 @@ export function PathBar({
             onClick={startEdit}
             className="flex h-6 w-6 shrink-0 items-center justify-center rounded p-1 hover:bg-border"
             aria-label={t("pathbar.editPath")}
-            title={t("pathbar.editPathTitle")}
+            title={t("pathbar.editPathTitle", { key: kEditPath })}
           >
             <Pencil size={13} className="text-fg-muted" />
           </button>
@@ -377,8 +379,8 @@ export function PathBar({
             }
             title={
               bookmarked
-                ? t("pathbar.bookmarkedTitle")
-                : t("pathbar.bookmarkTitle")
+                ? t("pathbar.bookmarkedTitle", { key: kBookmark })
+                : t("pathbar.bookmarkTitle", { key: kBookmark })
             }
           >
             <Star

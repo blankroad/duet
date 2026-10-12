@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Loader } from "lucide-react";
 import { formatSize } from "@/lib/format";
 import { useTasks } from "@/stores/tasks";
-import { commands } from "@/types/bindings";
+import { useTaskCancel } from "@/hooks/useTaskCancel";
 import type { Location, ProgressInfo, TaskDto } from "@/types/bindings";
 import { DialogShell } from "./DialogShell";
 import { DialogButton } from "./DialogButton";
@@ -40,6 +40,7 @@ export function ProgressModal({
 }) {
   const { t } = useTranslation();
   const task = useTasks((s) => s.tasks.get(taskId));
+  const { cancelling, cancel } = useTaskCancel(taskId);
   const progress = task?.progress ?? null;
   const route = routeOf(task);
 
@@ -64,13 +65,19 @@ export function ProgressModal({
             dangerText
             // 취소 요청만 보내고 모달은 유지 — task 가 실제로 사라지면
             // (cancelled 이벤트 → store 제거) 위 useEffect 가 닫는다.
-            onClick={() => void commands.taskCancel(taskId)}
+            disabled={cancelling}
+            onClick={() => void cancel()}
           >
             {t("common.cancel")}
           </DialogButton>
         </>
       }
     >
+      {cancelling && (
+        <p role="status" className="text-meta text-fg-muted">
+          {t("dialog.progress.stopping")}
+        </p>
+      )}
       {progress ? (
         <ProgressBody p={progress} />
       ) : (
@@ -80,7 +87,9 @@ export function ProgressModal({
         </div>
       )}
       {route && <RouteBlock src={route.src} dst={route.dst} />}
-      {progress && <ProgressStats p={progress} />}
+      {progress && (
+        <ProgressStats p={progress} countOnly={task?.kind === "delete"} />
+      )}
     </DialogShell>
   );
 }
@@ -98,14 +107,21 @@ function ProgressBody({ p }: { p: ProgressInfo }) {
       </span>
       {p.files_total > 0 && (
         <span className="shrink-0 tabular-nums text-meta text-fg-muted">
-          {Math.min(p.files_done + 1, p.files_total)} / {p.files_total}
+          {Math.min(p.files_done + (p.current_file ? 1 : 0), p.files_total)} /{" "}
+          {p.files_total}
         </span>
       )}
     </div>
   );
 }
 
-function ProgressStats({ p }: { p: ProgressInfo }) {
+function ProgressStats({
+  p,
+  countOnly,
+}: {
+  p: ProgressInfo;
+  countOnly: boolean;
+}) {
   const { t } = useTranslation();
   // percent==null = 총량 미상(폴더 등) → 게이지를 0% 고정 대신 "진행 중" 애니메이션.
   const indeterminate = p.percent == null;
@@ -125,10 +141,13 @@ function ProgressStats({ p }: { p: ProgressInfo }) {
       {/* 수치는 tabular-nums — 빠르게 갱신될 때 자릿수 흔들림으로 읽기 어려워짐 방지. */}
       <div className="flex flex-wrap justify-between gap-x-3 gap-y-1 text-meta tabular-nums text-fg-muted">
         <span className="truncate">
-          {formatSize(p.bytes_done)}
-          {p.bytes_total
-            ? ` / ${formatSize(p.bytes_total)}`
-            : ` ${t("dialog.progress.done")}`}
+          {countOnly
+            ? `${p.files_done} / ${p.files_total}`
+            : formatSize(p.bytes_done)}
+          {!countOnly &&
+            (p.bytes_total
+              ? ` / ${formatSize(p.bytes_total)}`
+              : ` ${t("dialog.progress.done")}`)}
           {p.percent != null ? ` · ${p.percent}%` : ""}
         </span>
         <span className="shrink-0">

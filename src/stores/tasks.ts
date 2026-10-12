@@ -3,6 +3,8 @@ import type { TaskDto, ProgressInfo, TaskStatus } from "@/types/bindings";
 
 interface State {
   tasks: Map<string, TaskDto>;
+  cancelling: Set<string>;
+  setCancelling: (id: string, value: boolean) => void;
   add: (t: TaskDto) => void;
   setStatus: (id: string, status: TaskStatus) => void;
   setProgress: (id: string, progress: ProgressInfo) => void;
@@ -13,6 +15,14 @@ interface State {
 
 export const useTasks = create<State>((set) => ({
   tasks: new Map(),
+  cancelling: new Set(),
+  setCancelling: (id, value) =>
+    set((s) => {
+      const cancelling = new Set(s.cancelling);
+      if (value) cancelling.add(id);
+      else cancelling.delete(id);
+      return { cancelling };
+    }),
   add: (t) =>
     set((s) => {
       const next = new Map(s.tasks);
@@ -48,13 +58,18 @@ export const useTasks = create<State>((set) => ({
       if (!s.tasks.has(id)) return s;
       const next = new Map(s.tasks);
       next.delete(id);
-      return { tasks: next };
+      const cancelling = new Set(s.cancelling);
+      cancelling.delete(id);
+      return { tasks: next, cancelling };
     }),
   setAll: (ts) =>
-    set(() => {
+    set((s) => {
       const next = new Map<string, TaskDto>();
       for (const t of ts) next.set(t.id, t);
-      return { tasks: next };
+      return {
+        tasks: next,
+        cancelling: new Set([...s.cancelling].filter((id) => next.has(id))),
+      };
     }),
 }));
 
