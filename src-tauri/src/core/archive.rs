@@ -746,8 +746,8 @@ async fn extract_remote(
 /// 패널이 이 Location 으로 navigate 하면 *실제 폴더* 라서 탐색/미리보기/
 /// 복사·이동/DnD/북마크가 전부 그대로 동작 (Location 모델 변경 없음).
 ///
-/// - 로컬: `<temp>/duet-archive/<token>/<stem>/` 로 crate 추출.
-/// - 원격(SSH): 호스트의 `~/.duet-tmp/browse-<token>/<stem>/` 로 host-side 추출
+/// - 로컬: `<temp>/duet-archive/<token>/content/` 로 crate 추출.
+/// - 원격(SSH): 호스트의 `~/.duet-tmp/browse-<token>/content/` 로 host-side 추출
 ///   (unzip/tar exec). **로컬 PC 를 1 바이트도 경유하지 않음** — 같은-호스트 원칙.
 ///   반환 Location 은 같은 `Ssh{}` source 라 패널이 그대로 원격을 탐색.
 ///
@@ -763,7 +763,6 @@ pub async fn open_for_browse(
     let format = detect_format(&archive.name)
         .ok_or_else(|| DuetError::Io(format!("unsupported archive: {}", archive.name)))?;
     let archive_path = archive.location.path.join(&archive.name);
-    let stem = archive_stem(&archive.name);
     let token = uuid::Uuid::new_v4().to_string();
 
     match &archive.location.source {
@@ -771,7 +770,8 @@ pub async fn open_for_browse(
             // token 디렉토리째 만들고, 추출 실패(예: NeedPassword) 시 통째로 정리해
             // 빈 temp 가 새지 않게 한다(재시도는 새 token 으로 들어온다).
             let token_dir = local_browse_root().join(&token);
-            let dest = token_dir.join(&stem);
+            // 원본 이름을 반복하면 긴 이름 + 내부 경로가 OS 경로 길이 제한에 닿는다.
+            let dest = token_dir.join("content");
             tokio::fs::create_dir_all(&dest)
                 .await
                 .map_err(|e| DuetError::Io(format!("create temp dir: {e}")))?;
@@ -793,7 +793,7 @@ pub async fn open_for_browse(
             // posix_join — 반환되어 reap·표시에 쓰이므로 Windows 클라이언트의 `\` 회피(§7).
             let mut dest = crate::fs::posix_join(&home, ".duet-tmp");
             dest = crate::fs::posix_join(&dest, &format!("browse-{token}"));
-            let dest = crate::fs::posix_join(&dest, &stem);
+            let dest = crate::fs::posix_join(&dest, "content");
             // mkdir -p + 추출을 한 호스트 명령으로 (PC 경유 0).
             let cmd = format!(
                 "mkdir -p {} && {}",
@@ -1311,6 +1311,32 @@ mod tests {
         );
     }
 
+    /// 복잡한 외부/내부 파일명도 실제 탐색용 추출 경로에서 보존된다.
+    #[test]
+    fn browse_zip_with_complex_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let names = [
+            "[한글] 자료 (최종) #1 & '확인' + 100%.ZIP".to_string(),
+            "보고서.2026.10.13 — café 😀.zip".to_string(),
+            format!("{}.zip", "가".repeat(80)),
+        ];
+        let member = "[내부 폴더] 자료/최종 (1) #100% & '확인'.txt";
+        for (i, name) in names.iter().enumerate() {
+            let archive = dir.path().join(name);
+            let mut writer = zip::ZipWriter::new(std::fs::File::create(&archive).unwrap());
+            writer
+                .start_file(member, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            writer.write_all(b"preserved").unwrap();
+            writer.finish().unwrap();
+            let dest = dir.path().join(i.to_string()).join(archive_stem(name));
+            std::fs::create_dir_all(&dest).unwrap();
+            let format = detect_format(name).unwrap();
+            extract_local_blocking(&archive, &dest, format, None).unwrap();
+            assert_eq!(std::fs::read(dest.join(member)).unwrap(), b"preserved");
+        }
+    }
+
     /// 암호(AES) zip → 올바른 암호로 해제 성공 / 없거나 틀린 암호는 NeedPassword.
     #[test]
     fn encrypted_zip_password_paths() {
@@ -1453,7 +1479,8 @@ mod tests {
     #[tokio::test]
     async fn open_for_browse_local_extracts_to_temp() {
         let dir = tempfile::tempdir().unwrap();
-        let zip_path = dir.path().join("pkg.zip");
+        let name = format!("[최종] {} (1) #100% & '확인'.zip", "가".repeat(65));
+        let zip_path = dir.path().join(&name);
         {
             let f = std::fs::File::create(&zip_path).unwrap();
             let mut w = zip::ZipWriter::new(f);
@@ -1467,14 +1494,14 @@ mod tests {
                 source: SourceId::Local,
                 path: dir.path().to_path_buf(),
             },
-            name: "pkg.zip".into(),
+            name,
         };
         let pool = crate::services::connection_pool::ConnectionPool::new();
         let loc = open_for_browse(archive, None, &pool).await.unwrap();
 
         assert_eq!(loc.source, SourceId::Local);
-        // 반환 경로 leaf 는 stem("pkg"), 내부에 a.txt 존재.
-        assert_eq!(loc.path.file_name().unwrap(), "pkg");
+        // 원본 이름 길이와 무관하게 짧은 임시 경로를 사용한다.
+        assert_eq!(loc.path.file_name().unwrap(), "content");
         assert_eq!(std::fs::read(loc.path.join("a.txt")).unwrap(), b"alpha");
 
         // 임시 잔여물 정리 (temp/duet-archive/<token>/).
