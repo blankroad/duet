@@ -180,10 +180,18 @@ function newTabId(): string {
 /** 새 탭 기본값 — 설정(Settings)에서 부팅 시 주입(applyTabDefaults). 죽은 토글 방지 배선. */
 let tabDefaults: { sortKey: SortKey; viewMode: ViewMode; showHidden: boolean } =
   {
-    sortKey: "name",
+    sortKey: "mtime",
     viewMode: "details",
     showHidden: false,
   };
+
+/**
+ * 키별 첫 정렬 방향 — 수정일·크기는 내림차순(최신/큰 것 먼저)이 자연스럽다.
+ * Finder/탐색기도 같은 관례. 같은 키 재클릭은 여전히 방향 토글.
+ */
+export function defaultOrderFor(key: SortKey): SortOrder {
+  return key === "mtime" || key === "size" ? "desc" : "asc";
+}
 
 const initialTab = (location: Location = home()): TabState => ({
   id: newTabId(),
@@ -193,7 +201,7 @@ const initialTab = (location: Location = home()): TabState => ({
   selected: new Set(),
   loadedAt: 0,
   sortKey: tabDefaults.sortKey,
-  sortOrder: "asc",
+  sortOrder: defaultOrderFor(tabDefaults.sortKey),
   showHidden: tabDefaults.showHidden,
   viewMode: tabDefaults.viewMode,
   gridCols: 1,
@@ -574,7 +582,12 @@ export const usePanes = create<PanesState>((set, get) => ({
           if (t.sortKey === key) {
             return { ...t, sortOrder: t.sortOrder === "asc" ? "desc" : "asc" };
           }
-          return { ...t, sortKey: key, sortOrder: "asc", cursorIndex: 0 };
+          return {
+            ...t,
+            sortKey: key,
+            sortOrder: defaultOrderFor(key),
+            cursorIndex: 0,
+          };
         }),
       },
     })),
@@ -882,6 +895,7 @@ export function applyTabDefaults(d: {
       tabs: p.tabs.map((t) => ({
         ...t,
         sortKey: d.sortKey,
+        sortOrder: defaultOrderFor(d.sortKey),
         viewMode: d.viewMode,
         showHidden: d.showHidden,
         cursorIndex: 0,

@@ -233,6 +233,14 @@ describe("panes — sort/hidden via active tab", () => {
     expect(activeTab(usePanes.getState(), "left").sortOrder).toBe("desc");
   });
 
+  it("toggleSortKey to mtime starts newest-first (desc)", () => {
+    usePanes.getState().setSort("left", "name", "asc");
+    usePanes.getState().toggleSortKey("left", "mtime");
+    expect(activeTab(usePanes.getState(), "left").sortOrder).toBe("desc");
+    usePanes.getState().toggleSortKey("left", "name");
+    expect(activeTab(usePanes.getState(), "left").sortOrder).toBe("asc");
+  });
+
   it("toggleShowHidden shows dotfiles", () => {
     usePanes
       .getState()

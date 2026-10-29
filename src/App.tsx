@@ -1750,7 +1750,7 @@ function App() {
         if (r.status === "ok") {
           applyTheme(r.data.theme ?? "system");
           applyTabDefaults({
-            sortKey: (r.data.default_sort ?? "name") as SortKey,
+            sortKey: (r.data.default_sort ?? "mtime") as SortKey,
             viewMode: (r.data.default_view ?? "details") as ViewMode,
             showHidden: r.data.show_hidden_default ?? false,
           });

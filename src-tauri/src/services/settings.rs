@@ -14,7 +14,7 @@ fn default_theme() -> String {
     "system".into()
 }
 fn default_sort() -> String {
-    "name".into()
+    "mtime".into()
 }
 fn default_view() -> String {
     "details".into()
