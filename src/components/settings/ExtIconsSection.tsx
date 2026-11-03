@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { commands } from "@/types/bindings";
 import { buildSettingsPatch } from "@/lib/settingsPatch";
@@ -18,6 +18,10 @@ function normExt(s: string): string {
 export function ExtIconsSection() {
   const { t } = useTranslation();
   const [map, setMap] = useState<Record<string, string>>({});
+  // 마지막으로 저장이 확인된 값 + 저장 중 표시 — 저장은 하나씩, 실패하면 이 값으로.
+  // (직전 화면 값으로 되돌리면 앞선 실패가 뒤이은 성공 변경까지 지웠다.)
+  const saved = useRef<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [ext, setExt] = useState("");
 
@@ -25,8 +29,13 @@ export function ExtIconsSection() {
     let cancelled = false;
     commands.settingsGet().then((r) => {
       if (cancelled) return;
-      if (r.status === "ok")
-        setMap((r.data.ext_icon_overrides ?? {}) as Record<string, string>);
+      if (r.status === "ok") {
+        saved.current = (r.data.ext_icon_overrides ?? {}) as Record<
+          string,
+          string
+        >;
+        setMap(saved.current);
+      }
       setLoading(false);
     });
     return () => {
@@ -35,18 +44,21 @@ export function ExtIconsSection() {
   }, []);
 
   const persist = async (next: Record<string, string>) => {
-    const prev = map;
+    if (busy) return;
+    setBusy(true);
     setMap(next);
     useAppSettings.getState().setExtIconOverrides(next); // 리스트 즉시 반영
     const r = await commands.settingsSet(
       buildSettingsPatch({ ext_icon_overrides: next }),
     );
-    if (r.status === "error") {
-      // 저장 실패 — 화면·목록 아이콘을 이전 값으로 되돌린다.
-      setMap(prev);
-      useAppSettings.getState().setExtIconOverrides(prev);
+    if (r.status === "ok") saved.current = next;
+    else {
+      // 저장 실패 — 화면·목록 아이콘을 마지막 저장값으로 되돌린다.
+      setMap(saved.current);
+      useAppSettings.getState().setExtIconOverrides(saved.current);
       toastSettingsSaveFailed(r.error);
     }
+    setBusy(false);
   };
 
   const assign = (iconName: string) => {
@@ -97,6 +109,7 @@ export function ExtIconsSection() {
                 <span className="ml-auto text-meta text-fg-muted">{name}</span>
                 <button
                   type="button"
+                  disabled={busy}
                   onClick={() => remove(e)}
                   aria-label={t("settings.remove")}
                   className="rounded p-1 text-fg-muted hover:bg-border hover:text-fg"
@@ -127,7 +140,7 @@ export function ExtIconsSection() {
             <button
               key={p.name}
               type="button"
-              disabled={!pending}
+              disabled={!pending || busy}
               onClick={() => assign(p.name)}
               title={p.name}
               aria-label={p.name}

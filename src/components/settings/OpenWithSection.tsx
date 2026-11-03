@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X, FolderOpen } from "lucide-react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { commands } from "@/types/bindings";
@@ -23,6 +23,9 @@ function appName(p: string): string {
 export function OpenWithSection() {
   const { t } = useTranslation();
   const [map, setMap] = useState<Record<string, string>>({});
+  // 마지막으로 저장이 확인된 값 + 저장 중 표시 — 저장은 하나씩, 실패하면 이 값으로.
+  const saved = useRef<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [ext, setExt] = useState("");
 
@@ -30,8 +33,13 @@ export function OpenWithSection() {
     let cancelled = false;
     commands.settingsGet().then((r) => {
       if (cancelled) return;
-      if (r.status === "ok")
-        setMap((r.data.ext_app_overrides ?? {}) as Record<string, string>);
+      if (r.status === "ok") {
+        saved.current = (r.data.ext_app_overrides ?? {}) as Record<
+          string,
+          string
+        >;
+        setMap(saved.current);
+      }
       setLoading(false);
     });
     return () => {
@@ -40,15 +48,19 @@ export function OpenWithSection() {
   }, []);
 
   const persist = async (next: Record<string, string>) => {
-    const prev = map;
+    if (busy) return;
+    setBusy(true);
     setMap(next);
     const r = await commands.settingsSet(
       buildSettingsPatch({ ext_app_overrides: next }),
     );
-    if (r.status === "error") {
-      setMap(prev); // 저장 안 됐으면 화면도 되돌린다 — 재시작 후 사라지는 "가짜 저장" 방지.
+    if (r.status === "ok") saved.current = next;
+    else {
+      // 저장 안 됐으면 화면도 마지막 저장값으로 — 재시작 후 사라지는 "가짜 저장" 방지.
+      setMap(saved.current);
       toastSettingsSaveFailed(r.error);
     }
+    setBusy(false);
   };
 
   const choose = async () => {
@@ -100,6 +112,7 @@ export function OpenWithSection() {
               <span className="ml-auto" />
               <button
                 type="button"
+                disabled={busy}
                 onClick={() => remove(e)}
                 aria-label={t("settings.remove")}
                 className="rounded p-1 text-fg-muted hover:bg-border hover:text-fg"
@@ -121,7 +134,7 @@ export function OpenWithSection() {
         />
         <button
           type="button"
-          disabled={!pending}
+          disabled={!pending || busy}
           onClick={() => void choose()}
           className="flex items-center gap-1.5 rounded border border-border px-3 py-1 text-base hover:bg-subtle disabled:opacity-30"
         >
