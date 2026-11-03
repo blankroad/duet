@@ -47,6 +47,8 @@ type ReadyState = {
   name: string;
   location: Location;
   data: PreviewData;
+  /** 읽은 파일 버전(경로+크기+수정시각) — 같은 경로라도 바뀌면 PDF·미디어를 다시 그린다. */
+  version: string;
 };
 type LoadState =
   | { phase: "empty" }
@@ -95,6 +97,7 @@ export function usePreviewLoad(target: PreviewTarget | null): LoadState {
   useEffect(() => {
     const loc = locRef.current;
     const nm = nameRef.current;
+    const version = key;
     if (!loc) {
       setState({ phase: "empty" });
       return;
@@ -115,7 +118,13 @@ export function usePreviewLoad(target: PreviewTarget | null): LoadState {
         const r = await commands.fsReadPreview(loc);
         if (cancelled) return;
         if (r.status === "ok")
-          setState({ phase: "ready", name: nm, location: loc, data: r.data });
+          setState({
+            phase: "ready",
+            name: nm,
+            location: loc,
+            data: r.data,
+            version,
+          });
         else
           setState({ phase: "error", name: nm, message: formatErr(r.error) });
       } catch (e) {
@@ -146,8 +155,15 @@ function PreviewBody({ state }: { state: LoadState }) {
   const busy = state.phase === "loading";
   const bodyRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
     // React 18 은 inert 속성을 모른다 — 직접 토글(포인터·키보드·보조기술 모두 차단).
-    bodyRef.current?.toggleAttribute("inert", busy);
+    el.toggleAttribute("inert", busy);
+    // 조작할 수 없는 동안 직전 오디오·영상이 계속 재생되지 않게 멈춘다.
+    if (busy)
+      el.querySelectorAll<HTMLMediaElement>("audio,video").forEach((m) =>
+        m.pause(),
+      );
   }, [busy, shown]);
   if (state.phase === "empty")
     return <Centered>{t("preview.selectFile")}</Centered>;
@@ -169,6 +185,7 @@ function PreviewBody({ state }: { state: LoadState }) {
           name={shown.name}
           location={shown.location}
           data={shown.data}
+          version={shown.version}
         />
       </div>
       {busy && (

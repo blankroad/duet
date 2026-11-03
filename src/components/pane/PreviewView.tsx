@@ -28,11 +28,15 @@ export function PreviewView({
   name,
   location,
   data,
+  version,
 }: {
   name: string;
   location: Location;
   data: PreviewData;
+  /** 파일 버전 — 같은 경로라도 바뀌면 PDF·미디어를 새로 마운트해 다시 읽는다. */
+  version?: string;
 }) {
+  const renderKey = version ?? location.path;
   const { t } = useTranslation();
   switch (data.kind) {
     case "text":
@@ -59,7 +63,7 @@ export function PreviewView({
       return (
         <Suspense fallback={<Centered>{t("preview.loading")}</Centered>}>
           <PreviewPdf
-            key={location.path}
+            key={renderKey}
             url={previewStreamUrl(location)}
             fallback={<OpenExternalButton location={location} />}
           />
@@ -69,11 +73,7 @@ export function PreviewView({
     case "video":
       // location 변경 시 remount 로 error 상태 리셋.
       return (
-        <MediaPreview
-          key={location.path}
-          kind={data.kind}
-          location={location}
-        />
+        <MediaPreview key={renderKey} kind={data.kind} location={location} />
       );
     case "binary":
       return (

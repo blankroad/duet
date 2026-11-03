@@ -41,3 +41,26 @@ it("keeps the loading notice until the first page is drawn, then shows the page 
   expect(screen.queryByText("Loading…")).toBeNull();
   expect(screen.getByText(/first 20 pages \(of 30\)/)).toBeTruthy();
 });
+
+it("re-reads the same PDF path when the file version changes", async () => {
+  const pdfjs = await import("pdfjs-dist");
+  const spy = vi.spyOn(pdfjs, "getDocument");
+  const { PreviewView } = await import("./PreviewView");
+  const loc = { source: { kind: "local" as const }, path: "/w/a.pdf" };
+  const data = { kind: "pdf", total_size: 10 } as never;
+  const { rerender } = render(
+    <PreviewView name="a.pdf" location={loc} data={data} version="v1" />,
+  );
+  await act(async () => {});
+  const before = spy.mock.calls.length;
+  rerender(
+    <PreviewView name="a.pdf" location={loc} data={data} version="v1" />,
+  );
+  await act(async () => {});
+  expect(spy.mock.calls.length).toBe(before); // 같은 버전: 다시 읽지 않음
+  rerender(
+    <PreviewView name="a.pdf" location={loc} data={data} version="v2" />,
+  );
+  await act(async () => {});
+  expect(spy.mock.calls.length).toBe(before + 1);
+});
