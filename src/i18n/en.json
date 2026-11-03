@@ -14,6 +14,7 @@
     "exist": "{{count}} item(s) with the same name already exist at the destination",
     "skipAllHint": "Don't copy conflicting items",
     "keepBothAllHint": "Copy with a new name — name (1).ext",
+    "nothingToDo": "Every item already exists — skipping them all does nothing. Choose Keep both or Replace.",
     "perFile": "Choose per file…",
     "setAll": "Set all:",
     "replace": "Replace",

@@ -14,6 +14,7 @@
     "exist": "같은 이름 {{count}}개가 받는 위치에 이미 있음",
     "skipAllHint": "충돌 항목은 복사하지 않음",
     "keepBothAllHint": "새 이름으로 복사 — name (1).ext",
+    "nothingToDo": "모든 항목이 이미 있습니다 — 건너뛰면 {{cta}}할 것이 없습니다. 둘 다 유지 또는 교체를 고르세요.",
     "perFile": "파일별로 선택…",
     "setAll": "일괄 설정:",
     "replace": "교체",

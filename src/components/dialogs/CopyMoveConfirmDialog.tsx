@@ -73,6 +73,18 @@ export function CopyMoveConfirmDialog({
       else replacedFiles++;
     }
   }
+  // 모든 항목이 이미 있고 전부 건너뛰면 할 일이 없다 — 예전엔 [복사] 를 눌러도
+  // 대화상자만 닫히고 아무 안내가 없어 "복사됐나?" 를 알 수 없었다.
+  const nothingToDo =
+    conflicts.length > 0 &&
+    conflicts.length >= plan.items.length &&
+    tally.skip === conflicts.length;
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const nothingNote = nothingToDo && (
+    <div className="text-meta text-fg">
+      {t("conflict.nothingToDo", { cta })}
+    </div>
+  );
   const replacementWarnings = (
     <>
       {replacedFiles > 0 && (
@@ -102,7 +114,7 @@ export function CopyMoveConfirmDialog({
   };
 
   const cancelBtn = (
-    <DialogButton hint="esc" onClick={onCancel}>
+    <DialogButton ref={cancelRef} hint="esc" onClick={onCancel}>
       {t("common.cancel")}
     </DialogButton>
   );
@@ -129,6 +141,7 @@ export function CopyMoveConfirmDialog({
             <DialogButton
               tone={tally.replace > 0 ? "danger" : "primary"}
               hint="enter"
+              disabled={nothingToDo}
               onClick={() => onConfirmPerFile(decisions)}
             >
               {cta}
@@ -144,6 +157,7 @@ export function CopyMoveConfirmDialog({
             setDecisions(Object.fromEntries(conflicts.map((c) => [c.name, p])))
           }
         />
+        {nothingNote}
         {replacementWarnings}
       </DialogShell>
     );
@@ -157,7 +171,8 @@ export function CopyMoveConfirmDialog({
       subtitle={transferSummary(plan, t)}
       icon={kind === "copy" ? Copy : MoveRight}
       onClose={onCancel}
-      initialFocus={ctaRef}
+      // 할 일이 없으면 주 버튼이 비활성이라 포커스는 [취소] 로 (Enter = 그냥 닫기).
+      initialFocus={nothingToDo ? cancelRef : ctaRef}
       footer={
         <>
           {cancelBtn}
@@ -165,6 +180,7 @@ export function CopyMoveConfirmDialog({
             ref={ctaRef}
             tone={destructive ? "danger" : "primary"}
             hint="enter"
+            disabled={nothingToDo}
             onClick={() => confirmWith(hasConflicts ? policy : "replace")}
           >
             {cta}
@@ -207,6 +223,7 @@ export function CopyMoveConfirmDialog({
                 {t("conflict.perFile")}
               </button>
             </div>
+            {nothingNote}
             {replacementWarnings}
           </div>
         </DialogBand>

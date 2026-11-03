@@ -269,3 +269,43 @@ describe("CopyMoveConfirmDialog", () => {
     expect(screen.queryByText(/restore.*folder/)).toBeNull();
   });
 });
+
+describe("CopyMoveConfirmDialog — 할 일이 없을 때", () => {
+  afterEach(cleanup);
+
+  it("전부 이미 있고 건너뛰기면 주 버튼 비활성 + 안내, 교체를 고르면 다시 활성", () => {
+    useAppSettings.setState({
+      conflictDefault: "skip",
+      rememberConflictChoice: false,
+    });
+    const { onConfirm } = render_(
+      plan({
+        items: [ref("a.txt"), ref("b.txt")],
+        conflicts: [conflict("a.txt"), conflict("b.txt")],
+      }),
+    );
+    const cta = () =>
+      screen.getByRole("button", { name: /Copy/ }) as HTMLButtonElement;
+    expect(cta().disabled).toBe(true);
+    expect(screen.getByText(/Every item already exists/)).toBeDefined();
+    fireEvent.click(screen.getByRole("radio", { name: "Keep both" }));
+    expect(cta().disabled).toBe(false);
+    expect(screen.queryByText(/Every item already exists/)).toBeNull();
+    fireEvent.click(cta());
+    expect(onConfirm).toHaveBeenCalledWith("keepboth");
+  });
+
+  it("일부만 충돌이면 건너뛰기여도 실행 가능", () => {
+    useAppSettings.setState({ conflictDefault: "skip" });
+    render_(
+      plan({
+        items: [ref("a.txt"), ref("b.txt")],
+        conflicts: [conflict("a.txt")],
+      }),
+    );
+    expect(
+      (screen.getByRole("button", { name: /Copy/ }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+  });
+});
