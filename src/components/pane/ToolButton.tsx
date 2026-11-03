@@ -15,7 +15,9 @@ interface ToolButtonProps {
   className?: string;
   active?: boolean;
   disabled?: boolean;
-  onClick: () => void;
+  /** 메뉴를 여는 버튼이면 true (aria-haspopup). */
+  menu?: boolean;
+  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
   children: React.ReactNode;
 }
 
@@ -27,6 +29,7 @@ export function ToolButton({
   className,
   active,
   disabled,
+  menu,
   onClick,
   children,
 }: ToolButtonProps) {
@@ -36,6 +39,7 @@ export function ToolButton({
       title={label}
       aria-label={ariaLabel ?? label}
       aria-pressed={active}
+      aria-haspopup={menu ? "menu" : undefined}
       disabled={disabled}
       onClick={onClick}
       className={clsx(

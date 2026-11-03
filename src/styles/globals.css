@@ -351,11 +351,11 @@ textarea,
 /*
  * 패널 도구 모음 폭 단계 — 자주 쓰는 토글(숨김·필터)은 모든 폭에서 1클릭.
  * 좁을수록 글자 라벨과 보기 바로가기를 먼저 접고, 접힌 것은 `보기` 메뉴로 간다.
- *   ~359  : 파일 작업 아이콘 + 필터·숨김 + 보기 메뉴(아이콘)
+ *   ~359  : 파일 작업 아이콘 + 필터·숨김 + 보기 메뉴(아이콘, 정렬 포함)
  *   360~  : 정렬 버튼, 보기 메뉴 글자
  *   400~  : 동기화가 켜져 있으면 버튼으로 보인다
  *   500~  : 새 폴더·새 파일 글자
- *   560~  : 보기 바로가기·동기화 버튼 (보기 메뉴 대신)
+ *   560~  : 보기 바로가기·동기화 버튼 (보기 메뉴 대신), 정렬 기준 글자
  *   680~  : 복사·이동·삭제 글자
  */
 .toolbar-view-buttons,
@@ -363,6 +363,7 @@ textarea,
 .toolbar-create-label,
 .toolbar-view-menu-label,
 .toolbar-sort,
+.toolbar-sort-label,
 .toolbar-sync {
   display: none;
 }
@@ -391,6 +392,9 @@ textarea,
   .toolbar-view-buttons,
   .toolbar-sync {
     display: flex;
+  }
+  .toolbar-sort-label {
+    display: inline;
   }
   .toolbar-view-menu {
     display: none;

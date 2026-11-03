@@ -544,6 +544,9 @@
     "filter": "이 폴더에서 이름 필터 ({{key}})",
     "filterActive": "필터: “{{text}}” ({{key}})",
     "filterName": "이름 필터",
+    "sortTitle": "정렬: {{key}} · {{order}}",
+    "sortAsc": "오름차순",
+    "sortDesc": "내림차순",
     "newFile": "새 파일 ({{key}})"
   },
   "shelf": {

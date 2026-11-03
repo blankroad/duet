@@ -13,6 +13,7 @@ import {
   FolderSync,
   Check,
   ChevronDown,
+  ArrowDownUp,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useKeyHint } from "@/lib/keyHint";
@@ -36,6 +37,7 @@ import {
 import { isVirtualTrash } from "@/lib/trashView";
 import { ToolButton } from "./ToolButton";
 import { FilterToolButton } from "./FilterToolButton";
+import { SortMenuButton, sortMenuEntries } from "./SortMenuButton";
 import clsx from "clsx";
 
 interface PaneToolbarProps {
@@ -88,6 +90,12 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
           mode === viewMode ? <Check size={14} /> : <span className="w-3.5" />,
         onSelect: () => runHere(() => setViewMode(id, mode)),
       })),
+      {
+        id: "sort",
+        label: t("menu.sortBy"),
+        icon: <ArrowDownUp size={14} />,
+        children: sortMenuEntries(id, t),
+      },
       { kind: "separator" },
       {
         id: "sync",
@@ -153,6 +161,7 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
       <div className="flex-1" />
 
       <FilterToolButton id={id} />
+      <SortMenuButton id={id} />
 
       <div className="toolbar-view-buttons items-center gap-0.5">
         <ViewButton

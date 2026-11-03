@@ -547,6 +547,9 @@
     "filter": "Filter names in this folder ({{key}})",
     "filterActive": "Filter: “{{text}}” ({{key}})",
     "filterName": "Name filter",
+    "sortTitle": "Sort: {{key}} · {{order}}",
+    "sortAsc": "Ascending",
+    "sortDesc": "Descending",
     "newFile": "New file ({{key}})"
   },
   "shelf": {

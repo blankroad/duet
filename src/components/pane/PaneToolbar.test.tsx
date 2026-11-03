@@ -105,3 +105,26 @@ it("필터 버튼은 해당 패널의 빠른 필터를 열고, 걸린 필터를 
     usePanes.getState().setFilterFocused("right", false);
   });
 });
+it("정렬 버튼은 그리드에서도 현재 기준·방향을 보이고 메뉴로 바꾼다", () => {
+  usePanes.getState().setViewMode("right", "grid");
+  usePanes.getState().setSort("right", "mtime", "desc");
+  render(
+    <>
+      <PaneToolbar id="right" />
+      <ContextMenu />
+    </>,
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Sort: Modified · Descending" }),
+  );
+  fireEvent.click(screen.getByText("Name"));
+  expect(activeTab(usePanes.getState(), "right").sortKey).toBe("name");
+  expect(activeTab(usePanes.getState(), "right").sortOrder).toBe("asc");
+  expect(usePanes.getState().activePane).toBe("right");
+  fireEvent.click(
+    screen.getByRole("button", { name: "Sort: Name · Ascending" }),
+  );
+  fireEvent.click(screen.getByText("Descending"));
+  expect(activeTab(usePanes.getState(), "right").sortOrder).toBe("desc");
+  expect(activeTab(usePanes.getState(), "left").sortKey).not.toBe("name");
+});
