@@ -664,6 +664,18 @@ describe("사이드바 — 키가 패널로 새지 않는다", () => {
     recent.focus();
     fireEvent.click(recent, { detail: 1 });
     expect(document.activeElement).not.toBe(recent);
+    // 섹션 머리글 같은 버튼도(Windows 는 클릭한 버튼이 포커스를 가진다) 내려놓는다.
+    const header = screen.getByRole("button", {
+      name: i18n.t("sidebar.hosts"),
+    });
+    header.focus();
+    fireEvent.click(header, { detail: 1 });
+    expect(document.activeElement).not.toBe(header);
+    // 필터 입력칸은 타이핑하러 누른 것이라 포커스를 유지한다.
+    const filter = screen.getByLabelText(i18n.t("sidebar.filterLabel"));
+    filter.focus();
+    fireEvent.click(filter, { detail: 1 });
+    expect(document.activeElement).toBe(filter);
   });
 });
 

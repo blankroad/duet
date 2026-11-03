@@ -159,6 +159,7 @@ export function Sidebar({
     >
       <aside
         onKeyDown={onSidebarKeyDown}
+        onClick={releaseSidebarFocusAfterMouse}
         className="flex w-full min-h-0 flex-col border-r border-border bg-subtle text-base"
       >
         {/* 필터·태그는 스크롤 영역 밖에 고정 — 예전엔 같은 스크롤 안에서 sticky 끼리 겹쳐
@@ -337,6 +338,24 @@ function onSidebarKeyDown(e: React.KeyboardEvent<HTMLElement>): void {
   const cmd = commandForKey(e);
   const modified = e.ctrlKey || e.metaKey || e.altKey;
   if (cmd ? cmd.startsWith("file.") : !modified) e.stopPropagation();
+}
+
+/**
+ * 사이드바 안 버튼(섹션 접기·+·새로고침·태그 칩 등)을 **마우스로** 누른 뒤엔 포커스를
+ * 내려놓는다. Windows(WebView2)는 클릭한 버튼이 포커스를 가져서, 그대로 두면 다음 ↑↓·
+ * Enter 가 onSidebarKeyDown 에 막혀 패널 목록으로 가지 않는다. 입력칸(필터·선반 이름)은
+ * 타이핑하러 누른 것이니 그대로 둔다. 키보드로 누른 경우(detail 0)도 그대로.
+ */
+function releaseSidebarFocusAfterMouse(e: React.MouseEvent<HTMLElement>): void {
+  if (e.detail === 0) return;
+  const a = document.activeElement;
+  if (
+    a instanceof HTMLElement &&
+    e.currentTarget.contains(a) &&
+    a.tagName !== "INPUT" &&
+    a.tagName !== "TEXTAREA"
+  )
+    a.blur();
 }
 
 function sidebarRows(root: HTMLElement): HTMLElement[] {
