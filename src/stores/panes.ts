@@ -224,6 +224,24 @@ export function activeTab(state: PanesState, id: PaneId): TabState {
 }
 
 /** 액션 안에서 active tab 만 변경하는 헬퍼. */
+/**
+ * 표시 순서가 바뀌는 변경(정렬·숨김 토글) 뒤에도 커서가 **보던 항목**(이름)을 따라가게.
+ * 예전엔 역순 정렬 뒤 커서가 같은 인덱스의 다른 파일에 남거나(Enter·F2·Delete 대상이
+ * 바뀜) 맨 위로 튀었다. 항목이 사라졌으면(숨김) 인덱스를 clamp.
+ */
+function keepCursor(prev: TabState, next: TabState): TabState {
+  const name = computeDisplayed(prev)[prev.cursorIndex]?.name;
+  const after = computeDisplayed(next);
+  const at = name === undefined ? -1 : after.findIndex((e) => e.name === name);
+  const cursorIndex =
+    at >= 0
+      ? at
+      : after.length > 0
+        ? Math.min(Math.max(0, prev.cursorIndex), after.length - 1)
+        : -1;
+  return { ...next, cursorIndex };
+}
+
 function withActiveTab(p: PaneState, fn: (t: TabState) => TabState): PaneState {
   const i = p.activeTabIndex;
   const cur = p.tabs[i];
@@ -566,40 +584,38 @@ export const usePanes = create<PanesState>((set, get) => ({
     set((s) => ({
       panes: {
         ...s.panes,
-        [id]: withActiveTab(s.panes[id], (t) => ({
-          ...t,
-          sortKey: key,
-          sortOrder: order,
-          cursorIndex: 0,
-        })),
+        [id]: withActiveTab(s.panes[id], (t) =>
+          keepCursor(t, { ...t, sortKey: key, sortOrder: order }),
+        ),
       },
     })),
   toggleSortKey: (id, key) =>
     set((s) => ({
       panes: {
         ...s.panes,
-        [id]: withActiveTab(s.panes[id], (t) => {
-          if (t.sortKey === key) {
-            return { ...t, sortOrder: t.sortOrder === "asc" ? "desc" : "asc" };
-          }
-          return {
-            ...t,
-            sortKey: key,
-            sortOrder: defaultOrderFor(key),
-            cursorIndex: 0,
-          };
-        }),
+        [id]: withActiveTab(s.panes[id], (t) =>
+          keepCursor(
+            t,
+            t.sortKey === key
+              ? { ...t, sortOrder: t.sortOrder === "asc" ? "desc" : "asc" }
+              : { ...t, sortKey: key, sortOrder: defaultOrderFor(key) },
+          ),
+        ),
       },
     })),
   toggleShowHidden: (id) =>
     set((s) => ({
       panes: {
         ...s.panes,
-        [id]: withActiveTab(s.panes[id], (t) => ({
-          ...t,
-          showHidden: !t.showHidden,
-          cursorIndex: 0,
-        })),
+        [id]: withActiveTab(s.panes[id], (t) => {
+          const next = keepCursor(t, { ...t, showHidden: !t.showHidden });
+          // 숨겨진 항목이 선택에 남으면 보이지 않는 파일이 삭제·이동 대상이 된다.
+          const visible = new Set(computeDisplayed(next).map((e) => e.name));
+          const selected = new Set(
+            [...t.selected].filter((n) => visible.has(n)),
+          );
+          return { ...next, selected };
+        }),
       },
     })),
   setViewMode: (id, mode) =>
