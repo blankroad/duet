@@ -959,3 +959,40 @@ describe("검증 1차 후속 (sol-2 F2~F6)", () => {
     expect(row("logs").textContent).toContain("L");
   });
 });
+
+describe("검증 2차 후속 (opus-3 Med-1)", () => {
+  const winKeys = vi.fn();
+  beforeEach(() => {
+    resetSidebarStores();
+    useCommands.setState({
+      builtins: [{ ...cmd("file.delete", "Delete"), category: "File" }],
+      dynamic: [],
+    });
+    useBookmarks.setState({
+      items: [{ id: "b1", name: "work", location: local("/work") }],
+    });
+    window.addEventListener("keydown", winKeys);
+    winKeys.mockClear();
+  });
+  afterEach(() => window.removeEventListener("keydown", winKeys));
+
+  it("우클릭 메뉴를 연 뒤 Delete 는 북마크가 아니라 패널로 간다", async () => {
+    await renderSidebar();
+    const bm = row("work");
+    bm.focus();
+    fireEvent.contextMenu(bm);
+    expect(document.activeElement).not.toBe(bm);
+    act(() => useContextMenu.getState().close());
+    fireEvent.keyDown(document.body, { key: "Delete", code: "Delete" });
+    expect(useBookmarks.getState().items).toHaveLength(1);
+    expect(winKeys).toHaveBeenCalledTimes(1);
+  });
+
+  it("드래그(마우스 업) 뒤에도 행이 포커스를 쥐고 있지 않는다", async () => {
+    await renderSidebar();
+    const bm = row("work");
+    bm.focus();
+    fireEvent.mouseUp(bm, { detail: 1 });
+    expect(document.activeElement).not.toBe(bm);
+  });
+});

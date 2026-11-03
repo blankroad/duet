@@ -164,6 +164,9 @@ export function Sidebar({
       <aside
         onKeyDown={onSidebarKeyDown}
         onClick={releaseFocusAfterMouse}
+        // 드래그 재정렬 뒤엔 합성 click 이 막혀(useReorderable) onClick 이 안 온다 —
+        // mouseup 에서도 포커스를 내려놓는다.
+        onMouseUp={releaseFocusAfterMouse}
         className="flex w-full min-h-0 flex-col border-r border-border bg-subtle text-base"
       >
         {/* 필터·태그는 스크롤 영역 밖에 고정 — 예전엔 같은 스크롤 안에서 sticky 끼리 겹쳐
@@ -416,6 +419,9 @@ function useFiltering(): boolean {
 function openMenu(e: React.MouseEvent, items: MenuEntry[]): void {
   e.preventDefault();
   e.stopPropagation();
+  // 우클릭 mousedown 이 행(tabindex=0)에 준 포커스를 내려놓는다 — 메뉴를 실행한 뒤 누른
+  // Delete 가 패널 대신 이 북마크를 지우던 문제(우클릭은 늘 마우스라 detail 을 안 본다).
+  (e.currentTarget as HTMLElement).blur();
   useContextMenu.getState().openAt(e.clientX, e.clientY, items);
 }
 

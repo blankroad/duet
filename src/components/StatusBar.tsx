@@ -161,7 +161,7 @@ export function StatusBar() {
     <footer
       onKeyDown={keepButtonActivationLocal}
       onClick={releaseFocusAfterMouse}
-      className="flex min-h-6 items-center gap-3 border-t border-border px-3 text-meta text-fg-muted"
+      className="flex h-6 items-center gap-3 border-t border-border px-3 text-meta text-fg-muted"
     >
       <span className="flex min-w-0 max-w-[50%] items-center gap-1.5">
         <span
@@ -176,7 +176,9 @@ export function StatusBar() {
             onClick={() => usePanes.getState().toggleShowHidden(activeId)}
             aria-pressed={tab.showHidden}
             title={hiddenTitle}
-            className="min-h-6 shrink-0 rounded px-1 hover:bg-border hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+            // 바 높이 전체(테두리 뺀 23px)를 누르는 영역으로 — min-h-6 은 바를 25px 로
+            // 밀어 숨김 파일 유무에 따라 하단 바가 1px 흔들렸다.
+            className="h-full shrink-0 rounded px-1 hover:bg-border hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
           >
             {hiddenLabel}
           </button>
