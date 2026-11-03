@@ -66,13 +66,14 @@ export function InlineRenameInput({
   const mountedRef = useRef(false);
   useEffect(() => {
     mountedRef.current = true;
+    const session = sessionRef.current;
     return () => {
       mountedRef.current = false;
       queueMicrotask(() => {
         if (
           !mountedRef.current &&
           !doneRef.current &&
-          useUI.getState().renameTarget === sessionRef.current
+          useUI.getState().renameTarget === session
         )
           useUI.getState().clearInlineRename();
       });
