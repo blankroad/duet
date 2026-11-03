@@ -906,6 +906,12 @@ function RecentItem({
   onOpenHostPath: (hostAlias: string, path: string, pane: PaneId) => void;
 }) {
   const { t } = useTranslation();
+  const nicks = useHostNicknames((s) => s.byAlias);
+  // 로컬 항목은 다른 행처럼 보고 있는 패널을 표시(원격은 연결 id 가 없어 생략).
+  const pane = usePaneAtKey(
+    entry.source === "local" ? "local" : "",
+    entry.path,
+  );
   const open = (pane: PaneId) => {
     if (entry.source === "ssh") onOpenHostPath(entry.alias, entry.path, pane);
     else onOpenLocation(localLocation(entry.path), pane);
@@ -928,6 +934,12 @@ function RecentItem({
       label: t("menu.copyPath"),
       onSelect: () => copyText(entry.path),
     },
+    { kind: "separator" },
+    {
+      id: "remove",
+      label: t("sidebar.removeFromRecent"),
+      onSelect: () => useRecents.getState().remove(entry),
+    },
   ];
   return (
     <button
@@ -939,7 +951,7 @@ function RecentItem({
       }}
       onContextMenu={(e) => openMenu(e, menu)}
       title={title}
-      className={clsx(rowClass, "w-full text-left")}
+      className={clsx(rowClass, "w-full text-left", pane && rowActiveClass)}
     >
       {entry.source === "ssh" ? (
         <Server size={14} className="shrink-0 text-fg-muted" />
@@ -947,10 +959,10 @@ function RecentItem({
         <Folder size={14} className="shrink-0 text-fg-muted" />
       )}
       <RowLabel text={entry.label} />
+      <PaneBadge pane={pane} />
+      {/* 즐겨찾기·호스트와 같은 별명 — 예전엔 같은 서버가 여기서만 raw alias 였다. */}
       {entry.source === "ssh" && (
-        <span className="ml-auto shrink-0 truncate text-meta opacity-50">
-          {entry.alias}
-        </span>
+        <AliasHint alias={aliasLabel(entry.alias, nicks)} />
       )}
     </button>
   );
@@ -1542,14 +1554,25 @@ function FavoriteItem({
   const { t } = useTranslation();
   const path = String(fav.path);
   // 살아있는 연결이 있으면 로컬 북마크와 같은 어휘로 현재 위치를 표시한다(L/R 배지).
-  const liveId = useConnections(
-    (s) =>
-      Object.values(s.active).find(
-        (c) => c.alias === fav.host_alias && c.state.kind === "connected",
-      )?.id ?? null,
+  const live = useConnections((s) =>
+    Object.values(s.active).find(
+      (c) => c.alias === fav.host_alias && c.state.kind === "connected",
+    ),
   );
   // sourceKey(ssh) 는 connection_id 그대로다 — 예전엔 "ssh:" 를 붙여 배지가 켜지지 않았다.
-  const favPane = usePaneAtKey(liveId ?? "", path);
+  const favPane = usePaneAtKey(live?.id ?? "", path);
+  // 연결돼 있으면 로컬 북마크처럼 파일 드롭 대상(그 폴더로 복사). 예전엔 원격 행에 놓으면
+  // 섹션의 "북마크 추가" 존으로 떨어졌다. 연결이 없으면 지금처럼 북마크 존.
+  const liveSource: SourceId | null = live
+    ? {
+        kind: "ssh",
+        connection_id: live.id,
+        host_ip: live.host_ip,
+        user: live.user,
+      }
+    : null;
+  const dropHover = useDropHover(liveSource ?? { kind: "local" }, path);
+  const dropOver = liveSource !== null && dropHover;
   const tags = tagsFor(
     useTags((s) => s.byKey),
     favTagKey(fav.id),
@@ -1603,11 +1626,13 @@ function FavoriteItem({
       })}
       onContextMenu={(e) => openMenu(e, menu)}
       title={path}
+      {...(liveSource ? dropAttrs(liveSource, path) : {})}
       className={clsx(
         rowClass,
         "pl-4",
         dragging && "opacity-50",
         favPane && rowActiveClass,
+        dropOver && dropHoverClass,
       )}
     >
       <Heart size={14} className="shrink-0 text-fg-muted" />
@@ -1762,7 +1787,7 @@ function HostItem({
     <div
       {...openableRow({ onOpen: () => onActivate(), onRename: promptName })}
       onContextMenu={(e) => openMenu(e, menu)}
-      title={`${host.user}@${host.hostname}:${host.port}${host.has_proxy_jump ? " (via jump)" : ""}${nickname ? ` · ${host.alias}` : ""}`}
+      title={`${host.user}@${host.hostname}:${host.port}${host.has_proxy_jump ? ` (${t("sidebar.viaJump")})` : ""}${nickname ? ` · ${host.alias}` : ""}`}
       className={clsx(rowClass, pane && rowActiveClass)}
     >
       <StateDot state={state} />
@@ -1774,7 +1799,7 @@ function HostItem({
         <Network
           size={14}
           className={clsx("shrink-0 text-fg-muted", !pane && "ml-auto")}
-          aria-label="ProxyJump"
+          aria-label={t("sidebar.viaJump")}
         />
       )}
     </div>

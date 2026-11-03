@@ -543,6 +543,7 @@
   },
   "shelf": {
     "title": "선반",
+    "source": "원래 위치(소스)",
     "copyHere": "여기로 복사 (활성 패널)",
     "copy": "복사",
     "moveHere": "여기로 이동 (활성 패널)",
@@ -753,6 +754,7 @@
     "renameFailed": "이름 바꾸기 실패: {{err}}",
     "removeBookmarkFailed": "북마크를 지우지 못했습니다: {{err}}",
     "removeFavoriteFailed": "즐겨찾기를 지우지 못했습니다: {{err}}",
+    "removeHostFailed": "호스트를 지우지 못했습니다: {{err}}",
     "bookmarksMigrated": "SSH 북마크 {{count}}개를 호스트 즐겨찾기로 옮겼습니다",
     "noActiveConnection": "이 폴더의 연결을 찾을 수 없습니다",
     "bookmarkedOnHost": "{{host}} 에 북마크: {{name}}",
@@ -813,6 +815,8 @@
     "hostClickConnectTitle": "{{alias}} (항목을 클릭해 연결)",
     "openConnect": "열기 (필요 시 연결)",
     "removeFavorite": "즐겨찾기 제거",
+    "removeFromRecent": "최근 목록에서 제거",
+    "viaJump": "점프 호스트 경유",
     "hosts": "호스트",
     "noHosts": "등록된 호스트가 없습니다.",
     "state": {

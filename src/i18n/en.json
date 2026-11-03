@@ -546,6 +546,7 @@
   },
   "shelf": {
     "title": "Shelf",
+    "source": "Source",
     "copyHere": "Copy here (active pane)",
     "copy": "Copy",
     "moveHere": "Move here (active pane)",
@@ -756,6 +757,7 @@
     "renameFailed": "Rename failed: {{err}}",
     "removeBookmarkFailed": "Could not remove the bookmark: {{err}}",
     "removeFavoriteFailed": "Could not remove the favorite: {{err}}",
+    "removeHostFailed": "Could not remove the host: {{err}}",
     "bookmarksMigrated": "Moved {{count}} SSH bookmark(s) to host favorites",
     "noActiveConnection": "No active connection for this folder",
     "bookmarkedOnHost": "Bookmarked on {{host}}: {{name}}",
@@ -816,6 +818,8 @@
     "hostClickConnectTitle": "{{alias}} (click an item to connect)",
     "openConnect": "Open (connect if needed)",
     "removeFavorite": "Remove favorite",
+    "removeFromRecent": "Remove from recent",
+    "viaJump": "via jump host",
     "hosts": "Hosts",
     "noHosts": "No hosts yet.",
     "state": {

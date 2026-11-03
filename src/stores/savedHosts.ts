@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import i18n from "@/i18n";
 import { commands } from "@/types/bindings";
 import { useToast } from "@/stores/toast";
 import { formatErr } from "@/lib/error";
@@ -40,7 +41,13 @@ export async function saveHost(host: SavedHost): Promise<boolean> {
 export async function removeSavedHost(alias: string): Promise<void> {
   const r = await commands.savedHostsRemove(alias);
   if (r.status === "ok") useSavedHosts.getState().setAll(r.data);
-  else useToast.getState().show(`Remove host: ${formatErr(r.error)}`, "error");
+  else
+    useToast
+      .getState()
+      .show(
+        i18n.t("toast.removeHostFailed", { err: formatErr(r.error) }),
+        "error",
+      );
 }
 
 /** 드래그 재정렬 — alias 순서대로. 낙관적 갱신 후 백엔드 반환값으로 정합. */

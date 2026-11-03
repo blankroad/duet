@@ -36,6 +36,8 @@ import { useTasks } from "@/stores/tasks";
 import { useUIDialogs } from "@/stores/ui-dialogs";
 import type { TaskDto } from "@/types/bindings";
 import { usePromptDialog } from "@/stores/promptDialog";
+import { useContextMenu, type MenuItem } from "@/stores/contextMenu";
+import { useHostNicknames } from "@/stores/hostNicknames";
 
 // commands.* 는 무엇을 부르든 빈 성공 — 컴포넌트가 부트스트랩 중 부르는 IPC 를 흡수한다.
 vi.mock("@/types/bindings", () => {
@@ -733,5 +735,49 @@ describe("사이드바 — 필터·태그", () => {
     const scroller = header.closest(".overflow-y-auto");
     expect(scroller).toBeTruthy();
     expect(scroller!.contains(filter)).toBe(false);
+  });
+});
+
+describe("사이드바 — 최근·즐겨찾기", () => {
+  beforeEach(resetSidebarStores);
+
+  it("최근 항목 하나만 우클릭으로 빼고, 원격 항목은 별명으로, 보고 있는 로컬 폴더엔 L/R", async () => {
+    useHostNicknames.setState({ byAlias: { prod: "운영서버" } });
+    useRecents.setState({
+      items: [
+        { source: "local", path: "/fixture", label: "fixture" },
+        { source: "ssh", alias: "prod", path: "/srv", label: "srv" },
+      ],
+    });
+    await renderSidebar();
+    expect(row("fixture").textContent).toContain("L");
+    expect(row("srv").textContent).toContain("운영서버");
+    fireEvent.contextMenu(row("fixture"));
+    const remove = useContextMenu
+      .getState()
+      .items.find((i) => (i as MenuItem).id === "remove") as MenuItem;
+    act(() => remove.onSelect?.());
+    expect(screen.queryByText("fixture")).toBeNull();
+    expect(screen.getByText("srv")).toBeTruthy();
+  });
+
+  it("연결된 원격 즐겨찾기 행은 파일 드롭 대상(그 폴더로 복사)이다", async () => {
+    useHostFavorites.setState({
+      items: [{ id: "f1", host_alias: "prod", name: "logs", path: "/var/log" }],
+    });
+    await renderSidebar();
+    expect(row("logs").hasAttribute("data-drop-path")).toBe(false);
+    act(() =>
+      useConnections.setState({
+        active: { "prod:1": conn("prod:1", "prod", "connected") },
+      }),
+    );
+    expect(row("logs").getAttribute("data-drop-path")).toBe("/var/log");
+    expect(
+      JSON.parse(row("logs").getAttribute("data-drop-source")!),
+    ).toMatchObject({
+      kind: "ssh",
+      connection_id: "prod:1",
+    });
   });
 });
