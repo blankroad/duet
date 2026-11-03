@@ -115,7 +115,12 @@ export function DialogShell({
             if (selectOnFocus && el instanceof HTMLInputElement) el.select();
           }}
           onPointerDownOutside={(e) => {
-            if (!dismissOnOutsideClick) e.preventDefault();
+            // 토스트(오버레이 위에 뜬다)를 누르는 건 대화상자 바깥 클릭이 아니다.
+            const target = e.target;
+            const onToast =
+              target instanceof Element &&
+              target.closest("[data-toast-root]") !== null;
+            if (onToast || !dismissOnOutsideClick) e.preventDefault();
           }}
           className={clsx(
             "fixed left-1/2 top-1/2 flex max-h-[85vh] w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-panel border border-border bg-base shadow-raised focus:outline-none",

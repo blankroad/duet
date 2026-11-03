@@ -1,6 +1,13 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { Toast } from "./Toast";
+import { DialogShell } from "./dialogs/DialogShell";
 import { useToast } from "@/stores/toast";
 import i18n from "@/i18n";
 
@@ -30,5 +37,28 @@ describe("Toast", () => {
       screen.getByRole("button", { name: i18n.t("common.close") }),
     );
     expect(screen.queryByRole("status")).toBeNull();
+  });
+});
+
+describe("Toast over a dialog", () => {
+  it("대화상자 위에 뜨고, 토스트를 닫아도 대화상자는 닫히지 않는다", () => {
+    const onClose = vi.fn();
+    render(
+      <>
+        <DialogShell title="Fixture" onClose={onClose}>
+          <span>body</span>
+        </DialogShell>
+        <Toast />
+      </>,
+    );
+    act(() => useToast.getState().show("Symlink failed", "error"));
+    const alert = screen.getByRole("alert");
+    expect(alert.closest("[aria-hidden='true']")).toBeNull();
+    expect(alert.closest("[data-toast-root]")?.className).toContain("z-[70]");
+    const close = screen.getByRole("button", { name: i18n.t("common.close") });
+    fireEvent.pointerDown(close);
+    fireEvent.click(close);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });
