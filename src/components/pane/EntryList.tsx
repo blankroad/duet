@@ -79,6 +79,21 @@ export function EntryList({
   const location = usePanes((s) => activeTab(s, id).location);
   const tabId = usePanes((s) => activeTab(s, id).id);
   const paneActive = usePanes((s) => s.activePane === id);
+  // 인라인 이름 바꾸기 완료 — 시작할 때의 탭·폴더를 기준으로 반영한다. 그 사이 다른
+  // 편집이 시작됐으면 그 편집 상태는 지우지 않는다.
+  const finishRename = (
+    oldName: string,
+    renamed: boolean,
+    newName?: string,
+  ) => {
+    const rt = useUI.getState().renameTarget;
+    const origin = rt?.tabId ?? tabId;
+    if (rt?.pane === id && rt.name === oldName)
+      useUI.getState().clearInlineRename();
+    if (!renamed) return;
+    if (newName) followRenamedEntry(id, origin, location, oldName, newName);
+    onRenamed();
+  };
   // "크기 계산" 결과(name → bytes) — 폴더 행의 크기 컬럼 표시.
   const dirSizes = usePanes((s) => activeTab(s, id).dirSizes);
   // Ctrl+X 로 잘라내기 대기 중인 이름 — 해당 행을 흐리게 표시.
@@ -338,17 +353,14 @@ export function EntryList({
                   renameRef={
                     renameTarget?.pane === id &&
                     renameTarget.name === entry.name &&
+                    (renameTarget.tabId ?? tabId) === tabId &&
                     !isParentEntry(entry)
                       ? { location, name: entry.name }
                       : null
                   }
-                  onRenameDone={(renamed, newName) => {
-                    useUI.getState().clearInlineRename();
-                    if (!renamed) return;
-                    if (newName)
-                      followRenamedEntry(id, location, entry.name, newName);
-                    onRenamed();
-                  }}
+                  onRenameDone={(renamed, newName) =>
+                    finishRename(entry.name, renamed, newName)
+                  }
                   onClick={(e) => onCursorMove(vi.index, e)}
                   onDoubleClick={() => onActivate(entry, vi.index)}
                 />

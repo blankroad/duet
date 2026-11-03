@@ -71,12 +71,12 @@ export function resolveActiveTargets(): ActiveCtx {
 
 /** F2 — 단일 선택만 rename. 다이얼로그 대신 행 안 인라인 편집. */
 export function triggerRename(showToast: ToastFn): void {
-  const { active, targets } = resolveActiveTargets();
+  const { active, tab, targets } = resolveActiveTargets();
   if (targets.length !== 1) {
     showToast(i18n.t("toast.renameSelectOne"));
     return;
   }
-  useUI.getState().requestInlineRename(active, targets[0]!.name);
+  useUI.getState().requestInlineRename(active, targets[0]!.name, tab.id);
 }
 
 /** 여러 항목 일괄 이름변경 — 규칙/미리보기 다이얼로그 오픈 (1개 이상). */
