@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import clsx from "clsx";
 import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 import { commands } from "@/types/bindings";
@@ -133,38 +134,49 @@ export function usePreviewLoad(target: PreviewTarget | null): LoadState {
 
 function PreviewBody({ state }: { state: LoadState }) {
   const { t } = useTranslation();
+  // ready 와 "불러오는 중(직전 내용 유지)"은 **같은 트리**로 그린다 — 모양이 바뀌면 React 가
+  // 직전 미리보기를 다시 마운트해 PDF·영상을 또 받았다. 기다리는 동안 직전 본문은 표시
+  // 전용(inert): 흐린 "기본 앱으로 열기"를 누르면 지금 고른 파일이 아니라 직전 파일이 열렸다.
+  const shown: ReadyState | undefined =
+    state.phase === "ready"
+      ? state
+      : state.phase === "loading"
+        ? state.prev
+        : undefined;
+  const busy = state.phase === "loading";
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    // React 18 은 inert 속성을 모른다 — 직접 토글(포인터·키보드·보조기술 모두 차단).
+    bodyRef.current?.toggleAttribute("inert", busy);
+  }, [busy, shown]);
   if (state.phase === "empty")
     return <Centered>{t("preview.selectFile")}</Centered>;
-  if (state.phase === "loading") {
-    // 늦게 나타나게(200ms) — 빠른 로컬에서 ↑↓ 할 때 "불러오는 중"이 깜빡이지 않도록.
-    const notice = (
-      <span className="animate-fade-in-late">{t("preview.loading")}</span>
-    );
-    if (!state.prev) return <Centered>{notice}</Centered>;
-    // 직전 미리보기를 흐리게 남겨 둔다 — 본문이 비었다 다시 차는 깜빡임 대신.
-    return (
-      <div className="relative h-full" aria-busy="true">
-        <div className="h-full opacity-40">
-          <PreviewView
-            name={state.prev.name}
-            location={state.prev.location}
-            data={state.prev.data}
-          />
-        </div>
+  if (state.phase === "error")
+    return <Centered tone="danger">{state.message}</Centered>;
+  // 늦게 나타나게(200ms) — 빠른 로컬에서 ↑↓ 할 때 "불러오는 중"이 깜빡이지 않도록.
+  const notice = (
+    <span className="animate-fade-in-late">{t("preview.loading")}</span>
+  );
+  if (!shown) return <Centered>{notice}</Centered>;
+  return (
+    <div className="relative h-full" aria-busy={busy || undefined}>
+      <div
+        ref={bodyRef}
+        className={clsx("h-full", busy && "pointer-events-none opacity-40")}
+        aria-hidden={busy || undefined}
+      >
+        <PreviewView
+          name={shown.name}
+          location={shown.location}
+          data={shown.data}
+        />
+      </div>
+      {busy && (
         <div className="pointer-events-none absolute inset-0">
           <Centered>{notice}</Centered>
         </div>
-      </div>
-    );
-  }
-  if (state.phase === "error")
-    return <Centered tone="danger">{state.message}</Centered>;
-  return (
-    <PreviewView
-      name={state.name}
-      location={state.location}
-      data={state.data}
-    />
+      )}
+    </div>
   );
 }
 

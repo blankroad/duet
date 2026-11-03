@@ -506,3 +506,24 @@ it("늦게 끝난 이름 바꾸기는 그 사이 다른 탭에서 시작한 편�
   expect(within(row("b.txt")).getByRole("textbox")).toBeTruthy();
 });
 
+it("불러오는 동안 남겨 둔 이전 미리보기는 다시 마운트되지 않고 조작할 수 없다", async () => {
+  vi.useFakeTimers();
+  fsReadPreview.mockResolvedValue({
+    status: "ok",
+    data: { kind: "binary", total_size: 10 },
+  });
+  render(<Harness withPreview />);
+  await act(async () => vi.advanceTimersByTimeAsync(200));
+  const btn = screen.getByRole("button", { name: /Open in default app/ });
+  fsReadPreview.mockImplementation(() => new Promise(() => {}));
+  fireEvent.keyDown(window, { key: "ArrowDown" });
+  await act(async () => vi.advanceTimersByTimeAsync(200));
+  // 같은 엘리먼트(재마운트 없음) + inert 컨테이너 안(포인터·키보드 차단)
+  const still = screen.getByRole("button", {
+    name: /Open in default app/,
+    hidden: true,
+  });
+  expect(still).toBe(btn);
+  expect(still.closest("[inert]")).toBeTruthy();
+  vi.useRealTimers();
+});
