@@ -16,6 +16,7 @@ import { SettingsDialog } from "@/components/SettingsDialog";
 import { CommandPalette } from "@/components/CommandPalette";
 import { FrecencyJumper } from "@/components/FrecencyJumper";
 import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
+import { useKeyboardNav } from "@/hooks/useKeyboardNav";
 import { useFrecency } from "@/stores/frecency";
 import type { FrecencyEntry } from "@/types/bindings";
 
@@ -250,6 +251,32 @@ describe("모달이 떠 있을 때 뒤 패널 단축키", () => {
     act(() => usePalette.getState().close());
     fireEvent.keyDown(document.body, { key: "Delete" });
     expect(del).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("모달이 떠 있을 때 뒤 패널 목록 키", () => {
+  function Nav({ onUp }: { onUp: () => void }) {
+    useKeyboardNav(vi.fn(), onUp, vi.fn());
+    return null;
+  }
+
+  it("팔레트 버튼에 포커스한 채 누른 목록 키(Backspace=상위 폴더)는 뒤 패널로 가지 않는다", () => {
+    const onUp = vi.fn();
+    usePalette.getState().open();
+    render(
+      <>
+        <Nav onUp={onUp} />
+        <CommandPalette />
+      </>,
+    );
+    const btn = screen.getByText("cmd.view.toggleSidebar").closest("button")!;
+    btn.focus();
+    fireEvent.keyDown(btn, { key: "Backspace" });
+    fireEvent.keyDown(btn, { key: "Enter" });
+    expect(onUp).not.toHaveBeenCalled();
+    act(() => usePalette.getState().close());
+    fireEvent.keyDown(document.body, { key: "Backspace" });
+    expect(onUp).toHaveBeenCalledTimes(1);
   });
 });
 

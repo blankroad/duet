@@ -31,3 +31,14 @@ export function releaseFocusAfterMouse(e: React.MouseEvent<HTMLElement>): void {
   )
     a.blur();
 }
+
+/**
+ * 모달 대화상자(Radix Dialog, role=dialog)가 열려 있나 — 그동안 window 키 처리기
+ * (전역 단축키·패널 목록)는 뒤 패널을 건드리지 않는다. 포커스가 모달 안이거나,
+ * 포커스를 잃어 body 에 있어도 모달이 문서에 있으면 열린 것으로 본다.
+ */
+export function modalDialogOpen(target: EventTarget | null): boolean {
+  if (target instanceof Element && target.closest("[role='dialog']"))
+    return true;
+  return document.querySelector("[role='dialog']") !== null;
+}

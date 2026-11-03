@@ -3,6 +3,7 @@ import { useKeymap, resolveKeyCommand } from "@/stores/keymap";
 import { useAllCommands } from "@/stores/commands";
 import { formatKeyEvent } from "@/lib/keyEvent";
 import { useContextMenu } from "@/stores/contextMenu";
+import { modalDialogOpen } from "@/lib/keyIsolation";
 
 /**
  * WebView2/브라우저 기본 단축키 중 앱을 막거나(프린트 다이얼로그) 상태를 날리는
@@ -21,16 +22,6 @@ const SWALLOW_WEBVIEW_DEFAULTS = new Set([
   "Ctrl+Shift+G", // 찾기 다음/이전
   "F7", // 캐럿 브라우징
 ]);
-
-/**
- * 모달 대화상자가 열려 있나 — 포커스가 그 안에 있거나(일반), 포커스를 잃어 body 에
- * 있어도 Radix 모달(role=dialog)이 문서에 있으면 열린 것으로 본다.
- */
-function modalOpen(target: EventTarget | null): boolean {
-  if (target instanceof Element && target.closest("[role='dialog']"))
-    return true;
-  return document.querySelector("[role='dialog']") !== null;
-}
 
 /**
  * 단축키 처리 — keymap binding 우선, 없으면 command.defaultKey 매칭.
@@ -68,7 +59,8 @@ export function useGlobalShortcuts() {
 
       // 모달(설정·팔레트·확인 창 등)이 떠 있으면 뒤 패널 명령은 보류 — 모달 안 버튼에
       // 포커스한 채 Delete 를 누르면 뒤 패널 선택이 삭제되던 문제. 웹뷰 기본 동작은 여전히 삼킨다.
-      const blocked = (isInput && !cmd.allowInInput) || modalOpen(e.target);
+      const blocked =
+        (isInput && !cmd.allowInInput) || modalDialogOpen(e.target);
       if (blocked) {
         if (SWALLOW_WEBVIEW_DEFAULTS.has(keystr)) e.preventDefault();
         return;
