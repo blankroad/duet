@@ -102,17 +102,19 @@ export function InlineRenameInput({
     }
     pendingRef.current = true;
     setPending(true);
-    const r = await commands.fsRename(target, newName);
-    pendingRef.current = false;
-    setPending(false);
-    if (r.status === "ok") {
-      finish(true, newName);
-    } else {
-      fail(
-        i18n.t("toast.renameFailed", { err: formatErr(r.error) }),
-        keepEditingOnError,
-      );
+    // IPC 자체가 reject 해도(채널·직렬화 오류) 잠금을 풀어야 Esc·재시도가 된다.
+    let err: string | null = null;
+    try {
+      const r = await commands.fsRename(target, newName);
+      if (r.status === "error") err = formatErr(r.error);
+    } catch (e) {
+      err = formatErr(e);
+    } finally {
+      pendingRef.current = false;
+      setPending(false);
     }
+    if (err === null) finish(true, newName);
+    else fail(i18n.t("toast.renameFailed", { err }), keepEditingOnError);
   };
 
   return (

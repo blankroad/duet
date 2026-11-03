@@ -93,3 +93,17 @@ it("cancels with Escape", () => {
   fireEvent.keyDown(input, { key: "Escape" });
   expect(onDone).toHaveBeenCalledWith(false, undefined);
 });
+
+it("unlocks the editor for retry when the rename IPC itself rejects", async () => {
+  vi.mocked(commands.fsRename).mockRejectedValue(new Error("transport lost"));
+  const { input, onDone } = setup();
+  fireEvent.change(input, { target: { value: "new.txt" } });
+  await act(async () => fireEvent.keyDown(input, { key: "Enter" }));
+  expect(input.readOnly).toBe(false);
+  expect(onDone).not.toHaveBeenCalled();
+  expect(JSON.stringify(useToast.getState().toasts)).toContain(
+    "transport lost",
+  );
+  fireEvent.keyDown(input, { key: "Escape" });
+  expect(onDone).toHaveBeenCalledWith(false, undefined);
+});
