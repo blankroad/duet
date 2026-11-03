@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { commands } from "@/types/bindings";
 import { formatErr } from "@/lib/error";
+import { aliasFromConnectionId } from "@/lib/hostAlias";
 import type { Bookmark, Location } from "@/types/bindings";
 import { useHostFavorites, addHostFavorite } from "@/stores/hostFavorites";
 import { useToast } from "@/stores/toast";
@@ -34,7 +35,7 @@ async function migrateSshBookmarks(items: Bookmark[]): Promise<void> {
   let moved = 0;
   for (const b of sshBms) {
     if (b.location.source.kind !== "ssh") continue;
-    const alias = b.location.source.connection_id.split(":")[0] ?? "";
+    const alias = aliasFromConnectionId(b.location.source.connection_id);
     const path = String(b.location.path);
     if (!alias) continue;
     const exists = useHostFavorites

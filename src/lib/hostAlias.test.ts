@@ -4,6 +4,7 @@ import {
   parseAdHocAlias,
   findSavedHostForAlias,
   prefillFromAlias,
+  aliasFromConnectionId,
 } from "./hostAlias";
 
 const mk = (alias: string, host: string, user = "u", port = 22): SavedHost => ({
@@ -75,5 +76,25 @@ describe("prefillFromAlias", () => {
 
   it("returns null for non ad-hoc aliases", () => {
     expect(prefillFromAlias("my-dart-reader")).toBeNull();
+  });
+});
+
+describe("aliasFromConnectionId", () => {
+  it("strips the uuid / restored suffix after the last colon", () => {
+    expect(
+      aliasFromConnectionId("nas:1b2c3d4e-0000-4000-8000-000000000000"),
+    ).toBe("nas");
+    expect(aliasFromConnectionId("nas:restored")).toBe("nas");
+  });
+
+  it("keeps ad-hoc user@host:port aliases whole", () => {
+    expect(aliasFromConnectionId("root@10.0.0.5:22:restored")).toBe(
+      "root@10.0.0.5:22",
+    );
+    expect(aliasFromConnectionId("u@::1:2222:abcd")).toBe("u@::1:2222");
+  });
+
+  it("returns the id as-is when there is no suffix", () => {
+    expect(aliasFromConnectionId("fixture")).toBe("fixture");
   });
 });
