@@ -68,6 +68,8 @@ interface State {
   dialog: DialogState;
   /** `openWhenFree` 로 미뤄 둔 대화상자 — 지금 창이 닫히면 차례로 연다. */
   queue: DialogState[];
+  /** 지금 창이 대기열에서 나온 것인가 — `open` 이 그 위를 덮으면 대기열로 되돌린다. */
+  fromQueue: boolean;
   open: (d: DialogState) => void;
   /**
    * 사용자가 쓰던 대화상자를 갈아치우지 않는 열기 — 백그라운드 작업이 묻는 것
@@ -82,11 +84,19 @@ interface State {
 export const useUIDialogs = create<State>((set, get) => ({
   dialog: { kind: "none" },
   queue: [],
-  open: (d) => set({ dialog: d }),
+  fromQueue: false,
+  // 확정 핸들러는 흔히 close() 직후 open(진행률 등)을 부른다 — close 가 대기열에서 꺼낸
+  // 창을 그 open 이 덮어 잃지 않게, 대기열 맨 앞으로 되돌린다.
+  open: (d) =>
+    set((s) =>
+      s.fromQueue && s.dialog.kind !== "none"
+        ? { dialog: d, queue: [s.dialog, ...s.queue], fromQueue: false }
+        : { dialog: d, fromQueue: false },
+    ),
   openWhenFree: (d) => {
     const cur = get().dialog.kind;
     if (cur === "none" || cur === "progress") {
-      set({ dialog: d });
+      set({ dialog: d, fromQueue: false });
       return true;
     }
     set((s) => ({ queue: [...s.queue, d] }));
@@ -95,6 +105,10 @@ export const useUIDialogs = create<State>((set, get) => ({
   close: () =>
     set((s) => {
       const [next, ...rest] = s.queue;
-      return { dialog: next ?? { kind: "none" }, queue: rest };
+      return {
+        dialog: next ?? { kind: "none" },
+        queue: rest,
+        fromQueue: next !== undefined,
+      };
     }),
 }));

@@ -3,7 +3,11 @@ import { useUIDialogs } from "./ui-dialogs";
 
 describe("ui-dialogs store", () => {
   beforeEach(() =>
-    useUIDialogs.setState({ dialog: { kind: "none" }, queue: [] }),
+    useUIDialogs.setState({
+      dialog: { kind: "none" },
+      queue: [],
+      fromQueue: false,
+    }),
   );
 
   it("opens and closes", () => {
@@ -41,5 +45,19 @@ describe("ui-dialogs store", () => {
       true,
     );
     expect(useUIDialogs.getState().dialog.kind).toBe("shortcuts");
+  });
+
+  it("close() 직후 open() 해도 대기 중이던 창을 잃지 않는다", () => {
+    const d = useUIDialogs.getState();
+    d.open({ kind: "batch-rename", targets: [] });
+    d.openWhenFree({ kind: "shortcuts" });
+    // 확정 핸들러: 닫고 → 진행률 열기
+    useUIDialogs.getState().close();
+    useUIDialogs.getState().open({ kind: "progress", title: "x", taskId: "t" });
+    expect(useUIDialogs.getState().dialog.kind).toBe("progress");
+    useUIDialogs.getState().close();
+    expect(useUIDialogs.getState().dialog.kind).toBe("shortcuts");
+    useUIDialogs.getState().close();
+    expect(useUIDialogs.getState().dialog.kind).toBe("none");
   });
 });
