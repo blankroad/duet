@@ -1,13 +1,14 @@
 import { forwardRef } from "react";
 import clsx from "clsx";
 import type { ReactNode } from "react";
+import { displayKey } from "@/lib/keyDisplay";
 
 export type DialogButtonTone = "secondary" | "primary" | "danger";
 
 interface DialogButtonProps {
   tone?: DialogButtonTone | undefined;
-  /** 키보드 힌트 — 버튼 안 작은 kbd 칩. enter=↵, esc=Esc. */
-  hint?: "enter" | "esc" | undefined;
+  /** 키보드 힌트 — 버튼 안 작은 kbd 칩. enter=↵, esc=Esc, mod-enter=⌘↩/Ctrl+Enter. */
+  hint?: "enter" | "esc" | "mod-enter" | undefined;
   /** secondary 톤에서 글자만 danger 색 (진행률 취소 등 — 배경은 채우지 않음). */
   dangerText?: boolean | undefined;
   disabled?: boolean | undefined;
@@ -45,7 +46,11 @@ export const DialogButton = forwardRef<HTMLButtonElement, DialogButtonProps>(
         <span>{children}</span>
         {hint && (
           <kbd className="rounded-[3px] border border-current px-1 py-0.5 font-mono text-[10px] leading-none opacity-50">
-            {hint === "enter" ? "↵" : "Esc"}
+            {hint === "enter"
+              ? "↵"
+              : hint === "mod-enter"
+                ? displayKey("Ctrl+Enter")
+                : "Esc"}
           </kbd>
         )}
       </button>

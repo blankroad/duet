@@ -261,6 +261,7 @@
       "atEnd": "at end",
       "atStart": "at start",
       "collision": "Name collisions — resolve before applying.",
+      "previewFailed": "Preview failed: {{err}}",
       "cta": "Rename",
       "desc": "Rename {{count}} item(s) using a shared rule with live preview."
     },

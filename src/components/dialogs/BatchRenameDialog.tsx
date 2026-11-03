@@ -12,6 +12,7 @@ import { DialogShell } from "./DialogShell";
 import { DialogButton } from "./DialogButton";
 import { DialogInput } from "./DialogInput";
 import { isImeComposing } from "@/lib/keyEvent";
+import { formatErr } from "@/lib/error";
 
 export interface BatchRenameDialogProps {
   targets: EntryRef[];
@@ -55,7 +56,13 @@ export function BatchRenameDialog({
   const [seqPad, setSeqPad] = useState(3);
   const [seqPos, setSeqPos] = useState<"prefix" | "suffix">("suffix");
   const [targetExt, setTargetExt] = useState(false);
-  const [plan, setPlan] = useState<BatchRenamePlan | null>(null);
+  // 미리보기는 그것을 계산한 규칙과 함께 둔다 — 입력 직후(디바운스·IPC 대기 중)엔
+  // 화면의 미리보기가 옛 규칙 것이라, 그 충돌 판정으로 새 규칙을 제출하면 안 된다.
+  const [preview, setPreview] = useState<{
+    rule: RenameRule;
+    plan: BatchRenamePlan;
+  } | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
   const rule = useMemo<RenameRule>(
     () => ({
@@ -92,7 +99,11 @@ export function BatchRenameDialog({
     let alive = true;
     const t = setTimeout(() => {
       void commands.fsBatchRenamePreview(targets, rule).then((r) => {
-        if (alive && r.status === "ok") setPlan(r.data);
+        if (!alive) return;
+        if (r.status === "ok") {
+          setPreview({ rule, plan: r.data });
+          setPreviewError(null);
+        } else setPreviewError(formatErr(r.error));
       });
     }, 120);
     return () => {
@@ -101,7 +112,9 @@ export function BatchRenameDialog({
     };
   }, [targets, rule]);
 
-  const blocked = !plan || plan.has_collision;
+  const plan = preview?.plan ?? null;
+  const current = preview?.rule === rule && previewError === null;
+  const blocked = !plan || !current || plan.has_collision;
   const changed =
     plan?.items.some((it) => it.old_name !== it.new_name) ?? false;
   const submit = () => {
@@ -123,7 +136,11 @@ export function BatchRenameDialog({
           submit();
       }}
       footerLeft={
-        plan?.has_collision ? (
+        previewError ? (
+          <span className="text-danger">
+            {t("dialog.batchRename.previewFailed", { err: previewError })}
+          </span>
+        ) : plan?.has_collision ? (
           <span className="text-danger">
             {t("dialog.batchRename.collision")}
           </span>
@@ -136,6 +153,7 @@ export function BatchRenameDialog({
           </DialogButton>
           <DialogButton
             tone="primary"
+            hint="mod-enter"
             disabled={blocked || !changed}
             onClick={submit}
           >
