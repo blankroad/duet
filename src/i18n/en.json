@@ -934,6 +934,7 @@
     "newTabTitle": "New tab ({{key}})",
     "editPath": "Edit path",
     "editPathTitle": "Edit path / go to location ({{key}})",
+    "currentTitle": "{{path}} — click to edit, right-click to copy",
     "favorites": "Favorites",
     "favoritesTitle": "Favorites — go to a saved folder",
     "noFavorites": "No favorites yet",

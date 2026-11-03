@@ -929,6 +929,7 @@
     "newTabTitle": "새 탭 ({{key}})",
     "editPath": "경로 편집",
     "editPathTitle": "경로 편집 / 위치로 이동 ({{key}})",
+    "currentTitle": "{{path}} — 클릭해 경로 편집, 우클릭으로 경로 복사",
     "favorites": "즐겨찾기",
     "favoritesTitle": "즐겨찾기 — 저장된 폴더로 이동",
     "noFavorites": "즐겨찾기 없음",

@@ -16,6 +16,7 @@ import {
   Folder,
   Plus,
   Trash2,
+  Copy,
 } from "lucide-react";
 import { platform } from "@tauri-apps/plugin-os";
 import type { Location } from "@/types/bindings";
@@ -33,6 +34,7 @@ import { useHostLabel } from "@/lib/hostLabel";
 import { bookmarkLocation } from "@/lib/bookmarkActions";
 import { useHostFavorites, removeHostFavorite } from "@/stores/hostFavorites";
 import { useContextMenu, type MenuEntry } from "@/stores/contextMenu";
+import { useToast } from "@/stores/toast";
 
 interface PathBarProps {
   location: Location;
@@ -113,6 +115,41 @@ export function PathBar({
     const p = draft.trim();
     setEditing(false);
     if (p) onSegmentClick?.(p);
+  };
+
+  // 현재 폴더 경로 복사 — 항목 경로 복사(copyPathsOf)와 같은 형식(`/` 통일).
+  const copyCurrentPath = () => {
+    const toast = useToast.getState().show;
+    void navigator.clipboard
+      .writeText(String(location.path).replace(/\\/g, "/"))
+      .then(
+        () =>
+          toast(
+            t("toast.copiedLabel", {
+              label: t("toast.labelPath").toLowerCase(),
+            }),
+            "success",
+          ),
+        () => toast(t("toast.clipboardUnavailable"), "error"),
+      );
+  };
+  const copyPathItem: MenuEntry = {
+    id: "copy-path",
+    label: t("menu.copyPath"),
+    icon: <Copy size={13} />,
+    onSelect: copyCurrentPath,
+  };
+  const openCurrentMenu = (e: React.MouseEvent) => {
+    useContextMenu.getState().openAt(e.clientX, e.clientY, [
+      copyPathItem,
+      {
+        id: "edit-path",
+        label: t("pathbar.editPath"),
+        icon: <Pencil size={13} />,
+        commandId: "pane.editPath",
+        onSelect: startEdit,
+      },
+    ]);
   };
 
   // 아카이브 내부: 임시경로 대신 archive.zip/sub 상대 breadcrumb.
@@ -297,6 +334,13 @@ export function PathBar({
             <PathBreadcrumbs
               items={winLocal ? crumbs : [{ label: "/", path: "/" }, ...crumbs]}
               onNavigate={onSegmentClick}
+              // 현재 폴더 이름 클릭 = 경로 직접 입력 (탐색기 주소창 관례).
+              onCurrentClick={startEdit}
+              currentTitle={t("pathbar.currentTitle", {
+                path: String(location.path),
+              })}
+              menuHead={[copyPathItem, { kind: "separator" }]}
+              onCurrentContextMenu={openCurrentMenu}
             />
           </>
         )}
