@@ -5,7 +5,6 @@ import {
   Network,
   Plus,
   X,
-  Bookmark,
   Heart,
   ChevronDown,
   ChevronRight,
@@ -350,6 +349,48 @@ function usePaneAtKey(key: string, path: string): string {
         out += id === "left" ? "L" : "R";
     }
     return out;
+  });
+}
+
+/**
+ * 이 호스트(alias)를 보고 있는 패널 배지 — 경로와 무관하게 패널의 활성 탭이 그 호스트의
+ * 연결 위에 있으면 켜진다. 호스트 행만 "어느 패널이 거기 있나" 를 알려주지 않았다.
+ */
+function usePanesOnHost(alias: string): string {
+  const active = useConnections((s) => s.active);
+  return usePanes((s) => {
+    let out = "";
+    for (const id of ["left", "right"] as const) {
+      const src = activeTab(s, id).location.source;
+      if (src.kind === "ssh" && active[src.connection_id]?.alias === alias)
+        out += id === "left" ? "L" : "R";
+    }
+    return out;
+  });
+}
+
+const DISCONNECTED: ConnectionState = { kind: "disconnected" };
+const STATE_RANK: Record<ConnectionState["kind"], number> = {
+  connected: 3,
+  connecting: 2,
+  error: 1,
+  disconnected: 0,
+};
+
+/**
+ * alias 의 대표 연결 상태(connected > connecting > error > disconnected) — store 의
+ * state 객체를 그대로 돌려줘 참조가 안정적이다(셀렉터 무한 리렌더 없음).
+ *
+ * 예전엔 `useConnections(s => s.stateByAlias)()` 로 **함수 참조**를 구독해서, 연결·끊김·
+ * 오류가 생겨도 호스트 점이 다른 이유로 다시 그려질 때까지 그대로였다.
+ */
+function useHostState(alias: string): ConnectionState {
+  return useConnections((s) => {
+    let best: ConnectionState = DISCONNECTED;
+    for (const c of Object.values(s.active))
+      if (c.alias === alias && STATE_RANK[c.state.kind] > STATE_RANK[best.kind])
+        best = c.state;
+    return best;
   });
 }
 
@@ -968,7 +1009,8 @@ function HostGroupFolder({
         type="button"
         onClick={() => toggle(`hostgroup:${group.id}`)}
         onContextMenu={(e) => openMenu(e, menu)}
-        className="flex w-full items-center gap-1 px-2 text-meta text-fg-muted hover:text-fg"
+        aria-expanded={!collapsed}
+        className="flex min-h-6 w-full items-center gap-1 px-2 text-meta text-fg-muted hover:text-fg"
         title={group.name}
       >
         {collapsed ? <ChevronRight size={10} /> : <ChevronDown size={10} />}
@@ -1011,6 +1053,8 @@ function SavedHostItem({
     hostTagKey(host.alias),
   );
   const display = nickname ?? host.alias;
+  const pane = usePanesOnHost(host.alias);
+  const state = useHostState(host.alias);
   const menu: MenuEntry[] = [
     {
       id: "connect",
@@ -1055,16 +1099,18 @@ function SavedHostItem({
       })}
       onContextMenu={(e) => openMenu(e, menu)}
       title={`${host.user}@${host.host}:${host.port}${host.key_path ? ` (key: ${host.key_path})` : ""}${nickname ? ` · ${host.alias}` : ""}`}
-      className={clsx(rowClass, reorder?.dragging && "opacity-50")}
-    >
-      <Bookmark size={14} className="shrink-0 text-fg-muted" />
-      <RowLabel text={display} />
-      {nickname && (
-        <span className="shrink-0 truncate text-meta text-fg-muted/60">
-          {host.alias}
-        </span>
+      className={clsx(
+        rowClass,
+        reorder?.dragging && "opacity-50",
+        pane && rowActiveClass,
       )}
+    >
+      {/* config 호스트와 같은 모양 표식 — 저장 호스트만 연결돼도 아무 표시가 없었다. */}
+      <StateDot state={state} />
+      <RowLabel text={display} />
+      {nickname && <AliasHint alias={host.alias} />}
       <InlineTags tags={tags} />
+      <PaneBadge pane={pane} />
       <DeleteBtn
         label={t("sidebar.removeSavedHost", { alias: host.alias })}
         onClick={() => void removeSavedHost(host.alias)}
@@ -1298,6 +1344,7 @@ function FavoriteGroup({
   const collapsed = useUI((s) => s.collapsed[`fav:${alias}`]);
   const toggle = useUI((s) => s.toggleSection);
   const nicks = useHostNicknames((s) => s.byAlias);
+  const hostState = useHostState(alias);
   const { dragKey, insertBeforeKey, onItemMouseDown } = useReorderable({
     group: `fav:${alias}`,
     keys: favs.map((f) => f.id),
@@ -1308,7 +1355,8 @@ function FavoriteGroup({
       <button
         type="button"
         onClick={() => toggle(`fav:${alias}`)}
-        className="flex w-full items-center gap-1 px-2 text-meta text-fg-muted hover:text-fg"
+        aria-expanded={!collapsed}
+        className="flex min-h-6 w-full items-center gap-1 px-2 text-meta text-fg-muted hover:text-fg"
         title={
           connected
             ? t("sidebar.hostConnectedTitle", { alias })
@@ -1316,12 +1364,8 @@ function FavoriteGroup({
         }
       >
         {collapsed ? <ChevronRight size={10} /> : <ChevronDown size={10} />}
-        <span
-          className={clsx(
-            "h-1.5 w-1.5 shrink-0 rounded-full",
-            connected ? "bg-success" : "bg-fg-muted/30",
-          )}
-        />
+        {/* 호스트 목록과 같은 모양 표식 — 예전 색 점(옅은 회색)은 라이트 모드에서 안 보였다. */}
+        <StateDot state={hostState} />
         <span className="truncate">{aliasLabel(alias, nicks)}</span>
         {collapsed && <span className="ml-auto opacity-50">{favs.length}</span>}
       </button>
@@ -1362,7 +1406,8 @@ function FavoriteItem({
         (c) => c.alias === fav.host_alias && c.state.kind === "connected",
       )?.id ?? null,
   );
-  const favPane = usePaneAtKey(liveId ? `ssh:${liveId}` : "", path);
+  // sourceKey(ssh) 는 connection_id 그대로다 — 예전엔 "ssh:" 를 붙여 배지가 켜지지 않았다.
+  const favPane = usePaneAtKey(liveId ?? "", path);
   const tags = tagsFor(
     useTags((s) => s.byKey),
     favTagKey(fav.id),
@@ -1452,7 +1497,6 @@ function HostsSection({
 }) {
   const { t } = useTranslation();
   const allHosts = useConnections((s) => s.hosts);
-  const stateByAlias = useConnections((s) => s.stateByAlias)();
   const savedCount = useSavedHosts((s) => s.hosts.length);
   const byKey = useTags((s) => s.byKey);
   const active = useTagFilter((s) => s.active);
@@ -1500,7 +1544,6 @@ function HostsSection({
             <HostItem
               key={h.alias}
               host={h}
-              state={stateByAlias[h.alias] ?? { kind: "disconnected" }}
               onActivate={() => onHostActivate(h.alias)}
             />
           ))}
@@ -1516,19 +1559,19 @@ function HostsSection({
 
 function HostItem({
   host,
-  state,
   onActivate,
 }: {
   host: Host;
-  state: ConnectionState;
   onActivate: () => void;
 }) {
   const { t } = useTranslation();
+  const state = useHostState(host.alias);
   const nicks = useHostNicknames((s) => s.byAlias);
   const byKey = useTags((s) => s.byKey);
   const tags = tagsFor(byKey, hostTagKey(host.alias));
   const nickname = nicks[host.alias];
   const display = nickname ?? host.alias;
+  const pane = usePanesOnHost(host.alias);
 
   // 별명 설정/해제 — config alias 키로 저장. 패널·상태바도 이 별명을 따른다.
   const promptName = () => {
@@ -1570,20 +1613,17 @@ function HostItem({
       {...openableRow({ onOpen: () => onActivate(), onRename: promptName })}
       onContextMenu={(e) => openMenu(e, menu)}
       title={`${host.user}@${host.hostname}:${host.port}${host.has_proxy_jump ? " (via jump)" : ""}${nickname ? ` · ${host.alias}` : ""}`}
-      className={rowClass}
+      className={clsx(rowClass, pane && rowActiveClass)}
     >
       <StateDot state={state} />
       <RowLabel text={display} />
-      {nickname && (
-        <span className="shrink-0 truncate text-meta text-fg-muted/60">
-          {host.alias}
-        </span>
-      )}
+      {nickname && <AliasHint alias={host.alias} />}
       <InlineTags tags={tags} />
+      <PaneBadge pane={pane} />
       {host.has_proxy_jump && (
         <Network
           size={14}
-          className="ml-auto shrink-0 text-fg-muted"
+          className={clsx("shrink-0 text-fg-muted", !pane && "ml-auto")}
           aria-label="ProxyJump"
         />
       )}
@@ -1614,7 +1654,8 @@ export function StateDot({ state }: { state: ConnectionState }) {
     // 반쯤 찬 원 — 진행 중임을 색 없이도 알 수 있게.
     connecting:
       "border border-warning bg-gradient-to-r from-warning from-50% to-transparent to-50% animate-pulse",
-    disconnected: "border border-fg-muted/50",
+    // 반투명 테두리는 라이트 모드(bg-subtle)에서 거의 사라졌다 — 불투명 muted 로.
+    disconnected: "border border-fg-muted",
   }[state.kind];
   return (
     <span
@@ -1698,12 +1739,28 @@ function DeleteBtn({ label, onClick }: { label: string; onClick: () => void }) {
   );
 }
 
+/**
+ * 별명 옆 실제 alias — 보조 정보지만 읽혀야 한다. 예전 `text-fg-muted/60` 은 라이트
+ * 모드에서 대비 약 2.2:1 이라 거의 안 보였다. 위계는 크기(11px)로만 낮추고, 긴 alias 가
+ * 별명을 밀어내지 않게 폭을 제한한다.
+ */
+function AliasHint({ alias }: { alias: string }) {
+  return (
+    <span
+      className="min-w-0 max-w-[40%] shrink truncate text-meta text-fg-muted"
+      title={alias}
+    >
+      {alias}
+    </span>
+  );
+}
+
 /** 행에 붙는 태그 표시(작은 회색 #tag). 없으면 렌더 안 함. */
 function InlineTags({ tags }: { tags: string[] }) {
   if (tags.length === 0) return null;
   return (
     <span
-      className="shrink-0 truncate text-meta text-fg-muted/60"
+      className="min-w-0 max-w-[40%] shrink truncate text-meta text-fg-muted"
       title={tags.map((t) => `#${t}`).join(" ")}
     >
       {tags.map((t) => `#${t}`).join(" ")}

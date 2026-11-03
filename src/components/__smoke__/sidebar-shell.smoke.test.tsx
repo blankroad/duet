@@ -21,6 +21,15 @@ import { useCommands } from "@/stores/commands";
 import { useKeymap } from "@/stores/keymap";
 import { displayKey } from "@/lib/keyDisplay";
 import type { Command } from "@/lib/commands";
+import { Sidebar } from "@/components/Sidebar";
+import { useBookmarks } from "@/stores/bookmarks";
+import { useHostFavorites } from "@/stores/hostFavorites";
+import { useSavedHosts } from "@/stores/savedHosts";
+import { useRecents } from "@/stores/recents";
+import { useTags } from "@/stores/tags";
+import { useTagFilter } from "@/stores/tagFilter";
+import { useSidebarFilter } from "@/stores/sidebarFilter";
+import { useHostGroups } from "@/stores/sidebarGroups";
 
 // commands.* 는 무엇을 부르든 빈 성공 — 컴포넌트가 부트스트랩 중 부르는 IPC 를 흡수한다.
 vi.mock("@/types/bindings", () => {
@@ -273,5 +282,144 @@ describe("상단바", () => {
       await Promise.resolve();
     });
     expect(win.unlisten).toHaveBeenCalled();
+  });
+});
+
+// ─────────────────────────── 사이드바 ───────────────────────────
+
+const sidebarProps = {
+  onHostActivate: vi.fn(),
+  onAdHocOpen: vi.fn(),
+  onSavedActivate: vi.fn(),
+  onOpenLocation: vi.fn(),
+  onOpenHostPath: vi.fn(),
+  onAddBookmark: vi.fn(),
+  onTrashActivate: vi.fn(),
+  onEject: vi.fn(),
+};
+
+const sshSrc = (id: string) =>
+  ({ kind: "ssh", connection_id: id, host_ip: "10.0.0.1", user: "u" }) as const;
+
+function conn(id: string, alias: string, kind: "connected" | "connecting") {
+  return { id, alias, host_ip: "10.0.0.1", user: "u", state: { kind } };
+}
+
+function resetSidebarStores() {
+  useUI.setState({ sidebarOpen: true, collapsed: {} });
+  useConnections.setState({
+    active: {},
+    hosts: [
+      {
+        alias: "prod",
+        hostname: "10.0.0.1",
+        port: 22,
+        user: "u",
+        has_proxy_jump: false,
+      },
+    ],
+  });
+  useSavedHosts.setState({ hosts: [] });
+  useBookmarks.setState({ items: [] });
+  useHostFavorites.setState({ items: [] });
+  useRecents.setState({ items: [] });
+  useTags.setState({ byKey: {} });
+  useTagFilter.setState({ active: [] });
+  useSidebarFilter.setState({ q: "", focusNonce: 0 });
+  useHostGroups.setState({ groups: [] });
+}
+
+/**
+ * 텍스트가 맞는 사이드바 행 — 같은 글자가 여러 곳(호스트 행·즐겨찾기 그룹 머리글)에
+ * 있으면 열 수 있는 행(role=button)을 우선한다.
+ */
+function row(name: string): HTMLElement {
+  const els = screen.getAllByText(name);
+  for (const el of els) {
+    const r = el.closest('[role="button"]');
+    if (r) return r as HTMLElement;
+  }
+  const b = els[0]?.closest("button");
+  if (!b) throw new Error(`row not found: ${name}`);
+  return b;
+}
+
+/** 사이드바 렌더 — 마운트 시 볼륨 재스캔(비동기 IPC)까지 끝낸다. */
+async function renderSidebar() {
+  let r: ReturnType<typeof render> | undefined;
+  await act(async () => {
+    r = render(<Sidebar {...sidebarProps} />);
+  });
+  return r!;
+}
+
+describe("사이드바 — 상태 표시", () => {
+  beforeEach(resetSidebarStores);
+
+  it("호스트 연결 상태 점이 연결/끊김에 바로 반응한다", async () => {
+    await renderSidebar();
+    const label = (k: string) => i18n.t(`sidebar.state.${k}`);
+    expect(
+      row("prod").querySelector(`[aria-label="${label("disconnected")}"]`),
+    ).toBeTruthy();
+    act(() =>
+      useConnections
+        .getState()
+        .upsertActive(conn("prod:1", "prod", "connecting")),
+    );
+    expect(
+      row("prod").querySelector(`[aria-label="${label("connecting")}"]`),
+    ).toBeTruthy();
+    act(() =>
+      useConnections.getState().setState("prod:1", { kind: "connected" }),
+    );
+    expect(
+      row("prod").querySelector(`[aria-label="${label("connected")}"]`),
+    ).toBeTruthy();
+    act(() => useConnections.getState().removeActive("prod:1"));
+    expect(
+      row("prod").querySelector(`[aria-label="${label("disconnected")}"]`),
+    ).toBeTruthy();
+  });
+
+  it("패널이 보고 있는 호스트·원격 즐겨찾기에 L/R 배지가 붙는다", async () => {
+    useConnections.setState({
+      active: { "prod:1": conn("prod:1", "prod", "connected") },
+    });
+    useHostFavorites.setState({
+      items: [{ id: "f1", host_alias: "prod", name: "logs", path: "/var/log" }],
+    });
+    setTab("right", {
+      location: { source: sshSrc("prod:1"), path: "/var/log" },
+    });
+    await renderSidebar();
+    expect(row("prod").textContent).toContain("R");
+    expect(row("logs").textContent).toContain("R");
+    // 원격 즐겨찾기 그룹 머리글도 모양 표식(연결됨)으로 보인다.
+    const groupHeader = screen
+      .getAllByText("prod")
+      .find((el) => el.closest("button[aria-expanded]"));
+    expect(
+      groupHeader
+        ?.closest("button")
+        ?.querySelector(`[aria-label="${i18n.t("sidebar.state.connected")}"]`),
+    ).toBeTruthy();
+  });
+
+  it("저장 호스트도 연결 상태를 보여 준다", async () => {
+    useSavedHosts.setState({
+      hosts: [
+        { alias: "lab", host: "10.0.0.9", port: 22, user: "u", key_path: null },
+      ],
+    });
+    useConnections.setState({
+      active: { "lab:1": conn("lab:1", "lab", "connected") },
+    });
+    await renderSidebar();
+    expect(
+      row("lab").querySelector(
+        `[aria-label="${i18n.t("sidebar.state.connected")}"]`,
+      ),
+    ).toBeTruthy();
   });
 });
