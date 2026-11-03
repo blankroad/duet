@@ -7,6 +7,9 @@ import { useToast } from "@/stores/toast";
 import { triggerUndo, triggerRedo } from "@/lib/fileActions";
 import { basename } from "@/lib/paths";
 import { useKeyHint } from "@/lib/keyHint";
+import { formatKeyEvent } from "@/lib/keyEvent";
+import { useKeymap, resolveKeyCommand } from "@/stores/keymap";
+import { useAllCommands } from "@/stores/commands";
 import type { JournalEntry, Location, OpKind } from "@/types/bindings";
 import { DialogShell } from "./DialogShell";
 import { DialogButton } from "./DialogButton";
@@ -27,6 +30,8 @@ export function HistoryDialog({ onClose }: { onClose: () => void }) {
   const hasUndoable = useJournal((s) => s.hasUndoable);
   const hasRedoable = useJournal((s) => s.hasRedoable);
   const showToast = useToast((s) => s.show);
+  const bindings = useKeymap((s) => s.bindings);
+  const all = useAllCommands();
 
   // 최신이 위. "다음 Ctrl+Z 대상" = 아직 안 되돌린 것 중 가장 최근.
   const nextUndoId = [...entries].reverse().find((e) => !e.undone)?.id;
@@ -40,6 +45,20 @@ export function HistoryDialog({ onClose }: { onClose: () => void }) {
       title={t("history.title")}
       description={t("history.desc")}
       icon={History}
+      // 모달 중엔 전역 단축키가 보류되므로(뒤 패널 보호), 이 창이 안내하는 되돌리기/
+      // 다시 실행 키는 여기서 직접 받는다 — 키맵 규칙 그대로.
+      onKeyDown={(e) => {
+        const ks = formatKeyEvent(e.nativeEvent);
+        if (!ks) return;
+        const id = resolveKeyCommand(ks, bindings, all);
+        if (id === "edit.undo" && hasUndoable) {
+          e.preventDefault();
+          void triggerUndo(showToast);
+        } else if (id === "edit.redo" && hasRedoable) {
+          e.preventDefault();
+          void triggerRedo(showToast);
+        }
+      }}
       onClose={onClose}
       footerLeft={t("history.redoNote")}
       footer={
