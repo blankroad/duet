@@ -601,11 +601,16 @@ export const usePanes = create<PanesState>((set, get) => ({
     set((s) => ({
       panes: {
         ...s.panes,
-        [id]: withActiveTab(s.panes[id], (t) => ({
-          ...t,
-          showHidden: !t.showHidden,
-          cursorIndex: 0,
-        })),
+        [id]: withActiveTab(s.panes[id], (t) => {
+          // 커서는 이름으로 따라간다 — 1클릭 토글마다 맨 위로 튀지 않게.
+          const focused = computeDisplayed(t)[t.cursorIndex]?.name;
+          const next = { ...t, showHidden: !t.showHidden };
+          const at =
+            focused === undefined
+              ? -1
+              : computeDisplayed(next).findIndex((e) => e.name === focused);
+          return { ...next, cursorIndex: at >= 0 ? at : 0 };
+        }),
       },
     })),
   setViewMode: (id, mode) =>
