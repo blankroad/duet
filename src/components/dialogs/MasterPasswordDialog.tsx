@@ -6,6 +6,7 @@ import { DialogShell } from "./DialogShell";
 import { DialogButton } from "./DialogButton";
 import { DialogInput } from "./DialogInput";
 import { DialogBand } from "./DialogBand";
+import { isImeComposing } from "@/lib/keyEvent";
 
 /**
  * Master password 프롬프트 — vault unlock (또는 신규 vault 생성).
@@ -79,7 +80,7 @@ export function MasterPasswordDialog({
     }
   };
   const onEnter = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !busy) void handleSubmit();
+    if (e.key === "Enter" && !busy && !isImeComposing(e)) void handleSubmit();
   };
 
   return (

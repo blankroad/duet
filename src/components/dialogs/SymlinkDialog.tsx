@@ -5,6 +5,7 @@ import type { Location } from "@/types/bindings";
 import { DialogShell } from "./DialogShell";
 import { DialogButton } from "./DialogButton";
 import { DialogInput } from "./DialogInput";
+import { isImeComposing } from "@/lib/keyEvent";
 
 export interface SymlinkDialogProps {
   parent: Location;
@@ -33,7 +34,7 @@ export function SymlinkDialog({
     onSubmit(name.trim(), target.trim());
   };
   const onEnter = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") submit();
+    if (e.key === "Enter" && !isImeComposing(e)) submit();
   };
 
   return (

@@ -5,6 +5,7 @@ import { DialogShell } from "./DialogShell";
 import { DialogButton } from "./DialogButton";
 import { DialogInput } from "./DialogInput";
 import { DialogBand } from "./DialogBand";
+import { isImeComposing } from "@/lib/keyEvent";
 
 /** submit 결과: "ok" = 닫기(성공 또는 caller 가 이미 처리), "retry" = 암호 틀림 → 재입력. */
 export type PwSubmitResult = "ok" | "retry";
@@ -99,7 +100,7 @@ export function PasswordPromptDialog({
         value={pw}
         onChange={(e) => setPw(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") void run();
+          if (e.key === "Enter" && !isImeComposing(e)) void run();
         }}
         placeholder={t("dialog.passwordPrompt.placeholder")}
       />

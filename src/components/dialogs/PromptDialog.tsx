@@ -4,6 +4,7 @@ import { usePromptDialog } from "@/stores/promptDialog";
 import { DialogShell } from "./DialogShell";
 import { DialogButton } from "./DialogButton";
 import { DialogInput } from "./DialogInput";
+import { isImeComposing } from "@/lib/keyEvent";
 
 /**
  * window.prompt 대체 인풋 다이얼로그 렌더러 — App 루트에 1개 마운트.
@@ -51,7 +52,7 @@ export function PromptDialogHost() {
         placeholder={req.placeholder}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") {
+          if (e.key === "Enter" && !isImeComposing(e)) {
             e.preventDefault();
             settle(value);
           }

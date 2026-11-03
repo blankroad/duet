@@ -3,6 +3,7 @@ import { Filter, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { commands, type CompareRules } from "@/types/bindings";
 import { buildSettingsPatch } from "@/lib/settingsPatch";
+import { isImeComposing } from "@/lib/keyEvent";
 
 /**
  * 비교 규칙 바 — 무시 패턴(glob) + mtime 허용오차 입력 후 Re-compare.
@@ -51,7 +52,9 @@ export function CompareRulesBar({
       <input
         value={ignore}
         onChange={(e) => setIgnore(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && run()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !isImeComposing(e)) run();
+        }}
         placeholder={t("dialog.compare.ignorePlaceholder")}
         className="min-w-0 flex-1 rounded border border-border bg-subtle px-2 py-0.5 focus:border-accent focus:outline-none"
       />

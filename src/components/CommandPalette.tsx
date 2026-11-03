@@ -9,6 +9,7 @@ import { fuzzyScore } from "@/lib/fuzzy";
 import { displayKey } from "@/lib/keyDisplay";
 import { commandLabel, commandCategory } from "@/lib/commands";
 import type { Command } from "@/lib/commands";
+import { isImeComposing } from "@/lib/keyEvent";
 
 /**
  * Ctrl+P 커맨드 팔레트. fuzzy 매칭 + Enter 실행.
@@ -89,6 +90,8 @@ export function CommandPalette() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
+                // 조합 중 Enter/↑↓ 는 IME 몫 — 부분 검색어로 실행하지 않는다.
+                if (isImeComposing(e)) return;
                 if (e.key === "ArrowDown") {
                   e.preventDefault();
                   setCursor((c) => Math.min(ranked.length - 1, c + 1));

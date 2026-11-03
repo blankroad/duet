@@ -11,6 +11,7 @@ import type {
 import { DialogShell } from "./DialogShell";
 import { DialogButton } from "./DialogButton";
 import { DialogInput } from "./DialogInput";
+import { isImeComposing } from "@/lib/keyEvent";
 
 export interface BatchRenameDialogProps {
   targets: EntryRef[];
@@ -118,7 +119,8 @@ export function BatchRenameDialog({
       onClose={onClose}
       initialFocus={findRef}
       onKeyDown={(e) => {
-        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit();
+        if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !isImeComposing(e))
+          submit();
       }}
       footerLeft={
         plan?.has_collision ? (

@@ -8,6 +8,7 @@ import type { EntryKind } from "@/types/bindings";
 import type { SearchHit } from "@/types/bindings";
 import { useSearch } from "@/stores/search";
 import { useIndexStatus } from "@/stores/indexStatus";
+import { isImeComposing } from "@/lib/keyEvent";
 
 /**
  * 글로벌 검색 결과 패널. <header> 와 <main>{panes}</main> 사이.
@@ -173,7 +174,7 @@ export function SearchPanel({
             if (e.key === "Escape") {
               e.preventDefault();
               close();
-            } else if (e.key === "Enter" && results[0]) {
+            } else if (e.key === "Enter" && results[0] && !isImeComposing(e)) {
               // Enter = 이동 + 닫기(확정). 마우스 클릭은 패널 유지(여러 결과 탐색).
               e.preventDefault();
               onPickHit(results[0]);

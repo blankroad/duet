@@ -4,6 +4,7 @@ import { Plus, Terminal, Trash2 } from "lucide-react";
 import { DialogShell } from "./DialogShell";
 import { DialogButton } from "./DialogButton";
 import { DialogInput } from "./DialogInput";
+import { isImeComposing } from "@/lib/keyEvent";
 
 export interface ArgsDialogProps {
   /** 편집 대상 앱 이름 (표시용). */
@@ -69,7 +70,7 @@ export function ArgsDialog({
               autoFocus={i === rows.length - 1}
               onChange={(e) => setRow(i, e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") submit();
+                if (e.key === "Enter" && !isImeComposing(e)) submit();
               }}
             />
             <button

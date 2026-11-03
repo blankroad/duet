@@ -5,6 +5,7 @@ import { DialogShell } from "./DialogShell";
 import { DialogButton } from "./DialogButton";
 import { DialogInput } from "./DialogInput";
 import { DialogBand } from "./DialogBand";
+import { isImeComposing } from "@/lib/keyEvent";
 
 /**
  * 원격 sudo 비밀번호 입력 — CLAUDE.md §5: `<input type=password>`, 컴포넌트 local
@@ -68,7 +69,7 @@ export function SudoPasswordDialog({
         value={password}
         onChange={(e) => setPassword(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") {
+          if (e.key === "Enter" && !isImeComposing(e)) {
             e.preventDefault();
             submit();
           }

@@ -6,6 +6,7 @@ import { DialogShell } from "./DialogShell";
 import { DialogButton } from "./DialogButton";
 import { DialogInput } from "./DialogInput";
 import { DialogBand } from "./DialogBand";
+import { isImeComposing } from "@/lib/keyEvent";
 
 export interface DangerConfirmDialogProps {
   title: string;
@@ -92,7 +93,8 @@ export function DangerConfirmDialog({
           autoComplete="off"
           onChange={(e) => setTyped(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && enabled) onConfirm(typed);
+            if (e.key === "Enter" && enabled && !isImeComposing(e))
+              onConfirm(typed);
           }}
         />
       </div>

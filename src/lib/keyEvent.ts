@@ -39,3 +39,20 @@ export function formatKeyEvent(e: KeyboardEvent): string | null {
   parts.push(key);
   return parts.join("+");
 }
+
+/**
+ * IME 조합(한글·일본어 등) 중의 키 입력인가 — 조합을 확정하는 Enter 를 제출로
+ * 처리하면 마지막 글자가 빠진 값이 나가거나 부분 검색어로 실행된다.
+ * WebKit 은 조합을 끝내는 Enter 에 isComposing 대신 keyCode 229 를 싣는다.
+ */
+export function isImeComposing(e: {
+  nativeEvent?: { isComposing?: boolean };
+  isComposing?: boolean;
+  keyCode?: number;
+}): boolean {
+  return (
+    e.nativeEvent?.isComposing === true ||
+    e.isComposing === true ||
+    e.keyCode === 229
+  );
+}

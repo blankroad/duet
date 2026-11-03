@@ -6,6 +6,7 @@ import type { Location } from "@/types/bindings";
 import { useHostLabel } from "@/lib/hostLabel";
 import { validateEntryName } from "@/lib/newEntry";
 import { formatErr } from "@/lib/error";
+import { isImeComposing } from "@/lib/keyEvent";
 import { DialogShell } from "./DialogShell";
 import { DialogButton } from "./DialogButton";
 import { DialogInput } from "./DialogInput";
@@ -114,7 +115,7 @@ export function NewEntryDialog({
           setError(null);
         }}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+          if (e.key === "Enter" && !isImeComposing(e)) {
             e.preventDefault();
             void submit();
           }

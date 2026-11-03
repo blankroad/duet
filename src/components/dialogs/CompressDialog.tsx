@@ -6,6 +6,7 @@ import { DialogShell } from "./DialogShell";
 import { DialogButton } from "./DialogButton";
 import { DialogInput } from "./DialogInput";
 import { Segmented } from "./Segmented";
+import { isImeComposing } from "@/lib/keyEvent";
 
 export interface CompressDialogProps {
   /** 압축 대상 항목 수 (본문 표시용). */
@@ -74,7 +75,7 @@ export function CompressDialog({
           placeholder={t("dialog.compress.placeholder")}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") submit();
+            if (e.key === "Enter" && !isImeComposing(e)) submit();
           }}
         />
         <Segmented

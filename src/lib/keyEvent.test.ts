@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatKeyEvent } from "./keyEvent";
+import { formatKeyEvent, isImeComposing } from "./keyEvent";
 
 function mkEvent(opts: Partial<KeyboardEvent>): KeyboardEvent {
   return {
@@ -65,5 +65,24 @@ describe("formatKeyEvent", () => {
     expect(
       formatKeyEvent(mkEvent({ key: "Tab", ctrlKey: true, shiftKey: true })),
     ).toBe("Ctrl+Shift+Tab");
+  });
+});
+
+describe("isImeComposing", () => {
+  it("React 이벤트의 nativeEvent.isComposing", () => {
+    expect(isImeComposing({ nativeEvent: { isComposing: true } })).toBe(true);
+  });
+  it("WebKit 조합 확정 Enter (keyCode 229)", () => {
+    expect(
+      isImeComposing({ nativeEvent: { isComposing: false }, keyCode: 229 }),
+    ).toBe(true);
+  });
+  it("네이티브 KeyboardEvent.isComposing", () => {
+    expect(isImeComposing({ isComposing: true })).toBe(true);
+  });
+  it("일반 Enter 는 조합 아님", () => {
+    expect(
+      isImeComposing({ nativeEvent: { isComposing: false }, keyCode: 13 }),
+    ).toBe(false);
   });
 });

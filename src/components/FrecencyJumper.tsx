@@ -7,6 +7,7 @@ import { usePanes, type PaneId } from "@/stores/panes";
 import { useConnections } from "@/stores/connections";
 import { commands } from "@/types/bindings";
 import type { FrecencyEntry, Location } from "@/types/bindings";
+import { isImeComposing } from "@/lib/keyEvent";
 
 /** 항목 소스 라벨 — 로컬은 "local", SSH 는 연결 alias(없으면 host_ip). */
 function sourceLabel(loc: Location): string {
@@ -88,6 +89,7 @@ export function FrecencyJumper({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
+                if (isImeComposing(e)) return;
                 if (e.key === "ArrowDown") {
                   e.preventDefault();
                   setCursor((c) => Math.min(results.length - 1, c + 1));
