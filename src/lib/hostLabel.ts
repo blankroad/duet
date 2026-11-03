@@ -3,7 +3,9 @@ import { useHostNicknames, type NickMap } from "@/stores/hostNicknames";
 import { useConnections } from "@/stores/connections";
 import { aliasFromConnectionId } from "@/lib/hostAlias";
 import { isRestoredRemote } from "@/stores/panes";
-import i18n from "@/i18n";
+// 앱 부트스트랩(@/i18n)이 아니라 같은 전역 인스턴스를 직접 — 이 모듈을 쓰는 컴포넌트
+// 테스트가 react-i18next 를 모킹해도 import 만으로 깨지지 않게.
+import i18n from "i18next";
 
 /**
  * 소스의 표시 라벨 — 로컬은 "Local", SSH 는 우선순위:
