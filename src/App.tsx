@@ -1783,16 +1783,28 @@ function App() {
         void navigateTo(pane, alias.kind.location);
       } else if (alias.kind.kind === "connect") {
         const target = alias.kind.saved_host_alias;
+        // 저장 호스트 이름(사용자가 붙인 별명)과 실제 연결 alias(user@host:port)는
+        // 다를 수 있다 — 둘 다로 기존 연결·재연결을 찾는다.
+        const saved = useSavedHosts
+          .getState()
+          .hosts.find((h) => h.alias === target);
+        const candidates = saved
+          ? [target, `${saved.user}@${saved.host}:${saved.port}`]
+          : [target];
         const conns = useConnections.getState();
-        if (conns.liveByAlias(target) || target in conns.reconnecting) {
-          onHostActivate(target);
+        const existing = candidates.find(
+          (a) => conns.liveByAlias(a) || a in conns.reconnecting,
+        );
+        if (existing) {
+          onHostActivate(existing);
           return;
         }
         pendingNav.current = null;
-        connectToAlias(target, { pane });
+        if (saved) onSavedActivate(saved);
+        else connectToAlias(target, { pane });
       }
     },
-    [navigateTo, onHostActivate, connectToAlias],
+    [navigateTo, onHostActivate, onSavedActivate, connectToAlias],
   );
 
   // 팔레트/동적 커맨드용 — 활성 패널 기준 래퍼.
