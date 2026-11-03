@@ -15,6 +15,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ save: vi.fn() }));
 vi.mock("@/types/bindings", () => ({
   commands: {
     fsCompareDirs: vi.fn(),
+    fsCompareVerify: vi.fn(),
     settingsGet: vi.fn().mockResolvedValue({ status: "error", error: {} }),
     settingsSet: vi.fn().mockResolvedValue({ status: "ok", data: null }),
   },
@@ -67,5 +68,55 @@ describe("CompareDialog 다시 비교", () => {
       await Promise.resolve();
     });
     expect(applyBtn().disabled).toBe(true);
+  });
+
+  it("검증하는 사이 다시 비교했으면 늦게 온 검증이 옛 목록을 되살리지 않는다", async () => {
+    const two = (): ComparePlan => ({
+      ...plan("same"),
+      entries: [
+        { ...entry("same"), rel: "old.txt" },
+        { ...entry("newer_left"), rel: "excluded.txt" },
+      ],
+    });
+    type VerifyResult = Awaited<ReturnType<typeof commands.fsCompareVerify>>;
+    let resolveVerify: (v: VerifyResult) => void = () => {};
+    vi.mocked(commands.fsCompareVerify).mockReturnValue(
+      new Promise<VerifyResult>((r) => {
+        resolveVerify = r;
+      }),
+    );
+    vi.mocked(commands.fsCompareDirs).mockResolvedValue({
+      status: "ok",
+      data: {
+        ...plan("same"),
+        entries: [{ ...entry("same"), rel: "new.txt" }],
+      },
+    });
+    const onApply = vi.fn();
+    render(
+      <CompareDialog
+        plan={two()}
+        onClose={() => {}}
+        onMerge={() => {}}
+        onApply={onApply}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Verify/ }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Re-compare/ }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      resolveVerify({
+        status: "ok",
+        data: [{ rel: "old.txt", equal: false }],
+      } as VerifyResult);
+      await Promise.resolve();
+    });
+    expect(screen.queryByText(/excluded\.txt/)).toBeNull();
+    expect(
+      (screen.getByRole("button", { name: /^Apply/ }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
   });
 });

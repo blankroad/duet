@@ -142,6 +142,7 @@
       "unverifiable": ", unverifiable {{count}}",
       "verifyFailed": "Verify failed: {{err}}",
       "recompareFailed": "Re-compare failed: {{err}}",
+      "verifyStale": "The list changed (re-compared) during verification — results were discarded. Verify again.",
       "exported": "Exported: {{dest}}",
       "exportFailed": "Export failed: {{err}}",
       "verifyTitle": "Re-verify 'Same' items by hash/bytes (catch false Same). Same-host uses host-side sha256 (no PC download).",

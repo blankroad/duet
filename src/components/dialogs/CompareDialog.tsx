@@ -60,8 +60,16 @@ export function CompareDialog({
   const [decisions, setDecisions] = useState<Record<string, ApplyDirection>>(
     {},
   );
+  // 최신 plan 과 그 세대 — 다시 비교가 시작되면 세대가 바뀌어, 그 전에 나간 검증·
+  // 다시 비교 응답은 버린다(늦게 온 검증이 새 결과를 옛 목록으로 되돌리던 문제).
+  const planRef = useRef(plan);
+  planRef.current = plan;
+  const genRef = useRef(0);
   const replacePlan = (next: ComparePlan) => {
-    const before = new Map(plan.entries.map((e) => [e.rel, e.status]));
+    const before = new Map(
+      planRef.current.entries.map((e) => [e.rel, e.status]),
+    );
+    planRef.current = next;
     setDecisions((prev) => {
       const kept: Record<string, ApplyDirection> = {};
       for (const e of next.entries) {
@@ -74,6 +82,7 @@ export function CompareDialog({
   };
 
   const onRecompare = async (rules: CompareRules) => {
+    const gen = ++genRef.current;
     setRecomparing(true);
     const r = await commands.fsCompareDirs(
       plan.left,
@@ -81,6 +90,7 @@ export function CompareDialog({
       rules,
       detectRenames,
     );
+    if (gen !== genRef.current) return; // 더 새 다시 비교가 이어받음
     if (r.status === "ok") {
       replacePlan(r.data);
       setVerifyNote(null);
@@ -104,16 +114,24 @@ export function CompareDialog({
     if (sameRels.length === 0) return;
     setVerifying(true);
     setVerifyNote(null);
+    const gen = genRef.current;
     const r = await commands.fsCompareVerify(plan.left, plan.right, sameRels);
+    if (gen !== genRef.current) {
+      // 검증하는 사이 다시 비교로 목록이 바뀌었다 — 옛 목록 기준 결과라 버린다.
+      setVerifyNote(t("dialog.compare.verifyStale"));
+      setVerifying(false);
+      return;
+    }
     if (r.status === "ok") {
       const differ = new Set(
         r.data.filter((v) => v.equal === false).map((v) => v.rel),
       );
       const unver = r.data.filter((v) => v.equal === null).length;
       if (differ.size > 0) {
+        const cur = planRef.current;
         replacePlan({
-          ...plan,
-          entries: plan.entries.map((e) =>
+          ...cur,
+          entries: cur.entries.map((e) =>
             differ.has(e.rel) && e.status === "same"
               ? { ...e, status: "differ" as const }
               : e,
