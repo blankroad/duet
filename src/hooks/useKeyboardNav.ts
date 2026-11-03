@@ -153,6 +153,10 @@ export function useKeyboardNav(
       }
       // 우클릭 메뉴가 열려 있으면 메뉴가 키(↑↓/Enter/Esc)를 처리 — 뒤 파일 목록은 안 건드림.
       if (useContextMenu.getState().open) return;
+      // 키맵/커맨드에 매인 키는 커맨드 몫(useGlobalShortcuts) — 여기서 같이 처리하면 두 번
+      // 일어난다. 예: Ctrl+↑(새 탭에서 열기)가 커서를 먼저 한 칸 올려 엉뚱한 폴더를 열었고,
+      // Space 를 다른 커맨드에 매도 Quick Look 이 함께 열렸다.
+      if (boundToCommand(e)) return;
 
       const state = usePanes.getState();
       const id = state.activePane;
@@ -259,8 +263,7 @@ export function useKeyboardNav(
         e.key !== " " &&
         !e.ctrlKey &&
         !e.metaKey &&
-        !e.altKey &&
-        !boundToCommand(e)
+        !e.altKey
       ) {
         e.preventDefault();
         typeaheadJump(id, e.key);
