@@ -1,4 +1,11 @@
-import { usePanes, type PaneId, type RestoredLayout } from "./panes";
+import {
+  usePanes,
+  defaultOrderFor,
+  type PaneId,
+  type RestoredLayout,
+  type SortKey,
+  type ViewMode,
+} from "./panes";
 import { useConnections } from "./connections";
 import { aliasFromConnectionId } from "@/lib/hostAlias";
 
@@ -61,15 +68,64 @@ function saveSession(): void {
   }
 }
 
-/** 부팅 시 저장된 레이아웃 로드 (없거나 손상 시 null). */
+const SORT_KEYS: readonly SortKey[] = ["name", "size", "mtime", "kind", "ext"];
+const VIEW_MODES: readonly ViewMode[] = ["details", "grid", "tiles"];
+
+type SlimTab = RestoredLayout["panes"][PaneId]["tabs"][number];
+
+const isObj = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null;
+
+/** 저장된 탭 하나를 검증·정규화. 경로가 없으면 버린다(null). */
+function parseTab(v: unknown): SlimTab | null {
+  if (!isObj(v) || typeof v.path !== "string" || v.path === "") return null;
+  const sortKey = SORT_KEYS.find((k) => k === v.sortKey) ?? "mtime";
+  return {
+    path: v.path,
+    ...(typeof v.host === "string" && v.host !== "" ? { host: v.host } : {}),
+    sortKey,
+    sortOrder:
+      v.sortOrder === "asc" || v.sortOrder === "desc"
+        ? v.sortOrder
+        : defaultOrderFor(sortKey),
+    showHidden: v.showHidden === true,
+    viewMode: VIEW_MODES.find((m) => m === v.viewMode) ?? "details",
+    ...(v.pinned === true ? { pinned: true } : {}),
+  };
+}
+
+function parsePane(v: unknown): RestoredLayout["panes"][PaneId] | null {
+  if (!isObj(v) || !Array.isArray(v.tabs)) return null;
+  const tabs = v.tabs.map(parseTab).filter((t): t is SlimTab => t !== null);
+  const idx = v.activeTabIndex;
+  return {
+    tabs,
+    activeTabIndex: typeof idx === "number" && Number.isInteger(idx) ? idx : 0,
+  };
+}
+
+/**
+ * 부팅 시 저장된 레이아웃 로드 (없거나 손상 시 null).
+ *
+ * 저장 데이터는 신뢰하지 않는다 — 손으로 고쳤거나 구버전/다른 버전이 쓴 값일 수
+ * 있다. 예전엔 패널 존재만 보고 통과시켜 `tabs` 가 배열이 아니면 복원이 throw 해
+ * 부팅이 중간에 멈췄고(세션 저장도 시작되지 않아 손상 데이터가 영원히 남음),
+ * 활성 인덱스가 빠지면 NaN 이 됐다. 탭 단위로 검증해 잘못된 탭만 버린다.
+ */
 export function loadSession(): RestoredLayout | null {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return null;
-    const v = JSON.parse(raw) as RestoredLayout;
-    // 최소 형태 검증 — 손상 시 무시하고 기본 부팅.
-    if (!v || !v.panes || !v.panes.left || !v.panes.right) return null;
-    return v;
+    const v: unknown = JSON.parse(raw);
+    if (!isObj(v) || !isObj(v.panes)) return null;
+    const left = parsePane(v.panes.left);
+    const right = parsePane(v.panes.right);
+    if (!left || !right) return null;
+    if (left.tabs.length === 0 && right.tabs.length === 0) return null;
+    return {
+      activePane: v.activePane === "right" ? "right" : "left",
+      panes: { left, right },
+    };
   } catch {
     return null;
   }

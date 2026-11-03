@@ -262,3 +262,53 @@ describe("session — 아카이브 탭", () => {
     expect(saved[0]!.pinned).toBe(true);
   });
 });
+
+describe("session — 손상 데이터", () => {
+  beforeEach(() => mem.clear());
+  const put = (v: unknown) =>
+    localStorage.setItem("duet.session.v1", JSON.stringify(v));
+
+  it("tabs 가 배열이 아니면 null (부팅이 throw 하지 않게)", () => {
+    put({ activePane: "left", panes: { left: {}, right: {} } });
+    expect(loadSession()).toBeNull();
+  });
+
+  it("잘못된 탭만 버리고 필드는 기본값으로 정규화한다", () => {
+    put({
+      activePane: "sideways",
+      panes: {
+        left: {
+          tabs: [
+            { path: "/ok", sortKey: "bogus", viewMode: 3, pinned: "yes" },
+            { nope: 1 },
+            null,
+          ],
+        },
+        right: { activeTabIndex: 0, tabs: [] },
+      },
+    });
+    const v = loadSession();
+    expect(v?.activePane).toBe("left");
+    expect(v?.panes.left.activeTabIndex).toBe(0);
+    expect(v?.panes.left.tabs).toEqual([
+      {
+        path: "/ok",
+        sortKey: "mtime",
+        sortOrder: "desc",
+        showHidden: false,
+        viewMode: "details",
+      },
+    ]);
+  });
+
+  it("핀 필드는 true 일 때만 살린다", () => {
+    put({
+      activePane: "left",
+      panes: {
+        left: { activeTabIndex: 0, tabs: [{ path: "/a", pinned: true }] },
+        right: { activeTabIndex: 0, tabs: [] },
+      },
+    });
+    expect(loadSession()?.panes.left.tabs[0]?.pinned).toBe(true);
+  });
+});
