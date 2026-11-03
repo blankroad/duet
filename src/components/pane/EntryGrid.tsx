@@ -72,6 +72,7 @@ export function EntryGrid({
   const renameTarget = useUI((s) => s.renameTarget);
   // 썸네일 URL 빌드용 — 현재 패널 폴더 location.
   const location = usePanes((s) => activeTab(s, id).location);
+  const tabId = usePanes((s) => activeTab(s, id).id);
   const paneActive = usePanes((s) => s.activePane === id);
   // "크기 계산" 결과 — 타일 메타의 폴더 크기 표시.
   const dirSizes = usePanes((s) => activeTab(s, id).dirSizes);
@@ -125,6 +126,19 @@ export function EntryGrid({
       });
     }
   }, [cursorIndex, cols, virtualizer]);
+
+  // 다른 폴더·탭으로 바뀌면 맨 위에서 시작해 커서로 (EntryList 와 같은 이유).
+  const viewKey = `${tabId}|${location.path}`;
+  useEffect(() => {
+    const el = parentRef.current;
+    if (!el) return;
+    el.scrollTop = 0;
+    if (cursorIndex >= 0)
+      virtualizer.scrollToIndex(Math.floor(cursorIndex / cols), {
+        align: "auto",
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewKey]);
 
   const { marquee, onContainerMouseDown } = useMarquee({
     id,

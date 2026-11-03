@@ -77,6 +77,7 @@ export function EntryList({
   const rowHeight = densityMetrics(useUI((s) => s.density)).row;
   // OS 아이콘(EntryIcon localPath)용 — 현재 패널 폴더 location. 원격이면 null 전달.
   const location = usePanes((s) => activeTab(s, id).location);
+  const tabId = usePanes((s) => activeTab(s, id).id);
   const paneActive = usePanes((s) => s.activePane === id);
   // "크기 계산" 결과(name → bytes) — 폴더 행의 크기 컬럼 표시.
   const dirSizes = usePanes((s) => activeTab(s, id).dirSizes);
@@ -115,6 +116,19 @@ export function EntryList({
       virtualizer.scrollToIndex(cursorIndex, { align: "auto" });
     }
   }, [cursorIndex, virtualizer]);
+
+  // 다른 폴더·탭으로 바뀌면 맨 위에서 시작해 커서로 — 커서 인덱스가 같으면(보통 0)
+  // 위 effect 가 안 돌아, 새 폴더가 이전 폴더의 스크롤 위치(중간)부터 보였다.
+  const viewKey = `${tabId}|${location.path}`;
+  useEffect(() => {
+    const el = parentRef.current;
+    if (!el) return;
+    el.scrollTop = 0;
+    if (cursorIndex >= 0)
+      virtualizer.scrollToIndex(cursorIndex, { align: "auto" });
+    // 폴더·탭이 바뀔 때만 — 커서 이동은 위 effect 담당.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewKey]);
 
   // 이 패널의 빈 영역 위로 드래그 중 (폴더 위가 아닐 때) — 패널 하이라이트
   const paneHighlight = dragActive && overThisPane && overFolder === null;
