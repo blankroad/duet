@@ -7,7 +7,8 @@ import {
   act,
 } from "@testing-library/react";
 import { ContextMenu } from "./ContextMenu";
-import { useContextMenu } from "@/stores/contextMenu";
+import { useContextMenu, type MenuEntry } from "@/stores/contextMenu";
+import "@/i18n";
 
 describe("ContextMenu", () => {
   beforeEach(() => {
@@ -101,5 +102,104 @@ describe("ContextMenu", () => {
     });
     expect(load).toHaveBeenCalledTimes(1);
     expect(await screen.findByText("Lazy 1")).toBeTruthy();
+  });
+
+  it("drops a late lazy submenu reply from a menu that was closed and reopened", async () => {
+    let resolveA!: (v: MenuEntry[]) => void;
+    const loadA = vi.fn(
+      () =>
+        new Promise<MenuEntry[]>((r) => {
+          resolveA = r;
+        }),
+    );
+    const loadB = vi
+      .fn()
+      .mockResolvedValue([{ id: "b1", label: "B action", onSelect: vi.fn() }]);
+    render(<ContextMenu />);
+    act(() => {
+      useContextMenu
+        .getState()
+        .openAt(10, 10, [{ id: "more", label: "More", loadChildren: loadA }]);
+    });
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "ArrowRight" });
+    });
+    act(() => useContextMenu.getState().close());
+    act(() => {
+      useContextMenu
+        .getState()
+        .openAt(10, 10, [{ id: "more", label: "More", loadChildren: loadB }]);
+    });
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "ArrowRight" });
+    });
+    expect(await screen.findByText("B action")).toBeTruthy();
+    await act(async () => {
+      resolveA([{ id: "a1", label: "A action", onSelect: vi.fn() }]);
+    });
+    expect(screen.queryByText("A action")).toBeNull();
+    expect(screen.getByText("B action")).toBeTruthy();
+  });
+
+  it("limits the root menu to the viewport and owns focus while open", () => {
+    const before = document.createElement("button");
+    document.body.appendChild(before);
+    before.focus();
+    render(<ContextMenu />);
+    act(() => {
+      useContextMenu
+        .getState()
+        .openAt(10, 10, [{ id: "x", label: "X", onSelect: vi.fn() }]);
+    });
+    const menu = screen.getByRole("menu");
+    expect(menu.style.overflowY).toBe("auto");
+    expect(menu.style.maxHeight).toContain("100vh");
+    expect(document.activeElement).toBe(menu);
+    const tab = new KeyboardEvent("keydown", { key: "Tab", cancelable: true });
+    window.dispatchEvent(tab);
+    expect(tab.defaultPrevented).toBe(true);
+    act(() => useContextMenu.getState().close());
+    expect(document.activeElement).toBe(before);
+    before.remove();
+  });
+
+  it("wraps with arrows, jumps with Home/End, and Esc closes one submenu level", () => {
+    const a = vi.fn();
+    const c = vi.fn();
+    render(<ContextMenu />);
+    act(() => {
+      useContextMenu.getState().openAt(10, 10, [
+        { id: "a", label: "A", onSelect: a },
+        {
+          id: "b",
+          label: "B",
+          children: [{ id: "b1", label: "B1", onSelect: vi.fn() }],
+        },
+        { id: "c", label: "C", onSelect: c },
+      ]);
+    });
+    fireEvent.keyDown(window, { key: "ArrowUp" }); // A → C (순환)
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(c).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      useContextMenu.getState().openAt(10, 10, [
+        { id: "a", label: "A", onSelect: a },
+        {
+          id: "b",
+          label: "B",
+          children: [{ id: "b1", label: "B1", onSelect: vi.fn() }],
+        },
+      ]);
+    });
+    fireEvent.keyDown(window, { key: "End" });
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    expect(screen.getByText("B1")).toBeTruthy();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByText("B1")).toBeNull();
+    expect(useContextMenu.getState().open).toBe(true);
+    fireEvent.keyDown(window, { key: "Home" });
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(a).toHaveBeenCalledTimes(1);
   });
 });

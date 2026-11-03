@@ -454,6 +454,8 @@
     "copy": "Copy",
     "cut": "Cut",
     "pasteIntoFolder": "Paste into folder",
+    "submenuLoading": "Loading…",
+    "submenuEmpty": "(none)",
     "copyToOtherPane": "Copy to other pane",
     "moveToOtherPane": "Move to other pane",
     "addToShelf": "Add to shelf",

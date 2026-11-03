@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import clsx from "clsx";
+import { useTranslation } from "react-i18next";
 import { displayKey } from "@/lib/keyDisplay";
 import { useKeymap, effectiveKey } from "@/stores/keymap";
 import { useCommands } from "@/stores/commands";
@@ -48,10 +49,10 @@ const FLYOUT_MARGIN = 4;
  * 서브메뉴 플라이아웃 — 부모 항목 옆(좌/우)으로 펼치되, 뷰포트 밖으로 넘치면 그만큼 안으로
  * 끌어당겨(clamp) 항상 보이게. 화면보다 긴 메뉴(셸 More Actions 등)는 스크롤.
  *
- * 보정은 **양축·자기치유**: 매 렌더마다 현재 transform 을 제거한 '자연 위치'에서 다시
- * 계산해 위/아래/좌/우 어디로 넘쳐도 화면 안으로 되돌린다. (과거엔 아래 넘침만 위로
- * 올렸고 되돌림이 없어, 순간적으로 잘못 측정된 rect 하나에 flyout 이 화면 구석에 박혀
- * 고정되는 버그가 있었다 — loadChildren 이 캐시로 즉시 resolve 되며 드러남.)
+ * `position: fixed` 로 부모 행의 화면 좌표에서 매 렌더 다시 계산한다(자기치유). 루트 메뉴가
+ * 화면보다 길어 스크롤 컨테이너가 되면 absolute 자식은 잘리므로 fixed 로 띄운다.
+ * (과거 transform 누적 방식은 순간적으로 잘못 측정된 rect 하나에 flyout 이 화면 구석에
+ * 박혀 고정되는 버그가 있었다 — 매번 앵커에서 새로 계산해 그 문제를 피한다.)
  */
 function Flyout({
   flipLeft,
@@ -61,35 +62,38 @@ function Flyout({
   children: React.ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [t, setT] = useState({ x: 0, y: 0 });
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   useLayoutEffect(() => {
     const el = ref.current;
-    if (!el) return;
-    // 자연 위치(부모 옆 기본) 측정을 위해 transform 초기화 후 rect 측정 → 누적/편류 방지.
-    // (t 를 빼서 역산하지 않는다: 실측값이 transform 을 반영하지 않는 환경에서도 안전.)
-    el.style.transform = "translate(0px, 0px)";
+    const anchor = el?.parentElement;
+    if (!el || !anchor) return;
+    const a = anchor.getBoundingClientRect();
     const r = el.getBoundingClientRect();
     const m = FLYOUT_MARGIN;
-    // 세로: 아래로 넘치면 올리고, 그래도 위로 넘치면 위를 우선(top 은 항상 ≥ m → 화면 안).
-    let dy = 0;
-    if (r.bottom > window.innerHeight - m)
-      dy = window.innerHeight - m - r.bottom;
-    if (r.top + dy < m) dy = m - r.top;
-    // 가로: 부모 옆 기본 위치가 화면 밖이면 안으로(구석행 방지). left 는 항상 ≥ m.
-    let dx = 0;
-    if (r.right > window.innerWidth - m) dx = window.innerWidth - m - r.right;
-    if (r.left + dx < m) dx = m - r.left;
-    // 페인트 전 즉시 적용(깜빡임 없음) + React 상태 동기화(다음 렌더 style 일치).
-    el.style.transform = `translate(${dx}px, ${dy}px)`;
-    setT((prev) => (prev.x === dx && prev.y === dy ? prev : { x: dx, y: dy }));
-  }, [children]);
+    // 세로: 부모 행 높이에서 시작, 아래로 넘치면 올리되 top 은 항상 ≥ m.
+    let top = a.top;
+    if (top + r.height > window.innerHeight - m)
+      top = window.innerHeight - m - r.height;
+    if (top < m) top = m;
+    // 가로: 부모 옆(오른쪽 기본, 공간 없으면 왼쪽). 화면 밖이면 안으로, left ≥ m.
+    let left = flipLeft ? a.left - r.width : a.right;
+    if (left + r.width > window.innerWidth - m)
+      left = window.innerWidth - m - r.width;
+    if (left < m) left = m;
+    setPos((prev) =>
+      prev && prev.left === left && prev.top === top ? prev : { left, top },
+    );
+  }, [children, flipLeft]);
   return (
     <div
       ref={ref}
-      className={clsx("absolute", flipLeft ? "right-full" : "left-full")}
       style={{
-        top: 0,
-        transform: `translate(${t.x}px, ${t.y}px)`,
+        position: "fixed",
+        left: pos?.left ?? 0,
+        top: pos?.top ?? 0,
+        // 첫 측정 전엔 숨겨 둔다(엉뚱한 자리 깜빡임 방지).
+        visibility: pos ? "visible" : "hidden",
+        zIndex: 62,
         maxHeight: "calc(100vh - 8px)",
         overflowY: "auto",
       }}
@@ -100,20 +104,38 @@ function Flyout({
 }
 
 export function ContextMenu() {
-  const { open, x, y, items, close } = useContextMenu();
+  const { open, x, y, items, seq, close } = useContextMenu();
   const panelRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ x, y });
   const [path, setPath] = useState<string[]>([]);
   const [cursor, setCursor] = useState<number[]>([0]);
   const [loaded, setLoaded] = useState<Loaded>({});
 
+  // 메뉴를 새로 열 때마다(seq) 펼친 경로·커서·지연 캐시를 초기화 — 같은 자리에서
+  // 다른 항목 메뉴를 다시 열어도 이전 메뉴 상태가 남지 않게.
   useEffect(() => {
     if (open) {
       setPath([]);
       setCursor([0]);
       setLoaded({});
     }
-  }, [open, x, y]);
+  }, [open, seq]);
+
+  // 포커스: 열면 메뉴가 받고(뒤 화면으로 Tab 이 새지 않게), 닫히면 열기 전 자리로 돌려준다.
+  // 닫으면서 다른 곳(이름 바꾸기 입력·다이얼로그)이 포커스를 가져갔으면 건드리지 않는다.
+  useEffect(() => {
+    if (!open) return;
+    const prev =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    panelRef.current?.focus({ preventScroll: true });
+    return () => {
+      const now = document.activeElement;
+      if (prev && prev.isConnected && (now === null || now === document.body))
+        prev.focus({ preventScroll: true });
+    };
+  }, [open, seq]);
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -162,12 +184,25 @@ export function ContextMenu() {
     });
     if (item.loadChildren && loaded[item.id] === undefined) {
       setLoaded((m) => ({ ...m, [item.id]: "loading" }));
+      // 응답이 늦게 오는 사이 메뉴를 닫고 다른 항목에서 다시 열었으면(같은 id 의
+      // "More options" 등) 이전 항목의 결과를 버린다 — 다른 파일의 셸 메뉴가 끼어들지 않게.
+      const mine = seq;
+      const current = () => {
+        const st = useContextMenu.getState();
+        return st.open && st.seq === mine;
+      };
       void item
         .loadChildren()
-        .then((kids) =>
-          setLoaded((m) => ({ ...m, [item.id]: kids.length ? kids : "empty" })),
-        )
-        .catch(() => setLoaded((m) => ({ ...m, [item.id]: "empty" })));
+        .then((kids) => {
+          if (current())
+            setLoaded((m) => ({
+              ...m,
+              [item.id]: kids.length ? kids : "empty",
+            }));
+        })
+        .catch(() => {
+          if (current()) setLoaded((m) => ({ ...m, [item.id]: "empty" }));
+        });
     }
   };
 
@@ -187,12 +222,20 @@ export function ContextMenu() {
       const level = path.length;
       const list = selectable(levels[level] ?? []);
       const cur = cursor[level] ?? 0;
+      // ↑↓ 는 끝에서 반대쪽으로 순환, Home/End 는 처음·끝 (OS 메뉴 관례).
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        setCursorAt(level, Math.min(list.length - 1, cur + 1));
+        if (list.length > 0) setCursorAt(level, (cur + 1) % list.length);
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
-        setCursorAt(level, Math.max(0, cur - 1));
+        if (list.length > 0)
+          setCursorAt(level, (cur - 1 + list.length) % list.length);
+      } else if (e.key === "Home") {
+        e.preventDefault();
+        setCursorAt(level, 0);
+      } else if (e.key === "End") {
+        e.preventDefault();
+        setCursorAt(level, Math.max(0, list.length - 1));
       } else if (e.key === "ArrowRight") {
         const item = list[cur];
         if (item && hasSubmenu(item)) {
@@ -210,7 +253,12 @@ export function ContextMenu() {
         if (item) run(level, item);
       } else if (e.key === "Escape") {
         e.preventDefault();
-        close();
+        // 서브메뉴가 펼쳐져 있으면 한 단계만 접는다. 루트에서 누르면 닫기.
+        if (level > 0) setPath((p) => p.slice(0, -1));
+        else close();
+      } else if (e.key === "Tab") {
+        // 메뉴가 열려 있는 동안 Tab 으로 뒤 화면에 포커스가 가지 않게.
+        e.preventDefault();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -220,7 +268,7 @@ export function ContextMenu() {
       window.removeEventListener("blur", close);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, path, cursor, levels.length]);
+  }, [open, seq, path, cursor, levels.length]);
 
   if (!open) return null;
 
@@ -233,11 +281,25 @@ export function ContextMenu() {
     return (
       <div
         ref={level === 0 ? panelRef : undefined}
-        className="min-w-44 rounded-panel border border-border bg-base py-1 shadow-panel"
+        role="menu"
+        tabIndex={-1}
+        className="min-w-44 rounded-panel border border-border bg-base py-1 shadow-panel focus:outline-none"
         style={
           level === 0
-            ? { position: "fixed", left: pos.x, top: pos.y, zIndex: 61 }
+            ? {
+                position: "fixed",
+                left: pos.x,
+                top: pos.y,
+                zIndex: 61,
+                // 창보다 긴 메뉴(낮은 창·항목 많은 폴더 메뉴)는 안에서 스크롤.
+                maxHeight: "calc(100vh - 8px)",
+                overflowY: "auto",
+              }
             : undefined
+        }
+        onScroll={
+          // 루트를 스크롤하면 펼쳐 둔 서브메뉴는 부모 행과 어긋나므로 접는다.
+          level === 0 ? () => setPath([]) : undefined
         }
         onContextMenu={(e) => e.preventDefault()}
       >
@@ -293,10 +355,13 @@ export function ContextMenu() {
 }
 
 function StatusPanel({ status }: { status: "loading" | "empty" }) {
+  const { t } = useTranslation();
   return (
     <div className="min-w-32 rounded-panel border border-border bg-base py-1 shadow-panel">
       <div className="px-3 py-1 text-meta text-fg-muted">
-        {status === "loading" ? "Loading…" : "(none)"}
+        {status === "loading"
+          ? t("menu.submenuLoading")
+          : t("menu.submenuEmpty")}
       </div>
     </div>
   );
@@ -334,10 +399,19 @@ function Row({
 }) {
   const hasKids =
     (!!item.children && item.children.length > 0) || !!item.loadChildren;
+  const btnRef = useRef<HTMLButtonElement>(null);
+  // 키보드로 화면 밖 항목에 가면 스크롤해 보이게(긴 메뉴).
+  useEffect(() => {
+    if (active) btnRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [active]);
   return (
     <div className="relative px-1" onMouseEnter={onMouseEnter}>
       <button
+        ref={btnRef}
         type="button"
+        role="menuitem"
+        tabIndex={-1}
+        aria-haspopup={hasKids ? "menu" : undefined}
         disabled={item.disabled}
         onClick={onClick}
         className={clsx(

@@ -451,6 +451,8 @@
     "copy": "복사",
     "cut": "잘라내기",
     "pasteIntoFolder": "폴더에 붙여넣기",
+    "submenuLoading": "불러오는 중…",
+    "submenuEmpty": "(항목 없음)",
     "copyToOtherPane": "반대 패널로 복사",
     "moveToOtherPane": "반대 패널로 이동",
     "addToShelf": "선반에 담기",
