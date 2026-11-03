@@ -126,3 +126,25 @@ describe("panes — 새 탭 위치", () => {
     expect(activeIdx()).toBe(4);
   });
 });
+
+describe("panes — 같은 경로, 다른 소스", () => {
+  beforeEach(seedFour);
+
+  it("로컬 /a 에서 원격 /a 로 가면 이동으로 보고 히스토리에 쌓는다", () => {
+    usePanes.getState().selectTab("left", 0);
+    const remote: Location = {
+      source: {
+        kind: "ssh",
+        connection_id: "prod:u1",
+        host_ip: "10.0.0.1",
+        user: "me",
+      },
+      path: "/a",
+    };
+    usePanes.getState().setEntries("left", remote, []);
+    const t = usePanes.getState().panes.left.tabs[0]!;
+    expect(t.location.source.kind).toBe("ssh");
+    expect(t.history.stack.length).toBe(2);
+    expect(t.history.index).toBe(1);
+  });
+});

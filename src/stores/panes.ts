@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { Entry, Location } from "@/types/bindings";
-import { normalizePath } from "@/lib/entryDnd";
+import { normalizePath, sameLocation } from "@/lib/entryDnd";
 import { patternToMatcher } from "@/lib/glob";
 
 export type PaneId = "left" | "right";
@@ -327,7 +327,9 @@ export const usePanes = create<PanesState>((set, get) => ({
           : p.tabs.findIndex((t) => t.id === opts.tabId);
       const cur = p.tabs[targetIndex];
       if (!cur) return s;
-      const navigated = cur.location.path !== loc.path;
+      // 경로뿐 아니라 소스(로컬/어느 연결)까지 같아야 "같은 폴더 새로고침" — 로컬
+      // /var/log 에서 원격 /var/log 로 가면 이동이다(히스토리·선택·필터 초기화).
+      const navigated = !sameLocation(cur.location, loc);
       const pushHistory = opts?.pushHistory ?? true;
       let history = cur.history;
       if (navigated && pushHistory) {
