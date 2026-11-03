@@ -1768,15 +1768,19 @@ function App() {
       // 후에도 쓰인다 — 안 읽으면 store 가 exists=false 로 남아 "Unlock vault" 가
       // 아예 안 보이고, 백엔드는 비번 없이 키/agent 만 시도해 AuthFailed 로 끝났다.
       void useVault.getState().refresh();
-      // 설정 적용 — 테마 + 새 탭 기본값(정렬/뷰/숨김), 기존 탭에도 즉시 반영.
+      // 설정 적용 — 테마 + 새 탭 기본값(정렬/뷰/숨김). 세션 복원이 없었으면 기존 탭에도.
       void commands.settingsGet().then((r) => {
         if (r.status === "ok") {
           applyTheme(r.data.theme ?? "system");
-          applyTabDefaults({
-            sortKey: (r.data.default_sort ?? "mtime") as SortKey,
-            viewMode: (r.data.default_view ?? "details") as ViewMode,
-            showHidden: r.data.show_hidden_default ?? false,
-          });
+          applyTabDefaults(
+            {
+              sortKey: (r.data.default_sort ?? "mtime") as SortKey,
+              viewMode: (r.data.default_view ?? "details") as ViewMode,
+              showHidden: r.data.show_hidden_default ?? false,
+            },
+            // 복원한 탭은 저장된 탭별 정렬·보기를 유지한다 — 새 탭 기본값만 갱신.
+            { existing: !saved },
+          );
           syncAppSettings(r.data);
           useAppSettings
             .getState()

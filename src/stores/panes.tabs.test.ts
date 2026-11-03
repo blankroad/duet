@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { usePanes } from "./panes";
+import { usePanes, applyTabDefaults } from "./panes";
 import { clearClosedTabs } from "./closedTabs";
 import type { Location } from "@/types/bindings";
 
@@ -339,5 +339,35 @@ describe("panes — 닫은 탭 다시 열기", () => {
     usePanes.getState().reopenClosedTab();
     expect(usePanes.getState().activePane).toBe("left");
     expect(paths()[0]).toBe("/a");
+  });
+});
+
+describe("applyTabDefaults", () => {
+  beforeEach(seedFour);
+
+  it("existing:false 면 열린 탭의 정렬·보기를 건드리지 않는다 (세션 복원 직후)", () => {
+    usePanes.getState().setViewMode("left", "grid");
+    applyTabDefaults(
+      { sortKey: "name", viewMode: "details", showHidden: false },
+      { existing: false },
+    );
+    const left = usePanes.getState().panes.left;
+    expect(left.tabs[left.activeTabIndex]!.viewMode).toBe("grid");
+    // 새 탭에는 기본값
+    usePanes.getState().openTab("left");
+    const now = usePanes.getState().panes.left;
+    expect(now.tabs[now.activeTabIndex]!.viewMode).toBe("details");
+    expect(now.tabs[now.activeTabIndex]!.sortKey).toBe("name");
+  });
+
+  it("기본은 열린 탭에도 적용 (설정 화면)", () => {
+    usePanes.getState().setViewMode("left", "grid");
+    applyTabDefaults({
+      sortKey: "mtime",
+      viewMode: "tiles",
+      showHidden: false,
+    });
+    const left = usePanes.getState().panes.left;
+    expect(left.tabs.every((t) => t.viewMode === "tiles")).toBe(true);
   });
 });

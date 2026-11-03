@@ -1106,15 +1106,23 @@ function sortEntries(
 }
 
 /**
- * 설정에서 새 탭 기본값을 주입 + 현재 열린 모든 탭에도 적용 (부팅 시 1회 / 설정 변경 시).
- * 새 탭은 tabDefaults 를 통해, 기존 탭은 즉시 갱신 — "default view" 등이 바로 반영되게.
+ * 설정에서 새 탭 기본값을 주입하고, `existing`(기본 true)이면 지금 열린 모든 탭에도
+ * 적용한다 — 설정 화면에서 "default view" 등을 바꾸면 바로 반영되게.
+ *
+ * 부팅 때 세션을 복원했으면 `existing: false` 로 부른다. 세션은 탭마다 정렬·보기·
+ * 숨김을 저장하는데, 예전엔 부팅 직후 이 함수가 그 값을 전부 기본값으로 덮어써
+ * 재시작할 때마다 탭별 설정이 사라졌다.
  */
-export function applyTabDefaults(d: {
-  sortKey: SortKey;
-  viewMode: ViewMode;
-  showHidden: boolean;
-}): void {
+export function applyTabDefaults(
+  d: {
+    sortKey: SortKey;
+    viewMode: ViewMode;
+    showHidden: boolean;
+  },
+  opts: { existing?: boolean } = {},
+): void {
   tabDefaults = { ...d };
+  if (opts.existing === false) return;
   usePanes.setState((s) => {
     const mapPane = (p: PaneState): PaneState => ({
       ...p,
