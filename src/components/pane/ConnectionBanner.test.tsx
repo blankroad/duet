@@ -5,6 +5,9 @@ import { usePanes } from "@/stores/panes";
 import { useConnections } from "@/stores/connections";
 import type { Location } from "@/types/bindings";
 
+const m = vi.hoisted(() => ({ connectionClose: vi.fn() }));
+vi.mock("@/types/bindings", () => ({ commands: m }));
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
@@ -35,7 +38,7 @@ function setLeftTabs(locs: Location[], active = 0) {
 
 describe("ConnectionBanner alias", () => {
   beforeEach(() => {
-    useConnections.setState({ active: {}, hosts: [] });
+    useConnections.setState({ active: {}, hosts: [], reconnecting: {} });
   });
 
   it("uses the active tab's own host after switching tabs (no stale alias)", () => {
@@ -64,5 +67,33 @@ describe("ConnectionBanner alias", () => {
     render(<ConnectionBanner id="left" onReconnect={onReconnect} />);
     fireEvent.click(screen.getByRole("button", { name: /banner.reconnect/ }));
     expect(onReconnect).toHaveBeenCalledWith("root@1.2.3.4:22", "left");
+  });
+
+  it("offers Stop while the backend is auto-reconnecting", () => {
+    useConnections.setState({
+      reconnecting: {},
+      active: {
+        "a:1": {
+          id: "a:1",
+          alias: "a",
+          host_ip: "10.0.0.1",
+          user: "u",
+          state: { kind: "connecting" },
+        },
+      },
+    });
+    setLeftTabs([ssh("a:1")]);
+    render(<ConnectionBanner id="left" onReconnect={vi.fn()} />);
+    expect(screen.getByText("banner.autoReconnecting")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "banner.stop" }));
+    expect(m.connectionClose).toHaveBeenCalledWith("a:1");
+  });
+
+  it("shows progress without buttons during a banner reconnect", () => {
+    useConnections.setState({ reconnecting: { b: true } });
+    setLeftTabs([ssh("b:restored")]);
+    render(<ConnectionBanner id="left" onReconnect={vi.fn()} />);
+    expect(screen.getByText("banner.reconnecting")).toBeTruthy();
+    expect(screen.queryAllByRole("button")).toHaveLength(0);
   });
 });

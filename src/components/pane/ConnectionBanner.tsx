@@ -7,6 +7,7 @@ import {
   type PaneId,
 } from "@/stores/panes";
 import { useConnections } from "@/stores/connections";
+import { commands } from "@/types/bindings";
 import { useHostNicknames } from "@/stores/hostNicknames";
 import { aliasFromConnectionId } from "@/lib/hostAlias";
 import { aliasLabel } from "@/lib/hostLabel";
@@ -63,9 +64,21 @@ export function ConnectionBanner({
         className="flex h-7 shrink-0 items-center gap-2 border-b border-border bg-subtle px-2 text-meta text-fg-muted"
       >
         <Loader size={12} className="shrink-0 animate-spin" aria-hidden />
-        <span className="min-w-0 truncate" title={text}>
+        <span className="min-w-0 flex-1 truncate" title={text}>
           {text}
         </span>
+        {!reconnecting && (
+          // 백엔드 자동 재연결(최대 ~1분 백오프)을 멈춘다 — 끊김 배너로 바뀌고
+          // 그 자리에서 다시 연결할 수 있다.
+          <button
+            type="button"
+            onClick={() => void commands.connectionClose(connId)}
+            title={t("banner.stopHint")}
+            className="ml-auto flex min-h-6 shrink-0 items-center rounded-panel border border-border bg-base px-2 py-0.5 text-meta text-fg hover:bg-subtle"
+          >
+            {t("banner.stop")}
+          </button>
+        )}
       </div>
     );
   }

@@ -585,7 +585,9 @@
     "autoReconnecting": "Connection dropped — reconnecting to {{label}} automatically…",
     "notConnected": "Not connected",
     "restoredReason": "restored after restart, not connected yet",
-    "closedReason": "connection was closed"
+    "closedReason": "connection was closed",
+    "stop": "Stop",
+    "stopHint": "Stop reconnecting automatically"
   },
   "pane": {
     "emptyFolder": "This folder is empty",

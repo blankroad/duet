@@ -582,7 +582,9 @@
     "autoReconnecting": "연결이 끊겨 {{label}} 에 자동으로 다시 연결하는 중…",
     "notConnected": "연결 안 됨",
     "restoredReason": "앱을 다시 시작해 아직 연결하지 않은 탭",
-    "closedReason": "연결을 닫았습니다"
+    "closedReason": "연결을 닫았습니다",
+    "stop": "중지",
+    "stopHint": "자동 재연결을 멈춥니다"
   },
   "pane": {
     "emptyFolder": "빈 폴더입니다",
