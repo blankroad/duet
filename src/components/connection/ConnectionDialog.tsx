@@ -9,6 +9,7 @@ import { HostKeyPrompt } from "./HostKeyPrompt";
 import { DialogShell } from "@/components/dialogs/DialogShell";
 import { DialogButton } from "@/components/dialogs/DialogButton";
 import { DialogInput } from "@/components/dialogs/DialogInput";
+import { formatErr } from "@/lib/error";
 import { ConnectErrorBox } from "./ConnectErrorBox";
 
 /**
@@ -51,14 +52,23 @@ export function ConnectionDialog({
   const [password, setPassword] = useState("");
   const [phase, setPhase] = useState<DialogPhase>({ kind: "idle" });
   const pwRef = useRef<HTMLInputElement>(null);
+  // 연결 시도 세대 — 연결 중에 닫으면 늦게 온 결과로 패널을 옮기지 않는다.
+  const attempt = useRef(0);
 
   // 다이얼로그가 새 호스트로 다시 열릴 때마다 phase + password 초기화.
   useEffect(() => {
     if (open) {
+      attempt.current += 1;
       setPhase({ kind: "idle" });
       setPassword("");
     }
   }, [open, alias]);
+
+  const close = () => {
+    attempt.current += 1;
+    setPassword("");
+    onClose();
+  };
 
   // trust=true 면 미지의 호스트키를 known_hosts 에 기록(TOFU). replaceChanged=true 면
   // *변경된* 키를 백업 후 교체(사용자가 새 fingerprint 검증 후 prompt 에서 명시 승인).
@@ -66,12 +76,30 @@ export function ConnectionDialog({
     if (!host) return;
     setPhase({ kind: "connecting" });
     const pw = password ? password : null;
-    const result = await commands.connectionOpen(
-      host.alias,
-      pw,
-      trust,
-      replaceChanged,
-    );
+    const mine = ++attempt.current;
+    let result: Awaited<ReturnType<typeof commands.connectionOpen>>;
+    try {
+      result = await commands.connectionOpen(
+        host.alias,
+        pw,
+        trust,
+        replaceChanged,
+      );
+    } catch (e) {
+      // IPC 자체 실패(reject) — 버튼이 "연결 중…" 에 멈추지 않게 오류로 보인다.
+      if (mine !== attempt.current) return;
+      setPassword("");
+      setPhase({
+        kind: "error",
+        error: { kind: "ConnectionFailed", message: formatErr(e) },
+      });
+      return;
+    }
+    if (mine !== attempt.current) {
+      // 사용자가 연결 중에 취소함 — 만들어진 연결은 닫는다(원치 않은 세션 방지).
+      if (result.status === "ok") void commands.connectionClose(result.data.id);
+      return;
+    }
     if (result.status === "ok") {
       setPassword(""); // 성공 — 즉시 clear (CLAUDE.md §5)
       const dto = result.data;
@@ -83,7 +111,7 @@ export function ConnectionDialog({
         state: { kind: "connected" },
       });
       onConnected(target, dto);
-      onClose();
+      close();
       return;
     }
     if (result.error.kind === "HostKeyUnverified") {
@@ -104,12 +132,12 @@ export function ConnectionDialog({
       title={t("dialog.connection.title", { alias })}
       description={t("dialog.connection.desc", { alias })}
       icon={Server}
-      onClose={onClose}
+      onClose={close}
       initialFocus={pwRef}
       footer={
         phase.kind === "host-key" ? undefined : (
           <>
-            <DialogButton hint="esc" onClick={onClose}>
+            <DialogButton hint="esc" onClick={close}>
               {t("common.cancel")}
             </DialogButton>
             <DialogButton
@@ -178,7 +206,7 @@ export function ConnectionDialog({
           info={phase.info}
           onTrust={() => void doConnect(true)}
           onReplace={() => void doConnect(false, true)}
-          onCancel={onClose}
+          onCancel={close}
         />
       )}
     </DialogShell>

@@ -18,6 +18,7 @@ import { DialogShell } from "@/components/dialogs/DialogShell";
 import { DialogButton } from "@/components/dialogs/DialogButton";
 import { DialogInput } from "@/components/dialogs/DialogInput";
 import { ConnectErrorBox } from "./ConnectErrorBox";
+import { formatErr } from "@/lib/error";
 
 /**
  * `~/.ssh/config` 에 없는 host 에 직접 입력으로 연결.
@@ -73,6 +74,8 @@ export function AdHocConnectDialog({
   const vault = useVault();
   /** master unlock 후 자동 실행할 작업 (vault_set 등). */
   const saveAfterUnlock = useRef<(() => Promise<void>) | null>(null);
+  // 연결 시도 세대 — 연결 중에 닫으면 늦게 온 결과로 패널을 옮기지 않는다.
+  const attempt = useRef(0);
 
   // 다이얼로그가 열릴 때 prefill 적용 (한 번만 — open false→true edge).
   useEffect(() => {
@@ -114,6 +117,7 @@ export function AdHocConnectDialog({
   };
 
   const handleClose = () => {
+    attempt.current += 1;
     reset();
     onClose();
   };
@@ -152,16 +156,35 @@ export function AdHocConnectDialog({
       !pw && prefill && hasSavedPassword && vault.unlocked
         ? prefill.alias
         : null;
-    const r = await commands.connectionOpenAdhoc({
-      host: host.trim(),
-      port: portNum,
-      user: user.trim(),
-      keyPath: keyPath.trim() ? keyPath.trim() : null,
-      password: pw,
-      savedPasswordAlias,
-      trustHostKey: trust,
-      replaceChangedHostKey: replaceChanged,
-    });
+    const mine = ++attempt.current;
+    let r: Awaited<ReturnType<typeof commands.connectionOpenAdhoc>>;
+    try {
+      r = await commands.connectionOpenAdhoc({
+        host: host.trim(),
+        port: portNum,
+        user: user.trim(),
+        keyPath: keyPath.trim() ? keyPath.trim() : null,
+        password: pw,
+        savedPasswordAlias,
+        trustHostKey: trust,
+        replaceChangedHostKey: replaceChanged,
+      });
+    } catch (e) {
+      // IPC 자체 실패(reject) — 버튼이 "연결 중…" 에 멈추지 않게 오류로 보인다.
+      if (mine !== attempt.current) return;
+      setPassword("");
+      setPhase({
+        kind: "error",
+        error: { kind: "ConnectionFailed", message: formatErr(e) },
+      });
+      return;
+    }
+    if (mine !== attempt.current) {
+      // 사용자가 연결 중에 취소함 — 만들어진 연결은 닫는다(원치 않은 세션 방지).
+      setPassword("");
+      if (r.status === "ok") void commands.connectionClose(r.data.id);
+      return;
+    }
     if (r.status !== "ok") {
       if (r.error.kind === "HostKeyUnverified") {
         // 호스트키 검증 실패 — password 는 신뢰 재시도 위해 유지(component-local, §5).
