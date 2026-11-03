@@ -140,6 +140,7 @@
       "verified": "{{count}}개 검증 — 실제 다름 {{differ}}개",
       "unverifiable": ", 검증 불가 {{count}}개",
       "verifyFailed": "검증 실패: {{err}}",
+      "recompareFailed": "다시 비교 실패: {{err}}",
       "exported": "내보냄: {{dest}}",
       "exportFailed": "내보내기 실패: {{err}}",
       "verifyTitle": "'Same' 항목을 해시/바이트로 재검증 (잘못된 Same 탐지). 동일 호스트는 호스트측 sha256 사용 (PC 다운로드 없음).",

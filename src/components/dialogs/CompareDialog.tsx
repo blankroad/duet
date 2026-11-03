@@ -20,6 +20,7 @@ import {
 } from "./compareView";
 import { CompareList } from "./CompareList";
 import { basename } from "@/lib/paths";
+import { formatErr } from "@/lib/error";
 import { CompareTree } from "./CompareTree";
 import { CompareRulesBar } from "./CompareRulesBar";
 import { CompareFilterBar } from "./CompareFilterBar";
@@ -53,6 +54,24 @@ export function CompareDialog({
   const [recomparing, setRecomparing] = useState(false);
   // 이동/이름변경 감지(기본 off). 토글 후 Re-compare 로 적용(머지에도 동일 적용).
   const [detectRenames, setDetectRenames] = useState(false);
+  // 행별 적용 방향 — **사용자가 직접 고른 것만** 담는다(없으면 상태별 기본값).
+  // 다시 비교·검증으로 행 상태가 바뀌면 그 행의 선택은 버린다: 예전엔 첫 plan 의
+  // 기본 방향이 남아, 이제 "같음"(기본 필터에서 숨김)이 된 파일까지 덮어썼다.
+  const [decisions, setDecisions] = useState<Record<string, ApplyDirection>>(
+    {},
+  );
+  const replacePlan = (next: ComparePlan) => {
+    const before = new Map(plan.entries.map((e) => [e.rel, e.status]));
+    setDecisions((prev) => {
+      const kept: Record<string, ApplyDirection> = {};
+      for (const e of next.entries) {
+        const d = prev[e.rel];
+        if (d !== undefined && before.get(e.rel) === e.status) kept[e.rel] = d;
+      }
+      return kept;
+    });
+    setPlan(next);
+  };
 
   const onRecompare = async (rules: CompareRules) => {
     setRecomparing(true);
@@ -62,7 +81,14 @@ export function CompareDialog({
       rules,
       detectRenames,
     );
-    if (r.status === "ok") setPlan(r.data);
+    if (r.status === "ok") {
+      replacePlan(r.data);
+      setVerifyNote(null);
+    } else {
+      setVerifyNote(
+        t("dialog.compare.recompareFailed", { err: formatErr(r.error) }),
+      );
+    }
     setRecomparing(false);
   };
 
@@ -85,14 +111,14 @@ export function CompareDialog({
       );
       const unver = r.data.filter((v) => v.equal === null).length;
       if (differ.size > 0) {
-        setPlan((p) => ({
-          ...p,
-          entries: p.entries.map((e) =>
+        replacePlan({
+          ...plan,
+          entries: plan.entries.map((e) =>
             differ.has(e.rel) && e.status === "same"
               ? { ...e, status: "differ" as const }
               : e,
           ),
-        }));
+        });
       }
       setVerifyNote(
         t("dialog.compare.verified", {
@@ -102,7 +128,9 @@ export function CompareDialog({
           (unver > 0 ? t("dialog.compare.unverifiable", { count: unver }) : ""),
       );
     } else {
-      setVerifyNote(t("dialog.compare.verifyFailed", { err: r.error.kind }));
+      setVerifyNote(
+        t("dialog.compare.verifyFailed", { err: formatErr(r.error) }),
+      );
     }
     setVerifying(false);
   };
@@ -122,7 +150,7 @@ export function CompareDialog({
     setVerifyNote(
       r.status === "ok"
         ? t("dialog.compare.exported", { dest })
-        : t("dialog.compare.exportFailed", { err: r.error.kind }),
+        : t("dialog.compare.exportFailed", { err: formatErr(r.error) }),
     );
   };
 
@@ -136,14 +164,6 @@ export function CompareDialog({
   const [showPreview, setShowPreview] = useState(false);
   // 보기 모드 — 평면 목록(키보드 내비) / 디렉토리 트리(접기·롤업).
   const [view, setView] = useState<"list" | "tree">("list");
-  // 행별 적용 방향(rel → dir) — 상태별 기본값으로 초기화.
-  const [decisions, setDecisions] = useState<Record<string, ApplyDirection>>(
-    () => {
-      const d: Record<string, ApplyDirection> = {};
-      for (const e of plan.entries) d[e.rel] = defaultDirection(e.status);
-      return d;
-    },
-  );
   const listRef = useRef<HTMLDivElement>(null);
 
   const dirOf = (rel: string, status: CompareStatus): ApplyDirection =>
