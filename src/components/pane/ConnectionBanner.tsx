@@ -1,9 +1,9 @@
-import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Loader, Unplug, RefreshCw } from "lucide-react";
 import clsx from "clsx";
 import { usePanes, activeTab, type PaneId } from "@/stores/panes";
 import { useConnections } from "@/stores/connections";
+import { aliasFromConnectionId } from "@/lib/hostAlias";
 
 /**
  * SSH 패널 연결 상태 배너 — 끊긴 연결을 사이드바 점 색이 아니라 패널 안에서
@@ -13,7 +13,9 @@ import { useConnections } from "@/stores/connections";
  * - connecting: 스피너 안내
  * - error / 연결 제거됨: danger 배너 + Reconnect 버튼
  *
- * alias 는 연결이 store 에서 제거된 뒤에도 재연결에 필요하므로 ref 로 기억.
+ * alias 는 연결이 store 에서 지워진 뒤에도 connection_id 에서 꺼낼 수 있다
+ * (`<alias>:<uuid>`). 예전엔 패널마다 ref 로 기억해서, 다른 호스트의 탭으로 바꿔도
+ * 앞 탭의 alias 로 재연결하는 버그가 있었다.
  */
 export function ConnectionBanner({
   id,
@@ -27,11 +29,7 @@ export function ConnectionBanner({
   const source = usePanes((s) => activeTab(s, id).location.source);
   const connId = source.kind === "ssh" ? source.connection_id : null;
   const conn = useConnections((s) => (connId ? s.active[connId] : undefined));
-  const lastAlias = useRef<string | null>(null);
-  if (conn) lastAlias.current = conn.alias;
-  // 연결이 store 에 없어도(재시작 복원 탭) connection_id 앞부분이 alias 다 —
-  // 이게 없으면 "다시 연결"이 alias 를 몰라 ad-hoc 다이얼로그로 떨어졌다.
-  const alias = lastAlias.current ?? connId?.split(":")[0] ?? null;
+  const alias = conn?.alias ?? (connId ? aliasFromConnectionId(connId) : null);
 
   if (!connId || source.kind !== "ssh") return null;
   const state = conn?.state ?? { kind: "disconnected" as const };

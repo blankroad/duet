@@ -140,7 +140,11 @@ import { useIndexProgressEvents } from "@/hooks/useIndexProgressEvents";
 import i18n from "@/i18n";
 import { Trans } from "react-i18next";
 import { formatErr } from "@/lib/error";
-import { findSavedHostForAlias, prefillFromAlias } from "@/lib/hostAlias";
+import {
+  aliasFromConnectionId,
+  findSavedHostForAlias,
+  prefillFromAlias,
+} from "@/lib/hostAlias";
 import { platform } from "@tauri-apps/plugin-os";
 import { confirm as tauriConfirm } from "@tauri-apps/plugin-dialog";
 import { commands } from "@/types/bindings";
@@ -194,7 +198,7 @@ function App() {
     if (loc.source.kind !== "ssh") return null;
     const id = loc.source.connection_id;
     return (
-      useConnections.getState().active[id]?.alias ?? id.split(":")[0] ?? null
+      useConnections.getState().active[id]?.alias ?? aliasFromConnectionId(id)
     );
   };
 
