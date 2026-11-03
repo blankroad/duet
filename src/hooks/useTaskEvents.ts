@@ -23,7 +23,7 @@ const PERM_DENIED = /permission denied|os error 5|access is denied/i;
 /**
  * 백엔드 task-event 구독 + 부트스트랩.
  *
- * - 마운트 시 tasks_list 로 현재 큐 snapshot 받아 store init
+ * - 구독을 건 뒤 tasks_list 스냅샷을 받아 store 에 **병합**(이벤트가 우선)
  * - 종결 상태 (completed/cancelled/failed) 는 즉시 store 에서 remove —
  *   TasksBar 가 active 만 표시. history 보존은 후속 (MVP-7).
  *
@@ -32,7 +32,7 @@ const PERM_DENIED = /permission denied|os error 5|access is denied/i;
  * 외부 변경과 동일한 경로로 새로고침한다. (in-app / 외부 변경 새로고침 일원화.)
  */
 export function useTaskEvents() {
-  const setAll = useTasks((s) => s.setAll);
+  const mergeSnapshot = useTasks((s) => s.mergeSnapshot);
   const add = useTasks((s) => s.add);
   const setStatus = useTasks((s) => s.setStatus);
   const setProgress = useTasks((s) => s.setProgress);
@@ -40,17 +40,14 @@ export function useTaskEvents() {
   const remove = useTasks((s) => s.remove);
 
   useEffect(() => {
-    let cancelled = false;
-    commands.tasksList().then((r) => {
-      if (cancelled) return;
-      if (r.status === "ok") setAll(r.data);
-    });
-    return () => {
-      cancelled = true;
+    // 스냅샷과 이벤트의 순서 — 구독을 먼저 걸고 나서 스냅샷을 받는다(그 사이 이벤트를
+    // 놓치지 않게). 스냅샷이 오기 전에 끝난 작업 id 는 기억했다가 병합 때 되살리지 않는다.
+    let disposed = false;
+    let snapshotPending = true;
+    const terminated = new Set<string>();
+    const markDone = (id: string) => {
+      if (snapshotPending) terminated.add(id);
     };
-  }, [setAll]);
-
-  useEffect(() => {
     const unlistenP = events.taskEvent.listen(({ payload }) => {
       const id = payload.task_id;
       switch (payload.change.kind) {
@@ -65,6 +62,7 @@ export function useTaskEvents() {
           setProgress(id, payload.change.progress);
           break;
         case "completed": {
+          markDone(id);
           setStatus(id, {
             kind: "completed",
             journal_id: payload.change.journal_id,
@@ -92,6 +90,7 @@ export function useTaskEvents() {
           break;
         }
         case "cancelled": {
+          markDone(id);
           setStatus(id, { kind: "cancelled" });
           startedAt.delete(id);
           takeElevatable(id);
@@ -108,6 +107,7 @@ export function useTaskEvents() {
           break;
         }
         case "failed": {
+          markDone(id);
           startedAt.delete(id);
           const msg = payload.change.message;
           setError(id, msg);
@@ -146,8 +146,17 @@ export function useTaskEvents() {
         }
       }
     });
+    void unlistenP
+      .then(() => (disposed ? null : commands.tasksList()))
+      .then((r) => {
+        snapshotPending = false;
+        if (disposed || !r || r.status !== "ok") return;
+        mergeSnapshot(r.data, terminated);
+        terminated.clear();
+      });
     return () => {
+      disposed = true;
       unlistenP.then((fn) => fn());
     };
-  }, [add, setStatus, setProgress, setError, remove]);
+  }, [add, setStatus, setProgress, setError, remove, mergeSnapshot]);
 }
