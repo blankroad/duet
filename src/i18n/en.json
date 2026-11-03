@@ -967,6 +967,7 @@
     "info": "Info",
     "close": "Close preview",
     "closeTitle": "Close preview (F11)",
+    "closeTitleKey": "Close preview ({{key}})",
     "selectFile": "Select a file to preview",
     "selectItem": "Select a file or folder",
     "loading": "Loading…",

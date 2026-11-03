@@ -15,6 +15,7 @@ import { childLocation } from "@/lib/entryDnd";
 import { usePreviewWidth } from "@/stores/previewWidth";
 import { beginWidthDrag } from "@/stores/panelWidth";
 import { formatErr } from "@/lib/error";
+import { useKeyHint } from "@/lib/keyHint";
 import { PreviewView, Centered } from "@/components/pane/PreviewView";
 import { PreviewInspector } from "@/components/pane/PreviewInspector";
 
@@ -145,6 +146,7 @@ function PreviewBody({ state }: { state: LoadState }) {
 export function PreviewPane({ below = false }: { below?: boolean }) {
   const { t } = useTranslation();
   const togglePreview = useUI((s) => s.togglePreview);
+  const closeKey = useKeyHint("view.togglePreview");
   const hover = usePreviewHover((s) => s.target);
   const cursorKey = usePanes(cursorPreviewDep);
   // 커서가 움직이면(키보드·클릭) 그게 가장 최근 의도 — 남아 있던 호버를 놓아 미리보기가
@@ -188,7 +190,12 @@ export function PreviewPane({ below = false }: { below?: boolean }) {
         </span>
         <button
           type="button"
-          title={t("preview.closeTitle")}
+          // 현재 키맵의 키로 안내 — "F11" 고정이라 맥 기본키·사용자 키와 달랐다.
+          title={
+            closeKey
+              ? t("preview.closeTitleKey", { key: closeKey })
+              : t("preview.close")
+          }
           aria-label={t("preview.close")}
           onClick={() => togglePreview()}
           className="flex h-6 w-6 shrink-0 items-center justify-center rounded-panel text-fg-muted hover:bg-subtle hover:text-fg"
