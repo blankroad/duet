@@ -54,7 +54,7 @@ export function ConnectionBanner({
     );
   }
 
-  const message = state.kind === "error" ? state.message : "Connection closed";
+  const message = state.kind === "error" ? state.message : t("source.closed");
 
   return (
     <div

@@ -10,8 +10,6 @@ import {
   Star,
   FileArchive,
   Pencil,
-  Monitor,
-  Server,
   BookMarked,
   Folder,
   Plus,
@@ -55,7 +53,8 @@ import {
 } from "@/stores/bookmarks";
 import { folderName } from "@/lib/entryMenu";
 import { pathSegments } from "@/lib/paths";
-import { useHostLabel } from "@/lib/hostLabel";
+import { SourceChip } from "./SourceIndicator";
+import { aliasFromConnectionId } from "@/lib/hostAlias";
 import { bookmarkLocation } from "@/lib/bookmarkActions";
 import { useHostFavorites, removeHostFavorite } from "@/stores/hostFavorites";
 import { useContextMenu, type MenuEntry } from "@/stores/contextMenu";
@@ -114,7 +113,6 @@ export function PathBar({
   const kNewTab = useKeyHint("tab.new");
   const { t } = useTranslation();
   const isLocal = location.source.kind === "local";
-  const sourceTitle = useHostLabel(location.source);
   const winLocal = isLocal && platform() === "windows";
   const crumbs = buildCrumbs(String(location.path), winLocal);
 
@@ -159,7 +157,7 @@ export function PathBar({
   // 채워지지 않고 누를 때마다 즐겨찾기가 하나씩 더 생겼다.
   const hostAlias =
     location.source.kind === "ssh"
-      ? (location.source.connection_id.split(":")[0] ?? "")
+      ? aliasFromConnectionId(location.source.connection_id)
       : null;
   const localBookmarkId = useBookmarks((s) =>
     hostAlias !== null
@@ -206,7 +204,7 @@ export function PathBar({
         : useHostFavorites
             .getState()
             .items.filter(
-              (f) => f.host_alias === (src.connection_id.split(":")[0] ?? ""),
+              (f) => f.host_alias === aliasFromConnectionId(src.connection_id),
             )
             .map((f) => ({ id: f.id, name: f.name, path: String(f.path) }));
 
@@ -269,6 +267,9 @@ export function PathBar({
         </button>
       </div>
       <div className="flex min-w-0 items-center gap-1">
+        {/* 소스 칩 — 원격이면 호스트 이름과 연결 상태. 어느 화면(편집·아카이브·
+            휴지통)에서도 숨기지 않는다: 탭이 1개면 이것이 유일한 원격 단서다. */}
+        <SourceChip source={location.source} />
         {trash ? (
           <div className="ml-2 flex min-w-0 items-center gap-1.5 truncate">
             <Trash2 size={13} className="shrink-0 text-fg-muted" />
@@ -320,19 +321,10 @@ export function PathBar({
             className="ml-2 min-w-0 flex-1 rounded border border-accent bg-subtle px-2 py-0.5 font-mono text-base focus:outline-none"
           />
         ) : (
-          <>
-            <span
-              title={sourceTitle}
-              aria-label={sourceTitle}
-              className="ml-2 flex shrink-0 items-center text-fg-muted"
-            >
-              {isLocal ? <Monitor size={14} /> : <Server size={14} />}
-            </span>
-            <PathBreadcrumbs
-              items={winLocal ? crumbs : [{ label: "/", path: "/" }, ...crumbs]}
-              onNavigate={onSegmentClick}
-            />
-          </>
+          <PathBreadcrumbs
+            items={winLocal ? crumbs : [{ label: "/", path: "/" }, ...crumbs]}
+            onNavigate={onSegmentClick}
+          />
         )}
       </div>
       <div className="path-actions ml-auto flex shrink-0 items-center">
