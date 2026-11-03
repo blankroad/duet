@@ -14,7 +14,6 @@ import {
   Check,
   ChevronDown,
 } from "lucide-react";
-import clsx from "clsx";
 import { useTranslation } from "react-i18next";
 import { useKeyHint } from "@/lib/keyHint";
 import {
@@ -35,6 +34,7 @@ import {
 } from "@/lib/fileActions";
 
 import { isVirtualTrash } from "@/lib/trashView";
+import { ToolButton } from "./ToolButton";
 
 interface PaneToolbarProps {
   id: PaneId;
@@ -223,53 +223,6 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
 
 function Divider() {
   return <div className="mx-1 h-4 w-px shrink-0 bg-border" />;
-}
-
-interface ToolButtonProps {
-  shortLabel?: string;
-  alwaysLabel?: boolean;
-  label: string;
-  active?: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}
-
-function ToolButton({
-  shortLabel,
-  alwaysLabel,
-  label,
-  active,
-  disabled,
-  onClick,
-  children,
-}: ToolButtonProps) {
-  return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      aria-pressed={active}
-      disabled={disabled}
-      onClick={onClick}
-      className={clsx(
-        "flex h-7 min-w-7 shrink-0 items-center justify-center gap-1 rounded-panel px-1.5 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent",
-        "hover:bg-subtle disabled:opacity-30 disabled:hover:bg-transparent",
-        active ? "text-accent" : "text-fg-muted hover:text-fg",
-      )}
-    >
-      {children}
-      {shortLabel && (
-        <span
-          className={
-            alwaysLabel ? "toolbar-create-label" : "toolbar-action-label"
-          }
-        >
-          {shortLabel}
-        </span>
-      )}
-    </button>
-  );
 }
 
 function ViewButton({
