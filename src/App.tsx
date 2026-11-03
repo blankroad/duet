@@ -1731,24 +1731,6 @@ function App() {
     [navigateTo, connectToAlias, showToast],
   );
 
-  const onAliasExecute = useCallback(
-    (alias: UserAlias) => {
-      if (alias.kind.kind === "navigate") {
-        const id = usePanes.getState().activePane;
-        void navigateTo(id, alias.kind.location);
-      } else if (alias.kind.kind === "connect") {
-        const targetAlias = alias.kind.saved_host_alias;
-        const conn = useConnections.getState().liveByAlias(targetAlias);
-        if (!conn) {
-          showToast(i18n.t("toast.connectFirst", { alias: targetAlias }));
-          return;
-        }
-        showToast(i18n.t("toast.hostConnected", { alias: targetAlias }));
-      }
-    },
-    [navigateTo, showToast],
-  );
-
   /** 활성 탭 위치를 북마크 — SSH 면 호스트 즐겨찾기로(재접속 안전), 로컬이면 북마크. */
   const onAddBookmark = useCallback(() => {
     const tab = activeTab(usePanes.getState(), usePanes.getState().activePane);
@@ -1787,6 +1769,30 @@ function App() {
       setDialogAlias(alias);
     },
     [navigateTo, setConnectTarget, showToast],
+  );
+
+  /**
+   * 사용자 별칭 실행. connect 별칭은 실제로 접속한다 — 예전엔 "먼저 연결하세요"/
+   * "연결됨" 토스트만 띄우고 아무것도 하지 않았다. 이미 연결(또는 재연결 중)이면
+   * 사이드바 호스트 더블클릭과 같은 경로, 아니면 저장 호스트 프리필 접속.
+   */
+  const onAliasExecute = useCallback(
+    (alias: UserAlias) => {
+      const pane = usePanes.getState().activePane;
+      if (alias.kind.kind === "navigate") {
+        void navigateTo(pane, alias.kind.location);
+      } else if (alias.kind.kind === "connect") {
+        const target = alias.kind.saved_host_alias;
+        const conns = useConnections.getState();
+        if (conns.liveByAlias(target) || target in conns.reconnecting) {
+          onHostActivate(target);
+          return;
+        }
+        pendingNav.current = null;
+        connectToAlias(target, { pane });
+      }
+    },
+    [navigateTo, onHostActivate, connectToAlias],
   );
 
   // 팔레트/동적 커맨드용 — 활성 패널 기준 래퍼.
