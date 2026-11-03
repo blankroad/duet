@@ -558,4 +558,36 @@ describe("connection smoke: reconnect races", () => {
       expect(connId(all[0]!.location)).toBe("nas:new");
     });
   });
+
+  it("a newer same-tab navigation during the home lookup is not overwritten", async () => {
+    const home = later<unknown>();
+    handlers.connection_open = () => ({
+      id: "nas:new",
+      alias: "nas",
+      host_ip: "10.0.0.2",
+      user: "u",
+    });
+    handlers.ssh_home_directory = () => home.promise;
+    handlers.list_directory = (p) => {
+      if (listedConn(p) === "nas:new" && listedPath(p) === "/srv/data")
+        throw { kind: "NotFound", message: "missing test path" };
+      return [];
+    };
+    await renderApp();
+    act(() => seedDeadNas());
+    fireEvent.click(reconnectButtons()[1]!);
+    await waitFor(() =>
+      expect(calls.some((c) => c.cmd === "ssh_home_directory")).toBe(true),
+    );
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit path" })[1]!);
+    const input = screen.getByRole("textbox", { name: "Go to path" });
+    fireEvent.change(input, { target: { value: "/user-chosen" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(rightTab().location.path).toBe("/user-chosen"));
+    await act(async () => home.resolve("/home/u"));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(rightTab().location.path).toBe("/user-chosen");
+  });
 });

@@ -1555,11 +1555,17 @@ function App() {
 
   const onSavedActivate = useCallback(
     (host: SavedHost) => {
+      // 이 저장 호스트의 연결 alias 가 배너 재연결 중이면 대화상자를 또 띄우지 않는다.
+      const connAlias = `${host.user}@${host.host}:${host.port}`;
+      if (connAlias in useConnections.getState().reconnecting) {
+        showToast(i18n.t("toast.reconnectInProgress", { alias: host.alias }));
+        return;
+      }
       setConnectTarget();
       setAdHocPrefill(host);
       setAdHocOpen(true);
     },
-    [setConnectTarget],
+    [setConnectTarget, showToast],
   );
 
   /**
@@ -1795,8 +1801,11 @@ function App() {
         if (result === "applied") landed = pending.path;
       }
       if (result === "failed") {
+        // 홈 조회를 기다리는 사이 같은 탭에서 다른 곳으로 이동했으면(navSeq 증가) 멈춘다 —
+        // 이어서 land 가 새 navSeq 를 받아 그 최신 이동을 덮어쓰던 경로.
+        const homeSeq = navSeq.current[pane];
         const homeRes = await commands.sshHomeDirectory(dto.id);
-        if (!stillTarget()) return;
+        if (!stillTarget() || navSeq.current[pane] !== homeSeq) return;
         const tries = ["~", "/"];
         if (homeRes.status === "ok") tries.unshift(homeRes.data);
         else failures.push(`~: ${formatErr(homeRes.error)}`);
