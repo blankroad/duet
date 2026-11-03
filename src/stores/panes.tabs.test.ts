@@ -235,3 +235,42 @@ describe("panes — 핀 탭", () => {
     usePanes.getState().moveActiveTabToOther();
   });
 });
+
+describe("panes — 탭 복제", () => {
+  beforeEach(seedFour);
+
+  it("원본 바로 오른쪽에 정렬·보기·히스토리를 그대로 복제하고 활성화", () => {
+    usePanes.getState().selectTab("left", 1);
+    usePanes.getState().setSort("left", "size", "asc");
+    usePanes.getState().setViewMode("left", "grid");
+    usePanes.getState().setEntries("left", loc("/b/x"), []);
+    usePanes.getState().duplicateTab("left", 1);
+    const left = usePanes.getState().panes.left;
+    expect(paths()).toEqual(["/a", "/b/x", "/b/x", "/c", "/d"]);
+    expect(left.activeTabIndex).toBe(2);
+    const dup = left.tabs[2]!;
+    expect(dup.id).not.toBe(left.tabs[1]!.id);
+    expect(dup.sortKey).toBe("size");
+    expect(dup.viewMode).toBe("grid");
+    expect(dup.history.stack.map((l) => String(l.path))).toEqual([
+      "/b",
+      "/b/x",
+    ]);
+  });
+
+  it("핀 탭을 복제하면 일반 탭으로 핀 구간 바로 뒤에", () => {
+    usePanes.getState().togglePinTab("left", 0);
+    usePanes.getState().togglePinTab("left", 1); // [a*, b*, c, d]
+    usePanes.getState().duplicateTab("left", 0);
+    expect(paths()).toEqual(["/a", "/b", "/a", "/c", "/d"]);
+    expect(usePanes.getState().panes.left.tabs[2]!.pinned).toBe(false);
+  });
+
+  it("아카이브 안에서 새 탭(Ctrl+T)은 아카이브 문맥을 가져간다", () => {
+    const ctx = { label: "x.zip", root: "/tmp/x", exitTo: loc("/d") };
+    usePanes.getState().setArchiveContext("left", ctx);
+    usePanes.getState().openTab("left");
+    const left = usePanes.getState().panes.left;
+    expect(left.tabs[left.activeTabIndex]!.archive).toEqual(ctx);
+  });
+});

@@ -221,3 +221,44 @@ describe("session — 핀 탭", () => {
     expect(String(left.tabs[left.activeTabIndex]!.location.path)).toBe("/a");
   });
 });
+
+describe("session — 아카이브 탭", () => {
+  it("아카이브를 보던 탭은 원래 폴더로 저장된다 (핀 유지)", () => {
+    usePanes.getState().restoreLayout({
+      activePane: "left",
+      panes: {
+        left: {
+          activeTabIndex: 0,
+          tabs: [
+            {
+              path: "/docs",
+              sortKey: "name",
+              sortOrder: "asc",
+              showHidden: false,
+              viewMode: "details",
+              pinned: true,
+            },
+          ],
+        },
+        right: { activeTabIndex: 0, tabs: [] },
+      },
+    });
+    usePanes.getState().setActivePane("left");
+    usePanes.getState().setArchiveContext("left", {
+      label: "x.zip",
+      root: "/tmp/duet-archive/abc/content",
+      exitTo: { source: { kind: "local" }, path: "/docs" },
+    });
+    usePanes
+      .getState()
+      .setEntries(
+        "left",
+        { source: { kind: "local" }, path: "/tmp/duet-archive/abc/content" },
+        [],
+      );
+    const saved = snapshot().panes.left.tabs;
+    expect(saved).toHaveLength(1);
+    expect(saved[0]!.path).toBe("/docs");
+    expect(saved[0]!.pinned).toBe(true);
+  });
+});

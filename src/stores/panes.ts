@@ -87,6 +87,11 @@ interface PanesState {
    * (패널은 탭이 최소 1개 필요) — 어느 탭에서 눌러도 결과가 같다.
    */
   closeAllTabs: (id: PaneId) => void;
+  /**
+   * 탭 복제 — 위치·정렬·보기·숨김·히스토리·아카이브/휴지통 문맥을 그대로 가진 일반
+   * 탭을 원본 바로 오른쪽(핀 구간 밖)에 만들고 활성화한다.
+   */
+  duplicateTab: (id: PaneId, index: number) => void;
   /** 고정/고정 해제 — 핀하면 핀 구간 끝으로, 해제하면 일반 구간 맨 앞으로 간다. */
   togglePinTab: (id: PaneId, index: number) => void;
   selectTab: (id: PaneId, index: number) => void;
@@ -299,6 +304,12 @@ export const usePanes = create<PanesState>((set, get) => ({
       const p = s.panes[id];
       const cur = p.tabs[p.activeTabIndex] ?? p.tabs[0]!;
       const nt = initialTab(location ?? cur.location);
+      // 위치를 안 주면 현재 탭 자리를 연다 — 아카이브/휴지통 안이면 그 문맥도
+      // 함께 가져가야 "위로"가 원래 폴더로 나가고 임시 경로가 세션에 남지 않는다.
+      if (!location) {
+        nt.archive = cur.archive;
+        nt.trashRoot = cur.trashRoot;
+      }
       // 새 탭은 일반 탭 — 핀 구간 안으로는 들어가지 않는다.
       const at = Math.max(
         pinnedCount(p),
@@ -372,6 +383,26 @@ export const usePanes = create<PanesState>((set, get) => ({
       return {
         panes: { ...s.panes, [id]: arrangePane(tabs, active.id, fallback) },
       };
+    }),
+  duplicateTab: (id, index) =>
+    set((s) => {
+      const p = s.panes[id];
+      const src = p.tabs[index];
+      if (!src) return s;
+      const copy: TabState = {
+        ...src,
+        id: newTabId(),
+        selected: new Set(),
+        loading: false,
+        filter: "",
+        filterFocused: false,
+        dirSizes: {},
+        history: { stack: src.history.stack.slice(), index: src.history.index },
+        pinned: false,
+      };
+      const at = Math.max(pinnedCount(p), index + 1);
+      const tabs = [...p.tabs.slice(0, at), copy, ...p.tabs.slice(at)];
+      return { panes: { ...s.panes, [id]: { tabs, activeTabIndex: at } } };
     }),
   togglePinTab: (id, index) =>
     set((s) => {

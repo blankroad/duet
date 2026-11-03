@@ -19,22 +19,23 @@ export function snapshot(): RestoredLayout {
   const slimPane = (id: PaneId): RestoredLayout["panes"][PaneId] => {
     const p = s.panes[id];
     const activeId = p.tabs[p.activeTabIndex]?.id;
-    // 아카이브/휴지통 임시 루트는 재시작 후 존재하지 않으므로 제외.
-    const keep = p.tabs.filter(
-      (t) => t.archive === undefined && t.trashRoot === undefined,
-    );
+    // 휴지통 루트는 재시작 후 의미가 없어 제외. 아카이브 탭은 임시 추출 경로가
+    // 사라지므로 **원래 폴더(exitTo)** 로 저장한다 — 예전엔 통째로 버려서 아카이브를
+    // 보던 핀 탭이 재시작마다 사라졌다.
+    const keep = p.tabs.filter((t) => t.trashRoot === undefined);
     const idx = keep.findIndex((t) => t.id === activeId);
     return {
       activeTabIndex: idx >= 0 ? idx : 0,
       tabs: keep.map((t) => {
-        const src = t.location.source;
+        const location = t.archive ? t.archive.exitTo : t.location;
+        const src = location.source;
         const host =
           src.kind === "ssh"
             ? (useConnections.getState().active[src.connection_id]?.alias ??
               aliasFromConnectionId(src.connection_id))
             : undefined;
         return {
-          path: String(t.location.path),
+          path: String(location.path),
           ...(host ? { host } : {}),
           sortKey: t.sortKey,
           sortOrder: t.sortOrder,
