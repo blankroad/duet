@@ -253,6 +253,27 @@ describe("panes — sort/hidden via active tab", () => {
       selectDisplayedEntries("left", usePanes.getState()).map((e) => e.name),
     ).toEqual([".bashrc", "README.md"]);
   });
+
+  it("going up with an active filter puts the cursor on the folder left", () => {
+    const local = { kind: "local" as const };
+    usePanes
+      .getState()
+      .setEntries("left", { source: local, path: "/child" }, [mk("x.txt")]);
+    usePanes.getState().setFilter("left", "txt");
+    usePanes
+      .getState()
+      .setEntries(
+        "left",
+        { source: local, path: "/" },
+        [mk("aaa", "dir"), mk("child", "dir")],
+        { focusName: "child" },
+      );
+    const t = activeTab(usePanes.getState(), "left");
+    expect(t.filter).toBe("");
+    expect(
+      selectDisplayedEntries("left", usePanes.getState())[t.cursorIndex]?.name,
+    ).toBe("child");
+  });
 });
 
 describe("panes — '..' parent row", () => {

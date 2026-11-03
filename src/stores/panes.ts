@@ -343,7 +343,13 @@ export const usePanes = create<PanesState>((set, get) => ({
         // 예전엔 무조건 0 이라, 위로 간 직후 커서가 ".." 에 앉아 Enter 를 누르면
         // 또 위로 갔고, 형제 폴더를 오가는 작업마다 커서를 다시 찾아야 했다.
         const focusName = opts?.focusName;
-        const displayed = computeDisplayed({ ...cur, entries, location: loc });
+        // 이동하면 필터가 풀리므로(아래 nextTab) 같은 조건의 목록에서 찾는다.
+        const displayed = computeDisplayed({
+          ...cur,
+          entries,
+          location: loc,
+          filter: "",
+        });
         const at =
           focusName === undefined
             ? -1
