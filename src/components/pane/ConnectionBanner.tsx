@@ -3,6 +3,7 @@ import { Loader, Unplug, RefreshCw } from "lucide-react";
 import clsx from "clsx";
 import { usePanes, activeTab, type PaneId } from "@/stores/panes";
 import { useConnections } from "@/stores/connections";
+import { useHostLabel } from "@/lib/hostLabel";
 import { aliasFromConnectionId } from "@/lib/hostAlias";
 
 /**
@@ -30,12 +31,14 @@ export function ConnectionBanner({
   const connId = source.kind === "ssh" ? source.connection_id : null;
   const conn = useConnections((s) => (connId ? s.active[connId] : undefined));
   const alias = conn?.alias ?? (connId ? aliasFromConnectionId(connId) : null);
+  const hostLabel = useHostLabel(source);
 
   if (!connId || source.kind !== "ssh") return null;
   const state = conn?.state ?? { kind: "disconnected" as const };
   if (state.kind === "connected") return null;
 
-  const label = alias ?? `${source.user}@${source.host_ip}`;
+  // 표시는 탭·소스 칩과 같은 라벨(별명 → alias), 재연결 대상은 raw alias.
+  const label = hostLabel;
 
   if (state.kind === "connecting") {
     return (
