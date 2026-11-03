@@ -87,7 +87,18 @@ export function CommandPalette() {
     <Dialog.Root open onOpenChange={(o) => !o && close()}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-        <Dialog.Content className="fixed left-1/2 top-1/4 z-50 w-full max-w-xl -translate-x-1/2 rounded-md border border-border bg-base shadow-lg focus:outline-none">
+        <Dialog.Content
+          // 토스트(오버레이 위)를 누르는 건 바깥 클릭이 아니다 — DialogShell 과 같은 규칙.
+          onPointerDownOutside={(e) => {
+            const target = e.target;
+            if (
+              target instanceof Element &&
+              target.closest("[data-toast-root]")
+            )
+              e.preventDefault();
+          }}
+          className="fixed left-1/2 top-1/4 z-50 w-full max-w-xl -translate-x-1/2 rounded-md border border-border bg-base shadow-lg focus:outline-none"
+        >
           <div className="flex items-center gap-2 border-b border-border px-3 py-2">
             <Search size={14} className="text-fg-muted shrink-0" />
             <input

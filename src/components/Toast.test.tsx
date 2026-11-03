@@ -61,4 +61,23 @@ describe("Toast over a dialog", () => {
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.queryByRole("alert")).toBeNull();
   });
+
+  it("토스트가 먼저 떠 있어도 대화상자가 열린 뒤 읽힌다(aria-hidden 아님)", async () => {
+    act(() => useToast.getState().show("Earlier error", "error"));
+    render(<Toast />);
+    render(
+      <DialogShell title="Fixture" onClose={() => {}}>
+        <span>body</span>
+      </DialogShell>,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    act(() => useToast.getState().show("Symlink failed", "error"));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    for (const alert of screen.getAllByRole("alert"))
+      expect(alert.closest("[aria-hidden='true']")).toBeNull();
+  });
 });

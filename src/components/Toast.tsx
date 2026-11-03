@@ -21,7 +21,23 @@ export function Toast() {
     const stack = stackRef.current;
     if (stack) stack.scrollTop = stack.scrollHeight;
   }, [newestId]);
-  if (toasts.length === 0) return null;
+  // 알림은 모달이 떠 있어도 읽혀야 한다 — Radix 모달은 열릴 때 body 의 다른 자식을
+  // aria-hidden 으로 숨기는데, 토스트가 먼저 떠 있었으면 이후 오류 토스트까지 스크린리더에서
+  // 사라졌다. 이 스택에 붙는 aria-hidden 만 걷어낸다(모달 본문 쪽 숨김은 그대로).
+  const shown = toasts.length > 0;
+  useEffect(() => {
+    const stack = stackRef.current;
+    if (!shown || !stack) return;
+    const unhide = () => {
+      if (stack.hasAttribute("aria-hidden"))
+        stack.removeAttribute("aria-hidden");
+    };
+    unhide();
+    const mo = new MutationObserver(unhide);
+    mo.observe(stack, { attributes: true, attributeFilter: ["aria-hidden"] });
+    return () => mo.disconnect();
+  }, [shown]);
+  if (!shown) return null;
   return createPortal(
     <div
       ref={stackRef}
