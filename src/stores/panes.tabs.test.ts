@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { usePanes } from "./panes";
+import { clearClosedTabs } from "./closedTabs";
 import type { Location } from "@/types/bindings";
 
 const loc = (path: string): Location => ({ source: { kind: "local" }, path });
@@ -272,5 +273,71 @@ describe("panes — 탭 복제", () => {
     usePanes.getState().openTab("left");
     const left = usePanes.getState().panes.left;
     expect(left.tabs[left.activeTabIndex]!.archive).toEqual(ctx);
+  });
+});
+
+describe("panes — 순서 변경", () => {
+  beforeEach(seedFour);
+  const ids = () => usePanes.getState().panes.left.tabs.map((t) => t.id);
+
+  it("드래그 순서를 적용하고 활성 탭은 id 로 따라간다", () => {
+    const [a, b, c, d] = ids();
+    usePanes.getState().reorderTabs("left", [d!, a!, b!, c!]);
+    expect(paths()).toEqual(["/d", "/a", "/b", "/c"]);
+    expect(activeIdx()).toBe(0); // 활성 /d
+  });
+
+  it("일반 탭을 핀 앞에 떨궈도 핀 구간 바로 뒤로 간다", () => {
+    usePanes.getState().togglePinTab("left", 0); // [a*, b, c, d]
+    const [a, b, c, d] = ids();
+    usePanes.getState().reorderTabs("left", [d!, a!, b!, c!]);
+    expect(paths()).toEqual(["/a", "/d", "/b", "/c"]);
+  });
+
+  it("키보드 이동은 이웃과 자리를 바꾸고 핀 경계는 넘지 않는다", () => {
+    usePanes.getState().moveTab("left", 3, -1);
+    expect(paths()).toEqual(["/a", "/b", "/d", "/c"]);
+    expect(activeIdx()).toBe(2);
+    usePanes.getState().togglePinTab("left", 0); // [a*, b, d, c]
+    usePanes.getState().moveTab("left", 1, -1); // b 는 핀 앞으로 못 감
+    expect(paths()).toEqual(["/a", "/b", "/d", "/c"]);
+    usePanes.getState().moveTab("left", 3, 1); // 끝 → no-op
+    expect(paths()).toEqual(["/a", "/b", "/d", "/c"]);
+  });
+});
+
+describe("panes — 닫은 탭 다시 열기", () => {
+  beforeEach(() => {
+    seedFour();
+    clearClosedTabs();
+  });
+
+  it("닫은 탭을 원래 자리에 다시 열고 활성화한다", () => {
+    usePanes.getState().setSort("left", "size", "asc"); // 활성 /d
+    usePanes.getState().closeTab("left", 1); // /b
+    usePanes.getState().closeTab("left", 2); // /d (활성)
+    expect(paths()).toEqual(["/a", "/c"]);
+    expect(usePanes.getState().reopenClosedTab()).toBe(true);
+    expect(paths()).toEqual(["/a", "/c", "/d"]);
+    expect(activeIdx()).toBe(2);
+    expect(usePanes.getState().panes.left.tabs[2]!.sortKey).toBe("size");
+    usePanes.getState().reopenClosedTab();
+    expect(paths()).toEqual(["/a", "/b", "/c", "/d"]);
+    expect(usePanes.getState().reopenClosedTab()).toBe(false);
+  });
+
+  it("일괄 닫기도 한 장씩 제자리로 되돌린다", () => {
+    usePanes.getState().closeTabsToRight("left", 1); // /c /d 닫힘
+    usePanes.getState().reopenClosedTab();
+    usePanes.getState().reopenClosedTab();
+    expect(paths()).toEqual(["/a", "/b", "/c", "/d"]);
+  });
+
+  it("다른 패널에서 눌러도 원래 패널에 열린다", () => {
+    usePanes.getState().closeTab("left", 0);
+    usePanes.getState().setActivePane("right");
+    usePanes.getState().reopenClosedTab();
+    expect(usePanes.getState().activePane).toBe("left");
+    expect(paths()[0]).toBe("/a");
   });
 });

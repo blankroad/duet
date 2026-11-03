@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { Entry, Location } from "@/types/bindings";
 import { normalizePath, sameLocation } from "@/lib/entryDnd";
 import { patternToMatcher } from "@/lib/glob";
+import { pushClosedTabs, popClosedTab, type ClosedTab } from "./closedTabs";
 
 export type PaneId = "left" | "right";
 export type SortKey = "name" | "size" | "mtime" | "kind" | "ext";
@@ -94,6 +95,15 @@ interface PanesState {
   duplicateTab: (id: PaneId, index: number) => void;
   /** 고정/고정 해제 — 핀하면 핀 구간 끝으로, 해제하면 일반 구간 맨 앞으로 간다. */
   togglePinTab: (id: PaneId, index: number) => void;
+  /**
+   * 드래그로 정한 새 순서(탭 id 배열) 적용. 핀 경계를 넘는 배치는 stable partition
+   * 으로 바로잡는다 — 일반 탭을 핀 사이에 떨궈도 핀 구간 바로 뒤에 놓인다.
+   */
+  reorderTabs: (id: PaneId, orderedIds: string[]) => void;
+  /** 탭을 한 칸 왼쪽(-1)/오른쪽(+1)으로. 핀 경계는 넘지 않는다 (키보드 이동). */
+  moveTab: (id: PaneId, index: number, delta: -1 | 1) => void;
+  /** 가장 최근에 닫은 탭을 원래 패널·자리에 다시 연다. 열었으면 true. */
+  reopenClosedTab: () => boolean;
   selectTab: (id: PaneId, index: number) => void;
   // existing — 활성 탭에 dispatch
   setEntries: (
@@ -281,6 +291,16 @@ function arrangePane(
   return { tabs: ordered, activeTabIndex: Math.max(0, i) };
 }
 
+/** 일괄 닫기에서 빠진 탭들을 닫은 탭 스택에 기록 (왼쪽부터). */
+function recordClosed(id: PaneId, before: TabState[], after: TabState[]): void {
+  const kept = new Set(after.map((t) => t.id));
+  const closed: ClosedTab[] = [];
+  before.forEach((tab, index) => {
+    if (!kept.has(tab.id)) closed.push({ pane: id, index, tab });
+  });
+  pushClosedTabs(closed);
+}
+
 /** 액션 안에서 active tab 만 변경하는 헬퍼. */
 function withActiveTab(p: PaneState, fn: (t: TabState) => TabState): PaneState {
   const i = p.activeTabIndex;
@@ -328,6 +348,7 @@ export const usePanes = create<PanesState>((set, get) => ({
     // 핀 탭은 X·가운데 클릭·Ctrl+W·팔레트 어느 경로로도 닫히지 않는다 — 가드를
     // 여기(store)에 둬야 키맵·팔레트 경로가 새지 않는다.
     if (!target || target.pinned || p.tabs.length <= 1) return false;
+    pushClosedTabs([{ pane: id, index, tab: target }]);
     set((s) => {
       const tabs = p.tabs.slice();
       tabs.splice(index, 1);
@@ -348,6 +369,7 @@ export const usePanes = create<PanesState>((set, get) => ({
       if (!target) return s;
       const tabs = p.tabs.filter((t, i) => i === index || t.pinned);
       if (tabs.length === p.tabs.length) return s;
+      recordClosed(id, p.tabs, tabs);
       // 누른 탭이 활성이 된다 (브라우저 관례).
       return {
         panes: {
@@ -363,6 +385,7 @@ export const usePanes = create<PanesState>((set, get) => ({
       if (!target) return s;
       const tabs = p.tabs.filter((t, i) => i <= index || t.pinned);
       if (tabs.length === p.tabs.length) return s;
+      recordClosed(id, p.tabs, tabs);
       // 활성 탭이 남았으면 그대로, 닫혔으면 기준 탭으로 옮겨온다.
       const activeId = p.tabs[p.activeTabIndex]?.id;
       return {
@@ -379,6 +402,7 @@ export const usePanes = create<PanesState>((set, get) => ({
       // 탭이 최소 1개 필요하므로 보고 있던 탭을 남긴다.
       const tabs = pinned.length > 0 ? pinned : [active];
       if (tabs.length === p.tabs.length) return s;
+      recordClosed(id, p.tabs, tabs);
       const fallback = tabs[tabs.length - 1]!.id;
       return {
         panes: { ...s.panes, [id]: arrangePane(tabs, active.id, fallback) },
@@ -423,6 +447,67 @@ export const usePanes = create<PanesState>((set, get) => ({
       if (index < 0 || index >= p.tabs.length) return s;
       return { panes: { ...s.panes, [id]: { ...p, activeTabIndex: index } } };
     }),
+  reorderTabs: (id, orderedIds) =>
+    set((s) => {
+      const p = s.panes[id];
+      const byId = new Map(p.tabs.map((t) => [t.id, t]));
+      const listed = orderedIds
+        .map((tid) => byId.get(tid))
+        .filter((t): t is TabState => t !== undefined);
+      const rest = p.tabs.filter((t) => !orderedIds.includes(t.id));
+      const next = arrangePane(
+        [...listed, ...rest],
+        p.tabs[p.activeTabIndex]?.id,
+      );
+      if (next.tabs.every((t, i) => t === p.tabs[i])) return s;
+      return { panes: { ...s.panes, [id]: next } };
+    }),
+  moveTab: (id, index, delta) =>
+    set((s) => {
+      const p = s.panes[id];
+      const a = p.tabs[index];
+      const b = p.tabs[index + delta];
+      // 핀 경계를 넘는 이동은 하지 않는다 (불변식).
+      if (!a || !b || a.pinned !== b.pinned) return s;
+      const tabs = p.tabs.slice();
+      tabs[index] = b;
+      tabs[index + delta] = a;
+      const activeId = p.tabs[p.activeTabIndex]?.id;
+      return { panes: { ...s.panes, [id]: arrangePane(tabs, activeId) } };
+    }),
+  reopenClosedTab: () => {
+    const c = popClosedTab();
+    if (!c) return false;
+    set((s) => {
+      const p = s.panes[c.pane];
+      const pc = pinnedCount(p);
+      // 아카이브 임시 추출 폴더는 그사이 정리됐을 수 있다 — 원래 폴더로 연다.
+      const base = c.tab.archive
+        ? { ...c.tab, location: c.tab.archive.exitTo, archive: undefined }
+        : c.tab;
+      const tab: TabState = {
+        ...base,
+        id: newTabId(),
+        entries: [],
+        selected: new Set(),
+        loading: false,
+        cursorIndex: -1,
+        history: c.tab.archive
+          ? { stack: [c.tab.archive.exitTo], index: 0 }
+          : c.tab.history,
+      };
+      // 원래 자리 근처로 — 단 핀/일반 구간 경계는 지킨다.
+      const at = tab.pinned
+        ? Math.min(c.index, pc)
+        : Math.min(Math.max(c.index, pc), p.tabs.length);
+      const tabs = [...p.tabs.slice(0, at), tab, ...p.tabs.slice(at)];
+      return {
+        panes: { ...s.panes, [c.pane]: { tabs, activeTabIndex: at } },
+        activePane: c.pane,
+      };
+    });
+    return true;
+  },
   setEntries: (id, location, entries, opts) =>
     set((s) => {
       // 저장 전 경로 정규화 — C:\/ 등 혼합/중복 구분자를 네이티브로(표시·영속 일관).
