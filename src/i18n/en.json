@@ -765,6 +765,7 @@
     "remoteEditFailed": "Edit failed: {{err}}",
     "remoteEditing": "Editing {{name}} — changes auto-upload",
     "pasteIntoSelf": "Can't paste a folder into itself",
+    "importFailed": "Import failed: {{err}}",
     "removeBookmarkFailed": "Could not remove the bookmark: {{err}}",
     "removeFavoriteFailed": "Could not remove the favorite: {{err}}",
     "bookmarksMigrated": "Moved {{count}} SSH bookmark(s) to host favorites",
@@ -991,7 +992,10 @@
     "resizeTitle": "Drag to resize · double-click to reset"
   },
   "dnd": {
-    "items": "{{count}} items"
+    "items": "{{count}} items",
+    "copy": "Copy",
+    "move": "Move",
+    "escCancel": "Esc to cancel"
   },
   "cmd": {
     "tab": {

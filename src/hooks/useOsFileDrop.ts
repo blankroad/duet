@@ -5,6 +5,8 @@ import { useUIDialogs } from "@/stores/ui-dialogs";
 import { useToast } from "@/stores/toast";
 import { dropLocationAt, resolveSidebarDropAt } from "@/lib/dropTarget";
 import { formatErr } from "@/lib/error";
+import { selfDropKind } from "@/lib/selfDrag";
+import i18n from "@/i18n";
 
 /**
  * OS(파인더/탐색기)에서 끌어온 파일을 드롭 위치의 패널/폴더로 가져오기(복사).
@@ -36,9 +38,24 @@ export function useOsFileDrop() {
         const dst =
           dropLocationAt(x, y) ?? resolveSidebarDropAt(x, y)?.location ?? null;
         if (!dst) return; // 받을 곳 없음 — 무시
+        // 목록에서 끈 파일을 원래 폴더나 그 폴더 자신에게 도로 놓은 경우 — 자기 자신과
+        // 충돌하는 복사 확인 창 대신 짧게 알리고 끝낸다.
+        const self = selfDropKind(paths, dst);
+        if (self) {
+          showToast(
+            i18n.t(
+              self === "same" ? "toast.alreadyInFolder" : "toast.pasteIntoSelf",
+            ),
+          );
+          return;
+        }
         const r = await commands.fsCopyPlanExternal(paths, dst);
         if (r.status === "ok") open({ kind: "copy-confirm", plan: r.data });
-        else showToast(`Import failed: ${formatErr(r.error)}`, "error");
+        else
+          showToast(
+            i18n.t("toast.importFailed", { err: formatErr(r.error) }),
+            "error",
+          );
       })
       .then((un) => {
         if (cancelled) un();

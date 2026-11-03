@@ -762,6 +762,7 @@
     "remoteEditFailed": "편집기를 열지 못했습니다: {{err}}",
     "remoteEditing": "{{name}} 편집 중 — 저장하면 자동으로 업로드됩니다",
     "pasteIntoSelf": "폴더를 자기 자신 안으로 붙여넣을 수 없습니다",
+    "importFailed": "가져오지 못했습니다: {{err}}",
     "removeBookmarkFailed": "북마크를 지우지 못했습니다: {{err}}",
     "removeFavoriteFailed": "즐겨찾기를 지우지 못했습니다: {{err}}",
     "bookmarksMigrated": "SSH 북마크 {{count}}개를 호스트 즐겨찾기로 옮겼습니다",
@@ -987,7 +988,10 @@
     "resizeTitle": "끌어서 폭 조절 · 더블클릭하면 기본값"
   },
   "dnd": {
-    "items": "{{count}}개"
+    "items": "{{count}}개",
+    "copy": "복사",
+    "move": "이동",
+    "escCancel": "Esc 취소"
   },
   "cmd": {
     "tab": {
