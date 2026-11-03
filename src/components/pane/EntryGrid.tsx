@@ -19,6 +19,7 @@ import { EntryIcon } from "@/lib/fileIcon";
 import { useAppSettings } from "@/stores/settings";
 import { thumbUrl } from "@/lib/previewUrl";
 import { childLocation } from "@/lib/entryDnd";
+import { followRenamedEntry } from "@/lib/renameReveal";
 import { useCutNames } from "@/hooks/useCutNames";
 import { useMarquee } from "@/hooks/useMarquee";
 import { useEntryDrag } from "@/hooks/useEntryDrag";
@@ -202,9 +203,12 @@ export function EntryGrid({
                     !isParentEntry(entry)
                       ? { location, name: entry.name }
                       : null,
-                  onRenameDone: (renamed) => {
+                  onRenameDone: (renamed, newName) => {
                     useUI.getState().clearInlineRename();
-                    if (renamed) onRenamed();
+                    if (!renamed) return;
+                    if (newName)
+                      followRenamedEntry(id, location, entry.name, newName);
+                    onRenamed();
                   },
                   onMouseEnter: () => setHoverEntry(id, entry),
                   onMouseDown: (e) => {
@@ -259,7 +263,7 @@ interface CellProps {
   highlight: boolean;
   /** 인라인 이름변경(F2) 중이면 대상 EntryRef — 이름 라벨이 input 으로 전환. */
   renameRef: EntryRef | null;
-  onRenameDone: (renamed: boolean) => void;
+  onRenameDone: (renamed: boolean, newName?: string) => void;
   onMouseEnter: () => void;
   onMouseDown: (e: React.MouseEvent) => void;
   onContextMenu: (e: React.MouseEvent) => void;

@@ -13,6 +13,7 @@ import {
   type SortOrder,
 } from "@/stores/panes";
 import { childLocation } from "@/lib/entryDnd";
+import { followRenamedEntry } from "@/lib/renameReveal";
 import { setHoverEntry, clearHover } from "@/stores/previewHover";
 import { useUI, densityMetrics } from "@/stores/ui";
 import { useContextMenu } from "@/stores/contextMenu";
@@ -323,9 +324,12 @@ export function EntryList({
                       ? { location, name: entry.name }
                       : null
                   }
-                  onRenameDone={(renamed) => {
+                  onRenameDone={(renamed, newName) => {
                     useUI.getState().clearInlineRename();
-                    if (renamed) onRenamed();
+                    if (!renamed) return;
+                    if (newName)
+                      followRenamedEntry(id, location, entry.name, newName);
+                    onRenamed();
                   }}
                   onClick={(e) => onCursorMove(vi.index, e)}
                   onDoubleClick={() => onActivate(entry, vi.index)}

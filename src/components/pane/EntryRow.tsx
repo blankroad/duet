@@ -22,7 +22,7 @@ interface EntryRowProps {
   dirSize?: number | undefined;
   /** 인라인 이름변경(F2) 중이면 대상 EntryRef — 이름 셀이 input 으로 전환. */
   renameRef?: EntryRef | null;
-  onRenameDone?: (renamed: boolean) => void;
+  onRenameDone?: (renamed: boolean, newName?: string) => void;
   onClick: (e: React.MouseEvent) => void;
   onDoubleClick: () => void;
 }
