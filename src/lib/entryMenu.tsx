@@ -70,7 +70,8 @@ import {
   triggerNewSymlink,
   triggerSync,
   triggerCompare,
-  copyPathsOf,
+  copySelectionPaths,
+  copySelectionNames,
   clipCopy,
   clipCut,
   clipPaste,
@@ -116,20 +117,13 @@ function sshAlias(location: Location): string | null {
   return conn?.alias ?? null;
 }
 
-async function copyText(text: string): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(text);
-    useToast.getState().show(`Copied: ${text}`, "success");
-  } catch {
-    useToast.getState().show("Clipboard unavailable", "error");
-  }
-}
-
 /** OS 파일 매니저에서 항목 위치 표시 (로컬 전용). */
 async function revealEntry(target: Location): Promise<void> {
   const r = await commands.revealPath(target);
   if (r.status === "error")
-    useToast.getState().show(`Reveal failed: ${formatErr(r.error)}`, "error");
+    useToast
+      .getState()
+      .show(i18n.t("toast.revealFailed", { err: formatErr(r.error) }), "error");
 }
 
 /** 해당 폴더에서 OS 터미널 열기 (로컬 전용). */
@@ -138,15 +132,22 @@ async function openTerminalAt(target: Location): Promise<void> {
   if (r.status === "error")
     useToast
       .getState()
-      .show(`Open terminal failed: ${formatErr(r.error)}`, "error");
+      .show(
+        i18n.t("toast.openTerminalFailed", { err: formatErr(r.error) }),
+        "error",
+      );
 }
 
 /** 원격 파일을 에디터로 열고 변경 시 자동 재업로드(편집 라운드트립). */
 async function editRemoteEntry(target: Location, name: string): Promise<void> {
   const r = await commands.sshEditOpen(target);
   const toast = useToast.getState().show;
-  if (r.status === "error") toast(`Edit failed: ${formatErr(r.error)}`);
-  else toast(`Editing ${name} — changes auto-upload`);
+  if (r.status === "error")
+    toast(
+      i18n.t("toast.remoteEditFailed", { err: formatErr(r.error) }),
+      "error",
+    );
+  else toast(i18n.t("toast.remoteEditing", { name }));
 }
 
 export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
@@ -216,6 +217,8 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
     );
   }
 
+  // 순서는 DESIGN.md "우클릭 메뉴" — 열기 · 클립보드 · 이름 변경/삭제 가 위, 드문 도구가 아래.
+  // ① 열기
   if (!multi) {
     if (isDir) {
       items.push(
@@ -230,17 +233,29 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
           id: "open-other",
           label: i18n.t("menu.openInOtherPane"),
           icon: <PanelRight size={ICON} />,
+          commandId: "pane.openInOther",
           onSelect: () => onOpenInOtherPane(paneId, entry),
         },
       );
     } else {
-      items.push({
-        id: "open",
-        label: i18n.t("menu.open"),
-        icon: <ExternalLink size={ICON} />,
-        shortcut: "Enter",
-        onSelect: () => onActivate(paneId, entry),
-      });
+      items.push(
+        {
+          id: "open",
+          label: i18n.t("menu.open"),
+          icon: <ExternalLink size={ICON} />,
+          shortcut: "Enter",
+          onSelect: () => onActivate(paneId, entry),
+        },
+        {
+          // Space 로 여는 큰 미리보기 — 메뉴에서도 찾을 수 있게.
+          id: "quick-look",
+          label: i18n.t("menu.quickLook"),
+          icon: <Eye size={ICON} />,
+          commandId: "view.quickLook",
+          shortcut: "Space",
+          onSelect: () => useUI.getState().toggleQuickLook(),
+        },
+      );
       // 원격 파일: 편집 라운드트립(다운로드→에디터→저장 시 자동 재업로드).
       if (location.source.kind === "ssh") {
         items.push({
@@ -283,6 +298,9 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
     );
   }
 
+  // ② 클립보드. 폴더 하나를 우클릭했으면 "이 폴더에 붙여넣기"(그 폴더 안으로) —
+  // Ctrl+V(현재 폴더) 와 대상이 달라 키 힌트를 붙이지 않는다.
+  const pasteInto = !multi && isDir;
   items.push(
     {
       id: "clip-copy",
@@ -300,13 +318,58 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
     },
     {
       id: "clip-paste",
-      label: i18n.t("menu.pasteIntoFolder"),
+      label: i18n.t(pasteInto ? "menu.pasteIntoFolder" : "menu.paste"),
       icon: <ClipboardPaste size={ICON} />,
-      commandId: "file.clipPaste",
+      ...(pasteInto ? {} : { commandId: "file.clipPaste" }),
       disabled: !useClipboard.getState().entry,
-      onSelect: () => void clipPaste(open, showToast),
+      onSelect: () =>
+        void clipPaste(open, showToast, pasteInto ? child : undefined),
     },
     sep(),
+  );
+
+  // ③ 이름 변경 · 삭제
+  items.push(
+    multi
+      ? {
+          id: "batch-rename",
+          label: i18n.t("menu.batchRename"),
+          icon: <Pencil size={ICON} />,
+          commandId: "file.rename",
+          onSelect: () => triggerBatchRename(open, showToast),
+        }
+      : {
+          id: "rename",
+          label: i18n.t("menu.rename"),
+          icon: <Pencil size={ICON} />,
+          commandId: "file.rename",
+          onSelect: () => triggerRename(showToast),
+        },
+    {
+      id: "delete",
+      label: i18n.t("menu.delete"),
+      icon: <Trash2 size={ICON} />,
+      commandId: "file.delete",
+      danger: true,
+      onSelect: () => void triggerDelete("trash", open, showToast),
+    },
+  );
+  // 영구 삭제는 설정에서 켠 경우에만 노출한다(CLAUDE.md §3). 예전에는 꺼져 있어도
+  // danger 항목이 그대로 보이고, 누르면 백엔드가 거부해 에러 토스트로 끝났다.
+  if (useAppSettings.getState().permanentDeleteEnabled) {
+    items.push({
+      id: "delete-perm",
+      label: i18n.t("menu.deletePermanently"),
+      icon: <Trash size={ICON} />,
+      commandId: "file.deletePerm",
+      danger: true,
+      onSelect: () => void triggerDelete("permanent", open, showToast),
+    });
+  }
+  items.push(sep());
+
+  // ④ 반대 패널 · 선반
+  items.push(
     {
       id: "copy",
       label: i18n.t("menu.copyToOtherPane"),
@@ -328,88 +391,78 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
       commandId: "shelf.add",
       onSelect: () => addSelectionToShelf(showToast),
     },
-    {
-      id: "compress",
-      label: i18n.t("menu.compress"),
-      icon: <Package size={ICON} />,
-      onSelect: () => triggerCompress(open, showToast),
-    },
-    // 폴더(또는 다중 선택에 폴더 포함 가능성) — 재귀 크기 계산해 크기 컬럼에 표시.
-    ...(isDir || multi
-      ? [
-          {
-            id: "calc-size",
-            label: i18n.t("menu.calculateSize"),
-            icon: <Sigma size={ICON} />,
-            commandId: "file.calcSize",
-            onSelect: () => void calcDirSizes(paneId),
-          } as MenuEntry,
-        ]
-      : []),
-    // 파일(또는 다중 선택에 파일 포함 가능성) — 무결성 해시 다이얼로그.
-    ...(!isDir || multi
-      ? [
-          {
-            id: "checksum",
-            label: i18n.t("menu.checksum"),
-            icon: <Hash size={ICON} />,
-            onSelect: () => triggerChecksum(open, showToast),
-          } as MenuEntry,
-        ]
-      : []),
-    // POSIX 권한 편집 — 원격 또는 로컬 unix (Windows 로컬은 POSIX 권한 없음).
-    ...(location.source.kind === "ssh" || !isWindows()
-      ? [
-          {
-            id: "permissions",
-            label: i18n.t("menu.permissions"),
-            icon: <Lock size={ICON} />,
-            onSelect: () => triggerPermissions(open, showToast),
-          } as MenuEntry,
-        ]
-      : []),
     sep(),
-    {
-      id: "rename",
-      label: i18n.t("menu.rename"),
-      icon: <Pencil size={ICON} />,
-      commandId: "file.rename",
-      disabled: multi,
-      onSelect: () => triggerRename(showToast),
-    },
-    ...(multi
-      ? [
-          {
-            id: "batch-rename",
-            label: i18n.t("menu.batchRename"),
-            icon: <Pencil size={ICON} />,
-            onSelect: () => triggerBatchRename(open, showToast),
-          } as MenuEntry,
-        ]
-      : []),
+  );
+
+  // ⑤ 새로 만들기 (폴더 하나를 우클릭했으면 그 안에)
+  const inside = !multi && isDir;
+  items.push(
     {
       id: "mkdir",
-      label: i18n.t(
-        !multi && entry.kind === "dir"
-          ? "menu.newFolderInside"
-          : "menu.newFolder",
-      ),
+      label: i18n.t(inside ? "menu.newFolderInside" : "menu.newFolder"),
       icon: <FolderPlus size={ICON} />,
-      ...(!multi && entry.kind === "dir"
-        ? {}
-        : { commandId: "file.newFolder" }),
-      onSelect: () =>
-        triggerMkdir(open, !multi && entry.kind === "dir" ? child : location),
+      ...(inside ? {} : { commandId: "file.newFolder" }),
+      onSelect: () => triggerMkdir(open, inside ? child : location),
     },
     {
       id: "new-file",
-      label: i18n.t(
-        !multi && entry.kind === "dir" ? "menu.newFileInside" : "menu.newFile",
-      ),
+      label: i18n.t(inside ? "menu.newFileInside" : "menu.newFile"),
       icon: <FilePlus size={ICON} />,
-      ...(!multi && entry.kind === "dir" ? {} : { commandId: "file.newFile" }),
-      onSelect: () =>
-        triggerNewFile(open, !multi && entry.kind === "dir" ? child : location),
+      ...(inside ? {} : { commandId: "file.newFile" }),
+      onSelect: () => triggerNewFile(open, inside ? child : location),
+    },
+    sep(),
+  );
+
+  // ⑥ 도구
+  items.push({
+    id: "compress",
+    label: i18n.t("menu.compress"),
+    icon: <Package size={ICON} />,
+    onSelect: () => triggerCompress(open, showToast),
+  });
+  // 폴더(또는 다중 선택에 폴더 포함 가능성) — 재귀 크기 계산해 크기 컬럼에 표시.
+  if (isDir || multi)
+    items.push({
+      id: "calc-size",
+      label: i18n.t("menu.calculateSize"),
+      icon: <Sigma size={ICON} />,
+      commandId: "file.calcSize",
+      onSelect: () => void calcDirSizes(paneId),
+    });
+  // 파일(또는 다중 선택에 파일 포함 가능성) — 무결성 해시 다이얼로그.
+  if (!isDir || multi)
+    items.push({
+      id: "checksum",
+      label: i18n.t("menu.checksum"),
+      icon: <Hash size={ICON} />,
+      onSelect: () => triggerChecksum(open, showToast),
+    });
+  // POSIX 권한 편집 — 원격 또는 로컬 unix (Windows 로컬은 POSIX 권한 없음).
+  if (location.source.kind === "ssh" || !isWindows())
+    items.push({
+      id: "permissions",
+      label: i18n.t("menu.permissions"),
+      icon: <Lock size={ICON} />,
+      onSelect: () => triggerPermissions(open, showToast),
+    });
+  items.push(sep());
+
+  // ⑦ 경로·이름 복사, 북마크 — 단축키와 같은 동작(선택 전체 대상)이라 힌트를 붙인다.
+  items.push(
+    {
+      id: "copy-path",
+      label: i18n.t("menu.copyPath"),
+      icon: <ClipboardCopy size={ICON} />,
+      commandId: "file.copyPath",
+      // 로컬은 백엔드 Path::join 으로 — Windows 드라이브문자·네이티브 구분자 보존(§7).
+      onSelect: () => void copySelectionPaths(showToast),
+    },
+    {
+      id: "copy-name",
+      label: i18n.t("menu.copyName"),
+      commandId: "file.copyName",
+      onSelect: () => void copySelectionNames(showToast),
     },
     {
       id: "bookmark",
@@ -426,43 +479,6 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
       icon: <Heart size={ICON} />,
       onSelect: () =>
         void addHostFavorite(alias, entry.name, String(child.path)),
-    });
-  }
-
-  items.push(
-    {
-      id: "copy-path",
-      label: i18n.t("menu.copyPath"),
-      icon: <ClipboardCopy size={ICON} />,
-      // 로컬은 백엔드 Path::join 으로 — Windows 드라이브문자·네이티브 구분자 보존(§7).
-      onSelect: () =>
-        void copyPathsOf([{ location, name: entry.name }], showToast),
-    },
-    {
-      id: "copy-name",
-      label: i18n.t("menu.copyName"),
-      onSelect: () => void copyText(entry.name),
-    },
-    sep(),
-    {
-      id: "delete",
-      label: i18n.t("menu.delete"),
-      icon: <Trash2 size={ICON} />,
-      commandId: "file.delete",
-      danger: true,
-      onSelect: () => void triggerDelete("trash", open, showToast),
-    },
-  );
-  // 영구 삭제는 설정에서 켠 경우에만 노출한다(CLAUDE.md §3). 예전에는 꺼져 있어도
-  // danger 항목이 그대로 보이고, 누르면 백엔드가 거부해 에러 토스트로 끝났다.
-  if (useAppSettings.getState().permanentDeleteEnabled) {
-    items.push({
-      id: "delete-perm",
-      label: i18n.t("menu.deletePermanently"),
-      icon: <Trash size={ICON} />,
-      commandId: "file.deletePerm",
-      danger: true,
-      onSelect: () => void triggerDelete("permanent", open, showToast),
     });
   }
 
