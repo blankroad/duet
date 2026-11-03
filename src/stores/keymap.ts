@@ -14,14 +14,63 @@ export const useKeymap = create<State>((set) => ({
   setAll: (bindings) => set({ bindings }),
 }));
 
-/** override (있으면) 또는 defaultKey */
+/**
+ * 이 명령을 **실제로** 실행하는 키 — 디스패처(`resolveKeyCommand`)와 같은 규칙.
+ *
+ * - 사용자 지정(override)이 있으면 그 키만 (기본 키는 꺼진다 — 편집 = 교체).
+ * - 없으면 기본 키. 단 그 기본 키를 다른 명령의 사용자 지정이 가져갔으면 없음:
+ *   예전엔 가려진 기본 키를 툴팁·팔레트가 계속 보여 "눌러도 안 되는 키"를 가르쳤다.
+ */
 export function effectiveKey(
   commandId: string,
   bindings: KeymapBinding[],
   defaultKey?: string,
 ): string | undefined {
   const override = bindings.find((b) => b.command_id === commandId);
-  return override?.key ?? defaultKey;
+  if (override) return override.key;
+  if (!defaultKey) return undefined;
+  if (bindings.some((b) => b.key === defaultKey)) return undefined;
+  return defaultKey;
+}
+
+/** 키 문자열이 가리킬 명령의 최소 모양 — `Command` 의 부분 집합. */
+interface KeyedCommand {
+  id: string;
+  defaultKey?: string | undefined;
+  altKeys?: string[] | undefined;
+}
+
+/**
+ * 키 → 실행할 명령 id. 사용자 지정이 우선, 없으면 기본 키·보조 키 — 단 사용자
+ * 지정이 있는 명령의 기본/보조 키는 더 이상 그 명령을 부르지 않는다(`effectiveKey`).
+ */
+export function resolveKeyCommand(
+  keystr: string,
+  bindings: KeymapBinding[],
+  commands: KeyedCommand[],
+): string | undefined {
+  const bound = bindings.find((b) => b.key === keystr);
+  if (bound) return bound.command_id;
+  const rebound = new Set(bindings.map((b) => b.command_id));
+  return commands.find(
+    (c) =>
+      !rebound.has(c.id) &&
+      (c.defaultKey === keystr || c.altKeys?.includes(keystr)),
+  )?.id;
+}
+
+/**
+ * 기본 키를 다른 명령의 사용자 지정에 빼앗긴 경우 그 명령 id — 키맵 표가
+ * "(없음)" 옆에 이유를 보여 준다.
+ */
+export function shadowedBy(
+  commandId: string,
+  bindings: KeymapBinding[],
+  defaultKey?: string,
+): string | undefined {
+  if (!defaultKey) return undefined;
+  if (bindings.some((b) => b.command_id === commandId)) return undefined;
+  return bindings.find((b) => b.key === defaultKey)?.command_id;
 }
 
 export async function bootstrapKeymap(): Promise<void> {

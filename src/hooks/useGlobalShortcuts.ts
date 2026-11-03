@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useKeymap } from "@/stores/keymap";
+import { useKeymap, resolveKeyCommand } from "@/stores/keymap";
 import { useAllCommands } from "@/stores/commands";
 import { formatKeyEvent } from "@/lib/keyEvent";
 import { useContextMenu } from "@/stores/contextMenu";
@@ -44,16 +44,8 @@ export function useGlobalShortcuts() {
       // 우클릭 메뉴가 열려 있으면 그 메뉴가 키를 처리 — 전역 단축키는 보류.
       if (useContextMenu.getState().open) return;
 
-      // override 우선
-      const binding = bindings.find((b) => b.key === keystr);
-      let commandId = binding?.command_id;
-
-      if (!commandId) {
-        const cmd = commands.find(
-          (c) => c.defaultKey === keystr || c.altKeys?.includes(keystr),
-        );
-        commandId = cmd?.id;
-      }
+      // override 우선 — 규칙은 표시(effectiveKey)와 한 곳(resolveKeyCommand)에서.
+      const commandId = resolveKeyCommand(keystr, bindings, commands);
 
       // 앱 커맨드가 없으면: WebView2 기본 동작(프린트 등)이면 삼키고, 아니면 통과.
       if (!commandId) {
