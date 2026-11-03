@@ -6,7 +6,7 @@ import {
   render,
   screen,
 } from "@testing-library/react";
-import type { Location } from "@/types/bindings";
+import type { Location, SearchHit } from "@/types/bindings";
 import { commands } from "@/types/bindings";
 import { useSearch } from "@/stores/search";
 import { SearchPanel } from "./SearchPanel";
@@ -139,5 +139,63 @@ describe("SearchPanel metadata filter support", () => {
       "report",
       expect.objectContaining({ content: true, min_size: 10 * 1024 ** 2 }),
     );
+  });
+});
+
+describe("SearchPanel 옛 결과 보호", () => {
+  const oldHit: SearchHit = {
+    location: local,
+    name: "old.txt",
+    kind: "file",
+    size: 1,
+    modified_ms: null,
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    useSearch.getState().open("left", local);
+    useSearch.getState().setContent(false);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("새 검색이 도는 동안 Enter 는 옛 검색어 결과를 확정하지 않는다", async () => {
+    const onPickHit = vi.fn();
+    vi.mocked(commands.indexSearch).mockReturnValue(new Promise(() => {}));
+    act(() => {
+      useSearch.getState().setQueryNow("old");
+      useSearch.getState().setResults([oldHit]);
+    });
+    render(<SearchPanel onPickHit={onPickHit} />);
+    const input = screen.getByPlaceholderText("search.namePlaceholder");
+    fireEvent.change(input, { target: { value: "newer" } });
+    expect(useSearch.getState().status).toBe("searching");
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onPickHit).not.toHaveBeenCalled();
+  });
+
+  it("닫은 뒤 늦게 온 응답이 검색 상태를 다시 채우지 않는다", async () => {
+    type SearchResult = Awaited<ReturnType<typeof commands.indexSearch>>;
+    let resolve: (v: SearchResult) => void = () => {};
+    vi.mocked(commands.indexSearch).mockReturnValue(
+      new Promise<SearchResult>((r) => {
+        resolve = r;
+      }),
+    );
+    act(() => useSearch.getState().setQueryNow("report"));
+    render(<SearchPanel onPickHit={vi.fn()} />);
+    await searchNow();
+    expect(commands.indexSearch).toHaveBeenCalled();
+    act(() => useSearch.getState().close());
+    await act(async () => {
+      resolve({ status: "ok", data: [oldHit] });
+      await Promise.resolve();
+    });
+    expect(useSearch.getState().results).toEqual([]);
+    expect(useSearch.getState().status).toBe("idle");
   });
 });

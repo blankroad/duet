@@ -119,6 +119,7 @@ export function SearchPanel({
       return;
     }
     setStatus("searching");
+    let live = true;
     const opts = {
       case_sensitive: false,
       include_hidden: false,
@@ -138,12 +139,17 @@ export function SearchPanel({
         const r = content
           ? await commands.searchGlobal(root, trimmed, opts)
           : await commands.indexSearch(root, trimmed, opts);
-        if (seq !== seqRef.current) return; // 더 새 검색이 시작됨 → 이 응답은 버림
+        // 더 새 검색이 시작됐거나 닫힘 → 이 응답은 버림
+        if (!live || seq !== seqRef.current) return;
         if (r.status === "ok") setResults(r.data ?? []);
         else setError(formatErr(r.error));
       })();
     }, 200);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      // 닫기·검색어 변경 — 이미 나간 응답이 닫힌 검색 상태를 다시 채우지 않게.
+      live = false;
+    };
   }, [
     isOpen,
     root,
@@ -174,8 +180,14 @@ export function SearchPanel({
             if (e.key === "Escape") {
               e.preventDefault();
               close();
-            } else if (e.key === "Enter" && results[0] && !isImeComposing(e)) {
+            } else if (
+              e.key === "Enter" &&
+              results[0] &&
+              status === "done" &&
+              !isImeComposing(e)
+            ) {
               // Enter = 이동 + 닫기(확정). 마우스 클릭은 패널 유지(여러 결과 탐색).
+              // 새 검색이 도는 동안(searching)엔 화면의 결과가 옛 검색어 것이라 확정하지 않는다.
               e.preventDefault();
               onPickHit(results[0]);
               close();

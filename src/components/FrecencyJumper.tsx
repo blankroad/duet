@@ -48,6 +48,7 @@ export function FrecencyJumper({
   useEffect(() => {
     if (isOpen) {
       setQuery("");
+      setResults([]); // 지난번 결과로 Enter 가 먹지 않게 — 새 조회가 채운다.
       setCursor(0);
       const timer = setTimeout(() => inputRef.current?.focus(), 0);
       return () => clearTimeout(timer);
@@ -55,17 +56,23 @@ export function FrecencyJumper({
   }, [isOpen]);
 
   // 질의 → 백엔드 frecency 조회 (150ms 디바운스). 열려 있을 때만.
+  // 검색어가 바뀌거나 닫히면 이미 나간 조회의 응답은 버린다 — 늦게 온 옛 응답이
+  // 새 검색 결과를 덮어써 엉뚱한 폴더로 이동하던 문제.
   useEffect(() => {
     if (!isOpen) return;
+    let live = true;
     const timer = setTimeout(() => {
       void commands.frecencyQuery(query, 50).then((r) => {
-        if (r.status === "ok") {
+        if (live && r.status === "ok") {
           setResults(r.data);
           setCursor(0);
         }
       });
     }, 150);
-    return () => clearTimeout(timer);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
   }, [isOpen, query]);
 
   if (!isOpen) return null;
