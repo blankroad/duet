@@ -16,6 +16,11 @@ import { useUI } from "@/stores/ui";
 import { useConnections } from "@/stores/connections";
 import type { Entry, Location } from "@/types/bindings";
 import { StatusBar } from "@/components/StatusBar";
+import { TopBar } from "@/components/TopBar";
+import { useCommands } from "@/stores/commands";
+import { useKeymap } from "@/stores/keymap";
+import { displayKey } from "@/lib/keyDisplay";
+import type { Command } from "@/lib/commands";
 
 // commands.* 는 무엇을 부르든 빈 성공 — 컴포넌트가 부트스트랩 중 부르는 IPC 를 흡수한다.
 vi.mock("@/types/bindings", () => {
@@ -28,6 +33,25 @@ vi.mock("@/types/bindings", () => {
     ),
   };
 });
+
+// 창 API — onResized 등록을 테스트가 직접 끝낼 수 있게 deferred 로 둔다.
+const win = vi.hoisted(() => ({
+  unlisten: vi.fn(),
+  resolveResized: null as null | ((u: () => void) => void),
+}));
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => ({
+    isMaximized: () => Promise.resolve(false),
+    onResized: () =>
+      new Promise<() => void>((resolve) => {
+        win.resolveResized = resolve;
+      }),
+    minimize: () => Promise.resolve(),
+    toggleMaximize: () => Promise.resolve(),
+    close: () => Promise.resolve(),
+  }),
+}));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
 const mk = (
   name: string,
@@ -181,5 +205,73 @@ describe("상태바", () => {
     // 단일 패널에선 L/R 이 의미 없으니 숨긴다.
     act(() => useUI.setState({ singlePane: true }));
     expect(screen.queryByLabelText(i18n.t("statusbar.paneRight"))).toBeNull();
+  });
+});
+
+const cmd = (id: string, defaultKey?: string): Command => ({
+  id,
+  label: id,
+  category: "View",
+  defaultKey,
+  action: () => {},
+});
+
+describe("상단바", () => {
+  beforeEach(() => {
+    useCommands.setState({
+      builtins: [
+        cmd("view.toggleSidebar", "Ctrl+B"),
+        cmd("view.togglePreview", "F11"),
+        cmd("view.singlePane", "Ctrl+Shift+D"),
+      ],
+    });
+    useKeymap.setState({ bindings: [] });
+    useUI.setState({
+      sidebarOpen: true,
+      previewOpen: false,
+      singlePane: false,
+    });
+  });
+
+  it("미리보기 토글 툴팁이 현재 키맵을 따른다 (F11 고정 아님)", () => {
+    render(<TopBar />);
+    const label = i18n.t("topbar.togglePreview", { key: displayKey("F11") });
+    expect(screen.getByRole("button", { name: label })).toBeTruthy();
+    act(() =>
+      useKeymap.setState({
+        bindings: [{ key: "Ctrl+Alt+P", command_id: "view.togglePreview" }],
+      }),
+    );
+    expect(
+      screen.getByRole("button", {
+        name: i18n.t("topbar.togglePreview", { key: displayKey("Ctrl+Alt+P") }),
+      }),
+    ).toBeTruthy();
+  });
+
+  it("토글 버튼은 켜짐/꺼짐을 aria-pressed 로 알리고 클릭으로 바뀐다", () => {
+    render(<TopBar />);
+    const preview = screen.getByRole("button", {
+      name: i18n.t("topbar.togglePreview", { key: displayKey("F11") }),
+    });
+    expect(preview.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(preview);
+    expect(useUI.getState().previewOpen).toBe(true);
+    expect(preview.getAttribute("aria-pressed")).toBe("true");
+    // 일반 액션 버튼(설정 등)은 토글 속성을 갖지 않는다.
+    const settings = screen.getByRole("button", {
+      name: i18n.t("topbar.settings", { key: "" }),
+    });
+    expect(settings.hasAttribute("aria-pressed")).toBe(false);
+  });
+
+  it("창 리스너 등록 전에 unmount 돼도 등록이 끝나면 바로 해제한다", async () => {
+    const { unmount } = render(<TopBar />);
+    unmount();
+    await act(async () => {
+      win.resolveResized?.(win.unlisten);
+      await Promise.resolve();
+    });
+    expect(win.unlisten).toHaveBeenCalled();
   });
 });

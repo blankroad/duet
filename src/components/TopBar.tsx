@@ -34,6 +34,7 @@ import { AppLauncherStrip } from "@/components/AppLauncherStrip";
  */
 export function TopBar() {
   const kViewTogglesidebar = useKeyHint("view.toggleSidebar");
+  const kViewTogglepreview = useKeyHint("view.togglePreview");
   const kViewSinglepane = useKeyHint("view.singlePane");
   const kViewDroptray = useKeyHint("view.dropTray");
   const kEditUndo = useKeyHint("edit.undo");
@@ -102,7 +103,7 @@ export function TopBar() {
         <PanelLeft size={15} />
       </IconBtn>
       <IconBtn
-        label={t("topbar.togglePreview")}
+        label={t("topbar.togglePreview", { key: kViewTogglepreview })}
         active={previewOpen}
         onClick={togglePreview}
       >
@@ -181,21 +182,34 @@ function WindowControls() {
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
+    // 리스너 등록은 비동기라 그 전에 unmount 되면 cleanup 시점엔 unlisten 이 없다 —
+    // disposed 를 기억했다가 등록이 끝나는 즉시 해제한다(예전엔 그대로 새었다).
+    let disposed = false;
     let unlisten: (() => void) | undefined;
+    const sync = (win: ReturnType<typeof getCurrentWindow>) =>
+      win
+        .isMaximized()
+        .then((m) => {
+          if (!disposed) setMaximized(m);
+        })
+        .catch(() => {});
     try {
       const win = getCurrentWindow();
-      void win.isMaximized().then(setMaximized);
+      void sync(win);
       void win
-        .onResized(() => {
-          void win.isMaximized().then(setMaximized);
-        })
+        .onResized(() => void sync(win))
         .then((u) => {
-          unlisten = u;
-        });
+          if (disposed) u();
+          else unlisten = u;
+        })
+        .catch(() => {});
     } catch {
       // Tauri 컨텍스트 밖(테스트 등) — 무시
     }
-    return () => unlisten?.();
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
   }, []);
 
   const run = (
@@ -327,9 +341,15 @@ function IconBtn({
       onContextMenu={onContextMenu}
       title={label}
       aria-label={label}
+      // 토글 버튼만 켜짐/꺼짐을 알린다(active 가 undefined 면 일반 액션 버튼).
+      aria-pressed={active}
       className={clsx(
-        "flex h-8 w-8 shrink-0 items-center justify-center rounded hover:bg-subtle",
-        active ? "text-accent" : "text-fg-muted hover:text-fg",
+        "flex h-8 w-8 shrink-0 items-center justify-center rounded",
+        // 켜짐은 색만이 아니라 배경으로도 — 라이트 모드에서 accent 아이콘 하나로는
+        // 회색 아이콘과 잘 구분되지 않았다 (사이드바 활성 행과 같은 bg-active 어휘).
+        active
+          ? "bg-active text-accent hover:bg-active"
+          : "text-fg-muted hover:bg-subtle hover:text-fg",
       )}
     >
       {children}

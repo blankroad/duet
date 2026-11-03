@@ -516,7 +516,7 @@
   },
   "topbar": {
     "toggleSidebar": "Toggle sidebar ({{key}})",
-    "togglePreview": "Toggle preview (F11)",
+    "togglePreview": "Toggle preview ({{key}})",
     "compareFolders": "Compare folders (left ↔ right)",
     "undo": "Undo last action ({{key}}) — right-click: history",
     "search": "Search ({{key}})",

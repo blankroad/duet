@@ -513,7 +513,7 @@
   },
   "topbar": {
     "toggleSidebar": "사이드바 토글 ({{key}})",
-    "togglePreview": "미리보기 토글 (F11)",
+    "togglePreview": "미리보기 토글 ({{key}})",
     "compareFolders": "폴더 비교 (왼쪽 ↔ 오른쪽)",
     "undo": "마지막 작업 되돌리기 ({{key}}) — 우클릭: 히스토리",
     "search": "검색 ({{key}})",
