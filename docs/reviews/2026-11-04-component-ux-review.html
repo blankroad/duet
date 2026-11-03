@@ -1,0 +1,784 @@
+<!doctype html>
+<html lang="ko" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>컴포넌트별 UX 리뷰 2026-11</title>
+<!--
+  개발용 템플릿 (설계 문서 / 기술 문서) — 임베디드·차량 SW
+  - 단일 파일. 목차는 h2/h3 에서 자동 생성.
+  - 코드 블록: <div class="code"><div class="code-head">파일명</div><pre><code>...</code></pre></div>
+    복사 버튼은 자동으로 붙음. 로그 출력은 <div class="code log"> 로.
+  - 비트 필드 표: <table class="bits">  (첫 행 비트 번호, 둘째 행 필드명)
+  - 환경 표: <table class="env">
+  - 알림: <div class="note">, <div class="note warn">  (첫 줄 <b>제목</b>)
+  - 디자인 토큰(:root)과 공통 유틸(.num .nw .center .mono .small .ok .warn .bad .dot .note)은 report.html 과 동일.
+  - 상태: <span class="status draft|review|approved|deprecated">
+  - 고정폭 다이어그램 안의 글자는 영문으로 (한글은 두 칸을 차지해 선이 어긋남)
+  - 테마: 기본 라이트 고정. <html data-theme="dark"> 로 다크, 속성을 지우면 시스템 설정을 따름.
+-->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<style>
+  :root {
+    --fg: #1d1d1f;
+    --sub: #4f5055;
+    --muted: #8a8b90;
+    --line: #dfdfe2;
+    --line-soft: #ededef;
+    --line-strong: #c9c9ce;
+    --bg: #ffffff;
+    --soft: #f6f6f7;
+    --desk: #efefed;
+    --accent: #23364f;
+    --link: #1f5fbf;
+    --up: #b8322a;
+    --down: #2a5aa8;
+    --ok: #2d7a3e;
+    --warn: #b5590a;
+    --bad: #b3261e;
+    --bar: var(--accent);
+    --bar-done: #9aa4b2;
+    --sans: "Pretendard", -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --fg: #e6e6e8; --sub: #a9aab0; --muted: #7c7d84;
+      --line: #2c2d31; --line-soft: #26272b; --line-strong: #3d3e44;
+      --bg: #17181a; --soft: #1f2023; --desk: #121315;
+      --accent: #9db3d6; --link: #79a8f0;
+      --up: #ef7a72; --down: #79a8f0; --ok: #6cbf7f; --warn: #e09a4f; --bad: #ef7a72;
+      --bar-done: #5a6270;
+    }
+  }
+  :root[data-theme="dark"] {
+    --fg: #e6e6e8; --sub: #a9aab0; --muted: #7c7d84;
+    --line: #2c2d31; --line-soft: #26272b; --line-strong: #3d3e44;
+    --bg: #17181a; --soft: #1f2023; --desk: #121315;
+    --accent: #9db3d6; --link: #79a8f0;
+    --up: #ef7a72; --down: #79a8f0; --ok: #6cbf7f; --warn: #e09a4f; --bad: #ef7a72;
+    --bar-done: #5a6270;
+  }
+
+
+  /* ---------- 공통 유틸 (report/dev 동일) ---------- */
+  .table-wrap { overflow-x: auto; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .nw { white-space: nowrap; }
+  .center { text-align: center; }
+  .mono { font-family: var(--mono); font-size: 0.9em; white-space: nowrap; }
+  .small { font-size: 12.5px; color: var(--muted); }
+  .ok { color: var(--ok); }
+  .warn { color: var(--warn); }
+  .bad { color: var(--bad); }
+  .up { color: var(--up); }
+  .down { color: var(--down); }
+  .up::before { content: "▲ "; font-size: 0.8em; }
+  .down::before { content: "▼ "; font-size: 0.8em; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: var(--muted); }
+  .dot.ok { background: var(--ok); }
+  .dot.warn { background: var(--warn); }
+  .dot.bad { background: var(--bad); }
+  .note {
+    margin: 16px 0;
+    padding: 12px 16px;
+    border-left: 3px solid var(--accent);
+    background: var(--soft);
+    color: var(--fg);
+    font-size: 14px;
+  }
+  .note.warn { border-left-color: var(--warn); }
+  .note b { display: block; margin-bottom: 2px; font-size: 13px; color: var(--accent); }
+  .note.warn b { color: var(--warn); }
+  .note p:last-child { margin-bottom: 0; }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; scroll-padding-top: 24px; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.7;
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+  }
+  a { color: var(--link); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 760px);
+    gap: 56px;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 48px 32px 96px;
+  }
+
+  /* ---------- 목차 ---------- */
+  .toc {
+    position: sticky;
+    top: 32px;
+    align-self: start;
+    max-height: calc(100vh - 64px);
+    overflow-y: auto;
+    font-size: 13px;
+  }
+  .toc-title { font-size: 11.5px; font-weight: 600; color: var(--muted); letter-spacing: 0.04em; margin-bottom: 8px; }
+  .toc ol { list-style: none; margin: 0; padding: 0; border-left: 1px solid var(--line); }
+  .toc a {
+    display: block;
+    padding: 3px 0 3px 12px;
+    margin-left: -1px;
+    border-left: 1px solid transparent;
+    color: var(--sub);
+    line-height: 1.5;
+  }
+  .toc a.h3 { padding-left: 24px; font-size: 12.5px; color: var(--muted); }
+  .toc a:hover { color: var(--fg); text-decoration: none; }
+  .toc a.active { color: var(--fg); border-left-color: var(--fg); }
+
+  /* ---------- 머리 ---------- */
+  .path { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  h1 { margin: 10px 0 18px; font-size: 28px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.3; }
+  .meta {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 4px 20px;
+    margin: 0 0 8px;
+    padding: 14px 0;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    font-size: 13.5px;
+  }
+  .meta dt { color: var(--muted); white-space: nowrap; }
+  .meta dd { margin: 0; }
+
+  .status {
+    display: inline-block;
+    padding: 0 7px;
+    border: 1px solid currentColor;
+    border-radius: 3px;
+    font-size: 12px;
+    line-height: 1.6;
+    font-weight: 500;
+  }
+  .status.draft { color: var(--muted); }
+  .status.review { color: var(--warn); }
+  .status.approved { color: var(--ok); }
+  .status.deprecated { color: var(--bad); text-decoration: line-through; }
+
+  /* ---------- 본문 ---------- */
+  h2 { margin: 52px 0 12px; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.4; }
+  h3 { margin: 30px 0 8px; font-size: 16px; font-weight: 600; }
+  h2 a.anchor, h3 a.anchor { margin-left: 6px; color: var(--muted); font-weight: 400; opacity: 0; }
+  h2:hover a.anchor, h3:hover a.anchor { opacity: 1; text-decoration: none; }
+  p { margin: 0 0 12px; }
+  ul, ol { margin: 0 0 12px; padding-left: 22px; }
+  li + li { margin-top: 3px; }
+  strong { font-weight: 600; }
+  hr { border: 0; border-top: 1px solid var(--line); margin: 40px 0; }
+
+  :not(pre) > code {
+    font-family: var(--mono);
+    font-size: 0.86em;
+    padding: 1px 5px;
+    background: var(--soft);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+  }
+  kbd {
+    font-family: var(--mono);
+    font-size: 0.82em;
+    padding: 1px 5px;
+    border: 1px solid var(--line-strong);
+    border-bottom-width: 2px;
+    border-radius: 3px;
+  }
+
+  .tldr { margin: 28px 0 0; padding: 2px 0 2px 16px; border-left: 2px solid var(--fg); }
+  .tldr p:last-child { margin-bottom: 0; }
+
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .cols h4 { margin: 0 0 6px; font-size: 13.5px; font-weight: 600; color: var(--sub); }
+
+
+  /* 코드 / 로그 */
+  .code {
+    margin: 14px 0 18px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: var(--soft);
+    overflow: hidden;
+  }
+  .code-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px 8px 5px 12px;
+    border-bottom: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .code-head button {
+    font: inherit;
+    color: var(--muted);
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    padding: 1px 6px;
+    cursor: pointer;
+  }
+  .code-head button:hover { color: var(--fg); border-color: var(--line-strong); }
+  pre {
+    margin: 0;
+    padding: 12px 14px;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.6;
+    tab-size: 2;
+  }
+  pre .c { color: var(--muted); }
+  pre .k { color: var(--link); }
+  .code.log pre { font-size: 12px; line-height: 1.55; }
+  .code.log .e { color: var(--bad); }
+  .code.log .w { color: var(--warn); }
+
+  .table-wrap { margin: 12px 0 18px; }
+  /* 표 */
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  caption { caption-side: top; text-align: right; font-size: 12px; color: var(--muted); padding-bottom: 4px; }
+  th, td { padding: 8px 12px 8px 0; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  th:last-child, td:last-child { padding-right: 0; }
+  thead th { border-bottom-color: var(--line-strong); font-size: 12.5px; font-weight: 600; color: var(--sub); white-space: nowrap; }
+
+  /* 환경 표: 왼쪽 열 좁게 */
+  table.env th:first-child, table.env td:first-child { width: 160px; color: var(--sub); }
+
+  /* 비트 필드 표 */
+  table.bits { table-layout: fixed; font-family: var(--mono); font-size: 12px; margin-bottom: 4px; }
+  table.bits th, table.bits td {
+    padding: 5px 2px;
+    text-align: center;
+    border: 1px solid var(--line);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  table.bits th { background: var(--soft); font-weight: 500; color: var(--muted); border-bottom-color: var(--line); }
+  table.bits td.r { color: var(--muted); background: repeating-linear-gradient(45deg, transparent 0 4px, var(--soft) 4px 8px); }
+
+  /* 체크리스트 */
+  .check { list-style: none; padding-left: 0; }
+  .check li { position: relative; padding-left: 26px; }
+  .check input { position: absolute; left: 0; top: 5px; margin: 0; accent-color: var(--fg); }
+  .check input:checked + span { color: var(--muted); text-decoration: line-through; }
+
+  .foot {
+    margin-top: 72px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+    font-size: 12.5px;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 28px 16px 64px; }
+    .toc { position: static; max-height: none; margin-bottom: 28px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+    h1 { font-size: 23px; }
+    .cols { grid-template-columns: 1fr; gap: 8px; }
+    table.env th:first-child, table.env td:first-child { width: 110px; }
+  }
+
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  @media print {
+    :root, :root[data-theme="dark"], :root:not([data-theme="light"]) {
+      --bg: #fff; --fg: #000; --sub: #444; --muted: #777;
+      --line: #ddd; --line-soft: #e6e6e6; --line-strong: #bbb; --soft: #f5f5f5;
+      --accent: #23364f; --link: #1f5fbf; --up: #b8322a; --down: #2a5aa8;
+      --ok: #2d7a3e; --warn: #b5590a; --bad: #b3261e; --bar-done: #9aa4b2;
+    }
+    .layout { display: block; padding: 0; max-width: none; }
+    .toc, .code-head button, a.anchor, .sr { display: none; }
+    pre { white-space: pre-wrap; }
+    h2, h3 { break-after: avoid; }
+    .code, table, .note { break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+  <nav class="toc" aria-label="목차">
+    <div class="toc-title">목차</div>
+    <ol id="toc"></ol>
+  </nav>
+
+  <main>
+    <div class="path">docs / reviews / 2026-11-04-component-ux-review</div>
+    <h1>컴포넌트별 UX 리뷰 · 구현 · 검증 (1차 5팀 + 2차 1팀)</h1>
+
+    <dl class="meta">
+      <dt>상태</dt><dd><span class="status review">Review</span> · main 반영·푸시 완료</dd>
+      <dt>작성</dt><dd>Claude Opus 5.5 (메인 오케스트레이터)</dd>
+      <dt>리뷰·검증</dt><dd>팀별 워커 Claude Opus 5.5 · Codex GPT-6.1-Sol</dd>
+      <dt>최종 수정</dt><dd>2026-11-04</dd>
+      <dt>대상</dt><dd>duet (Tauri 2 + React + Rust) · main <span class="mono">46ecee6..6290e2f</span></dd>
+      <dt>원본 기록</dt><dd><a href="2026-11-04-component-ux-review.md">2026-11-04-component-ux-review.md</a></dd>
+    </dl>
+
+    <div class="tldr">
+      <p>사용자가 짚은 불편 네 가지를 모두 고쳤다. 숨김 토글은 다시 툴바 1클릭이다. 원격 탭에는 호스트와 연결 상태 칩이 상시 표시된다. 탭을 핀으로 고정할 수 있고, 배너 [재연결]은 패널을 묻지 않고 원래 탭으로 돌아간다. 이와 함께 6개 컴포넌트를 병렬로 리뷰해 버그와 불편을 고쳤다.</p>
+      <p>결과는 커밋 151개(파일 157개, +13,687 / −1,713)이며, 새 의존성은 없고 백엔드 변경은 1개 파일이다. 실 SSH 서버 왕복과 Windows 실기는 확인하지 못했다. 백엔드 복사 경로 검사(B-05) 등 사용자 결정이 필요한 보류 항목이 남아 있다.</p>
+    </div>
+
+    <h2>배경</h2>
+    <p>전반적인 만족도는 높지만, 사용하면서 다음 네 가지가 걸린다는 피드백이 있었다.</p>
+    <ol>
+      <li><b>숨김 파일 토글이 한 단계 아래로 내려감.</b> 원인은 <code>4057333</code>(2026-09-11)의 "패널 폭 560px 미만이면 메뉴로" 규칙이다. 기본 창(1280px + 사이드바 + 미리보기)에서 패널 폭은 약 383px이라, 토글이 사실상 항상 <code>보기</code> 메뉴 안에 있었다.</li>
+      <li><b>현재 탭이 원격인지 알기 어려움.</b> 경로 바에 원격 표시가 약했고, 비활성 탭의 끊김은 아예 보이지 않았다.</li>
+      <li><b>탭 핀 고정 없음.</b></li>
+      <li><b>배너 [재연결] 후 "어느 패널에 띄울까"를 다시 물음.</b> 재연결이 일반 연결 대화상자를 그대로 재사용했기 때문이다.</li>
+    </ol>
+    <p>이 네 가지를 출발점으로 삼되, 같은 종류의 "미묘한 불편"이 더 있을 것으로 보고 컴포넌트 단위로 전체 리뷰를 진행했다.</p>
+
+    <h2>목표와 범위</h2>
+    <div class="cols">
+      <div>
+        <h4>목표</h4>
+        <ul>
+          <li>사용자 지적 4건 해결</li>
+          <li>컴포넌트마다 독립 리뷰 → 계획 → 구현 → 2인 병렬 검증 + 스모크 테스트</li>
+          <li>CLAUDE.md 규칙 유지: 새 의존성 없음, §5 비밀번호 취급, 키바인딩·색상 하드코딩 금지</li>
+        </ul>
+      </div>
+      <div>
+        <h4>범위 밖</h4>
+        <ul>
+          <li>IPC 시그니처를 바꾸는 백엔드 변경. 보류 표로 넘겼다</li>
+          <li>대형 리팩터(Sidebar.tsx 분할 등). 기능 변경과 섞지 않는다</li>
+          <li>실 SSH 서버·Windows 실기 검증</li>
+        </ul>
+      </div>
+    </div>
+
+    <h2>진행 방식</h2>
+    <h3>팀 구성</h3>
+<div class="code"><div class="code-head">orchestration</div><pre><code>                   main orchestrator (this session)
+               dedupe across teams, merge, visual smoke
+                                   |
+  ┌─────────┬─────────────┬────────┴────┬─────────────┬──────────────┐
+tabs   pane-chrome   connection   sidebar-shell   file-view   dialogs-palette
+                                                                 (wave 2)
+  |
+  |  per team: 1 git worktree (ux/&lt;comp&gt;) + 1 herdr workspace (3 panes)
+  |
+┌─┴───────────────────┬─────────────────────┐
+lead                  worker A              worker B
+Opus 5.5              Opus 5.5              GPT-6.1-Sol (codex)
+plan + impl           review + verify       review + verify</code></pre></div>
+    <p>팀마다 git worktree(<code>ux/&lt;comp&gt;</code>)와 herdr 워크스페이스 1개(탭 1개를 3분할)를 두었다. 리드가 계획과 구현을 맡고, 두 워커가 독립 리뷰와 병렬 검증을 맡았다. 메인 세션은 팀 간 중복 조율, 통합, 시각 스모크를 맡았다. 팀 사이에서는 alias 파싱 헬퍼를 공유했고, 겹치는 작업은 한 팀으로 몰았다. 탭 전환 새로고침 effect는 tabs 팀, 사이드바 상태 점은 sidebar-shell 팀이 맡았다.</p>
+
+    <h3>단계</h3>
+<div class="code"><div class="code-head">phases</div><pre><code>REVIEWING ──> PLANNED ──> IMPLEMENTING ──> VERIFYING ──> DONE
+ 3 reviews     plan.md      lead commits     2 workers      final.md
+ (lead+A+B)                                  gates + smoke
+                                             max 3 rounds; FAIL -> lead fixes</code></pre></div>
+    <p>소통은 파일로 했다. 작업은 <code>tasks/</code>, 보고는 <code>reports/*.md</code>와 <code>.done</code>, 진행 단계는 <code>STATUS</code>에 적었다. 검증은 최대 3라운드로 하고, 3라운드 뒤에 남은 수정은 리드가 회귀 테스트로 확인한 다음 그 사실을 final.md에 남겼다. 팀별 원본 보고서는 <code>../duet-ux/_orchestra/&lt;comp&gt;/{plan,final}.md</code>에 있다.</p>
+
+    <h3>게이트</h3>
+<div class="code"><div class="code-head">gates (every verify round)</div><pre><code>pnpm exec tsc --noEmit
+pnpm lint                       <span class="c"># eslint</span>
+pnpm exec prettier --check &lt;changed files&gt;
+pnpm exec vitest run --minWorkers=1 --maxWorkers=2
+pnpm exec vite build --outDir &lt;scratch&gt;
+cargo fmt --check &amp;&amp; cargo clippy -- -D warnings &amp;&amp; cargo test --lib</code></pre></div>
+    <div class="note warn">
+      <b>주의</b>
+      <p>이 머신에서 vitest에 <code>--maxWorkers</code>만 주면 RangeError로 테스트가 0개 실행되고 exit 1이 난다. <code>--minWorkers=1</code>을 같이 준다. 결과를 <code>tail</code>로 파이프하면 실패 종료 코드가 가려지므로 파이프하지 않는다.</p>
+    </div>
+
+    <h2>사용자 지적 4건의 해결</h2>
+
+    <h3>숨김 파일 토글 (pane-chrome)</h3>
+    <p>모든 패널 폭에서 숨김 토글을 툴바 버튼으로 되돌렸다. 켜진 상태는 배경 채움(<code>bg-active</code>)과 눈 아이콘으로 표시한다. 툴팁에는 현재 할당된 키가 나온다(키 하드코딩 없음). <code>보기</code> 메뉴의 항목도 그대로 남겼다. 폭 단계는 헤드리스 Chrome으로 280~720px를 1px 간격으로, 한/영 × 동기화 켬/끔 조합(1,764가지)에서 측정해 다시 정했으며 넘침은 0건이다.</p>
+<div class="code"><div class="code-head">src/components/pane/PaneToolbar.tsx (발췌)</div><pre><code>{<span class="c">/* 숨김 파일: 모든 폭에서 1클릭 (보기 메뉴에도 남긴다). */</span>}
+&lt;ToolButton
+  label={showHidden
+    ? t(<span class="c">"toolbar.hideHidden"</span>, { key: kHidden })
+    : t(<span class="c">"toolbar.showHidden"</span>, { key: kHidden })}
+  ariaLabel={t(<span class="c">"toolbar.hiddenFiles"</span>)}
+  active={showHidden}
+  onClick={() =&gt; runHere(() =&gt; toggleShowHidden(id))}
+&gt;
+  {showHidden ? &lt;Eye size={15} /&gt; : &lt;EyeOff size={15} /&gt;}
+&lt;/ToolButton&gt;</code></pre></div>
+    <p>토글해도 커서는 맨 위로 튀지 않고 같은 항목에 머문다(<code>keepCursor</code>). 숨겨지는 항목은 선택에서 빠진다.</p>
+
+    <h3>원격 탭 식별 (tabs)</h3>
+    <ul>
+      <li>경로 바 왼쪽 <code>SourceChip</code>: 원격이면 Server 아이콘과 호스트 별명이 accent 칩으로 나온다. 연결 중이면 회전 아이콘, 끊김·오류면 Unplug 아이콘에 danger 테두리를 쓴다. 경로 편집·아카이브·휴지통 화면에서도 칩은 유지된다.</li>
+      <li>탭에도 같은 아이콘과 호스트 이름을 붙여, 비활성 탭이 끊겨도 보인다. 툴팁에는 호스트, <code>user@ip</code>, 상태, 전체 경로가 나온다.</li>
+      <li>로컬 탭은 칩을 조용하게 둔다. 원격일 때만 눈에 띈다.</li>
+    </ul>
+
+    <h3>탭 핀 고정 (tabs)</h3>
+    <p>탭 우클릭 "탭 고정" 또는 명령 <code>tab.togglePin</code>으로 고정한다. 고정 탭은 왼쪽에 모이고, 구분선과 짧은 라벨을 쓰며, X 대신 핀 버튼이 붙는다. 세션에 저장되고, 구버전 세션도 그대로 읽힌다. 닫기 보호는 UI가 아니라 store에 두어서 X·가운데 클릭·<kbd>Ctrl+W</kbd>·팔레트·일괄 닫기 어느 경로로도 고정 탭이 닫히지 않는다.</p>
+<div class="code"><div class="code-head">src/stores/panes.ts (발췌)</div><pre><code><span class="c">/** 앞쪽 연속 핀 구간의 길이 = 첫 일반 탭의 인덱스. */</span>
+<span class="k">export function</span> pinnedCount(p: PaneState): <span class="k">number</span> {
+  <span class="k">let</span> k = 0;
+  <span class="k">while</span> (k &lt; p.tabs.length &amp;&amp; p.tabs[k]!.pinned) k += 1;
+  <span class="k">return</span> k;
+}
+
+closeTab: (id, index) =&gt; {
+  <span class="k">const</span> p = get().panes[id];
+  <span class="k">const</span> target = p.tabs[index];
+  <span class="c">// 핀 탭은 X·가운데 클릭·Ctrl+W·팔레트 어느 경로로도 닫히지 않는다.</span>
+  <span class="k">if</span> (!target || target.pinned || p.tabs.length &lt;= 1) <span class="k">return false</span>;
+  pushClosedTabs([{ pane: id, index, tab: target }]);
+  ...</code></pre></div>
+    <p>모든 삽입·이동은 <code>pinnedCount</code> 경계를 지킨다. 같은 작업에서 닫은 탭 다시 열기(<kbd>Ctrl+Shift+T</kbd>, 최근 25개), 드래그·키보드(<kbd>Ctrl+Shift+PageUp/Down</kbd>) 순서 변경, 상태를 유지하는 복제도 추가했다.</p>
+
+    <h3>배너 재연결 (connection)</h3>
+<div class="code"><div class="code-head">sequence: banner reconnect</div><pre><code>User           Banner(pane R, tab 2)     connections store         backend
+ |── click ──────>|                            |                        |
+ |                |── reconnect(alias, R) ────>|                        |
+ |                |                            |── connection_open ────>|
+ |                |                            |   key / agent / vault  |
+ |                |                            |<─ ok ──────────────────|
+ |                |<─ same pane, same tab, same path (no home lookup)   |
+ |                |   + other tabs on same host revived                 |
+ |                |                            |                        |
+ |   [password or host key needed]             |                        |
+ |<─ dialog pinned to pane R (no pane picker, reason shown first)       |
+ |   [server unreachable] -> toast, banner stays                        |</code></pre></div>
+    <p>키, 에이전트, 저장된 vault 비밀번호로 붙는 호스트는 대화상자 없이 재연결된다. 비밀번호나 호스트 키 승인이 필요할 때만 대화상자가 뜨며, 이때 패널은 고정되고 선택지가 없다. 실패 사유와 호스트 키 프롬프트는 처음부터 보인다. 같은 호스트를 쓰던 다른 탭(양쪽 패널, 비활성 탭, 뒤로가기 기록)도 새 연결로 함께 살아난다. 연결을 기다리는 사이 사용자가 그 탭에서 다른 폴더로 이동했다면 덮어쓰지 않는다.</p>
+    <div class="note">
+      <b>보안 (§5)</b>
+      <p>같은 작업에서 세 가지를 고쳤다. 저장 호스트로 프리필한 뒤 주소를 고치면 저장 비밀번호가 새 주소로 전송되던 문제, 호스트 키 승인 대상이 바뀔 수 있던 문제, 비밀번호 입력칸이 호출 직후 비워지지 않던 문제다. 평문 비밀번호를 프론트로 되돌리는 경로는 없다.</p>
+    </div>
+
+    <h2>컴포넌트별 결과</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>팀</th><th>사용자 지적</th><th>그 밖의 주요 변화</th><th class="nw">최종 검증</th></tr></thead>
+        <tbody>
+          <tr><td class="nw">tabs</td><td>원격 칩, 핀 탭</td><td>닫은 탭 다시 열기, 순서 변경, 상태 유지 복제. 늦은 목록 응답이 다른 탭을 덮던 경쟁 조건, 손상 세션으로 부팅이 멈추던 문제, <kbd>Ctrl+Tab</kbd>이 패널을 바꾸던 문제</td><td class="nw"><span class="ok">PASS</span> · 마지막 수정은 리드만 검증</td></tr>
+          <tr><td class="nw">pane-chrome</td><td>숨김 토글 1클릭</td><td>툴바 필터·정렬 버튼, 폭 단계 재조정, 현재 폴더 클릭 = 경로 편집, 경로 복사, UNC 경로 브레드크럼, 패턴 바·필터 바 키보드 결함</td><td class="nw"><span class="ok">PASS</span> (3R)</td></tr>
+          <tr><td class="nw">connection</td><td>배너 재연결</td><td>§5 보안 3건, 취소 후 늦은 성공 무시, 읽을 수 있는 오류 제목, 자동 재연결 [중지], 포트 보존</td><td class="nw"><span class="ok">PASS</span> (3R)</td></tr>
+          <tr><td class="nw">sidebar-shell</td><td>—</td><td>사이드바에서 <kbd>Delete</kbd>를 누르면 <b>활성 패널의 선택 파일이 휴지통으로 가던 버그</b>. 호스트 상태 점 미갱신, 상태바 L/R·원격·숨김 개수, 작업 바 진행·대기, 시작 시 작업 이벤트 유실</td><td class="nw"><span class="ok">PASS</span> (3R)</td></tr>
+          <tr><td class="nw">file-view</td><td>—</td><td>한글 IME에 안전한 이름 바꾸기, 키보드를 따라가는 미리보기, "폴더에 붙여넣기" 대상, Shift 범위 기준점, 비활성 패널 커서 회색, 드래그 복사/이동 배지</td><td class="nw">opus <span class="ok">PASS</span> / sol <span class="bad">FAIL</span> 1건 → 리드 수정</td></tr>
+          <tr><td class="nw">dialogs-palette</td><td>—</td><td>IME 조합 중 Enter 오발동, 모달 뒤로 키가 새는 문제, 키맵 편집(Esc·충돌·가려진 기본 키), 권한 혼합 선택 시 폴더 x 비트 상실, 토스트가 모달에 가려지는 문제</td><td class="nw"><span class="ok">PASS</span> (3R)</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="small">백엔드 변경은 <code>services/connection_supervisor.rs</code> 1개 파일이다. 재연결 실패 사유를 정확히 주고, config 읽기 실패 시 "연결 중"에 멈추지 않게 했다. 커밋 범위별 분포: fe/ui 96 · fe/store 26 · fe/hook 10 · fe/test 3 · test 2 · style 2 · be/svc 1 · docs 5 · merge 6.</p>
+
+    <h2>통합</h2>
+    <p>병합 순서는 connection → pane-chrome → sidebar-shell → file-view → tabs이고, 그 위에 2차 dialogs-palette를 얹었다. tabs 리드는 먼저 <code>ux/connection</code>을 병합해 충돌을 풀었다.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>충돌 지점</th><th>해결</th></tr></thead>
+        <tbody>
+          <tr><td class="mono nw">stores/panes.ts</td><td>숨김 토글 커서 유지가 pane-chrome과 file-view 양쪽에 있었다. 숨겨진 선택 해제까지 하는 file-view의 <code>keepCursor</code>로 정리하고, tabs의 핀 헬퍼(<code>pinnedCount</code>, <code>arrangePane</code>, <code>withTab</code>, <code>recordClosed</code>)와 합쳤다</td></tr>
+          <tr><td class="mono nw">pane/PathBar.tsx</td><td>소스 칩은 tabs의 <code>SourceChip</code>, 경로 바 기능(현재 폴더 클릭 편집, 경로 복사)은 pane-chrome 쪽을 따랐다</td></tr>
+          <tr><td class="mono nw">connectDialogs.test.tsx</td><td>savedHosts가 i18n을 import하게 되어 react-i18next 모킹에 <code>initReactI18next</code>를 보강했다(테스트만 수정)</td></tr>
+          <tr><td class="mono nw">tabs.smoke.test.tsx</td><td>file-view가 ContextMenu 항목을 <code>role="menuitem"</code>으로 바꿔서 헬퍼를 <code>getAllByRole("menuitem")</code>으로 고쳤다(테스트만 수정)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>검증</h2>
+    <h3>게이트 결과</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>시점</th><th>프론트엔드</th><th>백엔드</th></tr></thead>
+        <tbody>
+          <tr><td class="nw">1차 통합 <span class="mono">3f913ff</span></td><td>tsc · eslint · prettier 0, Vitest <b>75 files / 581 tests</b>, vite build 성공</td><td>cargo fmt · clippy(-D warnings) 통과, cargo test --lib <b>370 통과</b> (1 ignored)</td></tr>
+          <tr><td class="nw">2차 반영 전 <span class="mono">c9478d1</span></td><td>tsc · eslint · prettier 0, Vitest <b>84 files / 626 tests</b>, vite build 성공</td><td>변경 없음</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>2차의 새 회귀 테스트는 수정 전 코드에서 실패하는 것을 확인했다(12파일 35건).</p>
+
+    <h3>스모크 테스트</h3>
+    <ul>
+      <li><code>src/components/pane/__smoke__/tabs.smoke.test.tsx</code>(16): 원격 칩, 핀 고정·보호·세션 왕복, 닫은 탭 다시 열기, 드래그 재정렬(핀 경계)</li>
+      <li><code>src/__smoke__/tabs.app.smoke.test.tsx</code>(14): App 전체와 실제 keydown으로 키보드 탭 조작, 늦은 응답, 새로고침 경쟁 확인</li>
+      <li><code>src/__smoke__/connection.smoke.test.tsx</code>(11): 배너 재연결 경로 전부. 키 호스트, 비밀번호 호스트, 서버 불가, 동시 재연결, 대기 중 탭 이동</li>
+      <li><code>src/components/pane/__smoke__/pane-chrome.smoke.test.tsx</code>(6): 1클릭 숨김 토글, 필터·정렬, 경로 편집, 패턴 바</li>
+      <li><code>src/components/__smoke__/dialogs-palette.smoke.test.tsx</code>: 키보드·IME 흐름</li>
+    </ul>
+
+    <h3>실앱 · 시각 확인</h3>
+    <p>이 환경에는 화면 기록·손쉬운 사용 권한이 없어 실앱 창의 캡처와 조작은 하지 못했다. 대신 실제 <code>App</code> 컴포넌트를 헤드리스 Chrome으로 렌더해 화면을 확인했다.</p>
+    <ul class="check">
+      <li><input type="checkbox" checked><span><code>pnpm tauri dev</code> 빌드·실행, 런타임 오류 로그 없음</span></li>
+      <li><input type="checkbox" checked><span>대체 시각 스모크: 실제 <code>App</code>을 Vite와 헤드리스 Chrome으로 렌더(IPC 모킹, 라이트 모드). 툴바 숨김 토글(좁은 창 포함)과 켜짐 배경, 핀 탭, 원격 칩, 비활성 원격 탭의 끊김 아이콘, 끊긴 패널 배너, 상태바 원격·숨김 개수</span></li>
+      <li><input type="checkbox"><span>실제 SSH 서버 왕복. Docker daemon이 꺼져 있어 <code>scripts/ssh-it.sh</code> 미실행</span></li>
+      <li><input type="checkbox"><span>Windows 실기</span></li>
+      <li><input type="checkbox"><span>실앱 WKWebView에서 1280px 기본 창 툴바, 패턴 바 마우스 클릭, ProgressModal 마운트 경쟁 확인</span></li>
+    </ul>
+
+    <h2>대안 검토 — 툴바 반응형 정책</h2>
+    <p>숨김 토글이 메뉴로 숨은 근본 원인은 폭 단계 규칙이었다. 그래서 규칙 자체를 어떻게 둘지 비교했다.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>안</th><th>장점</th><th>단점</th><th>결정</th></tr></thead>
+        <tbody>
+          <tr><td>A. 고정 임계값 단계형 + 실측으로 재조정</td><td>단순하고 테스트 가능. 넘침 0을 측정으로 보장</td><td>버튼이 늘면 단계를 다시 측정해야 함</td><td><strong>채택</strong></td></tr>
+          <tr><td>B. ResizeObserver로 넘치는 버튼만 "더보기" (VS Code식)</td><td>공간 효율 최고</td><td>복잡하고 jsdom 테스트가 어려움. 어떤 버튼이 숨을지 예측하기 어려움</td><td>제외 (버튼이 더 늘면 재검토)</td></tr>
+          <tr><td>C. 기존 규칙 유지, 숨김 토글만 예외</td><td>변경 최소</td><td>필터·정렬도 같은 문제. 예외가 쌓임</td><td>제외</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>새로 발견한 문제 (미수정)</h2>
+    <ol>
+      <li><b>개발 빌드에서 세션 복원 활성 탭이 틀어진다.</b> React StrictMode가 부트스트랩 effect를 두 번 실행한다. 두 번째 실행이 첫 실행 루프가 바꾼 <code>activeTabIndex</code>를 "저장된 값"으로 읽는다(<code>App.tsx</code> 부트스트랩의 <code>savedActive</code>). 원래 main에 있던 코드이고 프로덕션에서는 재현되지 않을 것으로 보이지만, 부트스트랩을 멱등하게 만드는 편이 안전하다.</li>
+      <li><b>끊긴 원격 패널이 배너 아래에 "빈 폴더입니다"를 표시한다.</b> 폴더가 비어 있는 게 아니라 연결이 없는 상태이므로 문구를 구분해야 한다.</li>
+    </ol>
+
+    <h2>보류 — 사용자 결정 필요</h2>
+    <h3>1차</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>ID</th><th>내용</th><th>추천</th></tr></thead>
+        <tbody>
+          <tr><td class="nw">file-view B-05</td><td>백엔드 <code>plan_transfer</code>에 "대상이 원본 안" 검사가 없어 재귀 복사 위험이 있다</td><td><b>다음 백엔드 라운드 최우선</b></td></tr>
+          <tr><td class="nw">sidebar H-1</td><td>저장 호스트·북마크·즐겨찾기 제거가 즉시 실행되고 되돌릴 수 없다(§4)</td><td>토스트 "되돌리기"</td></tr>
+          <tr><td class="nw">sidebar H-2</td><td>저장 호스트를 제거해도 vault 비밀번호가 남는다</td><td>백엔드 remove 시 vault 정리</td></tr>
+          <tr><td class="nw">connection H1/H2</td><td>자동 재연결이 ssh-config + 키 호스트 전용이다. config 호스트에는 vault 비밀번호 재사용 경로가 없다</td><td>재연결 profile 보관 + <code>saved_password_alias</code> (IPC 변경)</td></tr>
+          <tr><td class="nw">file-view B-01</td><td>목록 탐색 키(↑↓, Enter, Backspace, Tab 등)가 하드코딩돼 있다(규칙 위반)</td><td><code>nav.*</code> 커맨드화</td></tr>
+          <tr><td class="nw">file-view B-06</td><td>라이트 모드에서 활성 선택(95%)과 hover(97%)의 대비가 약하다</td><td>활성 선택용 토큰을 한 단계 진하게</td></tr>
+          <tr><td class="nw">tabs H-01</td><td>원격 표시 색이 현재 accent(파랑)다</td><td>유지. 혼동 피드백이 오면 <code>--remote</code> 토큰</td></tr>
+          <tr><td class="nw">tabs H-05/H-06</td><td>활성 탭 닫기 시 이웃 선택 방향, <kbd>Alt+9</kbd></td><td>오른쪽 이웃, <kbd>Alt+9</kbd> = 마지막 탭 (브라우저 관례)</td></tr>
+          <tr><td class="nw">file-view B-02</td><td>컨텍스트 메뉴가 약 20항목이다</td><td>"도구 ▸", "복사 ▸" 서브메뉴</td></tr>
+          <tr><td class="nw">pane-chrome 5 / B-09</td><td><code>useKeyboardNav</code>가 포커스된 버튼의 Enter/Space를 가로채고, Tab이 툴바 포커스 이동을 막는다</td><td>버튼·메뉴에서는 양보 + 클릭 후 목록으로 포커스 복귀</td></tr>
+          <tr><td class="nw">sidebar H-5</td><td>Sidebar.tsx가 약 1,900줄이다</td><td>다음 라운드에 리팩터 단독 커밋으로</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h3>2차 (dialogs-palette)</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>항목</th><th>내용</th><th>추천</th></tr></thead>
+        <tbody>
+          <tr><td class="nw">권한 혼합 편집</td><td>건드린 비트만 적용해야 한다</td><td>백엔드 set/clear 마스크 + 재귀 시 폴더 x 유지</td></tr>
+          <tr><td class="nw">원격 "이동" 별칭</td><td>세션 <code>connection_id</code>를 저장해서 재시작하면 죽은 id가 된다</td><td>host_alias + path 모델(IPC). 단기에는 생성 제한</td></tr>
+          <tr><td class="nw">명령 가용성</td><td>원격/로컬에서 못 쓰는 명령이 그대로 보인다</td><td>비활성 + 이유 표시</td></tr>
+          <tr><td class="nw">공통 Enter·중복 제출</td><td>대화상자마다 따로 구현돼 있다</td><td>DialogShell <code>onSubmit</code>, <code>useSubmitOnce</code></td></tr>
+          <tr><td class="nw">충돌 결정 단일 task</td><td>정책 그룹마다 task가 생겨 <kbd>Ctrl+Z</kbd>를 여러 번 눌러야 한다</td><td>백엔드 execute에 결정 맵 인자</td></tr>
+          <tr><td class="nw">기본 키 완전 해제</td><td><code>keymap.toml</code>에 disabled 표식이 필요하다</td><td>형식 결정 후</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="small">각 팀의 전체 보류 목록은 <code>../duet-ux/_orchestra/&lt;comp&gt;/final.md</code>의 "보류" 절에 있다.</p>
+
+    <h2>배포 및 롤백</h2>
+    <ol>
+      <li>main에 직접 반영했고(브랜치·PR 없음) <code>origin/main</code>에 푸시했다: <span class="mono">46ecee6..6290e2f</span>.</li>
+      <li>기능 플래그는 없다. 변경은 팀별 merge 커밋으로 묶여 있다.</li>
+    </ol>
+<div class="code"><div class="code-head">team merge commits</div><pre><code>efb4d7f  merge: integrate ux/connection
+ae60f61  merge: integrate ux/pane-chrome
+33dc489  merge: integrate ux/sidebar-shell
+0312ba1  merge: integrate ux/file-view
+c2258d3  merge: integrate ux/tabs</code></pre></div>
+    <div class="note">
+      <b>롤백</b>
+      <p>특정 기능만 되돌리려면 해당 기능 커밋을 <code>git revert</code>한다. 예: 숨김 토글 <code>b914cee</code>, 핀 탭 <code>2af85d6</code>, 원격 칩 <code>a4bf1ac</code>, 배너 재연결 <code>2fc40e4</code>. 팀 단위로 되돌리려면 위 merge 커밋을 <code>git revert -m 1</code>한다. 통합 때 공유 파일(<code>panes.ts</code>, <code>PathBar.tsx</code>)의 충돌을 풀었으므로, 팀 단위 revert 뒤에는 게이트를 다시 돌려야 한다.</p>
+    </div>
+
+    <h2>변경 이력</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>날짜</th><th>버전</th><th>내용</th><th>작성</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">2026-11-04</td><td class="mono">0.3</td><td>HTML 개발 문서로 정리</td><td>Claude Opus 5.5</td></tr>
+          <tr><td class="mono">2026-11-04</td><td class="mono">0.2</td><td>2차 dialogs-palette 추가 (<span class="mono">6290e2f</span>)</td><td>Claude Opus 5.5</td></tr>
+          <tr><td class="mono">2026-11-04</td><td class="mono">0.1</td><td>1차 5팀 결과와 통합 기록 (<span class="mono">01b1fae</span>)</td><td>Claude Opus 5.5</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="foot">
+      <span>docs/reviews/2026-11-04-component-ux-review.html</span>
+      <span>원본: 2026-11-04-component-ux-review.md</span>
+    </div>
+  </main>
+</div>
+
+<script>
+  (function () {
+    var toc = document.getElementById("toc");
+    var heads = document.querySelectorAll("main h2, main h3");
+    var used = {};
+    heads.forEach(function (h) {
+      if (!h.id) {
+        var base = h.textContent.trim().toLowerCase().replace(/[^\w가-힣]+/g, "-").replace(/^-|-$/g, "") || "section";
+        var id = base, n = 2;
+        while (used[id] || document.getElementById(id)) id = base + "-" + n++;
+        h.id = id;
+      }
+      used[h.id] = true;
+      var li = document.createElement("li");
+      var a = document.createElement("a");
+      a.href = "#" + h.id;
+      a.textContent = h.textContent;
+      if (h.tagName === "H3") a.className = "h3";
+      li.appendChild(a);
+      toc.appendChild(li);
+      var anchor = document.createElement("a");
+      anchor.href = "#" + h.id;
+      anchor.className = "anchor";
+      anchor.textContent = "#";
+      anchor.setAttribute("aria-hidden", "true");
+      h.appendChild(anchor);
+    });
+
+    var links = toc.querySelectorAll("a");
+    function mark() {
+      var cur = null;
+      heads.forEach(function (h, i) { if (h.getBoundingClientRect().top < 120) cur = i; });
+      links.forEach(function (a, i) { a.classList.toggle("active", i === cur); });
+    }
+    window.addEventListener("scroll", mark, { passive: true });
+    mark();
+
+    // 복사 버튼. 보안 컨텍스트가 아니거나(사내 http) Clipboard API 가 거부되면 execCommand 로 폴백.
+    var live = document.createElement("span");
+    live.className = "sr";
+    live.setAttribute("aria-live", "polite");
+    live.setAttribute("aria-atomic", "true");
+    document.body.appendChild(live);
+
+    var copying = false;
+    var liveTimer = null;
+
+    function announce(message) {
+      if (liveTimer !== null) clearTimeout(liveTimer);
+      live.textContent = message;
+      liveTimer = setTimeout(function () {
+        live.textContent = "";
+        liveTimer = null;
+      }, 1800);
+    }
+
+    function legacyCopy(text) {
+      var sel = window.getSelection ? window.getSelection() : null;
+      var ranges = [];
+      for (var i = 0; sel && i < sel.rangeCount; i++) {
+        ranges.push(sel.getRangeAt(i).cloneRange());
+      }
+      var active = document.activeElement;
+      var inputSelection = null;
+      try {
+        if (active && typeof active.selectionStart === "number") {
+          inputSelection = [active.selectionStart, active.selectionEnd, active.selectionDirection];
+        }
+      } catch (e) {}
+
+      var sx = window.scrollX, sy = window.scrollY;
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;border:0;padding:0;";
+      var ok = false;
+      try {
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        ta.setSelectionRange(0, ta.value.length);
+        ok = document.execCommand("copy");
+      } catch (e) {
+        ok = false;
+      } finally {
+        if (ta.parentNode) ta.parentNode.removeChild(ta);
+        // 포커스를 먼저 복원하고, 그 뒤 선택을 복원한다.
+        try {
+          if (active && active !== document.body && active !== document.documentElement &&
+              document.documentElement.contains(active) && typeof active.focus === "function") {
+            active.focus();
+          }
+        } catch (e) {}
+        try {
+          if (sel) {
+            sel.removeAllRanges();
+            ranges.forEach(function (range) { sel.addRange(range); });
+          }
+          if (inputSelection && active && typeof active.setSelectionRange === "function") {
+            active.setSelectionRange(inputSelection[0], inputSelection[1], inputSelection[2]);
+          }
+        } catch (e) {}
+        try { window.scrollTo(sx, sy); } catch (e) {}
+      }
+      return ok;
+    }
+
+    function copyText(text, done, fail) {
+      function fallback() {
+        var ok = false;
+        try { ok = legacyCopy(text); } catch (e) {}
+        (ok ? done : fail)();
+      }
+      try {
+        var clip = navigator.clipboard;
+        if (clip && typeof clip.writeText === "function" && window.isSecureContext) {
+          clip.writeText(text).then(done, fallback);
+          return;
+        }
+      } catch (e) {}
+      fallback();
+    }
+
+    document.querySelectorAll(".code").forEach(function (box) {
+      var head = box.querySelector(".code-head");
+      var code = box.querySelector("code");
+      if (!head || !code) return;
+
+      var btn = document.createElement("button");
+      var timer = null;
+      btn.type = "button";
+      btn.textContent = "복사";
+
+      function finish(ok) {
+        copying = false;
+        btn.removeAttribute("aria-busy");
+        btn.textContent = ok ? "복사됨" : "복사 실패";
+        announce(ok ? "복사됨" : "복사 실패. 코드를 직접 선택해 복사하세요.");
+        if (timer !== null) clearTimeout(timer);
+        timer = setTimeout(function () {
+          btn.textContent = "복사";
+          timer = null;
+        }, 1800);
+      }
+
+      btn.addEventListener("click", function () {
+        if (copying) {
+          announce("복사 처리 중입니다. 권한 요청이 있으면 확인하세요.");
+          return;
+        }
+        copying = true;
+        if (timer !== null) clearTimeout(timer);
+        btn.textContent = "복사 중";
+        btn.setAttribute("aria-busy", "true");
+        copyText(code.textContent || "",
+          function () { finish(true); },
+          function () { finish(false); });
+      });
+      head.appendChild(btn);
+    });
+  })();
+</script>
+</body>
+</html>
