@@ -120,3 +120,65 @@ describe("AdHocConnectDialog request lifecycle", () => {
     expect(m.connectionClose).toHaveBeenCalledWith("u@box.lan:22:1");
   });
 });
+
+describe("AdHocConnectDialog saved password (§5)", () => {
+  const saved = {
+    alias: "box",
+    host: "box.lan",
+    port: 22,
+    user: "u",
+    key_path: null,
+  };
+
+  beforeEach(async () => {
+    const { useVault } = await import("@/stores/vault");
+    useVault.setState({ exists: true, unlocked: true });
+    m.vaultHas.mockResolvedValue({ status: "ok", data: true });
+    m.connectionOpenAdhoc.mockResolvedValue({
+      status: "error",
+      error: { kind: "AuthFailed" },
+    });
+  });
+
+  it("does not send the saved password alias once the host is edited", async () => {
+    render(
+      <AdHocConnectDialog
+        open
+        onClose={vi.fn()}
+        onConnected={vi.fn()}
+        prefill={saved}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("dialog.adhoc.host"), {
+      target: { value: "other.lan" },
+    });
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: /dialog.connection.connect/ }),
+      );
+    });
+    expect(m.connectionOpenAdhoc).toHaveBeenCalledWith(
+      expect.objectContaining({ host: "other.lan", savedPasswordAlias: null }),
+    );
+  });
+
+  it("sends the alias for the unchanged endpoint even before vaultHas answers", async () => {
+    m.vaultHas.mockReturnValue(new Promise(() => {}));
+    render(
+      <AdHocConnectDialog
+        open
+        onClose={vi.fn()}
+        onConnected={vi.fn()}
+        prefill={saved}
+      />,
+    );
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: /dialog.connection.connect/ }),
+      );
+    });
+    expect(m.connectionOpenAdhoc).toHaveBeenCalledWith(
+      expect.objectContaining({ host: "box.lan", savedPasswordAlias: "box" }),
+    );
+  });
+});

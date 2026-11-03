@@ -131,6 +131,14 @@ export function AdHocConnectDialog({
     setMasterDialog({ open: false });
   };
 
+  /** 입력한 주소가 프리필한 저장 호스트와 같은가 — 저장된 비번은 이때만 쓴다. */
+  const savedEndpoint =
+    prefill !== null &&
+    prefill !== undefined &&
+    host.trim() === prefill.host &&
+    user.trim() === prefill.user &&
+    Number.parseInt(port, 10) === prefill.port;
+
   /** unlock 후 저장된 password '존재 여부' 재확인(평문 안 가져옴, §5). */
   const refreshHasSavedPassword = async () => {
     if (!prefill) return;
@@ -171,12 +179,13 @@ export function AdHocConnectDialog({
     setPhase({ kind: "connecting" });
     // password 는 호출 인자로만 전달, store/localStorage 에 저장 안 함 (CLAUDE.md §5).
     const pw = password ? password : null;
-    // 사용자가 비번을 안 쳤고 이 호스트에 저장된 비번이 있으면, 평문을 프론트로 가져오지
-    // 않고 alias 만 넘겨 backend 가 vault 에서 직접 꺼내 쓰게 한다 (§5 2026-07).
+    // 사용자가 비번을 안 쳤으면, 평문을 프론트로 가져오지 않고 alias 만 넘겨 backend 가
+    // vault 에서 직접 꺼내 쓰게 한다 (§5 2026-07). 저장된 비번이 없으면 backend 가 None
+    // 으로 처리하므로 존재 확인(vaultHas)을 기다리지 않는다 — 빨리 누르면 놓치던 경쟁.
+    // 단 **주소가 저장된 그대로일 때만** — 프리필 후 host 를 고쳤는데 옛 호스트의
+    // 비번을 새 서버로 보내면 안 된다.
     const savedPasswordAlias =
-      !pw && prefill && hasSavedPassword && vault.unlocked
-        ? prefill.alias
-        : null;
+      !pw && savedEndpoint && vault.unlocked && prefill ? prefill.alias : null;
     const mine = ++attempt.current;
     let r: Awaited<ReturnType<typeof commands.connectionOpenAdhoc>>;
     try {
@@ -357,7 +366,7 @@ export function AdHocConnectDialog({
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder={
-              hasSavedPassword && !password
+              hasSavedPassword && savedEndpoint && !password
                 ? t("dialog.adhoc.savedPwAvailable")
                 : t("dialog.adhoc.pwPlaceholder")
             }
