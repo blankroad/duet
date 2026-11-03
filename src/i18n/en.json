@@ -836,6 +836,11 @@
   },
   "tasks": {
     "count": "{{count}} tasks",
+    "queued": "Queued",
+    "progress": "Task progress",
+    "openDetails": "click for progress details",
+    "queuedCount_one": "· {{count}} queued",
+    "queuedCount_other": "· {{count}} queued",
     "kind": {
       "copy": "Copying…",
       "move": "Moving…",

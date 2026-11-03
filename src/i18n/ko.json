@@ -833,6 +833,10 @@
   },
   "tasks": {
     "count": "작업 {{count}}개",
+    "queued": "대기 중",
+    "progress": "작업 진행률",
+    "openDetails": "눌러서 진행 상세 보기",
+    "queuedCount_other": "· 대기 {{count}}",
     "kind": {
       "copy": "복사 중…",
       "move": "이동 중…",

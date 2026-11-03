@@ -31,6 +31,10 @@ import { useTagFilter } from "@/stores/tagFilter";
 import { useSidebarFilter } from "@/stores/sidebarFilter";
 import { useHostGroups } from "@/stores/sidebarGroups";
 import { usePlaces } from "@/stores/places";
+import { TasksBar } from "@/components/TasksBar";
+import { useTasks } from "@/stores/tasks";
+import { useUIDialogs } from "@/stores/ui-dialogs";
+import type { TaskDto } from "@/types/bindings";
 
 // commands.* 는 무엇을 부르든 빈 성공 — 컴포넌트가 부트스트랩 중 부르는 IPC 를 흡수한다.
 vi.mock("@/types/bindings", () => {
@@ -461,5 +465,97 @@ describe("사이드바 — 키보드·접근성", () => {
     });
     fireEvent.keyDown(eject, { key: "Enter" });
     expect(sidebarProps.onOpenLocation).not.toHaveBeenCalled();
+  });
+});
+
+// ─────────────────────────── 작업 바 ───────────────────────────
+
+function task(
+  id: string,
+  status: "queued" | "running",
+  percent: number | null = 40,
+): TaskDto {
+  return {
+    id,
+    kind: "copy",
+    status: { kind: status },
+    title: `Copying ${id}.zip → /tmp`,
+    host_key: { kind: "local" },
+    progress:
+      status === "running"
+        ? {
+            bytes_done: 400,
+            bytes_total: percent == null ? null : 1000,
+            speed_bps: null,
+            eta_sec: null,
+            percent,
+            current_file: `${id}.zip`,
+            files_done: 0,
+            files_total: 1,
+          }
+        : null,
+    error_message: null,
+    affected_locations: [],
+  } as unknown as TaskDto;
+}
+
+function setTasks(ts: TaskDto[]) {
+  act(() => useTasks.getState().setAll(ts));
+}
+
+describe("작업 바", () => {
+  beforeEach(() => {
+    useTasks.setState({ tasks: new Map(), cancelling: new Set() });
+    useUIDialogs.setState({ dialog: { kind: "none" } });
+  });
+
+  it("작업이 2개가 돼도 보고 있던 작업의 진행 막대와 취소가 그대로 남는다", () => {
+    render(<TasksBar />);
+    setTasks([task("big", "running")]);
+    expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe(
+      "40",
+    );
+    expect(
+      screen.getAllByRole("button", { name: i18n.t("sidebar.cancelTask") }),
+    ).toHaveLength(1);
+    setTasks([task("big", "running"), task("small", "queued")]);
+    // 접힌 상태에서도 대표 작업 행(막대·취소)이 보인다.
+    expect(screen.getByText("big.zip")).toBeTruthy();
+    expect(screen.getByRole("progressbar")).toBeTruthy();
+    expect(
+      screen.getAllByRole("button", { name: i18n.t("sidebar.cancelTask") }),
+    ).toHaveLength(1);
+    // 펼치면 대기 작업이 "대기 중" 으로 구분돼 보인다.
+    const toggle = screen.getByRole("button", { expanded: false });
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText(new RegExp(i18n.t("tasks.queued")))).toBeTruthy();
+    expect(
+      screen.getAllByRole("button", { name: i18n.t("sidebar.cancelTask") }),
+    ).toHaveLength(2);
+  });
+
+  it("대기 작업이 먼저 들어와 있어도 요약 줄은 실행 중인 작업을 보여 준다", () => {
+    render(<TasksBar />);
+    setTasks([task("waiting", "queued"), task("busy", "running")]);
+    expect(screen.getByText("busy.zip")).toBeTruthy();
+  });
+
+  it("총량을 모르는 작업은 0% 대신 진행 중 애니메이션으로 보인다", () => {
+    render(<TasksBar />);
+    setTasks([task("dir", "running", null)]);
+    const bar = screen.getByRole("progressbar");
+    expect(bar.hasAttribute("aria-valuenow")).toBe(false);
+    expect(bar.querySelector(".animate-indeterminate")).toBeTruthy();
+  });
+
+  it("작업 이름을 누르면 진행 상세 창을 다시 연다", () => {
+    render(<TasksBar />);
+    setTasks([task("big", "running")]);
+    fireEvent.click(screen.getByText("big.zip"));
+    expect(useUIDialogs.getState().dialog).toMatchObject({
+      kind: "progress",
+      taskId: "big",
+    });
   });
 });
