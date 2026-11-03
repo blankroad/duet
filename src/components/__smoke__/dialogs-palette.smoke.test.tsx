@@ -15,6 +15,7 @@ import type { Command } from "@/lib/commands";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { CommandPalette } from "@/components/CommandPalette";
 import { FrecencyJumper } from "@/components/FrecencyJumper";
+import { confirm as tauriConfirm } from "@tauri-apps/plugin-dialog";
 import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
 import { useKeyboardNav } from "@/hooks/useKeyboardNav";
 import { useFrecency } from "@/stores/frecency";
@@ -229,6 +230,40 @@ describe("설정 › 키맵 — 저장 중 재편집", () => {
       await Promise.resolve();
     });
     expect(store).toEqual([{ key: "F10", command_id: "view.toggleSidebar" }]);
+    expect(editBtn().disabled).toBe(false);
+  });
+});
+
+describe("설정 › 키맵 — 전체 기본값 복원 중", () => {
+  it("복원이 끝나기 전엔 편집할 수 없다 (복원 응답이 새 편집을 지우지 않게)", async () => {
+    type ResetResult = Awaited<ReturnType<typeof ipc.keymapReset>>;
+    let finish: () => void = () => {};
+    vi.mocked(tauriConfirm).mockResolvedValue(true);
+    vi.mocked(ipc.keymapReset).mockImplementationOnce(
+      () =>
+        new Promise<ResetResult>((r) => {
+          finish = () => {
+            store = [];
+            r({ status: "ok", data: [] } as ResetResult);
+          };
+        }),
+    );
+    render(<SettingsDialog onClose={vi.fn()} />);
+    fireEvent.click(screen.getByText("settings.nav.keymap"));
+    const editBtn = () =>
+      rowOf("cmd.view.toggleSidebar").querySelector(
+        "button",
+      ) as HTMLButtonElement;
+    await act(async () => {
+      fireEvent.click(screen.getByText("settings.keymap.restoreDefaults"));
+      await Promise.resolve();
+    });
+    expect(editBtn().disabled).toBe(true);
+    await act(async () => {
+      finish();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
     expect(editBtn().disabled).toBe(false);
   });
 });

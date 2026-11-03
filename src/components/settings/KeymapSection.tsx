@@ -53,6 +53,20 @@ export function KeymapSection() {
     }
   };
 
+  // 전체 기본값 복원도 같은 잠금 안에서 — 확인 창부터 완료까지 다른 편집을 막는다
+  // (복원 응답이 그 사이의 새 편집을 지우지 않게).
+  const restoreAll = async () => {
+    setSaving(true);
+    try {
+      const ok = await tauriConfirm(t("settings.keymap.restoreConfirm"), {
+        title: t("settings.keymap.restoreDefaults"),
+      });
+      if (ok) await resetKeymap();
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // 사용자 지정 전부 해제 — 기본 키로. 응답 스냅숏이 뒤섞이지 않게 순서대로.
   const resetCommand = async (commandId: string) => {
     setSaving(true);
@@ -110,13 +124,7 @@ export function KeymapSection() {
         <button
           type="button"
           disabled={saving}
-          onClick={() => {
-            void tauriConfirm(t("settings.keymap.restoreConfirm"), {
-              title: t("settings.keymap.restoreDefaults"),
-            }).then((ok) => {
-              if (ok) void resetKeymap();
-            });
-          }}
+          onClick={() => void restoreAll()}
           className="flex items-center gap-1 rounded border border-border px-2 py-1 text-meta text-fg-muted hover:bg-border hover:text-fg disabled:opacity-30"
           title={t("settings.keymap.restoreTitle")}
         >
