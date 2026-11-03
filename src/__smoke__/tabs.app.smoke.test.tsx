@@ -241,8 +241,32 @@ describe("App — 탭 키보드 흐름", () => {
     cursorTo("slow");
     key({ key: "Enter", code: "Enter" });
     key({ key: "Tab", code: "Tab", ctrlKey: true }); // 응답 전에 다음 탭으로
+    // 전제: 같은 패널에서 탭이 실제로 바뀌었다 (패널 전환 아님)
+    expect(usePanes.getState().activePane).toBe("left");
+    expect(L().activeTabIndex).toBe(1);
     await wait(400);
     expect(paths()[1]).toBe("/other");
     expect(L().tabs[1]!.entries.map((e) => e.name)).toEqual(["o.txt"]);
+  });
+
+  it("Ctrl+Tab / Ctrl+Shift+Tab 은 같은 패널의 탭을 순환한다 (패널은 그대로)", async () => {
+    await boot();
+    act(() =>
+      usePanes.getState().openTab("left", {
+        source: { kind: "local" },
+        path: "/other",
+      }),
+    );
+    await wait(60);
+    act(() => usePanes.getState().selectTab("left", 0));
+    key({ key: "Tab", code: "Tab", ctrlKey: true });
+    expect(usePanes.getState().activePane).toBe("left");
+    expect(L().activeTabIndex).toBe(1);
+    key({ key: "Tab", code: "Tab", ctrlKey: true, shiftKey: true });
+    expect(usePanes.getState().activePane).toBe("left");
+    expect(L().activeTabIndex).toBe(0);
+    // 수식키 없는 Tab 은 여전히 패널 전환
+    key({ key: "Tab", code: "Tab" });
+    expect(usePanes.getState().activePane).toBe("right");
   });
 });
