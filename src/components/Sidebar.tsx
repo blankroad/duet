@@ -242,6 +242,9 @@ function openableRow(opts: {
       e.preventDefault();
     },
     onKeyDown: (e: React.KeyboardEvent) => {
+      // 행 안의 버튼(삭제 X·꺼내기)에서 누른 키는 그 버튼 몫이다 — 예전엔 버블링으로
+      // 행이 가로채(preventDefault) 버튼 대신 행이 열렸다.
+      if (e.target !== e.currentTarget) return;
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
         opts.onOpen(targetPane(e));
@@ -326,6 +329,13 @@ const rowClass =
 
 /** 활성 행 — 이 위치를 패널이 보고 있다. */
 const rowActiveClass = "border-l-accent bg-active hover:bg-active";
+
+/**
+ * 섹션 헤더의 작은 액션 버튼(+ / 새로고침 / 지우기) — 아이콘은 12px 그대로 두고 누르는
+ * 영역만 24px. 예전엔 16px 라 DESIGN 의 최소 클릭 타겟 24px 에 못 미쳤다.
+ */
+const headerBtnClass =
+  "flex h-6 w-6 shrink-0 items-center justify-center rounded text-fg-muted hover:bg-border hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent";
 
 /**
  * 이 위치를 보고 있는 패널 배지 문자열("L"/"R"/"LR", 없으면 ""). 사이드바에서 연
@@ -502,7 +512,7 @@ function PlacesSection({
         <button
           type="button"
           onClick={rescan}
-          className="rounded p-0.5 text-fg-muted hover:bg-border hover:text-fg"
+          className={headerBtnClass}
           title={t("sidebar.rescanVolumes")}
           aria-label={t("sidebar.rescanVolumes")}
         >
@@ -687,9 +697,10 @@ function VolumeItem({
   ];
   return (
     <div
-      onClick={(e) =>
-        onOpenLocation(locationForSource(source, path), targetPane(e))
-      }
+      // 다른 행처럼 Tab/Enter 로 닿게 — 예전엔 div+onClick 이라 키보드로 열 수 없었다.
+      {...openableRow({
+        onOpen: (pane) => onOpenLocation(locationForSource(source, path), pane),
+      })}
       onContextMenu={(e) => openMenu(e, menu)}
       title={path}
       {...dropAttrs(source, path)}
@@ -745,7 +756,7 @@ function RecentSection({
           <button
             type="button"
             onClick={clear}
-            className="rounded p-0.5 text-fg-muted hover:bg-border hover:text-fg"
+            className={headerBtnClass}
             title={t("sidebar.clearRecents")}
             aria-label={t("sidebar.clearRecents")}
           >
@@ -1521,7 +1532,7 @@ function HostsSection({
           <button
             type="button"
             onClick={() => void reloadSshHosts()}
-            className="rounded p-0.5 text-fg-muted hover:bg-border hover:text-fg"
+            className={headerBtnClass}
             title={t("sidebar.reloadSshConfig")}
             aria-label={t("sidebar.reloadSshConfig")}
           >
@@ -1694,11 +1705,12 @@ function Section({
       {/* 구분선이 아니라 위 여백이 섹션을 나눈다 — border-border 는 bg-subtle 과
           밝기 차가 라이트 7%·다크 6% 라 선으로는 보이지 않는다. 헤더 아래 hairline 은
           제목을 제 본문에 붙여주는 보조 역할. 스크롤해도 제목이 남도록 sticky. */}
-      <div className="sticky top-0 z-10 flex h-5 shrink-0 items-center gap-1.5 border-b border-border bg-subtle pl-2 pr-1">
+      <div className="sticky top-0 z-10 flex h-6 shrink-0 items-center gap-1 border-b border-border bg-subtle pl-2 pr-1">
         <button
           type="button"
           onClick={() => toggle(sectionKey)}
-          className="flex min-w-0 flex-1 items-center gap-1.5 text-fg-muted hover:text-fg"
+          aria-expanded={open}
+          className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-fg-muted hover:text-fg"
         >
           {open ? (
             <ChevronDown size={12} className="shrink-0" />
@@ -1774,7 +1786,7 @@ function AddBtn({ label, onClick }: { label: string; onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="rounded p-0.5 text-fg-muted hover:bg-border hover:text-fg"
+      className={headerBtnClass}
       aria-label={label}
       title={label}
     >

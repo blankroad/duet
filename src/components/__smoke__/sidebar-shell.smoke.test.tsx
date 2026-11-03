@@ -30,6 +30,7 @@ import { useTags } from "@/stores/tags";
 import { useTagFilter } from "@/stores/tagFilter";
 import { useSidebarFilter } from "@/stores/sidebarFilter";
 import { useHostGroups } from "@/stores/sidebarGroups";
+import { usePlaces } from "@/stores/places";
 
 // commands.* 는 무엇을 부르든 빈 성공 — 컴포넌트가 부트스트랩 중 부르는 IPC 를 흡수한다.
 vi.mock("@/types/bindings", () => {
@@ -421,5 +422,44 @@ describe("사이드바 — 상태 표시", () => {
         `[aria-label="${i18n.t("sidebar.state.connected")}"]`,
       ),
     ).toBeTruthy();
+  });
+});
+
+describe("사이드바 — 키보드·접근성", () => {
+  beforeEach(resetSidebarStores);
+
+  it("섹션 머리글은 펼침 상태를 aria-expanded 로 알리고 클릭으로 접힌다", async () => {
+    await renderSidebar();
+    const header = screen.getByRole("button", {
+      name: i18n.t("sidebar.hosts"),
+    });
+    expect(header.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(header);
+    expect(header.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("prod")).toBeNull();
+  });
+
+  it("볼륨 행도 Tab 으로 닿고 Enter 로 열린다, 행 안 꺼내기 버튼의 Enter 는 행을 열지 않는다", async () => {
+    await renderSidebar();
+    act(() =>
+      usePlaces
+        .getState()
+        .setVolumes("local", [
+          { name: "USB", path: "/Volumes/USB", ejectable: true },
+        ]),
+    );
+    const volume = row("USB");
+    expect(volume.tabIndex).toBe(0);
+    fireEvent.keyDown(volume, { key: "Enter" });
+    expect(sidebarProps.onOpenLocation).toHaveBeenCalledWith(
+      { source: { kind: "local" }, path: "/Volumes/USB" },
+      "left",
+    );
+    sidebarProps.onOpenLocation.mockClear();
+    const eject = screen.getByRole("button", {
+      name: i18n.t("sidebar.ejectName", { name: "USB" }),
+    });
+    fireEvent.keyDown(eject, { key: "Enter" });
+    expect(sidebarProps.onOpenLocation).not.toHaveBeenCalled();
   });
 });
