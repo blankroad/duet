@@ -50,6 +50,7 @@ import { useContextMenu, type MenuEntry } from "@/stores/contextMenu";
 import { openShellMenu } from "@/lib/shellMenu";
 import { buildEntryMenu, buildEmptyMenu, folderName } from "@/lib/entryMenu";
 import { calcDirSizes } from "@/lib/dirSize";
+import { beginTabNav } from "@/lib/tabNav";
 import { toggleDropTray } from "@/lib/dropTray";
 import {
   childLocation,
@@ -186,13 +187,6 @@ function App() {
     [listDirectory],
   );
 
-  /**
-   * 패널별 이동 토큰 — 느린 SSH 에서 폴더 A 를 누른 직후 뒤로/다른 폴더를 누르면
-   * 두 listDirectory 가 겹치고 **늦게 도착한 쪽**이 최종 상태가 됐다("클릭했는데
-   * 다른 폴더가 열림"). 최신 요청이 아니면 응답을 버린다.
-   */
-  const navSeq = useRef<Record<PaneId, number>>({ left: 0, right: 0 });
-
   /** 이 위치의 호스트 alias (로컬이면 null) — 살아있는 연결 우선, 없으면 id 접두. */
   const aliasOf = (loc: Location): string | null => {
     if (loc.source.kind !== "ssh") return null;
@@ -217,10 +211,10 @@ function App() {
       // 로드 중 표시 — 느린 SSH ls 에서 이전 목록이 그대로 보여 "무반응"으로
       // 오인되는 것 방지. setEntries 가 성공 시 자동 해제.
       state.setLoading(id, true, tabId);
-      const seq = ++navSeq.current[id];
+      const current = beginTabNav(tabId); // 같은 탭의 더 새 이동이 이기게
       try {
         const entries = await listEntries(location);
-        if (navSeq.current[id] !== seq) return; // 더 새 이동이 시작됨
+        if (!current()) return; // 이 탭에서 더 새 이동이 시작됨
         state.setEntries(id, location, entries, {
           tabId,
           pushHistory: opts.pushHistory ?? true,
@@ -240,7 +234,7 @@ function App() {
           }
         }
       } catch (e) {
-        if (navSeq.current[id] !== seq) return; // 낡은 요청의 실패는 무시
+        if (!current()) return; // 낡은 요청의 실패는 무시
         usePanes.getState().setLoading(id, false, tabId);
         // 사용자가 더블클릭해도 silent fail 면 무반응으로 인식. toast 로 노출.
         showToast(
@@ -257,15 +251,28 @@ function App() {
     async (
       id: PaneId,
       location: Location,
-      /** `tabId`: 이동할 탭 (긴 작업 전에 잡아 둔 탭). 생략하면 지금 활성 탭. */
-      opts: { pushHistory?: boolean; tabId?: string } = {},
+      /**
+       * `tabId`: 이동할 탭 (긴 작업 전에 잡아 둔 탭). 생략하면 지금 활성 탭.
+       * `current`: 그 긴 작업을 시작할 때 받은 토큰 — 그사이 같은 탭이 다른 데로
+       * 갔으면 이 이동은 하지 않는다.
+       */
+      opts: {
+        pushHistory?: boolean;
+        tabId?: string;
+        current?: () => boolean;
+      } = {},
     ): Promise<boolean> => {
       const tabId = opts.tabId ?? activeTab(usePanes.getState(), id).id;
+      // 대상 탭이 이미 닫혔거나 사용자가 그 탭에서 더 새로 이동했으면 시작하지 않는다
+      // (닫힌 탭의 늦은 작업이 남은 탭의 로드를 방해하지 않게).
+      if (!usePanes.getState().panes[id].tabs.some((t) => t.id === tabId))
+        return false;
+      if (opts.current && !opts.current()) return false;
       usePanes.getState().setLoading(id, true, tabId);
-      const seq = ++navSeq.current[id];
+      const current = beginTabNav(tabId);
       try {
         const entries = await listEntries(location);
-        if (navSeq.current[id] !== seq) return false;
+        if (!current()) return false;
         usePanes.getState().setEntries(id, location, entries, {
           tabId,
           pushHistory: opts.pushHistory ?? true,
@@ -286,7 +293,7 @@ function App() {
         }
         return true;
       } catch (e) {
-        if (navSeq.current[id] !== seq) return false;
+        if (!current()) return false;
         usePanes.getState().setLoading(id, false, tabId);
         showToast(
           i18n.t("toast.cannotOpen", {
@@ -315,13 +322,13 @@ function App() {
   const syncMirror = useCallback(
     (opposite: PaneId, target: Location) => {
       // 반대 패널의 지금 탭에 고정 — 목록이 오는 사이 그쪽 탭을 바꾸거나 닫아도 남의
-      // 탭을 덮어쓰지 않게. 그쪽에서 더 새 이동이 시작되면(navSeq) 이 동행은 버린다.
+      // 탭을 덮어쓰지 않게. 그 탭에서 더 새 이동이 시작되면 이 동행은 버린다.
       const tabId = activeTab(usePanes.getState(), opposite).id;
-      const seq = ++navSeq.current[opposite];
+      const current = beginTabNav(tabId);
       void (async () => {
         try {
           const entries = await listEntries(target);
-          if (navSeq.current[opposite] !== seq) return;
+          if (!current()) return;
           usePanes.getState().setEntries(opposite, target, entries, {
             pushHistory: true,
             tabId,
@@ -343,6 +350,7 @@ function App() {
       const id = pane ?? usePanes.getState().activePane;
       const startTab = activeTab(usePanes.getState(), id);
       const src = startTab.location.source;
+      const current = beginTabNav(startTab.id);
       void (async () => {
         // Windows 로컬은 backend 가 가상 location(shell:RecycleBinFolder)을 반환 —
         // navigateTo(listEntries)가 trash 목록으로 채운다.
@@ -355,7 +363,7 @@ function App() {
           return;
         }
         // 휴지통 위치를 묻는 사이 탭을 바꿔도 시작한 탭이 휴지통이 된다.
-        if (await navigateTo(id, r.data, { tabId: startTab.id }))
+        if (await navigateTo(id, r.data, { tabId: startTab.id, current }))
           usePanes.getState().setTrashRoot(id, r.data.path, startTab.id);
       })();
     },
@@ -483,14 +491,19 @@ function App() {
       // 원격에서 못 푸는 포맷(7z/rar/단일 파일)은 아래 일반 파일 열기로 넘어간다.
       if (canExtractArchive(entry.name, tab.location.source)) {
         const archive = { location: tab.location, name: entry.name };
+        // 추출 동안 이 탭에서 다른 데로 가면 늦게 끝난 추출이 그 위치를 덮지 않게.
+        const current = beginTabNav(tab.id);
         void (async () => {
           // 1차는 암호 없이 — 암호 zip 이면 NeedPassword → 암호 입력 다이얼로그.
           const r = await commands.fsArchiveOpenForBrowse(archive, null);
           if (r.status === "error") {
             if (r.error.kind === "NeedPassword") {
-              useUIDialogs
-                .getState()
-                .open({ kind: "browse-password", paneId: id, archive });
+              useUIDialogs.getState().open({
+                kind: "browse-password",
+                paneId: id,
+                archive,
+                tabId: tab.id,
+              });
               return;
             }
             showToast(
@@ -504,7 +517,7 @@ function App() {
           }
           // 추출은 오래 걸린다 — 그 사이 탭을 바꿔도 목록과 아카이브 문맥이 같은
           // 탭(시작한 탭)에 붙게 한다. 예전엔 목록과 문맥이 서로 다른 탭에 붙었다.
-          if (await navigateTo(id, r.data, { tabId: tab.id }))
+          if (await navigateTo(id, r.data, { tabId: tab.id, current }))
             usePanes
               .getState()
               .setArchiveContext(
@@ -1705,10 +1718,10 @@ function App() {
       const state = usePanes.getState();
       // 접속은 수 초 걸린다 — 그 사이 다른 탭을 골라도 접속을 시작한 탭에 연다.
       const tabId = activeTab(state, paneId).id;
-      // 첫 목록을 읽는 사이 그 패널에서 사용자가 새로 이동하면(navSeq 증가) 이
-      // 초기 위치로 되돌리지 않는다.
-      const seq = ++navSeq.current[paneId];
-      const superseded = () => navSeq.current[paneId] !== seq;
+      // 첫 목록을 읽는 사이 그 탭에서 사용자가 새로 이동하면 이 초기 위치로 되돌리지
+      // 않는다. (다른 탭으로 전환하는 것은 무효화하지 않는다 — 세대가 탭 단위.)
+      const current = beginTabNav(tabId);
+      const superseded = () => !current();
       const ssh: import("@/types/bindings").SourceId = {
         kind: "ssh",
         connection_id: dto.id,
@@ -2009,10 +2022,13 @@ function App() {
           archiveName={dialog.archive.name}
           onClose={closeDialog}
           submit={async (pw) => {
-            const tabId = activeTab(usePanes.getState(), dialog.paneId).id;
+            // 처음 열기를 시작한 탭 — 암호를 묻는 사이 탭을 바꿨어도 그 탭에 연다.
+            const tabId =
+              dialog.tabId ?? activeTab(usePanes.getState(), dialog.paneId).id;
+            const current = beginTabNav(tabId);
             const r = await commands.fsArchiveOpenForBrowse(dialog.archive, pw);
             if (r.status === "ok") {
-              if (await navigateTo(dialog.paneId, r.data, { tabId }))
+              if (await navigateTo(dialog.paneId, r.data, { tabId, current }))
                 usePanes.getState().setArchiveContext(
                   dialog.paneId,
                   {

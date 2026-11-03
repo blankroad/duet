@@ -17,7 +17,8 @@ const dir = (name: string) => ({
 });
 const file = (name: string) => ({ ...dir(name), kind: "file", size: 1 });
 const listing: Record<string, unknown[]> = {
-  "/home": [dir("a"), dir("b"), dir("slow")],
+  "/home": [dir("a"), dir("b"), dir("slow"), file("x.zip")],
+  "/tmp/ex": [file("in.txt")],
   "/home/a": [file("a.txt")],
   "/home/b": [file("b.txt")],
   "/home/slow": [file("late.txt")],
@@ -85,6 +86,15 @@ vi.mock("@/types/bindings", () => {
       if (k === "startupOpenPath")
         return async () => ({ status: "ok", data: null });
       if (k === "settingsGet") return async () => ({ status: "ok", data: {} });
+      // 아카이브 추출은 느리다 — 그 사이 탭 조작 시나리오용.
+      if (k === "fsArchiveOpenForBrowse")
+        return async () => {
+          await new Promise((r) => setTimeout(r, 200));
+          return {
+            status: "ok",
+            data: { source: { kind: "local" }, path: "/tmp/ex" },
+          };
+        };
       return async () => ({ status: "ok", data: [] });
     },
   });
@@ -137,7 +147,7 @@ async function boot() {
   });
   render(<App />);
   await waitFor(() =>
-    expect(activeTab(usePanes.getState(), "left").entries.length).toBe(3),
+    expect(activeTab(usePanes.getState(), "left").entries.length).toBe(4),
   );
   await wait(80);
   act(() => usePanes.getState().setActivePane("left"));
@@ -268,5 +278,66 @@ describe("App — 탭 키보드 흐름", () => {
     // 수식키 없는 Tab 은 여전히 패널 전환
     key({ key: "Tab", code: "Tab" });
     expect(usePanes.getState().activePane).toBe("right");
+  });
+});
+
+describe("App — 긴 아카이브 열기 중 탭 조작", () => {
+  const openZip = () => {
+    cursorTo("x.zip");
+    key({ key: "Enter", code: "Enter" });
+  };
+
+  it("추출 중 탭을 바꿔도 아카이브는 시작한 탭에 문맥과 함께 열린다", async () => {
+    await boot();
+    act(() =>
+      usePanes.getState().openTab("left", {
+        source: { kind: "local" },
+        path: "/other",
+      }),
+    );
+    await wait(60);
+    act(() => usePanes.getState().selectTab("left", 0));
+    await wait(60);
+    openZip();
+    key({ key: "Tab", code: "Tab", ctrlKey: true });
+    expect(L().activeTabIndex).toBe(1);
+    await wait(400);
+    const [first, second] = L().tabs;
+    expect(String(first!.location.path)).toBe("/tmp/ex");
+    expect(first!.archive?.label).toBe("x.zip");
+    expect(String(second!.location.path)).toBe("/other");
+    expect(second!.archive).toBeUndefined();
+  });
+
+  it("추출 중 같은 탭에서 다른 폴더로 가면 늦은 추출이 그 위치를 덮지 않는다", async () => {
+    await boot();
+    openZip();
+    cursorTo("a");
+    key({ key: "Enter", code: "Enter" });
+    await wait(400);
+    const t = activeTab(usePanes.getState(), "left");
+    expect(String(t.location.path)).toBe("/home/a");
+    expect(t.archive).toBeUndefined();
+  });
+
+  it("추출 중 그 탭을 닫으면 남은 탭의 로드를 방해하지 않는다", async () => {
+    await boot();
+    act(() =>
+      usePanes.getState().openTab("left", {
+        source: { kind: "local" },
+        path: "/other",
+      }),
+    );
+    await wait(60);
+    act(() => usePanes.getState().selectTab("left", 0));
+    await wait(60);
+    openZip();
+    key({ key: "w", code: "KeyW", ctrlKey: true });
+    await wait(400);
+    expect(paths()).toEqual(["/other"]);
+    const t = activeTab(usePanes.getState(), "left");
+    expect(t.loading).toBe(false);
+    expect(t.archive).toBeUndefined();
+    expect(t.entries.map((e) => e.name)).toEqual(["o.txt"]);
   });
 });
