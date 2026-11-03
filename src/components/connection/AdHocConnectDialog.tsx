@@ -83,6 +83,9 @@ export function AdHocConnectDialog({
   const saveAfterUnlock = useRef<(() => Promise<void>) | null>(null);
   // 연결 시도 세대 — 연결 중에 닫으면 늦게 온 결과로 패널을 옮기지 않는다.
   const attempt = useRef(0);
+  // 호스트 키 확인 뒤 재시도용 비밀번호 — 입력칸은 호출 직후 비우고(§5), 신뢰 후
+  // 같은 비번으로 다시 붙을 때만 여기서 꺼낸다. 닫거나 재시도하면 버린다.
+  const retryPw = useRef<string | null>(null);
 
   // 열릴 때마다(open false→true) 패널과 첫 안내를 정한다.
   useEffect(() => {
@@ -122,6 +125,8 @@ export function AdHocConnectDialog({
     setUser("");
     setKeyPath("");
     setPassword(""); // CLAUDE.md §5: clear from memory after submit
+    retryPw.current = null;
+    saveAfterUnlock.current = null; // 평문을 캡처한 저장 콜백도 버린다
     setTarget("left");
     setPhase({ kind: "idle" });
     setSave(false);
@@ -178,7 +183,9 @@ export function AdHocConnectDialog({
     }
     setPhase({ kind: "connecting" });
     // password 는 호출 인자로만 전달, store/localStorage 에 저장 안 함 (CLAUDE.md §5).
-    const pw = password ? password : null;
+    const pw = password || retryPw.current || null;
+    retryPw.current = null;
+    setPassword(""); // 호출 직후 clear — 저장 흐름은 위에서 캡처한 pw 사용 (§5)
     // 사용자가 비번을 안 쳤으면, 평문을 프론트로 가져오지 않고 alias 만 넘겨 backend 가
     // vault 에서 직접 꺼내 쓰게 한다 (§5 2026-07). 저장된 비번이 없으면 backend 가 None
     // 으로 처리하므로 존재 확인(vaultHas)을 기다리지 않는다 — 빨리 누르면 놓치던 경쟁.
@@ -217,7 +224,8 @@ export function AdHocConnectDialog({
     }
     if (r.status !== "ok") {
       if (r.error.kind === "HostKeyUnverified") {
-        // 호스트키 검증 실패 — password 는 신뢰 재시도 위해 유지(component-local, §5).
+        // 호스트키 검증 실패 — 신뢰 재시도에 쓸 비번만 ref 에 보관(component-local, §5).
+        retryPw.current = pw;
         setPhase({ kind: "host-key", info: r.error.message });
         return;
       }
@@ -494,7 +502,11 @@ export function AdHocConnectDialog({
         <MasterPasswordDialog
           open
           mode={masterDialog.mode}
-          onClose={() => setMasterDialog({ open: false })}
+          onClose={() => {
+            // 마스터 비번을 취소하면 평문을 쥔 저장 콜백도 버린다 (§5).
+            saveAfterUnlock.current = null;
+            setMasterDialog({ open: false });
+          }}
           onUnlocked={handleMasterUnlocked}
         />
       )}

@@ -64,12 +64,16 @@ export function ConnectionDialog({
   const pwRef = useRef<HTMLInputElement>(null);
   // 연결 시도 세대 — 연결 중에 닫으면 늦게 온 결과로 패널을 옮기지 않는다.
   const attempt = useRef(0);
+  // 호스트 키 확인 뒤 재시도용 비밀번호 — 입력칸은 호출 직후 비우고(§5), 신뢰 후
+  // 같은 비번으로 다시 붙을 때만 여기서 꺼낸다. 닫거나 재시도하면 버린다.
+  const retryPw = useRef<string | null>(null);
 
   // 다이얼로그가 새 호스트로 다시 열릴 때마다 phase + password + 패널 초기화.
   // 재연결이면 대화상자 없이 시도했다 실패한 이유로 시작한다(호스트 키면 프롬프트).
   useEffect(() => {
     if (open) {
       attempt.current += 1;
+      retryPw.current = null;
       setPassword("");
       setTarget(reconnect?.pane ?? defaultPane ?? "left");
       const e = reconnect?.error;
@@ -85,6 +89,7 @@ export function ConnectionDialog({
 
   const close = () => {
     attempt.current += 1;
+    retryPw.current = null;
     setPassword("");
     onClose();
   };
@@ -94,7 +99,9 @@ export function ConnectionDialog({
   const doConnect = async (trust: boolean, replaceChanged = false) => {
     if (!host) return;
     setPhase({ kind: "connecting" });
-    const pw = password ? password : null;
+    const pw = password || retryPw.current || null;
+    retryPw.current = null;
+    setPassword(""); // 호출 직후 clear (CLAUDE.md §5)
     const mine = ++attempt.current;
     let result: Awaited<ReturnType<typeof commands.connectionOpen>>;
     try {
@@ -134,8 +141,9 @@ export function ConnectionDialog({
       return;
     }
     if (result.error.kind === "HostKeyUnverified") {
-      // 호스트키 검증 단계(인증 前) 실패 — password 는 신뢰 재시도 위해 유지
-      // (component-local state 한정, §5). prompt 에서 신뢰하면 doConnect(true) 재호출.
+      // 호스트키 검증 단계(인증 前) 실패 — 신뢰 재시도에 쓸 비번만 ref 에 보관
+      // (component-local, §5). prompt 에서 신뢰하면 doConnect(true) 가 꺼내 쓴다.
+      retryPw.current = pw;
       setPhase({ kind: "host-key", info: result.error.message });
       return;
     }

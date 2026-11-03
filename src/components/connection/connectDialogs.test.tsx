@@ -236,3 +236,53 @@ describe("host key prompt pins the endpoint", () => {
     );
   });
 });
+
+describe("password handling (§5)", () => {
+  it("clears the password field as soon as the call starts and reuses it only for the host-key retry", async () => {
+    const first = deferred<unknown>();
+    m.connectionOpen.mockReturnValueOnce(first.promise);
+    render(
+      <ConnectionDialog alias="nas" onClose={vi.fn()} onConnected={vi.fn()} />,
+    );
+    const pw = screen.getByLabelText(
+      "dialog.connection.passwordLabel",
+    ) as HTMLInputElement;
+    fireEvent.change(pw, { target: { value: "secret" } });
+    fireEvent.click(
+      screen.getByRole("button", { name: /dialog.connection.connect/ }),
+    );
+    expect(pw.value).toBe("");
+    expect(m.connectionOpen).toHaveBeenLastCalledWith(
+      "nas",
+      "secret",
+      false,
+      false,
+    );
+    await act(async () =>
+      first.resolve({
+        status: "error",
+        error: {
+          kind: "HostKeyUnverified",
+          message: {
+            host: "nas.lan",
+            fingerprint: "SHA256:X",
+            changed: false,
+            changed_line: null,
+          },
+        },
+      }),
+    );
+    m.connectionOpen.mockResolvedValueOnce({ status: "ok", data: dto });
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: /dialog.hostKey.trustCta/ }),
+      );
+    });
+    expect(m.connectionOpen).toHaveBeenLastCalledWith(
+      "nas",
+      "secret",
+      true,
+      false,
+    );
+  });
+});
