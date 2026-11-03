@@ -586,7 +586,8 @@
     "hideExtColumn": "Hide extension column",
     "showExtColumn": "Show extension column",
     "resizeColumn": "Drag to resize column",
-    "parentFolder": "Parent folder"
+    "parentFolder": "Parent folder",
+    "parentFolderDrop": "Parent folder — drop here to move/copy up"
   },
   "settings": {
     "title": "Settings",

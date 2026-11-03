@@ -77,6 +77,7 @@ export function EntryList({
   const rowHeight = densityMetrics(useUI((s) => s.density)).row;
   // OS 아이콘(EntryIcon localPath)용 — 현재 패널 폴더 location. 원격이면 null 전달.
   const location = usePanes((s) => activeTab(s, id).location);
+  const paneActive = usePanes((s) => s.activePane === id);
   // "크기 계산" 결과(name → bytes) — 폴더 행의 크기 컬럼 표시.
   const dirSizes = usePanes((s) => activeTab(s, id).dirSizes);
   // Ctrl+X 로 잘라내기 대기 중인 이름 — 해당 행을 흐리게 표시.
@@ -310,6 +311,7 @@ export function EntryList({
                 <EntryRow
                   entry={entry}
                   isCursor={cursorIndex === vi.index}
+                  paneActive={paneActive}
                   isSelected={selected.has(entry.name)}
                   isCut={cutNames.has(entry.name)}
                   splitExt={splitExt}
@@ -385,6 +387,10 @@ function ColumnHeader({
   return (
     <button
       type="button"
+      // 정렬 상태를 보조기술에도 — 현재 열만 방향을 알린다.
+      aria-sort={
+        active ? (order === "asc" ? "ascending" : "descending") : undefined
+      }
       onClick={() => onClick(col)}
       className={`relative flex h-6 items-center gap-1 hover:text-fg ${className} ${active ? "text-fg" : ""}`}
     >

@@ -14,6 +14,8 @@ import {
 import { setHoverEntry, clearHover } from "@/stores/previewHover";
 import { useUI, densityMetrics } from "@/stores/ui";
 import { InlineRenameInput } from "./InlineRenameInput";
+import { cursorBar } from "./EntryRow";
+import i18n from "@/i18n";
 import { formatSize, formatTime } from "@/lib/format";
 import { EntryIcon } from "@/lib/fileIcon";
 import { useAppSettings } from "@/stores/settings";
@@ -70,6 +72,7 @@ export function EntryGrid({
   const renameTarget = useUI((s) => s.renameTarget);
   // 썸네일 URL 빌드용 — 현재 패널 폴더 location.
   const location = usePanes((s) => activeTab(s, id).location);
+  const paneActive = usePanes((s) => s.activePane === id);
   // "크기 계산" 결과 — 타일 메타의 폴더 크기 표시.
   const dirSizes = usePanes((s) => activeTab(s, id).dirSizes);
   // Ctrl+X 로 잘라내기 대기 중인 이름 — 해당 셀을 흐리게 표시.
@@ -193,6 +196,7 @@ export function EntryGrid({
                   entry,
                   location,
                   isCursor,
+                  paneActive,
                   isSelected,
                   isCut: cutNames.has(entry.name),
                   dirSize: dirSizes[entry.name],
@@ -256,6 +260,8 @@ interface CellProps {
   entry: Entry;
   location: Location;
   isCursor: boolean;
+  /** 활성 패널인가 — 비활성 패널 커서 테두리는 회색(EntryRow 와 같은 어휘). */
+  paneActive: boolean;
   isSelected: boolean;
   /** Ctrl+X 로 잘라내기 대기 중 — 아이콘/이름을 흐리게 표시. */
   isCut: boolean;
@@ -270,6 +276,11 @@ interface CellProps {
   onContextMenu: (e: React.MouseEvent) => void;
   onClick: (e: React.MouseEvent) => void;
   onDoubleClick: () => void;
+}
+
+/** 그리드 셀 커서 테두리 — 활성 패널 accent, 비활성 패널 회색. */
+function cellCursor(paneActive: boolean): string {
+  return paneActive ? "border-accent" : "border-fg-muted/50";
 }
 
 /** 썸네일 대상 이미지 확장자(백엔드 활성 코덱과 일치). 로컬·원격 모두. */
@@ -349,6 +360,7 @@ function GridCell({
   entry,
   location,
   isCursor,
+  paneActive,
   isSelected,
   isCut,
   highlight,
@@ -370,10 +382,10 @@ function GridCell({
         onContextMenu={onContextMenu}
         onClick={onClick}
         onDoubleClick={onDoubleClick}
-        title="Parent folder — drop here to move/copy up"
+        title={i18n.t("pane.parentFolderDrop")}
         className={clsx(
           "m-1 flex flex-col items-center justify-center gap-1 rounded-panel border border-transparent p-2 cursor-default hover:bg-subtle",
-          isCursor && "border-accent",
+          isCursor && cellCursor(paneActive),
           highlight && "ring-2 ring-inset ring-accent",
         )}
       >
@@ -395,7 +407,7 @@ function GridCell({
         "m-1 flex flex-col items-center justify-center gap-1 rounded-panel border p-2 cursor-default",
         // 선택 셀은 hover 회색으로 덮지 않음 (마키 드래그 중 파란 선택색 유지).
         isSelected ? "bg-active" : "border-transparent hover:bg-subtle",
-        isCursor ? "border-accent" : "border-transparent",
+        isCursor ? cellCursor(paneActive) : "border-transparent",
         highlight && "ring-2 ring-inset ring-accent",
       )}
       onClick={onClick}
@@ -439,6 +451,7 @@ function TileRow({
   entry,
   location,
   isCursor,
+  paneActive,
   isSelected,
   isCut,
   dirSize,
@@ -461,11 +474,11 @@ function TileRow({
         onContextMenu={onContextMenu}
         onClick={onClick}
         onDoubleClick={onDoubleClick}
-        title="Parent folder — drop here to move/copy up"
+        title={i18n.t("pane.parentFolderDrop")}
         className={clsx(
           "flex h-full items-center gap-3 px-3 cursor-default hover:bg-subtle",
           isCursor
-            ? "border-l-2 border-l-accent pl-[10px]"
+            ? clsx("border-l-2 pl-[10px]", cursorBar(paneActive))
             : "border-l-2 border-l-transparent",
           highlight && "ring-2 ring-inset ring-accent",
         )}
@@ -487,7 +500,7 @@ function TileRow({
         // 선택 행은 hover 회색으로 덮지 않음 (마키 드래그 중 파란 선택색 유지).
         isSelected ? "bg-active" : "hover:bg-subtle",
         isCursor
-          ? "border-l-2 border-l-accent pl-[10px]"
+          ? clsx("border-l-2 pl-[10px]", cursorBar(paneActive))
           : "border-l-2 border-l-transparent",
         highlight && "ring-2 ring-inset ring-accent",
       )}

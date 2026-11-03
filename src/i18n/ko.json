@@ -583,7 +583,8 @@
     "hideExtColumn": "확장자 열 숨기기",
     "showExtColumn": "확장자 열 보이기",
     "resizeColumn": "끌어서 열 너비 조절",
-    "parentFolder": "상위 폴더"
+    "parentFolder": "상위 폴더",
+    "parentFolderDrop": "상위 폴더 — 여기에 놓으면 위 폴더로 복사·이동"
   },
   "settings": {
     "title": "설정",
