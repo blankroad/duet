@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  act,
+  waitFor,
+} from "@testing-library/react";
 import { ConnectionDialog } from "./ConnectionDialog";
 import { AdHocConnectDialog } from "./AdHocConnectDialog";
 import { useConnections } from "@/stores/connections";
@@ -17,6 +23,7 @@ const m = vi.hoisted(() => ({
   connectionClose: vi.fn(),
   vaultHas: vi.fn(),
   vaultStatus: vi.fn(),
+  savedHostsUpsert: vi.fn(),
 }));
 vi.mock("@/types/bindings", () => ({ commands: m }));
 
@@ -334,5 +341,111 @@ describe("pane picker", () => {
     });
     expect(right.getAttribute("aria-pressed")).toBe("true");
     expect(left.getAttribute("aria-pressed")).toBe("false");
+  });
+});
+
+describe("ad-hoc request identity (round 2)", () => {
+  const savedA = {
+    alias: "a",
+    host: "a.lan",
+    port: 22,
+    user: "u",
+    key_path: null,
+  };
+  const hostKeyErr = (host: string) => ({
+    status: "error",
+    error: {
+      kind: "HostKeyUnverified",
+      message: {
+        host,
+        fingerprint: `SHA256:${host}`,
+        changed: false,
+        changed_line: null,
+      },
+    },
+  });
+
+  it("vault unlock during a host key prompt does not refill the form or retarget Trust", async () => {
+    useVault.setState({ exists: true, unlocked: false });
+    m.connectionOpenAdhoc.mockResolvedValueOnce(hostKeyErr("b.lan"));
+    render(
+      <AdHocConnectDialog
+        open
+        onClose={vi.fn()}
+        onConnected={vi.fn()}
+        prefill={savedA}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("dialog.adhoc.host"), {
+      target: { value: "b.lan" },
+    });
+    fireEvent.change(screen.getByLabelText("dialog.adhoc.password"), {
+      target: { value: "pw-b" },
+    });
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: /dialog.connection.connect/ }),
+      );
+    });
+    // 프롬프트 표시 중 잠금 해제 버튼은 막혀 있다.
+    expect(
+      (
+        screen.getByRole("button", {
+          name: /dialog.adhoc.unlockVault/,
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+    // 다른 경로로 vault 가 열려도(전역 상태) 폼/대상은 그대로.
+    await act(async () => useVault.setState({ unlocked: true }));
+    expect(
+      (screen.getByLabelText("dialog.adhoc.host") as HTMLInputElement).value,
+    ).toBe("b.lan");
+    m.connectionOpenAdhoc.mockResolvedValueOnce({
+      status: "error",
+      error: { kind: "AuthFailed" },
+    });
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: /dialog.hostKey.trustCta/ }),
+      );
+    });
+    expect(m.connectionOpenAdhoc).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        host: "b.lan",
+        password: "pw-b",
+        savedPasswordAlias: null,
+        trustHostKey: true,
+      }),
+    );
+  });
+
+  it("does not navigate when cancelled while the host is being saved", async () => {
+    const save = deferred<unknown>();
+    m.savedHostsUpsert.mockReturnValue(save.promise);
+    m.connectionOpenAdhoc.mockResolvedValue({
+      status: "ok",
+      data: { ...dto, id: "u@new.lan:22:1" },
+    });
+    const onConnected = vi.fn();
+    render(
+      <AdHocConnectDialog open onClose={vi.fn()} onConnected={onConnected} />,
+    );
+    fireEvent.change(screen.getByLabelText("dialog.adhoc.host"), {
+      target: { value: "new.lan" },
+    });
+    fireEvent.change(screen.getByLabelText("dialog.adhoc.user"), {
+      target: { value: "u" },
+    });
+    fireEvent.click(screen.getByRole("checkbox"));
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: /dialog.connection.connect/ }),
+      );
+    });
+    await waitFor(() => expect(m.savedHostsUpsert).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: /common.cancel/ }));
+    await act(async () => save.resolve({ status: "ok", data: [] }));
+    expect(onConnected).not.toHaveBeenCalled();
+    expect(m.connectionClose).toHaveBeenCalledWith("u@new.lan:22:1");
   });
 });

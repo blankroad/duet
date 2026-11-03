@@ -41,6 +41,15 @@ export interface AdHocConnectDialogProps {
   reconnect?: ReconnectInfo | null | undefined;
 }
 
+/** 한 번의 ad-hoc 연결 요청이 겨누는 곳 (비밀번호 제외). */
+interface AdhocTarget {
+  host: string;
+  port: number;
+  user: string;
+  keyPath: string | null;
+  savedPasswordAlias: string | null;
+}
+
 type Phase =
   | { kind: "idle" }
   | { kind: "connecting" }
@@ -86,6 +95,9 @@ export function AdHocConnectDialog({
   // 호스트 키 확인 뒤 재시도용 비밀번호 — 입력칸은 호출 직후 비우고(§5), 신뢰 후
   // 같은 비번으로 다시 붙을 때만 여기서 꺼낸다. 닫거나 재시도하면 버린다.
   const retryPw = useRef<string | null>(null);
+  // 호스트 키 프롬프트를 띄운 요청의 주소 — [신뢰]/[교체] 는 폼이 아니라 이 값으로
+  // 재시도한다(프롬프트가 보여 준 호스트와 실제 신뢰 대상이 어긋나지 않게).
+  const hostKeyReq = useRef<AdhocTarget | null>(null);
 
   // 열릴 때마다(open false→true) 패널과 첫 안내를 정한다.
   useEffect(() => {
@@ -102,21 +114,23 @@ export function AdHocConnectDialog({
   }, [open, reconnect, defaultPane]);
 
   // 다이얼로그가 열릴 때 prefill 적용 (한 번만 — open false→true edge).
+  // vault 잠금 해제는 여기에 걸지 않는다 — 예전엔 해제할 때마다 폼이 저장값으로 다시
+  // 채워져, 호스트 키 확인 중 고친 주소가 몰래 되돌아갔다.
   useEffect(() => {
-    if (!open) return;
-    if (prefill) {
-      setHost(prefill.host);
-      setPort(String(prefill.port));
-      setUser(prefill.user);
-      setKeyPath(prefill.key_path ?? "");
-      setAlias(prefill.alias);
-      setSave(false); // 이미 저장된 호스트 — 재저장 default off
-      setSavePassword(false);
-      // vault 가 unlocked 면 저장된 password '존재 여부'만 확인(평문 안 가져옴, §5).
-      if (vault.unlocked) {
-        void vaultHas(prefill.alias).then(setHasSavedPassword);
-      }
-    }
+    if (!open || !prefill) return;
+    setHost(prefill.host);
+    setPort(String(prefill.port));
+    setUser(prefill.user);
+    setKeyPath(prefill.key_path ?? "");
+    setAlias(prefill.alias);
+    setSave(false); // 이미 저장된 호스트 — 재저장 default off
+    setSavePassword(false);
+  }, [open, prefill]);
+
+  // vault 가 unlocked 면 저장된 password '존재 여부'만 확인(평문 안 가져옴, §5) — 힌트용.
+  useEffect(() => {
+    if (!open || !prefill || !vault.unlocked) return;
+    void vaultHas(prefill.alias).then(setHasSavedPassword);
   }, [open, prefill, vault.unlocked]);
 
   const reset = () => {
@@ -126,6 +140,7 @@ export function AdHocConnectDialog({
     setKeyPath("");
     setPassword(""); // CLAUDE.md §5: clear from memory after submit
     retryPw.current = null;
+    hostKeyReq.current = null;
     saveAfterUnlock.current = null; // 평문을 캡처한 저장 콜백도 버린다
     setTarget("left");
     setPhase({ kind: "idle" });
@@ -173,8 +188,11 @@ export function AdHocConnectDialog({
   // trust=true 면 미지의 호스트키를 known_hosts 에 기록(TOFU). replaceChanged=true 면
   // *변경된* 키를 백업 후 교체(사용자가 새 fingerprint 검증 후 prompt 에서 명시 승인).
   const doConnect = async (trust: boolean, replaceChanged = false) => {
-    const portNum = Number.parseInt(port, 10);
-    if (!host.trim() || !user.trim() || Number.isNaN(portNum)) {
+    // 호스트 키 승인 재시도면 프롬프트를 띄운 요청 그대로, 아니면 지금 폼 값.
+    const snap = trust || replaceChanged ? hostKeyReq.current : null;
+    hostKeyReq.current = null;
+    const portNum = snap ? snap.port : Number.parseInt(port, 10);
+    if (!snap && (!host.trim() || !user.trim() || Number.isNaN(portNum))) {
       setPhase({
         kind: "error",
         error: { kind: "Io", message: t("dialog.adhoc.required") } as DuetError,
@@ -191,18 +209,26 @@ export function AdHocConnectDialog({
     // 으로 처리하므로 존재 확인(vaultHas)을 기다리지 않는다 — 빨리 누르면 놓치던 경쟁.
     // 단 **주소가 저장된 그대로일 때만** — 프리필 후 host 를 고쳤는데 옛 호스트의
     // 비번을 새 서버로 보내면 안 된다.
-    const savedPasswordAlias =
-      !pw && savedEndpoint && vault.unlocked && prefill ? prefill.alias : null;
+    const req: AdhocTarget = snap ?? {
+      host: host.trim(),
+      port: portNum,
+      user: user.trim(),
+      keyPath: keyPath.trim() ? keyPath.trim() : null,
+      savedPasswordAlias:
+        !pw && savedEndpoint && vault.unlocked && prefill
+          ? prefill.alias
+          : null,
+    };
     const mine = ++attempt.current;
     let r: Awaited<ReturnType<typeof commands.connectionOpenAdhoc>>;
     try {
       r = await commands.connectionOpenAdhoc({
-        host: host.trim(),
-        port: portNum,
-        user: user.trim(),
-        keyPath: keyPath.trim() ? keyPath.trim() : null,
+        host: req.host,
+        port: req.port,
+        user: req.user,
+        keyPath: req.keyPath,
         password: pw,
-        savedPasswordAlias,
+        savedPasswordAlias: req.savedPasswordAlias,
         trustHostKey: trust,
         replaceChangedHostKey: replaceChanged,
       });
@@ -226,6 +252,7 @@ export function AdHocConnectDialog({
       if (r.error.kind === "HostKeyUnverified") {
         // 호스트키 검증 실패 — 신뢰 재시도에 쓸 비번만 ref 에 보관(component-local, §5).
         retryPw.current = pw;
+        hostKeyReq.current = req;
         setPhase({ kind: "host-key", info: r.error.message });
         return;
       }
@@ -249,11 +276,16 @@ export function AdHocConnectDialog({
         const savedAlias = alias.trim() || dto.alias;
         await saveHost({
           alias: savedAlias,
-          host: host.trim(),
-          port: portNum,
-          user: user.trim(),
-          key_path: keyPath.trim() ? keyPath.trim() : null,
+          host: req.host,
+          port: req.port,
+          user: req.user,
+          key_path: req.keyPath,
         });
+        if (mine !== attempt.current) {
+          // 저장하는 사이 취소함 — 늦게 패널을 옮기거나 저장 프롬프트를 띄우지 않는다.
+          void commands.connectionClose(dto.id);
+          return;
+        }
         // password 도 저장 옵션 — vault 에 암호화 저장.
         if (savePassword && pw) {
           if (!vault.unlocked) {
@@ -271,6 +303,10 @@ export function AdHocConnectDialog({
             needsMasterFlow = true;
           } else {
             await vaultSet(savedAlias, pw);
+            if (mine !== attempt.current) {
+              void commands.connectionClose(dto.id);
+              return;
+            }
           }
         }
       }
@@ -427,13 +463,14 @@ export function AdHocConnectDialog({
         {prefill && vault.exists && !vault.unlocked && (
           <button
             type="button"
+            disabled={locked}
             onClick={() => {
               saveAfterUnlock.current = async () => {
                 await refreshHasSavedPassword();
               };
               setMasterDialog({ open: true, mode: "unlock", after: "fetch" });
             }}
-            className="flex w-full items-center justify-center gap-1 rounded border border-border px-2 py-1 text-meta text-fg-muted hover:bg-subtle hover:text-fg"
+            className="flex w-full items-center justify-center gap-1 rounded border border-border px-2 py-1 text-meta text-fg-muted hover:bg-subtle hover:text-fg disabled:opacity-40"
           >
             <Lock size={11} />
             {t("dialog.adhoc.unlockVault")}
@@ -514,6 +551,12 @@ export function AdHocConnectDialog({
           onClose={() => {
             // 마스터 비번을 취소하면 평문을 쥔 저장 콜백도 버린다 (§5).
             saveAfterUnlock.current = null;
+            if (masterDialog.after === "save") {
+              // 연결·패널 이동은 이미 끝났다 — "연결 중…" 에 멈춘 채 남기지 않는다.
+              reset();
+              onClose();
+              return;
+            }
             setMasterDialog({ open: false });
           }}
           onUnlocked={handleMasterUnlocked}
