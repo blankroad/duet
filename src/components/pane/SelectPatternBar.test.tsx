@@ -80,3 +80,17 @@ it("모드 버튼으로 선택 해제로 바꿔 적용할 수 있고, 바 밖으
   fireEvent.blur(screen.getByRole("textbox"), { relatedTarget: document.body });
   expect(screen.queryByRole("textbox")).toBeNull();
 });
+
+it("WebKit 처럼 버튼 클릭이 포커스를 옮기지 않아도 마우스로 적용된다", async () => {
+  render(<SelectPatternBar id="left" />);
+  await openBar();
+  const input = screen.getByRole("textbox", { name: "선택" });
+  fireEvent.change(input, { target: { value: "*.md" } });
+  const apply = screen.getByRole("button", { name: "적용" });
+  // mousedown 기본 동작(포커스 이동)이 막혀야 blur 가 일어나지 않는다.
+  expect(fireEvent.mouseDown(apply)).toBe(false);
+  fireEvent.click(apply);
+  expect([...activeTab(usePanes.getState(), "left").selected]).toEqual([
+    "c.md",
+  ]);
+});

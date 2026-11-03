@@ -56,6 +56,7 @@ export function SelectPatternBar({ id }: { id: PaneId }) {
           }),
     );
   };
+  const keepInputFocus = (e: React.MouseEvent) => e.preventDefault();
   const applyAndClose = () => {
     apply();
     setOpen(false);
@@ -73,6 +74,9 @@ export function SelectPatternBar({ id }: { id: PaneId }) {
     >
       <button
         type="button"
+        // WebKit(macOS)은 클릭한 버튼에 포커스를 주지 않아 blur 의 relatedTarget 이
+        // null → 바가 닫혀 click 이 사라진다. 입력 포커스를 유지해 클릭이 실행되게.
+        onMouseDown={keepInputFocus}
         className={`${BAR_BUTTON} px-1`}
         onClick={() => {
           setMode(isAdd ? "remove" : "add");
@@ -111,6 +115,9 @@ export function SelectPatternBar({ id }: { id: PaneId }) {
       />
       <button
         type="button"
+        // WebKit(macOS)은 클릭한 버튼에 포커스를 주지 않아 blur 의 relatedTarget 이
+        // null → 바가 닫혀 click 이 사라진다. 입력 포커스를 유지해 클릭이 실행되게.
+        onMouseDown={keepInputFocus}
         onClick={applyAndClose}
         className={`${BAR_BUTTON} px-1.5 text-base`}
       >
@@ -118,6 +125,9 @@ export function SelectPatternBar({ id }: { id: PaneId }) {
       </button>
       <button
         type="button"
+        // WebKit(macOS)은 클릭한 버튼에 포커스를 주지 않아 blur 의 relatedTarget 이
+        // null → 바가 닫혀 click 이 사라진다. 입력 포커스를 유지해 클릭이 실행되게.
+        onMouseDown={keepInputFocus}
         onClick={() => setOpen(false)}
         className={`${BAR_BUTTON} w-6`}
         aria-label={t("common.close")}
