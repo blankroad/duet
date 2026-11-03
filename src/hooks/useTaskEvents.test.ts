@@ -74,4 +74,29 @@ describe("useTaskEvents — 초기 스냅샷과 이벤트 순서", () => {
     await act(async () => h.resolveList!({ status: "ok", data: [mk("old")] }));
     expect(useTasks.getState().tasks.has("old")).toBe(false);
   });
+
+  it("스냅샷 전에 온 시작·진행이 옛 스냅샷(대기·낮은 진행률)에 덮이지 않는다", async () => {
+    renderHook(() => useTaskEvents());
+    await flush();
+    act(() => {
+      h.emit!({
+        payload: { task_id: "x", change: { kind: "started" } } as TaskEvent,
+      });
+      h.emit!({
+        payload: {
+          task_id: "x",
+          change: { kind: "progress", progress: { percent: 80 } },
+        } as unknown as TaskEvent,
+      });
+    });
+    const stale = {
+      ...mk("x"),
+      status: { kind: "queued" },
+      progress: { percent: 10 },
+    } as unknown as TaskDto;
+    await act(async () => h.resolveList!({ status: "ok", data: [stale] }));
+    const t = useTasks.getState().tasks.get("x");
+    expect(t?.status.kind).toBe("running");
+    expect(t?.progress?.percent).toBe(80);
+  });
 });

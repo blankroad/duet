@@ -48,6 +48,10 @@ export function useTaskEvents() {
     const markDone = (id: string) => {
       if (snapshotPending) terminated.add(id);
     };
+    // 스냅샷 전에 온 시작·진행은 store 에 아직 그 작업이 없으면 버려진다(setStatus/
+    // setProgress 는 없는 id 를 무시). 순서대로 모아 뒀다가 병합 뒤 다시 적용한다 —
+    // 안 그러면 실제로 도는 작업이 스냅샷의 옛 "대기"·옛 진행률로 남았다.
+    const replay: Array<() => void> = [];
     const unlistenP = events.taskEvent.listen(({ payload }) => {
       const id = payload.task_id;
       switch (payload.change.kind) {
@@ -57,10 +61,15 @@ export function useTaskEvents() {
           break;
         case "started":
           setStatus(id, { kind: "running" });
+          if (snapshotPending)
+            replay.push(() => setStatus(id, { kind: "running" }));
           break;
-        case "progress":
-          setProgress(id, payload.change.progress);
+        case "progress": {
+          const progress = payload.change.progress;
+          setProgress(id, progress);
+          if (snapshotPending) replay.push(() => setProgress(id, progress));
           break;
+        }
         case "completed": {
           markDone(id);
           setStatus(id, {
@@ -152,10 +161,14 @@ export function useTaskEvents() {
         snapshotPending = false;
         if (disposed || !r || r.status !== "ok") return;
         mergeSnapshot(r.data, terminated);
+        // 종결된 작업은 병합에서 빠졌으니 재적용해도 되살아나지 않는다(없는 id 무시).
+        for (const apply of replay) apply();
+        replay.length = 0;
         terminated.clear();
       });
     return () => {
       disposed = true;
+      replay.length = 0;
       unlistenP.then((fn) => fn());
     };
   }, [add, setStatus, setProgress, setError, remove, mergeSnapshot]);
