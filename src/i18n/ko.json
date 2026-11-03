@@ -567,7 +567,11 @@
   "selectPattern": {
     "select": "선택",
     "deselect": "선택 해제",
-    "placeholder": "패턴 (예: *.ts, img_??.png, report)"
+    "placeholder": "패턴 (예: *.ts, img_??.png, report)",
+    "noMatch": "일치하는 항목 없음: {{pattern}}",
+    "selected_other": "{{count}}개 선택",
+    "deselected_other": "{{count}}개 선택 해제",
+    "switchMode": "선택 / 선택 해제 전환"
   },
   "banner": {
     "connecting": "{{label}} 에 연결 중…",

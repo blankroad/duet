@@ -570,7 +570,13 @@
   "selectPattern": {
     "select": "Select",
     "deselect": "Deselect",
-    "placeholder": "Pattern (e.g. *.ts, img_??.png, report)"
+    "placeholder": "Pattern (e.g. *.ts, img_??.png, report)",
+    "noMatch": "No matches: {{pattern}}",
+    "selected_one": "{{count}} item selected",
+    "selected_other": "{{count}} items selected",
+    "deselected_one": "{{count}} item deselected",
+    "deselected_other": "{{count}} items deselected",
+    "switchMode": "Switch between select and deselect"
   },
   "banner": {
     "connecting": "Connecting to {{label}}…",
