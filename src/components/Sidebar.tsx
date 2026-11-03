@@ -159,31 +159,35 @@ export function Sidebar({
     >
       <aside
         onKeyDown={onSidebarKeyDown}
-        className="flex w-full min-h-0 flex-col overflow-y-auto border-r border-border bg-subtle pb-2 text-base"
+        className="flex w-full min-h-0 flex-col border-r border-border bg-subtle text-base"
       >
-        {/* 태스크 진행은 TasksBar(하단, 사이드바 접힘과 무관)로 일원화 — 중복 제거. */}
+        {/* 필터·태그는 스크롤 영역 밖에 고정 — 예전엔 같은 스크롤 안에서 sticky 끼리 겹쳐
+            섹션 제목(sticky)이 필터바 뒤로 숨어, 긴 목록에서 지금 어느 섹션인지 몰랐다. */}
         <SidebarFilter />
         <TagBar />
-        <PlacesSection
-          onOpenLocation={onOpenLocation}
-          onTrashActivate={onTrashActivate}
-          onEject={onEject}
-        />
-        <HostsSection
-          onHostActivate={onHostActivate}
-          onAdHocOpen={onAdHocOpen}
-          onSavedActivate={onSavedActivate}
-        />
-        <BookmarksSection
-          onOpen={onOpenLocation}
-          onAdd={onAddBookmark}
-          onOpenHostPath={onOpenHostPath}
-        />
-        <RecentSection
-          onOpenLocation={onOpenLocation}
-          onOpenHostPath={onOpenHostPath}
-        />
-        <ShelfSection />
+        {/* 태스크 진행은 TasksBar(하단, 사이드바 접힘과 무관)로 일원화 — 중복 제거. */}
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto pb-2">
+          <PlacesSection
+            onOpenLocation={onOpenLocation}
+            onTrashActivate={onTrashActivate}
+            onEject={onEject}
+          />
+          <HostsSection
+            onHostActivate={onHostActivate}
+            onAdHocOpen={onAdHocOpen}
+            onSavedActivate={onSavedActivate}
+          />
+          <BookmarksSection
+            onOpen={onOpenLocation}
+            onAdd={onAddBookmark}
+            onOpenHostPath={onOpenHostPath}
+          />
+          <RecentSection
+            onOpenLocation={onOpenLocation}
+            onOpenHostPath={onOpenHostPath}
+          />
+          <ShelfSection />
+        </div>
       </aside>
       <SidebarResizer />
     </div>
@@ -385,6 +389,16 @@ function useActiveSource(): SourceId {
 
 const EMPTY_PLACES: Place[] = [];
 const EMPTY_VOLUMES: Volume[] = [];
+
+/**
+ * 이름 필터나 태그 필터가 켜져 있는가 — 켜져 있으면 접힌 하위 그룹도 펼치고, 결과가
+ * 없는 그룹은 숨긴다. 접힌 그룹 안에 답이 숨으면 필터가 쓸모없다.
+ */
+function useFiltering(): boolean {
+  const q = useSidebarFilter((s) => s.q.trim() !== "");
+  const tags = useTagFilter((s) => s.active.length > 0);
+  return q || tags;
+}
 
 /** 컨텍스트 메뉴 오픈 헬퍼. */
 function openMenu(e: React.MouseEvent, items: MenuEntry[]): void {
@@ -969,6 +983,7 @@ function SavedHostsBody({
       !hideAliases.has(h.alias) && matchesQuery(nicks[h.alias] ?? h.alias, q),
   );
   const groups = useHostGroups((s) => s.groups);
+  const filtering = useFiltering();
   const byAlias = new Map(hosts.map((h) => [h.alias, h]));
   // 그룹에 배정된 alias 집합 (live 호스트만 — dangling 멤버 무시).
   const grouped = new Set<string>();
@@ -981,23 +996,30 @@ function SavedHostsBody({
     keys: ungrouped.map((h) => h.alias),
     onCommit: (next) => void reorderSavedHosts(next),
   });
-  if (allHosts.length === 0) return null;
+  // 보일 저장 호스트가 없으면 "저장됨" 라벨째 숨긴다 — 필터 중이거나 전부 config 와
+  // 겹칠 때 빈 라벨만 남던 문제.
+  if (hosts.length === 0) return null;
   return (
     <>
       <SubLabel>{t("sidebar.saved")}</SubLabel>
-      {groups.map((g, gi) => (
-        <HostGroupFolder
-          key={g.id}
-          group={g}
-          members={g.members
-            .map((a) => byAlias.get(a))
-            .filter((h): h is SavedHost => !!h)}
-          groups={groups}
-          onActivate={onActivate}
-          isFirst={gi === 0}
-          isLast={gi === groups.length - 1}
-        />
-      ))}
+      {groups.map((g, gi) => {
+        const members = g.members
+          .map((a) => byAlias.get(a))
+          .filter((h): h is SavedHost => !!h);
+        // 필터 중엔 걸린 멤버가 없는 그룹 머리글("0")을 숨긴다.
+        if (filtering && members.length === 0) return null;
+        return (
+          <HostGroupFolder
+            key={g.id}
+            group={g}
+            members={members}
+            groups={groups}
+            onActivate={onActivate}
+            isFirst={gi === 0}
+            isLast={gi === groups.length - 1}
+          />
+        );
+      })}
       {ungrouped.map((h) => (
         <Fragment key={h.alias}>
           {dragKey && insertBeforeKey === h.alias && <DropLine />}
@@ -1084,7 +1106,9 @@ function HostGroupFolder({
   isLast: boolean;
 }) {
   const { t } = useTranslation();
-  const collapsed = useUI((s) => s.collapsed[`hostgroup:${group.id}`]);
+  const filtering = useFiltering();
+  const collapsed =
+    useUI((s) => s.collapsed[`hostgroup:${group.id}`]) && !filtering;
   const toggle = useUI((s) => s.toggleSection);
   const menu: MenuEntry[] = [
     {
@@ -1296,6 +1320,7 @@ function BookmarksSection({
       sectionKey="bookmarks"
       title={t("sidebar.bookmarks")}
       count={totalAll}
+      forceOpen={tagFilter.length > 0}
       action={<AddBtn label={t("sidebar.bookmarkActiveTab")} onClick={onAdd} />}
     >
       {/* 섹션 본문 전체가 "여기에 놓으면 북마크" 존 — 행 위에 놓으면 행이 이긴다
@@ -1457,7 +1482,8 @@ function FavoriteGroup({
   onOpen: (hostAlias: string, path: string, pane: PaneId) => void;
 }) {
   const { t } = useTranslation();
-  const collapsed = useUI((s) => s.collapsed[`fav:${alias}`]);
+  const filtering = useFiltering();
+  const collapsed = useUI((s) => s.collapsed[`fav:${alias}`]) && !filtering;
   const toggle = useUI((s) => s.toggleSection);
   const nicks = useHostNicknames((s) => s.byAlias);
   const hostState = useHostState(alias);
@@ -1613,24 +1639,30 @@ function HostsSection({
 }) {
   const { t } = useTranslation();
   const allHosts = useConnections((s) => s.hosts);
-  const savedCount = useSavedHosts((s) => s.hosts.length);
+  const savedHosts = useSavedHosts((s) => s.hosts);
   const byKey = useTags((s) => s.byKey);
   const active = useTagFilter((s) => s.active);
   const configAliases = new Set(allHosts.map((h) => h.alias));
   const nicks = useHostNicknames((s) => s.byAlias);
   const q = useSidebarFilter((s) => s.q);
   // 태그 필터 — config 호스트는 host:<alias> 키. 이름 필터는 별명 우선(화면에 보이는 것).
-  const hosts = allHosts.filter(
-    (h) =>
-      matchesTagFilter(tagsFor(byKey, hostTagKey(h.alias)), active) &&
-      matchesQuery(nicks[h.alias] ?? h.alias, q),
-  );
+  const visible = (alias: string) =>
+    matchesTagFilter(tagsFor(byKey, hostTagKey(alias)), active) &&
+    matchesQuery(nicks[alias] ?? alias, q);
+  const hosts = allHosts.filter((h) => visible(h.alias));
+  // config 와 같은 alias 의 저장본은 숨겨지므로 개수에서도 뺀다(예전엔 두 번 셌다).
+  const savedOnly = savedHosts.filter((h) => !configAliases.has(h.alias));
+  const savedCount = savedOnly.length;
+  const shown = hosts.length + savedOnly.filter((h) => visible(h.alias)).length;
+  // 이름 필터에 하나도 안 걸리면 다른 섹션처럼 섹션째 숨긴다.
+  if (q.trim() !== "" && shown === 0) return null;
 
   return (
     <Section
       sectionKey="hosts"
       title={t("sidebar.hosts")}
       count={allHosts.length + savedCount}
+      forceOpen={active.length > 0}
       action={
         <div className="flex items-center gap-0.5">
           {/* ~/.ssh/config 를 편집하고 돌아왔을 때 — 예전엔 앱을 다시 켜야 했다. */}
@@ -1653,6 +1685,8 @@ function HostsSection({
           actionLabel={t("sidebar.connectHost")}
           onAction={onAdHocOpen}
         />
+      ) : shown === 0 ? (
+        <Item label={t("sidebar.noTagMatch")} muted />
       ) : (
         <>
           {hosts.length > 0 && <SubLabel>~/.ssh/config</SubLabel>}
@@ -1791,6 +1825,7 @@ function Section({
   action,
   children,
   first = false,
+  forceOpen = false,
 }: {
   sectionKey: string;
   title: string;
@@ -1799,12 +1834,14 @@ function Section({
   children: ReactNode;
   /** 첫 섹션은 위 여백 없이 — 여백이 섹션을 나누는 장치라 맨 위엔 필요 없다. */
   first?: boolean;
+  /** 접힘 무시(태그 필터가 이 섹션을 좁히는 중) — 걸린 항목이 접힌 채 숨지 않게. */
+  forceOpen?: boolean;
 }) {
   const collapsed = useUI((s) => s.collapsed[sectionKey]);
   const toggle = useUI((s) => s.toggleSection);
   // 필터 중에는 접힘을 무시한다 — 접힌 섹션 안에 답이 숨으면 필터가 쓸모없다.
   const filtering = useSidebarFilter((s) => s.q.trim() !== "");
-  const open = filtering || !collapsed;
+  const open = filtering || forceOpen || !collapsed;
   return (
     <div className={clsx("flex flex-col", !first && "mt-3.5")}>
       {/* 구분선이 아니라 위 여백이 섹션을 나눈다 — border-border 는 bg-subtle 과

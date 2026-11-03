@@ -25,14 +25,16 @@ export function SidebarFilter() {
   const ref = useRef<HTMLInputElement>(null);
 
   // command(팔레트/사용자 지정 키)로 온 포커스 요청 — 바로 새 질의를 칠 수 있게 전체선택.
+  // 처리한 요청은 소비한다: 마운트 때 옛 nonce 로 다시 포커스하지 않게(사이드바 재오픈).
   useEffect(() => {
-    if (focusNonce === 0) return;
+    if (!useSidebarFilter.getState().focusPending) return;
+    useSidebarFilter.getState().consumeFocus();
     ref.current?.focus();
     ref.current?.select();
   }, [focusNonce]);
 
   return (
-    <div className="sticky top-0 z-20 shrink-0 border-b border-border bg-subtle px-2 py-1.5">
+    <div className="shrink-0 border-b border-border bg-subtle px-2 py-1.5">
       {/* 입력칸은 bg-base — 사이드바(bg-subtle) 위에서 라이트 모드에서도 칸으로 읽힌다. */}
       <div className="flex h-[26px] items-center gap-1.5 rounded border border-border bg-base px-2 focus-within:border-accent">
         <Search size={13} className="shrink-0 text-fg-muted" />

@@ -660,3 +660,78 @@ describe("사이드바 — 키가 패널로 새지 않는다", () => {
     expect(document.activeElement).not.toBe(recent);
   });
 });
+
+describe("사이드바 — 필터·태그", () => {
+  beforeEach(resetSidebarStores);
+
+  it("켜 둔 태그가 마지막 항목에서 지워져도 칩과 지우기가 남아 필터를 풀 수 있다", async () => {
+    useTags.setState({ byKey: { "host:prod": ["web"] } });
+    await renderSidebar();
+    const chip = screen.getByRole("button", { name: "#web" });
+    fireEvent.click(chip);
+    expect(chip.getAttribute("aria-pressed")).toBe("true");
+    // 태그 편집으로 마지막 #web 이 사라진다 → 필터는 남아 호스트를 가린다.
+    act(() => useTags.setState({ byKey: {} }));
+    expect(screen.queryByText("prod")).toBeNull();
+    expect(screen.getByRole("button", { name: "#web" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("tags.clear") }));
+    expect(screen.getByText("prod")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "#web" })).toBeNull();
+  });
+
+  it("필터 커맨드는 닫힌 사이드바를 열어 포커스하고, 다시 열 때는 포커스를 빼앗지 않는다", async () => {
+    useUI.setState({ sidebarOpen: false });
+    await renderSidebar();
+    act(() => useSidebarFilter.getState().requestFocus());
+    expect(useUI.getState().sidebarOpen).toBe(true);
+    const filter = screen.getByLabelText(i18n.t("sidebar.filterLabel"));
+    expect(document.activeElement).toBe(filter);
+    act(() => (document.activeElement as HTMLElement).blur());
+    act(() => useUI.getState().toggleSidebar());
+    act(() => useUI.getState().toggleSidebar());
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it("이름 필터는 접힌 즐겨찾기 그룹도 펼치고, 걸린 게 없는 섹션은 숨긴다", async () => {
+    useUI.setState({ collapsed: { "fav:prod": true } });
+    useHostFavorites.setState({
+      items: [{ id: "f1", host_alias: "prod", name: "logs", path: "/var/log" }],
+    });
+    await renderSidebar();
+    expect(screen.queryByText("logs")).toBeNull();
+    act(() => useSidebarFilter.getState().set("logs"));
+    expect(screen.getByText("logs")).toBeTruthy();
+    // Hosts 섹션은 걸린 호스트가 없으니 머리글째 사라진다.
+    expect(
+      screen.queryByRole("button", { name: i18n.t("sidebar.hosts") }),
+    ).toBeNull();
+  });
+
+  it("필터 중에는 걸린 멤버가 없는 호스트 그룹 머리글을 숨긴다", async () => {
+    useSavedHosts.setState({
+      hosts: [
+        { alias: "alpha", host: "a", port: 22, user: "u", key_path: null },
+        { alias: "beta", host: "b", port: 22, user: "u", key_path: null },
+      ],
+    });
+    useHostGroups.setState({
+      groups: [{ id: "g1", name: "BetaGroup", members: ["beta"] }],
+    });
+    await renderSidebar();
+    expect(screen.getByText("BetaGroup")).toBeTruthy();
+    act(() => useSidebarFilter.getState().set("alpha"));
+    expect(screen.queryByText("BetaGroup")).toBeNull();
+    expect(screen.getByText("alpha")).toBeTruthy();
+  });
+
+  it("필터바는 스크롤 영역 밖에 있어 섹션 제목(sticky)을 가리지 않는다", async () => {
+    await renderSidebar();
+    const filter = screen.getByLabelText(i18n.t("sidebar.filterLabel"));
+    const header = screen.getByRole("button", {
+      name: i18n.t("sidebar.hosts"),
+    });
+    const scroller = header.closest(".overflow-y-auto");
+    expect(scroller).toBeTruthy();
+    expect(scroller!.contains(filter)).toBe(false);
+  });
+});
