@@ -345,10 +345,13 @@ export const usePanes = create<PanesState>((set, get) => ({
       const nt = initialTab(location ?? cur.location);
       // 위치를 안 주면 현재 탭 자리를 연다 — 아카이브/휴지통 안이면 그 문맥도
       // 함께 가져가야 "위로"가 원래 폴더로 나가고 임시 경로가 세션에 남지 않는다.
-      if (!location) {
+      // 위치를 줬어도 같은 아카이브/휴지통 안(예: 아카이브 속 폴더를 Ctrl+↑)이면
+      // 문맥을 유지한다.
+      const path = String(nt.location.path);
+      if (!location || (cur.archive && path.startsWith(cur.archive.root)))
         nt.archive = cur.archive;
+      if (!location || (cur.trashRoot && path.startsWith(cur.trashRoot)))
         nt.trashRoot = cur.trashRoot;
-      }
       // 새 탭은 일반 탭 — 핀 구간 안으로는 들어가지 않는다.
       const at = Math.max(
         pinnedCount(p),

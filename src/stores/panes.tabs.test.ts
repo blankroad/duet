@@ -393,4 +393,15 @@ describe("panes — 긴 작업의 문맥은 시작한 탭에", () => {
       true,
     );
   });
+
+  it("아카이브 속 폴더를 새 탭으로 열면(Ctrl+↑) 아카이브 문맥을 유지한다", () => {
+    usePanes.getState().setArchiveContext("left", ctx);
+    usePanes.getState().openTab("left", loc("/tmp/x/sub"), { after: 3 });
+    const left = usePanes.getState().panes.left;
+    expect(left.tabs[left.activeTabIndex]!.archive).toEqual(ctx);
+    // 아카이브 밖 위치면 문맥 없음
+    usePanes.getState().openTab("left", loc("/elsewhere"));
+    const now = usePanes.getState().panes.left;
+    expect(now.tabs[now.activeTabIndex]!.archive).toBeUndefined();
+  });
 });
