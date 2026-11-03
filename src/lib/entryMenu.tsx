@@ -17,6 +17,10 @@ import {
   LayoutGrid,
   ArrowDownUp,
   Eye,
+  EyeOff,
+  Check,
+  ChevronUp,
+  ChevronDown,
   ExternalLink,
   FilePen,
   FolderSearch,
@@ -42,6 +46,7 @@ import { basename } from "@/lib/paths";
 import { canExtractArchive } from "@/lib/archive";
 import {
   usePanes,
+  activeTab,
   type PaneId,
   type SortKey,
   type ViewMode,
@@ -493,18 +498,21 @@ export interface EmptyMenuDeps {
   inVirtualTrash?: boolean;
 }
 
+// 라벨은 메뉴를 열 때 번역한다 — 모듈 로드 시점에 고정하면 언어를 바꿔도 그대로였다.
 const SORTS: { key: SortKey; label: string }[] = [
-  { key: "name", label: i18n.t("menu.sortName") },
-  { key: "size", label: i18n.t("menu.sortSize") },
-  { key: "mtime", label: i18n.t("menu.sortMtime") },
-  { key: "kind", label: i18n.t("menu.sortKind") },
-  { key: "ext", label: i18n.t("menu.sortExt") },
+  { key: "name", label: "menu.sortName" },
+  { key: "size", label: "menu.sortSize" },
+  { key: "mtime", label: "menu.sortMtime" },
+  { key: "kind", label: "menu.sortKind" },
+  { key: "ext", label: "menu.sortExt" },
 ];
 const VIEWS: { mode: ViewMode; label: string }[] = [
-  { mode: "details", label: i18n.t("menu.viewDetails") },
-  { mode: "grid", label: i18n.t("menu.viewGrid") },
-  { mode: "tiles", label: i18n.t("menu.viewTiles") },
+  { mode: "details", label: "menu.viewDetails" },
+  { mode: "grid", label: "menu.viewGrid" },
+  { mode: "tiles", label: "menu.viewTiles" },
 ];
+/** 체크 아이콘 자리 — 고르지 않은 항목도 같은 폭을 차지해 라벨이 나란히 선다. */
+const blank = () => <span style={{ width: ICON }} />;
 
 export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
   const { paneId, location, onRefresh, inVirtualTrash } = deps;
@@ -535,6 +543,9 @@ export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
   }
   const p = usePanes.getState();
   const alias = sshAlias(location);
+  // 지금 상태(보기 방식·정렬·숨김 파일·확장자 열)를 체크로 보여 준다 — 툴바 보기 메뉴와 같은 어휘.
+  const tab = activeTab(p, paneId);
+  const splitExt = useUI.getState().splitExt;
 
   const items: MenuEntry[] = [
     {
@@ -606,7 +617,8 @@ export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
       icon: <LayoutGrid size={ICON} />,
       children: VIEWS.map((v) => ({
         id: `view-${v.mode}`,
-        label: v.label,
+        label: i18n.t(v.label),
+        icon: tab.viewMode === v.mode ? <Check size={ICON} /> : blank(),
         onSelect: () => p.setViewMode(paneId, v.mode),
       })),
     },
@@ -614,25 +626,32 @@ export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
       id: "sort",
       label: i18n.t("menu.sortBy"),
       icon: <ArrowDownUp size={ICON} />,
+      // 현재 정렬 기준은 방향 화살표로 — 다시 누르면 열 머리글처럼 방향이 바뀐다.
       children: SORTS.map((s) => ({
         id: `sort-${s.key}`,
-        label: s.label,
+        label: i18n.t(s.label),
+        icon:
+          tab.sortKey !== s.key ? (
+            blank()
+          ) : tab.sortOrder === "asc" ? (
+            <ChevronUp size={ICON} aria-label={i18n.t("menu.sortAsc")} />
+          ) : (
+            <ChevronDown size={ICON} aria-label={i18n.t("menu.sortDesc")} />
+          ),
         onSelect: () => p.toggleSortKey(paneId, s.key),
       })),
     },
     {
       id: "hidden",
       label: i18n.t("menu.toggleHidden"),
-      icon: <Eye size={ICON} />,
+      icon: tab.showHidden ? <Check size={ICON} /> : <EyeOff size={ICON} />,
       commandId: "view.toggleHidden",
       onSelect: () => p.toggleShowHidden(paneId),
     },
     {
       id: "split-ext",
-      label: useUI.getState().splitExt
-        ? "Hide extension column"
-        : "Show extension column",
-      icon: <Columns3 size={ICON} />,
+      label: i18n.t(splitExt ? "pane.hideExtColumn" : "pane.showExtColumn"),
+      icon: splitExt ? <Check size={ICON} /> : <Columns3 size={ICON} />,
       onSelect: () => useUI.getState().toggleSplitExt(),
     },
     sep(),

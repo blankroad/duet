@@ -455,6 +455,8 @@
     "cut": "Cut",
     "pasteIntoFolder": "Paste into folder",
     "quickLook": "Quick Look",
+    "sortAsc": "Ascending",
+    "sortDesc": "Descending",
     "submenuLoading": "Loading…",
     "submenuEmpty": "(none)",
     "copyToOtherPane": "Copy to other pane",

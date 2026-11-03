@@ -452,6 +452,8 @@
     "cut": "잘라내기",
     "pasteIntoFolder": "폴더에 붙여넣기",
     "quickLook": "Quick Look 미리보기",
+    "sortAsc": "오름차순",
+    "sortDesc": "내림차순",
     "submenuLoading": "불러오는 중…",
     "submenuEmpty": "(항목 없음)",
     "copyToOtherPane": "반대 패널로 복사",
