@@ -48,28 +48,35 @@ export function AppLauncherStrip() {
   };
 
   return (
-    <div className="flex items-center gap-0.5 overflow-hidden">
-      {items.map((a) => (
-        <Fragment key={a.id}>
-          {dragKey && insertBeforeKey === a.id && <DropLine />}
-          {isAppFolder(a) ? (
-            <FolderTile
-              folder={a}
-              merge={mergeTargetKey === a.id}
-              dragging={dragKey === a.id}
-              onMouseDown={(e) => startDrag(e, a.id)}
-            />
-          ) : (
-            <AppButton
-              app={a}
-              merge={mergeTargetKey === a.id}
-              dragging={dragKey === a.id}
-              onMouseDown={(e) => startDrag(e, a.id)}
-            />
-          )}
-        </Fragment>
-      ))}
-      {dragKey && insertBeforeKey === null && <DropLine />}
+    <div className="flex min-w-0 items-center gap-0.5">
+      {/* 앱만 가로 스크롤(트랙패드·Shift+휠) — "+" 는 밖에 고정. 예전엔 통째로
+          overflow-hidden 이라 창이 좁으면 뒤쪽 앱과 "+" 가 말없이 잘렸다. */}
+      <div
+        data-launcher-scroll=""
+        className="flex min-w-0 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        {items.map((a) => (
+          <Fragment key={a.id}>
+            {dragKey && insertBeforeKey === a.id && <DropLine />}
+            {isAppFolder(a) ? (
+              <FolderTile
+                folder={a}
+                merge={mergeTargetKey === a.id}
+                dragging={dragKey === a.id}
+                onMouseDown={(e) => startDrag(e, a.id)}
+              />
+            ) : (
+              <AppButton
+                app={a}
+                merge={mergeTargetKey === a.id}
+                dragging={dragKey === a.id}
+                onMouseDown={(e) => startDrag(e, a.id)}
+              />
+            )}
+          </Fragment>
+        ))}
+        {dragKey && insertBeforeKey === null && <DropLine />}
+      </div>
       <button
         type="button"
         onClick={() => void registerApp()}
@@ -315,7 +322,11 @@ function FolderFlyout({
     const a = anchor.getBoundingClientRect();
     const c = card.getBoundingClientRect();
     const left = Math.max(8, Math.min(a.left, window.innerWidth - c.width - 8));
-    const top = Math.min(a.bottom + 6, window.innerHeight - c.height - 8);
+    // 카드는 max-height 로 창 안에 들어오게 했지만, 그래도 위가 잘리지 않게 하한 8px.
+    const top = Math.max(
+      8,
+      Math.min(a.bottom + 6, window.innerHeight - c.height - 8),
+    );
     setPos({ left, top });
   }, [anchor]);
 
@@ -332,7 +343,7 @@ function FolderFlyout({
       <div className="fixed inset-0 z-40" onMouseDown={onClose} />
       <div
         ref={cardRef}
-        className="fixed z-50 rounded-xl border border-border bg-base p-3 shadow-panel"
+        className="fixed z-50 flex max-h-[calc(100vh-16px)] flex-col rounded-xl border border-border bg-base p-3 shadow-panel"
         style={{
           left: pos?.left ?? -9999,
           top: pos?.top ?? -9999,
@@ -369,7 +380,7 @@ function FolderFlyout({
             {folder.name}
           </div>
         )}
-        <div className="grid max-w-[18rem] grid-cols-4 gap-1">
+        <div className="grid min-h-0 max-w-[18rem] grid-cols-4 gap-1 overflow-y-auto">
           {children.map((c) => (
             <FolderChild
               key={c.id}

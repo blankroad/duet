@@ -40,6 +40,8 @@ import { useContextMenu, type MenuItem } from "@/stores/contextMenu";
 import { useHostNicknames } from "@/stores/hostNicknames";
 import { beginWidthDrag } from "@/stores/panelWidth";
 import { reorderSavedHosts } from "@/stores/savedHosts";
+import { useAppLaunchers } from "@/stores/appLaunchers";
+import type { AppItem } from "@/types/bindings";
 
 // commands.* 는 무엇을 부르든 빈 성공 — 컴포넌트가 부트스트랩 중 부르는 IPC 를 흡수한다.
 vi.mock("@/types/bindings", () => {
@@ -823,5 +825,26 @@ describe("폭 드래그·재정렬 생명주기", () => {
       "a",
     ]);
     await p;
+  });
+});
+
+describe("앱 런처 넘침", () => {
+  it("앱이 많아도 '앱 추가' 버튼은 스크롤 영역 밖에 고정돼 항상 닿는다", () => {
+    useAppLaunchers.setState({
+      items: Array.from({ length: 30 }, (_, i) => ({
+        id: `a${i}`,
+        name: `App${i}`,
+        path: `/Applications/App${i}.app`,
+        args: [],
+        children: null,
+      })) as unknown as AppItem[],
+    });
+    render(<TopBar />);
+    const add = screen.getByRole("button", { name: i18n.t("launcher.addApp") });
+    const scroller = document.querySelector("[data-launcher-scroll]");
+    expect(scroller).toBeTruthy();
+    expect(scroller!.contains(add)).toBe(false);
+    expect(scroller!.className).toContain("overflow-x-auto");
+    expect(scroller!.querySelectorAll("button").length).toBe(30);
   });
 });
