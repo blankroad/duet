@@ -5,6 +5,24 @@ import { usePanes, type PaneId } from "@/stores/panes";
 import { useUI } from "@/stores/ui";
 import { useToast } from "@/stores/toast";
 
+/**
+ * 바 안의 버튼에 포커스가 있을 때 전역 목록 키(useKeyboardNav — Enter 열기, Space 미리보기,
+ * Tab 패널 전환, Backspace 위로, 방향키)로 새지 않게 막는 키. 버튼 기본 동작(Enter/Space 클릭,
+ * Tab 포커스 이동)은 그대로 둔다. 입력창의 키는 전역 핸들러가 원래 무시한다.
+ */
+const BAR_OWNED_KEYS = new Set([
+  "Enter",
+  " ",
+  "Tab",
+  "Backspace",
+  "ArrowUp",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "Home",
+  "End",
+]);
+
 const BAR_BUTTON =
   "flex h-6 shrink-0 items-center justify-center gap-1 rounded text-fg-muted hover:bg-border hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent";
 
@@ -16,7 +34,8 @@ const BAR_BUTTON =
  * - Enter / 적용: 패턴을 활성 패널 선택집합에 add/remove 적용 후 닫기(텍스트 유지 — 직후 모드
  *   전환 재적용 편의).
  * - 모드 버튼: 선택 ↔ 선택 해제 전환.
- * - ESC / X / 바 밖으로 포커스 이동: 닫기. 바 안의 버튼으로 Tab 이동은 닫지 않는다.
+ * - ESC(바 어디서든) / X / 바 밖으로 포커스 이동: 닫기. 바 안의 버튼으로 Tab 이동은 닫지 않는다.
+ * - 버튼 포커스 중 Enter/Space/Tab 등은 전역 목록 키로 새지 않는다(파일 열기·패널 전환 방지).
  *
  * 필터(PaneFilterBar)와 독립 — 대상은 항상 현재 표시 항목(displayedEntries).
  */
@@ -65,6 +84,16 @@ export function SelectPatternBar({ id }: { id: PaneId }) {
   return (
     <div
       className="flex h-7 shrink-0 items-center gap-2 border-b border-border bg-subtle px-2 text-base"
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          // 입력·버튼 어디서든 Esc 로 닫는다.
+          e.preventDefault();
+          e.stopPropagation();
+          setOpen(false);
+        } else if (BAR_OWNED_KEYS.has(e.key)) {
+          e.stopPropagation();
+        }
+      }}
       onBlur={(e) => {
         // 바 안(적용·모드·닫기 버튼)으로 옮기는 포커스는 닫지 않는다 — 키보드로 닿게.
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
@@ -99,10 +128,7 @@ export function SelectPatternBar({ id }: { id: PaneId }) {
         value={pattern}
         onChange={(e) => setPattern(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Escape") {
-            e.preventDefault();
-            setOpen(false);
-          } else if (e.key === "Enter") {
+          if (e.key === "Enter") {
             e.preventDefault();
             applyAndClose();
           }

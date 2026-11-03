@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   act,
   cleanup,
@@ -12,6 +12,7 @@ import { useUI } from "@/stores/ui";
 import { useToast } from "@/stores/toast";
 import type { Entry } from "@/types/bindings";
 import i18n from "@/i18n";
+import { useKeyboardNav } from "@/hooks/useKeyboardNav";
 
 const file = (name: string) =>
   ({
@@ -93,4 +94,31 @@ it("WebKit 처럼 버튼 클릭이 포커스를 옮기지 않아도 마우스로
   expect([...activeTab(usePanes.getState(), "left").selected]).toEqual([
     "c.md",
   ]);
+});
+
+const onActivate = vi.fn();
+const onQuickLook = vi.fn();
+function WithNav() {
+  useKeyboardNav(onActivate, vi.fn(), onQuickLook);
+  return <SelectPatternBar id="left" />;
+}
+
+it("버튼에 포커스가 있을 때 Enter·Space·Tab 은 전역 목록 키로 새지 않고, Esc 는 바를 닫는다", async () => {
+  onActivate.mockClear();
+  onQuickLook.mockClear();
+  usePanes.getState().setActivePane("left");
+  usePanes.getState().setCursor("left", 0);
+  render(<WithNav />);
+  await openBar();
+  const apply = screen.getByRole("button", { name: "적용" });
+  apply.focus();
+  // 기본 동작(버튼 클릭 합성·포커스 이동)을 막지 않아야 한다.
+  expect(fireEvent.keyDown(apply, { key: "Enter" })).toBe(true);
+  expect(fireEvent.keyDown(apply, { key: " " })).toBe(true);
+  expect(fireEvent.keyDown(apply, { key: "Tab" })).toBe(true);
+  expect(onActivate).not.toHaveBeenCalled();
+  expect(onQuickLook).not.toHaveBeenCalled();
+  expect(usePanes.getState().activePane).toBe("left");
+  fireEvent.keyDown(apply, { key: "Escape" });
+  expect(screen.queryByRole("textbox")).toBeNull();
 });

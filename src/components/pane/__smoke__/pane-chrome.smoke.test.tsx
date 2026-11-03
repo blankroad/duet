@@ -181,15 +181,23 @@ describe("pane-chrome 스모크", () => {
     expect(screen.getByText("work")).toBeTruthy();
   });
 
-  it("⑤ 패턴 선택 바: Tab 으로 적용 버튼까지 가서 실행한다", async () => {
+  it("⑤ 패턴 선택 바: Tab 으로 적용 버튼까지 가서 Enter 로 실행한다", async () => {
     render(<Harness id="right" />);
-    act(() => useUI.getState().requestSelectPattern("right", "add"));
+    // Ctrl+= 는 활성 패널을 대상으로 연다.
+    act(() => {
+      usePanes.getState().setActivePane("right");
+      useUI.getState().requestSelectPattern("right", "add");
+    });
     await act(() => new Promise((r) => requestAnimationFrame(() => r(null))));
     const input = screen.getByRole("textbox", { name: "선택" });
     fireEvent.change(input, { target: { value: "*.md" } });
     const apply = screen.getByRole("button", { name: "적용" });
     fireEvent.blur(input, { relatedTarget: apply });
-    fireEvent.click(apply);
+    apply.focus();
+    // 실제 키 입력이 전역 목록 키(Enter 열기·Tab 패널 전환)로 새지 않고 버튼 기본 동작을 남긴다.
+    expect(fireEvent.keyDown(apply, { key: "Enter" })).toBe(true);
+    expect(usePanes.getState().activePane).toBe("right");
+    fireEvent.click(apply); // jsdom 은 Enter→click 을 합성하지 않으므로 직접.
     expect([...tab().selected]).toEqual(["readme.md"]);
   });
 
