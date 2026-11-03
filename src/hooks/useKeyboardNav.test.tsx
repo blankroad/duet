@@ -114,3 +114,18 @@ it("repeating the same letter cycles through matches", () => {
   fireEvent.keyDown(window, { key: "a" });
   expect(cursorName()).toBe("avocado");
 });
+
+it("forgets the range anchor when the tab moves to another folder", () => {
+  setAnchorAt("left", at("b"));
+  usePanes
+    .getState()
+    .setEntries(
+      "left",
+      { source: { kind: "local" }, path: "/kn2" },
+      ["a", "b", "c"].map(file),
+    );
+  // 커서는 새 폴더의 첫 항목(".." 다음 a) 근처 — a 에서 Shift 범위는 a 만.
+  usePanes.getState().setCursor("left", at("a"));
+  selectRangeTo("left", at("a"));
+  expect(selected()).toEqual(["a"]);
+});

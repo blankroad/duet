@@ -4,6 +4,8 @@ import {
   computeDisplayed,
   type PaneId,
 } from "@/stores/panes";
+import type { Location } from "@/types/bindings";
+import { sameLocationDir } from "@/lib/entryDnd";
 
 /**
  * Shift 범위 선택의 기준점 — 키보드와 마우스가 **하나**를 같이 쓴다 (탐색기/Finder 관례).
@@ -18,25 +20,26 @@ import {
  * 규칙: Shift 없는 클릭·이동·Ctrl 토글·마키가 기준점을 정하고, Shift 클릭/이동은
  * 기준점 → 대상 범위를 선택한다(기준점은 그대로).
  */
-const anchors = new Map<string, string>();
-
-function tabKey(id: PaneId): string {
-  return activeTab(usePanes.getState(), id).id;
-}
+/** 탭 id → 기준점 (그 폴더 위치와 함께 — 다른 폴더로 가면 무효). */
+const anchors = new Map<string, { name: string; location: Location }>();
 
 /** 기준점을 표시 목록의 `index` 항목으로 둔다. 범위 밖이면 지운다. */
 export function setAnchorAt(id: PaneId, index: number): void {
-  const name = computeDisplayed(activeTab(usePanes.getState(), id))[index]
-    ?.name;
-  if (name === undefined) anchors.delete(tabKey(id));
-  else anchors.set(tabKey(id), name);
+  const tab = activeTab(usePanes.getState(), id);
+  const name = computeDisplayed(tab)[index]?.name;
+  if (name === undefined) anchors.delete(tab.id);
+  else anchors.set(tab.id, { name, location: tab.location });
 }
 
 /** 기준점 → `index` 범위를 선택하고 커서를 `index` 로. */
 export function selectRangeTo(id: PaneId, index: number): void {
   const state = usePanes.getState();
   const tab = activeTab(state, id);
-  const name = anchors.get(tab.id);
+  const a = anchors.get(tab.id);
+  // 같은 탭이라도 다른 폴더로 옮겼으면 예전 기준점은 버린다 — 이름이 겹치는 새 폴더에서
+  // 엉뚱한 범위가 잡히던 문제.
+  const name =
+    a && sameLocationDir(a.location, tab.location) ? a.name : undefined;
   const found =
     name === undefined
       ? -1
