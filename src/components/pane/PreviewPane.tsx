@@ -10,7 +10,7 @@ import {
   type PaneId,
 } from "@/stores/panes";
 import { useUI } from "@/stores/ui";
-import { usePreviewHover } from "@/stores/previewHover";
+import { usePreviewHover, dropHoverTarget } from "@/stores/previewHover";
 import { usePreviewWidth } from "@/stores/previewWidth";
 import { beginWidthDrag } from "@/stores/panelWidth";
 import { formatErr } from "@/lib/error";
@@ -131,6 +131,11 @@ export function PreviewPane({ below = false }: { below?: boolean }) {
   const togglePreview = useUI((s) => s.togglePreview);
   const hover = usePreviewHover((s) => s.target);
   const cursorKey = usePanes(cursorPreviewDep);
+  // 커서가 움직이면(키보드·클릭) 그게 가장 최근 의도 — 남아 있던 호버를 놓아 미리보기가
+  // 커서를 따라가게 한다. 마우스를 목록 위에 둔 채 ↑↓ 하면 예전 호버 항목에 멈춰 있었다.
+  useEffect(() => {
+    dropHoverTarget();
+  }, [cursorKey]);
   // 호버 우선, 없으면 cursor. cursorKey 는 cursorTarget()(비반응 getState)의
   // 재평가 트리거라 의도적 의존성.
   // eslint-disable-next-line react-hooks/exhaustive-deps

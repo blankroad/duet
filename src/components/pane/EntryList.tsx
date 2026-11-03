@@ -282,7 +282,9 @@ export function EntryList({
                 key={vi.key}
                 data-entry={entry.name}
                 data-drop-folder={isDropFolder ? entry.name : undefined}
-                onMouseEnter={() => setHoverEntry(id, entry)}
+                onMouseEnter={(e) =>
+                  setHoverEntry(id, entry, { x: e.clientX, y: e.clientY })
+                }
                 onMouseDown={(e) => {
                   // 아이콘/이름(드래그 핸들) 위에서만 항목 드래그 시작. 그 외
                   // (Size/Modified 컬럼 등 여백)은 컨테이너 마키 선택으로 흘려보냄.

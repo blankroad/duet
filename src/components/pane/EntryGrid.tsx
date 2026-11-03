@@ -210,7 +210,8 @@ export function EntryGrid({
                       followRenamedEntry(id, location, entry.name, newName);
                     onRenamed();
                   },
-                  onMouseEnter: () => setHoverEntry(id, entry),
+                  onMouseEnter: (e) =>
+                    setHoverEntry(id, entry, { x: e.clientX, y: e.clientY }),
                   onMouseDown: (e) => {
                     // 아이콘/이름(핸들) 위에서만 드래그 시작 — 그 외 여백은 마키로.
                     if (
@@ -264,7 +265,7 @@ interface CellProps {
   /** 인라인 이름변경(F2) 중이면 대상 EntryRef — 이름 라벨이 input 으로 전환. */
   renameRef: EntryRef | null;
   onRenameDone: (renamed: boolean, newName?: string) => void;
-  onMouseEnter: () => void;
+  onMouseEnter: (e: React.MouseEvent) => void;
   onMouseDown: (e: React.MouseEvent) => void;
   onContextMenu: (e: React.MouseEvent) => void;
   onClick: (e: React.MouseEvent) => void;
@@ -387,6 +388,7 @@ function GridCell({
     <div
       data-entry={entry.name}
       data-drop-folder={entry.kind === "dir" ? entry.name : undefined}
+      onMouseEnter={onMouseEnter}
       onMouseDown={onMouseDown}
       onContextMenu={onContextMenu}
       className={clsx(
@@ -477,6 +479,7 @@ function TileRow({
     <div
       data-entry={entry.name}
       data-drop-folder={entry.kind === "dir" ? entry.name : undefined}
+      onMouseEnter={onMouseEnter}
       onMouseDown={onMouseDown}
       onContextMenu={onContextMenu}
       className={clsx(
