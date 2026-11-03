@@ -667,7 +667,10 @@
       "customized": "Customized (not default)",
       "edit": "Edit",
       "reset": "Reset",
-      "pressKey": "Press key…"
+      "pressKey": "Press key…",
+      "conflictPrompt": "{{key}} is assigned to “{{command}}”. Move it to this command?",
+      "conflictReplace": "Replace",
+      "shadowed": "Default key {{key}} is used by “{{command}}”"
     },
     "desc": "Application settings",
     "conflictDefault": "Default when a file already exists",

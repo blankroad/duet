@@ -662,7 +662,10 @@
       "customized": "사용자 지정 (기본값 아님)",
       "edit": "편집",
       "reset": "초기화",
-      "pressKey": "키를 누르세요…"
+      "pressKey": "키를 누르세요…",
+      "conflictPrompt": "{{key}} 는 ‘{{command}}’ 에 지정되어 있습니다. 이 명령으로 옮길까요?",
+      "conflictReplace": "바꾸기",
+      "shadowed": "기본 키 {{key}} 를 ‘{{command}}’ 가 사용 중"
     },
     "desc": "앱 설정",
     "conflictDefault": "같은 이름이 있을 때 기본 선택",

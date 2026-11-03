@@ -87,6 +87,7 @@ export async function setKeymap(
     useKeymap.getState().setAll(r.data);
     return true;
   }
+  useToast.getState().show(`Bind key: ${formatErr(r.error)}`, "error");
   return false;
 }
 
