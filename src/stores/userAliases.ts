@@ -28,6 +28,7 @@ export async function addUserAlias(
     useUserAliases.getState().setAll(r.data);
     return true;
   }
+  useToast.getState().show(`Add alias: ${formatErr(r.error)}`, "error");
   return false;
 }
 

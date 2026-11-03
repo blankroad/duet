@@ -76,8 +76,8 @@ function AddForm({ onClose }: { onClose: () => void }) {
       if (!savedHost) return;
       kind = { kind: "connect", saved_host_alias: savedHost };
     }
-    await addUserAlias(name.trim(), kind);
-    onClose();
+    // 실패하면 폼을 닫지 않는다 — 입력을 지우지 않고 다시 시도할 수 있게(토스트는 store).
+    if (await addUserAlias(name.trim(), kind)) onClose();
   };
 
   return (

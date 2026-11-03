@@ -3,7 +3,7 @@ import { X } from "lucide-react";
 import { commands } from "@/types/bindings";
 import { buildSettingsPatch } from "@/lib/settingsPatch";
 import { ICON_PALETTE, paletteIcon } from "@/lib/iconPalette";
-import { useAppSettings } from "@/stores/settings";
+import { useAppSettings, toastSettingsSaveFailed } from "@/stores/settings";
 
 /** 확장자 정규화 — 소문자, 선두 점 제거, trim. */
 function normExt(s: string): string {
@@ -33,11 +33,18 @@ export function ExtIconsSection() {
   }, []);
 
   const persist = async (next: Record<string, string>) => {
+    const prev = map;
     setMap(next);
     useAppSettings.getState().setExtIconOverrides(next); // 리스트 즉시 반영
-    await commands.settingsSet(
+    const r = await commands.settingsSet(
       buildSettingsPatch({ ext_icon_overrides: next }),
     );
+    if (r.status === "error") {
+      // 저장 실패 — 화면·목록 아이콘을 이전 값으로 되돌린다.
+      setMap(prev);
+      useAppSettings.getState().setExtIconOverrides(prev);
+      toastSettingsSaveFailed(r.error);
+    }
   };
 
   const assign = (iconName: string) => {

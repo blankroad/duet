@@ -5,10 +5,11 @@ import { commands } from "@/types/bindings";
 import type { Settings, SettingsPatch } from "@/types/bindings";
 import { applyTabDefaults, type SortKey, type ViewMode } from "@/stores/panes";
 import { useTranslation } from "react-i18next";
-import { syncAppSettings } from "@/stores/settings";
+import { syncAppSettings, toastSettingsSaveFailed } from "@/stores/settings";
 import { useUI, type Density } from "@/stores/ui";
 import { setLang, storedLang, type LangSetting } from "@/i18n";
 import { applyTheme } from "@/lib/theme";
+import { formatErr } from "@/lib/error";
 import { buildSettingsPatch as buildPatch } from "@/lib/settingsPatch";
 
 const isWindows = platform() === "windows";
@@ -24,6 +25,7 @@ export function GeneralSection() {
   const [lang, setLangState] = useState<LangSetting>(storedLang());
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   // 탐색기 통합 상태 (Windows 전용, 레지스트리가 SoT). 두 토글이 같은 키군을 만지므로
   // busy 플래그 하나로 직렬화한다.
   const [openInDuet, setOpenInDuet] = useState(false);
@@ -35,6 +37,7 @@ export function GeneralSection() {
     commands.settingsGet().then((r) => {
       if (cancelled) return;
       if (r.status === "ok") setSettings(r.data);
+      else setLoadError(formatErr(r.error));
       setLoading(false);
     });
     if (isWindows) {
@@ -65,14 +68,16 @@ export function GeneralSection() {
 
   const toggleOpenInDuet = async (enabled: boolean) => {
     setShellBusy(true);
-    await commands.openInDuetSet(enabled);
+    const r = await commands.openInDuetSet(enabled);
+    if (r.status === "error") toastSettingsSaveFailed(r.error);
     await refreshShellStatus();
     setShellBusy(false);
   };
 
   const toggleDefaultHandler = async (enabled: boolean) => {
     setShellBusy(true);
-    await commands.defaultFolderHandlerSet(enabled);
+    const r = await commands.defaultFolderHandlerSet(enabled);
+    if (r.status === "error") toastSettingsSaveFailed(r.error);
     await refreshShellStatus();
     setShellBusy(false);
   };
@@ -80,7 +85,10 @@ export function GeneralSection() {
   // 저장 후 즉시 적용 (테마 + 새 탭 기본값) — 죽은 토글 방지.
   const save = async (over: Partial<SettingsPatch>) => {
     const r = await commands.settingsSet(buildPatch(over));
-    if (r.status !== "ok") return;
+    if (r.status !== "ok") {
+      toastSettingsSaveFailed(r.error);
+      return;
+    }
     setSettings(r.data);
     applyTheme(r.data.theme ?? "system");
     applyTabDefaults({
@@ -91,6 +99,13 @@ export function GeneralSection() {
     syncAppSettings(r.data);
   };
 
+  // 불러오기 실패를 끝없는 "불러오는 중…" 으로 두지 않는다.
+  if (loadError)
+    return (
+      <div role="alert" className="text-base text-danger">
+        {t("settings.loadFailed", { err: loadError })}
+      </div>
+    );
   if (loading || !settings)
     return (
       <div className="text-base text-fg-muted">{t("settings.loading")}</div>

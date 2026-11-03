@@ -712,6 +712,8 @@
     "shellDefault": "폴더를 기본으로 duet 에서 열기 (더블클릭)",
     "shellDefaultHint": "폴더·드라이브를 더블클릭할 때 탐색기 대신 duet 이 열립니다. 켜면 위 우클릭 항목도 함께 등록됩니다. 끄면 탐색기로 돌아갑니다. duet 이 이미 켜져 있으면 새 탭으로 열립니다.",
     "loading": "불러오는 중…",
+    "saveFailed": "설정 저장 실패: {{err}}",
+    "loadFailed": "설정을 불러오지 못했습니다: {{err}}",
     "sizeUnits": "파일 크기 단위",
     "sizeUnitsHint": "이진은 탐색기와, 십진은 파인더와 같은 값입니다.",
     "sizeBinary": "1 KiB = 1024 바이트",

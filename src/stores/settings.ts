@@ -3,6 +3,19 @@ import { platform } from "@tauri-apps/plugin-os";
 import type { ConflictPolicy, Settings } from "@/types/bindings";
 import { setFormatOptions } from "@/lib/format";
 import { setDirsFirst } from "@/stores/panes";
+import i18n from "@/i18n";
+import { useToast } from "@/stores/toast";
+import { formatErr } from "@/lib/error";
+
+/**
+ * 설정 저장 실패 알림 — 저장이 안 됐는데 바뀐 것처럼 보이던 화면(연결 프로그램·아이콘·
+ * 일반 설정)이 공통으로 쓴다. 호출부는 화면 상태를 이전 값으로 되돌린다.
+ */
+export function toastSettingsSaveFailed(err: unknown): void {
+  useToast
+    .getState()
+    .show(i18n.t("settings.saveFailed", { err: formatErr(err) }), "error");
+}
 
 /** 복사/이동 확인 다이얼로그를 언제 띄울지. backend `confirm_transfer` 미러. */
 export type ConfirmTransfer = "always" | "conflicts_only" | "never";

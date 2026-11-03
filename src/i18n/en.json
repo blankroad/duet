@@ -717,6 +717,8 @@
     "shellDefault": "Open folders in duet by default (double-click)",
     "shellDefaultHint": "Makes duet the default action when you double-click a folder or drive, instead of File Explorer. Enabling this also adds the right-click entry above. Reversible — turning it off restores Explorer. While duet is already running, opened folders appear as a new tab.",
     "loading": "Loading…",
+    "saveFailed": "Could not save settings: {{err}}",
+    "loadFailed": "Could not load settings: {{err}}",
     "sizeUnits": "File size units",
     "sizeUnitsHint": "Binary matches Windows; decimal matches Finder.",
     "sizeBinary": "1 KiB = 1024 bytes",

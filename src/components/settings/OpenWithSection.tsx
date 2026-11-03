@@ -3,6 +3,7 @@ import { X, FolderOpen } from "lucide-react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { commands } from "@/types/bindings";
 import { buildSettingsPatch } from "@/lib/settingsPatch";
+import { toastSettingsSaveFailed } from "@/stores/settings";
 
 /** 확장자 정규화 — 소문자, 선두 점 제거, trim. */
 function normExt(s: string): string {
@@ -36,8 +37,15 @@ export function OpenWithSection() {
   }, []);
 
   const persist = async (next: Record<string, string>) => {
+    const prev = map;
     setMap(next);
-    await commands.settingsSet(buildSettingsPatch({ ext_app_overrides: next }));
+    const r = await commands.settingsSet(
+      buildSettingsPatch({ ext_app_overrides: next }),
+    );
+    if (r.status === "error") {
+      setMap(prev); // 저장 안 됐으면 화면도 되돌린다 — 재시작 후 사라지는 "가짜 저장" 방지.
+      toastSettingsSaveFailed(r.error);
+    }
   };
 
   const choose = async () => {
