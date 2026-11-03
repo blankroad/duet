@@ -100,10 +100,10 @@ function renderPane() {
 }
 
 const tabEls = () => screen.getAllByRole("tab");
-/** 열린 우클릭 메뉴의 항목 (메뉴 항목은 role 없는 button — 탭 안 버튼은 제외). */
+/** 열린 우클릭 메뉴의 항목 (ContextMenu 항목은 role="menuitem" — 탭 안 버튼은 제외). */
 const menuItem = (label: string | RegExp): HTMLButtonElement => {
   const hit = screen
-    .getAllByRole("button")
+    .getAllByRole("menuitem")
     .filter((b) => !b.closest('[role="tab"]'))
     .find((b) =>
       typeof label === "string"
