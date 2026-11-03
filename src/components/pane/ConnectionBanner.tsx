@@ -24,6 +24,24 @@ import { aliasLabel } from "@/lib/hostLabel";
  * (`<alias>:<uuid>`). 예전엔 패널마다 ref 로 기억해서, 다른 호스트의 탭으로 바꿔도
  * 앞 탭의 alias 로 재연결하는 버그가 있었다.
  */
+/**
+ * 백엔드 자동 재연결 포기 사유(`connection_supervisor.rs` 의 고정 문구) → i18n 키.
+ * 모르는 사유(네트워크 오류 원문 등)는 그대로 보인다.
+ */
+const SUPERVISOR_REASONS: Record<string, string> = {
+  "auth failed on reconnect": "banner.reason.authFailed",
+  "host alias removed from ~/.ssh/config": "banner.reason.aliasRemoved",
+  "automatic reconnect is not supported for directly entered hosts — press Reconnect":
+    "banner.reason.adhocUnsupported",
+  "could not read ~/.ssh/config while reconnecting":
+    "banner.reason.configUnreadable",
+};
+
+function reasonText(message: string, t: (key: string) => string): string {
+  const key = SUPERVISOR_REASONS[message];
+  return key ? t(key) : message;
+}
+
 export function ConnectionBanner({
   id,
   onReconnect,
@@ -92,7 +110,7 @@ export function ConnectionBanner({
         : t("banner.disconnected");
   const reason =
     state.kind === "error"
-      ? state.message
+      ? reasonText(state.message, t)
       : restored
         ? t("banner.restoredReason")
         : t("banner.closedReason");

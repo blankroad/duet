@@ -96,4 +96,30 @@ describe("ConnectionBanner alias", () => {
     expect(screen.getByText("banner.reconnecting")).toBeTruthy();
     expect(screen.queryAllByRole("button")).toHaveLength(0);
   });
+
+  it("translates known supervisor reasons and keeps unknown ones as-is", () => {
+    const at = (message: string) => {
+      useConnections.setState({
+        reconnecting: {},
+        active: {
+          "a:1": {
+            id: "a:1",
+            alias: "a",
+            host_ip: "10.0.0.1",
+            user: "u",
+            state: { kind: "error", message },
+          },
+        },
+      });
+      setLeftTabs([ssh("a:1")]);
+      const r = render(<ConnectionBanner id="left" onReconnect={vi.fn()} />);
+      const text = screen.getByRole("alert").textContent;
+      r.unmount();
+      return text;
+    };
+    expect(at("auth failed on reconnect")).toContain(
+      "banner.reason.authFailed",
+    );
+    expect(at("connection refused")).toContain("connection refused");
+  });
 });

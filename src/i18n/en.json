@@ -587,7 +587,13 @@
     "restoredReason": "restored after restart, not connected yet",
     "closedReason": "connection was closed",
     "stop": "Stop",
-    "stopHint": "Stop reconnecting automatically"
+    "stopHint": "Stop reconnecting automatically",
+    "reason": {
+      "authFailed": "couldn't authenticate again — press Reconnect to enter the password",
+      "aliasRemoved": "this host is no longer in ~/.ssh/config",
+      "adhocUnsupported": "directly entered hosts don't reconnect automatically — press Reconnect",
+      "configUnreadable": "stopped reconnecting: ~/.ssh/config could not be read"
+    }
   },
   "pane": {
     "emptyFolder": "This folder is empty",

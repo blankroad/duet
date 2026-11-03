@@ -584,7 +584,13 @@
     "restoredReason": "앱을 다시 시작해 아직 연결하지 않은 탭",
     "closedReason": "연결을 닫았습니다",
     "stop": "중지",
-    "stopHint": "자동 재연결을 멈춥니다"
+    "stopHint": "자동 재연결을 멈춥니다",
+    "reason": {
+      "authFailed": "다시 인증하지 못했습니다 — 재연결을 눌러 비밀번호를 입력하세요",
+      "aliasRemoved": "~/.ssh/config 에서 이 호스트가 사라졌습니다",
+      "adhocUnsupported": "직접 입력한 호스트는 자동 재연결을 지원하지 않습니다 — 재연결을 누르세요",
+      "configUnreadable": "~/.ssh/config 를 읽지 못해 자동 재연결을 멈췄습니다"
+    }
   },
   "pane": {
     "emptyFolder": "빈 폴더입니다",
