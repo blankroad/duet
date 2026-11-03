@@ -23,7 +23,7 @@ const PERM_DENIED = /permission denied|os error 5|access is denied/i;
 /**
  * 백엔드 task-event 구독 + 부트스트랩.
  *
- * - 마운트 시 tasks_list 로 현재 큐 snapshot 받아 store init
+ * - 구독을 건 뒤 tasks_list 스냅샷을 받아 store 에 **병합**(이벤트가 우선)
  * - 종결 상태 (completed/cancelled/failed) 는 즉시 store 에서 remove —
  *   TasksBar 가 active 만 표시. history 보존은 후속 (MVP-7).
  *
@@ -32,7 +32,7 @@ const PERM_DENIED = /permission denied|os error 5|access is denied/i;
  * 외부 변경과 동일한 경로로 새로고침한다. (in-app / 외부 변경 새로고침 일원화.)
  */
 export function useTaskEvents() {
-  const setAll = useTasks((s) => s.setAll);
+  const mergeSnapshot = useTasks((s) => s.mergeSnapshot);
   const add = useTasks((s) => s.add);
   const setStatus = useTasks((s) => s.setStatus);
   const setProgress = useTasks((s) => s.setProgress);
@@ -40,17 +40,18 @@ export function useTaskEvents() {
   const remove = useTasks((s) => s.remove);
 
   useEffect(() => {
-    let cancelled = false;
-    commands.tasksList().then((r) => {
-      if (cancelled) return;
-      if (r.status === "ok") setAll(r.data);
-    });
-    return () => {
-      cancelled = true;
+    // 스냅샷과 이벤트의 순서 — 구독을 먼저 걸고 나서 스냅샷을 받는다(그 사이 이벤트를
+    // 놓치지 않게). 스냅샷이 오기 전에 끝난 작업 id 는 기억했다가 병합 때 되살리지 않는다.
+    let disposed = false;
+    let snapshotPending = true;
+    const terminated = new Set<string>();
+    const markDone = (id: string) => {
+      if (snapshotPending) terminated.add(id);
     };
-  }, [setAll]);
-
-  useEffect(() => {
+    // 스냅샷 전에 온 시작·진행은 store 에 아직 그 작업이 없으면 버려진다(setStatus/
+    // setProgress 는 없는 id 를 무시). 순서대로 모아 뒀다가 병합 뒤 다시 적용한다 —
+    // 안 그러면 실제로 도는 작업이 스냅샷의 옛 "대기"·옛 진행률로 남았다.
+    const replay: Array<() => void> = [];
     const unlistenP = events.taskEvent.listen(({ payload }) => {
       const id = payload.task_id;
       switch (payload.change.kind) {
@@ -60,11 +61,17 @@ export function useTaskEvents() {
           break;
         case "started":
           setStatus(id, { kind: "running" });
+          if (snapshotPending)
+            replay.push(() => setStatus(id, { kind: "running" }));
           break;
-        case "progress":
-          setProgress(id, payload.change.progress);
+        case "progress": {
+          const progress = payload.change.progress;
+          setProgress(id, progress);
+          if (snapshotPending) replay.push(() => setProgress(id, progress));
           break;
+        }
         case "completed": {
+          markDone(id);
           setStatus(id, {
             kind: "completed",
             journal_id: payload.change.journal_id,
@@ -92,6 +99,7 @@ export function useTaskEvents() {
           break;
         }
         case "cancelled": {
+          markDone(id);
           setStatus(id, { kind: "cancelled" });
           startedAt.delete(id);
           takeElevatable(id);
@@ -108,6 +116,7 @@ export function useTaskEvents() {
           break;
         }
         case "failed": {
+          markDone(id);
           startedAt.delete(id);
           const msg = payload.change.message;
           setError(id, msg);
@@ -146,8 +155,21 @@ export function useTaskEvents() {
         }
       }
     });
+    void unlistenP
+      .then(() => (disposed ? null : commands.tasksList()))
+      .then((r) => {
+        snapshotPending = false;
+        if (disposed || !r || r.status !== "ok") return;
+        mergeSnapshot(r.data, terminated);
+        // 종결된 작업은 병합에서 빠졌으니 재적용해도 되살아나지 않는다(없는 id 무시).
+        for (const apply of replay) apply();
+        replay.length = 0;
+        terminated.clear();
+      });
     return () => {
+      disposed = true;
+      replay.length = 0;
       unlistenP.then((fn) => fn());
     };
-  }, [add, setStatus, setProgress, setError, remove]);
+  }, [add, setStatus, setProgress, setError, remove, mergeSnapshot]);
 }

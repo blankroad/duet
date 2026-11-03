@@ -1,4 +1,6 @@
 import { create } from "zustand";
+import { reorderInSlots } from "@/lib/reorderSlots";
+import i18n from "@/i18n";
 import { commands } from "@/types/bindings";
 import { useToast } from "@/stores/toast";
 import { formatErr } from "@/lib/error";
@@ -40,16 +42,20 @@ export async function saveHost(host: SavedHost): Promise<boolean> {
 export async function removeSavedHost(alias: string): Promise<void> {
   const r = await commands.savedHostsRemove(alias);
   if (r.status === "ok") useSavedHosts.getState().setAll(r.data);
-  else useToast.getState().show(`Remove host: ${formatErr(r.error)}`, "error");
+  else
+    useToast
+      .getState()
+      .show(
+        i18n.t("toast.removeHostFailed", { err: formatErr(r.error) }),
+        "error",
+      );
 }
 
 /** 드래그 재정렬 — alias 순서대로. 낙관적 갱신 후 백엔드 반환값으로 정합. */
 export async function reorderSavedHosts(aliases: string[]): Promise<void> {
   const prev = useSavedHosts.getState().hosts;
-  const byAlias = new Map(prev.map((h) => [h.alias, h]));
-  const optimistic = aliases
-    .map((a) => byAlias.get(a))
-    .filter((h): h is SavedHost => h !== undefined);
+  // 그룹 밖 항목만 끌어도 그룹 멤버를 지우지 않게 — 자리 채우기(백엔드와 같은 규칙).
+  const optimistic = reorderInSlots(prev, (h) => h.alias, aliases);
   useSavedHosts.getState().setAll(optimistic);
   const r = await commands.savedHostsReorder(aliases);
   if (r.status === "ok") useSavedHosts.getState().setAll(r.data);

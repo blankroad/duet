@@ -11,6 +11,12 @@ interface State {
   setError: (id: string, message: string) => void;
   remove: (id: string) => void;
   setAll: (ts: TaskDto[]) => void;
+  /**
+   * 초기 스냅샷(tasks_list) 병합 — 응답이 오기 전에 이벤트로 이미 받은 작업은 store 쪽이
+   * 더 새롭다. 스냅샷에서는 store 에 없고 `terminated`(그 사이 끝난 id)도 아닌 작업만 더한다.
+   * 예전엔 setAll 로 덮어써서, 먼저 들어온 새 작업이 사라지거나 끝난 작업이 되살아났다.
+   */
+  mergeSnapshot: (ts: TaskDto[], terminated: ReadonlySet<string>) => void;
 }
 
 export const useTasks = create<State>((set) => ({
@@ -61,6 +67,13 @@ export const useTasks = create<State>((set) => ({
       const cancelling = new Set(s.cancelling);
       cancelling.delete(id);
       return { tasks: next, cancelling };
+    }),
+  mergeSnapshot: (ts, terminated) =>
+    set((s) => {
+      const next = new Map(s.tasks);
+      for (const t of ts)
+        if (!next.has(t.id) && !terminated.has(t.id)) next.set(t.id, t);
+      return { tasks: next };
     }),
   setAll: (ts) =>
     set((s) => {

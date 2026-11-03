@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { useUI } from "@/stores/ui";
 
 /**
  * 사이드바 이름 필터 — 위치·호스트·북마크·최근을 이름으로 좁힌다.
@@ -8,17 +9,29 @@ interface State {
   q: string;
   /** 포커스 요청 신호 — 값이 오르면 입력창이 포커스+전체선택. command 에서 발사. */
   focusNonce: number;
+  /**
+   * 아직 처리 안 된 포커스 요청이 있는가. 입력창이 처리하면 내린다 — nonce 만 보면
+   * 사이드바를 다시 열(재마운트) 때마다 옛 요청이 되살아나 패널 포커스를 빼앗았다.
+   */
+  focusPending: boolean;
   set: (q: string) => void;
   clear: () => void;
+  /** 필터로 포커스. 사이드바가 닫혀 있으면 먼저 연다(예전엔 아무 반응이 없었다). */
   requestFocus: () => void;
+  consumeFocus: () => void;
 }
 
 export const useSidebarFilter = create<State>((set) => ({
   q: "",
   focusNonce: 0,
+  focusPending: false,
   set: (q) => set({ q }),
   clear: () => set({ q: "" }),
-  requestFocus: () => set((s) => ({ focusNonce: s.focusNonce + 1 })),
+  requestFocus: () => {
+    if (!useUI.getState().sidebarOpen) useUI.getState().toggleSidebar();
+    set((s) => ({ focusNonce: s.focusNonce + 1, focusPending: true }));
+  },
+  consumeFocus: () => set({ focusPending: false }),
 }));
 
 /**

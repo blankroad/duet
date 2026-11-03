@@ -68,4 +68,24 @@ describe("tasks store", () => {
     expect(useTasks.getState().tasks.size).toBe(2);
     expect(useTasks.getState().tasks.has("a")).toBe(false);
   });
+
+  it("mergeSnapshot keeps tasks that arrived by event before the snapshot", () => {
+    useTasks.getState().add(mk("new", { kind: "running" }));
+    useTasks.getState().mergeSnapshot([], new Set());
+    expect(useTasks.getState().tasks.has("new")).toBe(true);
+  });
+
+  it("mergeSnapshot does not revive tasks that finished before the snapshot", () => {
+    useTasks
+      .getState()
+      .mergeSnapshot([mk("old", { kind: "running" })], new Set(["old"]));
+    expect(useTasks.getState().tasks.has("old")).toBe(false);
+  });
+
+  it("mergeSnapshot prefers the event-updated task over the stale snapshot copy", () => {
+    useTasks.getState().add(mk("a", { kind: "running" }));
+    useTasks.getState().mergeSnapshot([mk("a"), mk("b")], new Set());
+    expect(useTasks.getState().tasks.get("a")?.status.kind).toBe("running");
+    expect(useTasks.getState().tasks.has("b")).toBe(true);
+  });
 });

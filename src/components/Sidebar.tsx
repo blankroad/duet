@@ -5,7 +5,6 @@ import {
   Network,
   Plus,
   X,
-  Bookmark,
   Heart,
   ChevronDown,
   ChevronRight,
@@ -57,7 +56,11 @@ import {
 } from "@/stores/places";
 import { useRecents, type RecentEntry } from "@/stores/recents";
 import { useSidebarFilter, matchesQuery } from "@/stores/sidebarFilter";
-import { SidebarFilter, RowLabel } from "@/components/SidebarFilter";
+import {
+  SidebarFilter,
+  RowLabel,
+  SIDEBAR_ROW,
+} from "@/components/SidebarFilter";
 import { useSidebarWidth } from "@/stores/sidebarWidth";
 import { beginWidthDrag } from "@/stores/panelWidth";
 import { useDragState } from "@/stores/dragState";
@@ -89,6 +92,13 @@ import {
   favTagKey,
 } from "@/stores/tags";
 import { useTagFilter } from "@/stores/tagFilter";
+import { useKeymap } from "@/stores/keymap";
+import { useCommands } from "@/stores/commands";
+import { formatKeyEvent } from "@/lib/keyEvent";
+import {
+  keepButtonActivationLocal,
+  releaseFocusAfterMouse,
+} from "@/lib/keyIsolation";
 import type {
   SavedHost,
   Bookmark as BookmarkType,
@@ -147,33 +157,45 @@ export function Sidebar({
 
   return (
     <div
+      data-sidebar=""
       className="relative flex min-h-0 shrink-0"
       style={{ width, maxWidth: "100%" }}
     >
-      <aside className="flex w-full min-h-0 flex-col overflow-y-auto border-r border-border bg-subtle pb-2 text-base">
-        {/* 태스크 진행은 TasksBar(하단, 사이드바 접힘과 무관)로 일원화 — 중복 제거. */}
+      <aside
+        onKeyDown={onSidebarKeyDown}
+        onClick={releaseFocusAfterMouse}
+        // 드래그 재정렬 뒤엔 합성 click 이 막혀(useReorderable) onClick 이 안 온다 —
+        // mouseup 에서도 포커스를 내려놓는다.
+        onMouseUp={releaseFocusAfterMouse}
+        className="flex w-full min-h-0 flex-col border-r border-border bg-subtle text-base"
+      >
+        {/* 필터·태그는 스크롤 영역 밖에 고정 — 예전엔 같은 스크롤 안에서 sticky 끼리 겹쳐
+            섹션 제목(sticky)이 필터바 뒤로 숨어, 긴 목록에서 지금 어느 섹션인지 몰랐다. */}
         <SidebarFilter />
         <TagBar />
-        <PlacesSection
-          onOpenLocation={onOpenLocation}
-          onTrashActivate={onTrashActivate}
-          onEject={onEject}
-        />
-        <HostsSection
-          onHostActivate={onHostActivate}
-          onAdHocOpen={onAdHocOpen}
-          onSavedActivate={onSavedActivate}
-        />
-        <BookmarksSection
-          onOpen={onOpenLocation}
-          onAdd={onAddBookmark}
-          onOpenHostPath={onOpenHostPath}
-        />
-        <RecentSection
-          onOpenLocation={onOpenLocation}
-          onOpenHostPath={onOpenHostPath}
-        />
-        <ShelfSection />
+        {/* 태스크 진행은 TasksBar(하단, 사이드바 접힘과 무관)로 일원화 — 중복 제거. */}
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto pb-2">
+          <PlacesSection
+            onOpenLocation={onOpenLocation}
+            onTrashActivate={onTrashActivate}
+            onEject={onEject}
+          />
+          <HostsSection
+            onHostActivate={onHostActivate}
+            onAdHocOpen={onAdHocOpen}
+            onSavedActivate={onSavedActivate}
+          />
+          <BookmarksSection
+            onOpen={onOpenLocation}
+            onAdd={onAddBookmark}
+            onOpenHostPath={onOpenHostPath}
+          />
+          <RecentSection
+            onOpenLocation={onOpenLocation}
+            onOpenHostPath={onOpenHostPath}
+          />
+          <ShelfSection />
+        </div>
       </aside>
       <SidebarResizer />
     </div>
@@ -237,24 +259,116 @@ function openableRow(opts: {
   return {
     role: "button",
     tabIndex: 0,
-    onClick: (e: React.MouseEvent) => opts.onOpen(targetPane(e)),
+    [SIDEBAR_ROW]: "",
+    onClick: (e: React.MouseEvent<HTMLElement>) => {
+      opts.onOpen(targetPane(e));
+      releaseFocusIfMouse(e);
+    },
     onDoubleClick: (e: React.MouseEvent) => {
       // 클릭에서 이미 열었으므로 중복 이동만 막는다.
       e.preventDefault();
     },
     onKeyDown: (e: React.KeyboardEvent) => {
+      // 행 안의 버튼(삭제 X·꺼내기)에서 누른 키는 그 버튼 몫이다 — 예전엔 버블링으로
+      // 행이 가로채(preventDefault) 버튼 대신 행이 열렸다.
+      if (e.target !== e.currentTarget) return;
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
+        // 처리한 키는 여기서 끝 — Ctrl/⌘+Enter(반대 패널에 열기)가 aside 를 지나 패널의
+        // Enter(커서 항목 열기)까지 실행되던 문제.
+        e.stopPropagation();
         opts.onOpen(targetPane(e));
-      } else if (e.key === "F2" && opts.onRename) {
+        return;
+      }
+      // 이름 바꾸기·제거는 하드코딩한 F2/Delete 가 아니라 **현재 키맵**의 파일 이름 변경·
+      // 삭제 키를 따른다(사이드바 문맥에선 그 항목에 적용). 패널로 새는 건 aside 가 막는다.
+      const cmd = commandForKey(e);
+      if (cmd === "file.rename" && opts.onRename) {
         e.preventDefault();
+        e.stopPropagation();
         opts.onRename();
-      } else if (e.key === "Delete" && opts.onRemove) {
+      } else if (cmd === "file.delete" && opts.onRemove) {
         e.preventDefault();
+        e.stopPropagation();
         opts.onRemove();
       }
     },
   } as const;
+}
+
+/** 키보드 이동(↑/↓) 대상 행 표식 — `<button>` 행과 openableRow 행이 공유. */
+const sidebarRowAttr = { [SIDEBAR_ROW]: "" } as const;
+
+/**
+ * 마우스로 행을 눌렀으면 포커스를 내려놓는다 — 그래야 바로 이어지는 ↑↓·Enter·Delete 가
+ * 방금 연 패널 목록으로 간다(파인더처럼). 키보드로 연 경우(detail 0)는 사이드바에 남는다.
+ */
+function releaseFocusIfMouse(e: React.MouseEvent<HTMLElement>): void {
+  if (e.detail > 0) e.currentTarget.blur();
+}
+
+/**
+ * 키 이벤트를 현재 키맵으로 풀어 커맨드 id 로 — 전역 단축키 처리와 같은 규칙
+ * (사용자 override 우선, 없으면 defaultKey/altKeys).
+ */
+function commandForKey(e: React.KeyboardEvent): string | undefined {
+  const key = formatKeyEvent(e.nativeEvent);
+  if (!key) return undefined;
+  const override = useKeymap.getState().bindings.find((b) => b.key === key);
+  if (override) return override.command_id;
+  const { builtins, dynamic } = useCommands.getState();
+  return [...builtins, ...dynamic].find(
+    (c) => c.defaultKey === key || c.altKeys?.includes(key),
+  )?.id;
+}
+
+/**
+ * 사이드바 안(입력칸 제외)에 키보드 포커스가 있을 때의 키 처리 — aside 의 onKeyDown.
+ *
+ * 패널 목록의 키 처리(useKeyboardNav·전역 단축키)는 window 에서 포커스와 무관하게
+ * 돌아서, 예전엔 북마크 행에서 Delete 를 누르면 북마크가 지워지면서 **활성 패널의
+ * 선택 파일까지 휴지통으로** 갔다(F2·Enter·Tab·↑↓ 도 패널이 가로챘다). 사이드바가
+ * 포커스를 가진 동안은 수식키 없는 키와 파일 커맨드를 여기서 멈춘다 — Ctrl+B·팔레트
+ * 같은 다른 전역 단축키와 F11 같은 파일 외 커맨드는 그대로 통과.
+ *
+ * - ↑/↓: 이전/다음 행으로 포커스  · Home/End: 처음/끝 행
+ * - Esc: 사이드바를 떠난다(포커스 해제 → 다시 패널 키)
+ */
+function onSidebarKeyDown(e: React.KeyboardEvent<HTMLElement>): void {
+  const target = e.target as HTMLElement;
+  if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    focusSiblingRow(e.currentTarget, target, e.key === "ArrowDown" ? 1 : -1);
+  } else if (e.key === "Home" || e.key === "End") {
+    e.preventDefault();
+    const rows = sidebarRows(e.currentTarget);
+    (e.key === "Home" ? rows[0] : rows[rows.length - 1])?.focus();
+  } else if (e.key === "Escape") {
+    target.blur();
+  }
+  // 행 활성화 키(Enter/Space)는 수식키와 무관하게 사이드바 몫(<button> 행 포함).
+  keepButtonActivationLocal(e);
+  const cmd = commandForKey(e);
+  const modified = e.ctrlKey || e.metaKey || e.altKey;
+  if (cmd ? cmd.startsWith("file.") : !modified) e.stopPropagation();
+}
+
+function sidebarRows(root: HTMLElement): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>(`[${SIDEBAR_ROW}]`));
+}
+
+/** `from` 기준 delta 칸 떨어진 행으로 포커스. `from` 이 행이 아니면(필터 등) 첫/끝 행. */
+function focusSiblingRow(
+  root: HTMLElement,
+  from: HTMLElement,
+  delta: 1 | -1,
+): void {
+  const rows = sidebarRows(root);
+  const cur = rows.indexOf(from.closest<HTMLElement>(`[${SIDEBAR_ROW}]`)!);
+  const next =
+    cur < 0 ? (delta > 0 ? rows[0] : rows[rows.length - 1]) : rows[cur + delta];
+  next?.focus();
 }
 
 /**
@@ -291,10 +405,24 @@ function useActiveSource(): SourceId {
 const EMPTY_PLACES: Place[] = [];
 const EMPTY_VOLUMES: Volume[] = [];
 
+/**
+ * 이름 필터나 태그 필터가 켜져 있는가 — 켜져 있으면 접힌 하위 그룹도 펼치고, 결과가
+ * 없는 그룹은 숨긴다. 접힌 그룹 안에 답이 숨으면 필터가 쓸모없다.
+ */
+function useFiltering(): boolean {
+  const q = useSidebarFilter((s) => s.q.trim() !== "");
+  const tags = useTagFilter((s) => s.active.length > 0);
+  return q || tags;
+}
+
 /** 컨텍스트 메뉴 오픈 헬퍼. */
 function openMenu(e: React.MouseEvent, items: MenuEntry[]): void {
   e.preventDefault();
   e.stopPropagation();
+  // 우클릭 mousedown 이 행(tabindex=0)에 준 포커스를 내려놓는다 — 메뉴를 실행한 뒤 누른
+  // Delete 가 패널 대신 이 북마크를 지우던 문제. 키보드로 연 메뉴(메뉴 키·Shift+F10,
+  // button 0)는 ↑↓ 로 고른 위치를 지키도록 포커스를 둔다.
+  if (e.button === 2) (e.currentTarget as HTMLElement).blur();
   useContextMenu.getState().openAt(e.clientX, e.clientY, items);
 }
 
@@ -329,6 +457,13 @@ const rowClass =
 const rowActiveClass = "border-l-accent bg-active hover:bg-active";
 
 /**
+ * 섹션 헤더의 작은 액션 버튼(+ / 새로고침 / 지우기) — 아이콘은 12px 그대로 두고 누르는
+ * 영역만 24px. 예전엔 16px 라 DESIGN 의 최소 클릭 타겟 24px 에 못 미쳤다.
+ */
+const headerBtnClass =
+  "flex h-6 w-6 shrink-0 items-center justify-center rounded text-fg-muted hover:bg-border hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent";
+
+/**
  * 이 위치를 보고 있는 패널 배지 문자열("L"/"R"/"LR", 없으면 ""). 사이드바에서 연
  * 결과가 화면에 남지 않던 문제. **원시값**을 반환해야 셀렉터가 매 렌더 새 참조를
  * 만들지 않는다(무한 리렌더 방지).
@@ -350,6 +485,66 @@ function usePaneAtKey(key: string, path: string): string {
         out += id === "left" ? "L" : "R";
     }
     return out;
+  });
+}
+
+/**
+ * 이 호스트(alias)를 보고 있는 패널 배지 — 경로와 무관하게 패널의 활성 탭이 그 호스트의
+ * 연결 위에 있으면 켜진다. 호스트 행만 "어느 패널이 거기 있나" 를 알려주지 않았다.
+ */
+function usePanesOnHost(alias: string): string {
+  const active = useConnections((s) => s.active);
+  return usePanes((s) => {
+    let out = "";
+    for (const id of ["left", "right"] as const) {
+      const src = activeTab(s, id).location.source;
+      if (src.kind === "ssh" && active[src.connection_id]?.alias === alias)
+        out += id === "left" ? "L" : "R";
+    }
+    return out;
+  });
+}
+
+/** 이 호스트(alias)의 어떤 연결이든 그 경로를 보고 있는 패널 배지("L"/"R"/"LR"). */
+function usePaneAtHostPath(alias: string, path: string): string {
+  const active = useConnections((s) => s.active);
+  return usePanes((s) => {
+    let out = "";
+    for (const id of ["left", "right"] as const) {
+      const loc = activeTab(s, id).location;
+      if (
+        loc.source.kind === "ssh" &&
+        String(loc.path) === path &&
+        active[loc.source.connection_id]?.alias === alias
+      )
+        out += id === "left" ? "L" : "R";
+    }
+    return out;
+  });
+}
+
+const DISCONNECTED: ConnectionState = { kind: "disconnected" };
+const STATE_RANK: Record<ConnectionState["kind"], number> = {
+  connected: 3,
+  connecting: 2,
+  error: 1,
+  disconnected: 0,
+};
+
+/**
+ * alias 의 대표 연결 상태(connected > connecting > error > disconnected) — store 의
+ * state 객체를 그대로 돌려줘 참조가 안정적이다(셀렉터 무한 리렌더 없음).
+ *
+ * 예전엔 `useConnections(s => s.stateByAlias)()` 로 **함수 참조**를 구독해서, 연결·끊김·
+ * 오류가 생겨도 호스트 점이 다른 이유로 다시 그려질 때까지 그대로였다.
+ */
+function useHostState(alias: string): ConnectionState {
+  return useConnections((s) => {
+    let best: ConnectionState = DISCONNECTED;
+    for (const c of Object.values(s.active))
+      if (c.alias === alias && STATE_RANK[c.state.kind] > STATE_RANK[best.kind])
+        best = c.state;
+    return best;
   });
 }
 
@@ -461,7 +656,7 @@ function PlacesSection({
         <button
           type="button"
           onClick={rescan}
-          className="rounded p-0.5 text-fg-muted hover:bg-border hover:text-fg"
+          className={headerBtnClass}
           title={t("sidebar.rescanVolumes")}
           aria-label={t("sidebar.rescanVolumes")}
         >
@@ -472,9 +667,11 @@ function PlacesSection({
       {localHome && source.kind !== "local" && !filtering && (
         <button
           type="button"
-          onClick={(e) =>
-            onOpenLocation(localLocation(localHome), targetPane(e))
-          }
+          {...sidebarRowAttr}
+          onClick={(e) => {
+            onOpenLocation(localLocation(localHome), targetPane(e));
+            releaseFocusIfMouse(e);
+          }}
           title={t("sidebar.thisPcTitle")}
           className={clsx(rowClass, "w-full text-left font-medium text-accent")}
         >
@@ -543,10 +740,12 @@ function PlaceItem({
   return (
     <button
       type="button"
+      {...sidebarRowAttr}
       {...dropAttrs(source, path)}
-      onClick={(e) =>
-        onOpenLocation(locationForSource(source, path), targetPane(e))
-      }
+      onClick={(e) => {
+        onOpenLocation(locationForSource(source, path), targetPane(e));
+        releaseFocusIfMouse(e);
+      }}
       onContextMenu={(e) => openMenu(e, menu)}
       title={path}
       className={clsx(
@@ -584,7 +783,11 @@ function TrashItem({
   return (
     <button
       type="button"
-      onClick={(e) => onTrashActivate(targetPane(e))}
+      {...sidebarRowAttr}
+      onClick={(e) => {
+        onTrashActivate(targetPane(e));
+        releaseFocusIfMouse(e);
+      }}
       onContextMenu={(e) => openMenu(e, menu)}
       title={t("sidebar.trashTitle")}
       className={clsx(rowClass, "w-full text-left")}
@@ -646,9 +849,10 @@ function VolumeItem({
   ];
   return (
     <div
-      onClick={(e) =>
-        onOpenLocation(locationForSource(source, path), targetPane(e))
-      }
+      // 다른 행처럼 Tab/Enter 로 닿게 — 예전엔 div+onClick 이라 키보드로 열 수 없었다.
+      {...openableRow({
+        onOpen: (pane) => onOpenLocation(locationForSource(source, path), pane),
+      })}
       onContextMenu={(e) => openMenu(e, menu)}
       title={path}
       {...dropAttrs(source, path)}
@@ -704,7 +908,7 @@ function RecentSection({
           <button
             type="button"
             onClick={clear}
-            className="rounded p-0.5 text-fg-muted hover:bg-border hover:text-fg"
+            className={headerBtnClass}
             title={t("sidebar.clearRecents")}
             aria-label={t("sidebar.clearRecents")}
           >
@@ -739,6 +943,12 @@ function RecentItem({
   onOpenHostPath: (hostAlias: string, path: string, pane: PaneId) => void;
 }) {
   const { t } = useTranslation();
+  const nicks = useHostNicknames((s) => s.byAlias);
+  // 로컬 항목은 다른 행처럼 보고 있는 패널을 표시(원격은 연결 id 가 없어 생략).
+  const pane = usePaneAtKey(
+    entry.source === "local" ? "local" : "",
+    entry.path,
+  );
   const open = (pane: PaneId) => {
     if (entry.source === "ssh") onOpenHostPath(entry.alias, entry.path, pane);
     else onOpenLocation(localLocation(entry.path), pane);
@@ -761,14 +971,24 @@ function RecentItem({
       label: t("menu.copyPath"),
       onSelect: () => copyText(entry.path),
     },
+    { kind: "separator" },
+    {
+      id: "remove",
+      label: t("sidebar.removeFromRecent"),
+      onSelect: () => useRecents.getState().remove(entry),
+    },
   ];
   return (
     <button
       type="button"
-      onClick={(e) => open(targetPane(e))}
+      {...sidebarRowAttr}
+      onClick={(e) => {
+        open(targetPane(e));
+        releaseFocusIfMouse(e);
+      }}
       onContextMenu={(e) => openMenu(e, menu)}
       title={title}
-      className={clsx(rowClass, "w-full text-left")}
+      className={clsx(rowClass, "w-full text-left", pane && rowActiveClass)}
     >
       {entry.source === "ssh" ? (
         <Server size={14} className="shrink-0 text-fg-muted" />
@@ -776,10 +996,10 @@ function RecentItem({
         <Folder size={14} className="shrink-0 text-fg-muted" />
       )}
       <RowLabel text={entry.label} />
+      <PaneBadge pane={pane} />
+      {/* 즐겨찾기·호스트와 같은 별명 — 예전엔 같은 서버가 여기서만 raw alias 였다. */}
       {entry.source === "ssh" && (
-        <span className="ml-auto shrink-0 truncate text-meta opacity-50">
-          {entry.alias}
-        </span>
+        <AliasHint alias={aliasLabel(entry.alias, nicks)} />
       )}
     </button>
   );
@@ -812,6 +1032,7 @@ function SavedHostsBody({
       !hideAliases.has(h.alias) && matchesQuery(nicks[h.alias] ?? h.alias, q),
   );
   const groups = useHostGroups((s) => s.groups);
+  const filtering = useFiltering();
   const byAlias = new Map(hosts.map((h) => [h.alias, h]));
   // 그룹에 배정된 alias 집합 (live 호스트만 — dangling 멤버 무시).
   const grouped = new Set<string>();
@@ -824,23 +1045,30 @@ function SavedHostsBody({
     keys: ungrouped.map((h) => h.alias),
     onCommit: (next) => void reorderSavedHosts(next),
   });
-  if (allHosts.length === 0) return null;
+  // 보일 저장 호스트가 없으면 "저장됨" 라벨째 숨긴다 — 필터 중이거나 전부 config 와
+  // 겹칠 때 빈 라벨만 남던 문제.
+  if (hosts.length === 0) return null;
   return (
     <>
       <SubLabel>{t("sidebar.saved")}</SubLabel>
-      {groups.map((g, gi) => (
-        <HostGroupFolder
-          key={g.id}
-          group={g}
-          members={g.members
-            .map((a) => byAlias.get(a))
-            .filter((h): h is SavedHost => !!h)}
-          groups={groups}
-          onActivate={onActivate}
-          isFirst={gi === 0}
-          isLast={gi === groups.length - 1}
-        />
-      ))}
+      {groups.map((g, gi) => {
+        const members = g.members
+          .map((a) => byAlias.get(a))
+          .filter((h): h is SavedHost => !!h);
+        // 필터 중엔 걸린 멤버가 없는 그룹 머리글("0")을 숨긴다.
+        if (filtering && members.length === 0) return null;
+        return (
+          <HostGroupFolder
+            key={g.id}
+            group={g}
+            members={members}
+            groups={groups}
+            onActivate={onActivate}
+            isFirst={gi === 0}
+            isLast={gi === groups.length - 1}
+          />
+        );
+      })}
       {ungrouped.map((h) => (
         <Fragment key={h.alias}>
           {dragKey && insertBeforeKey === h.alias && <DropLine />}
@@ -927,7 +1155,9 @@ function HostGroupFolder({
   isLast: boolean;
 }) {
   const { t } = useTranslation();
-  const collapsed = useUI((s) => s.collapsed[`hostgroup:${group.id}`]);
+  const filtering = useFiltering();
+  const collapsed =
+    useUI((s) => s.collapsed[`hostgroup:${group.id}`]) && !filtering;
   const toggle = useUI((s) => s.toggleSection);
   const menu: MenuEntry[] = [
     {
@@ -968,7 +1198,8 @@ function HostGroupFolder({
         type="button"
         onClick={() => toggle(`hostgroup:${group.id}`)}
         onContextMenu={(e) => openMenu(e, menu)}
-        className="flex w-full items-center gap-1 px-2 text-meta text-fg-muted hover:text-fg"
+        aria-expanded={!collapsed}
+        className="flex min-h-6 w-full items-center gap-1 px-2 text-meta text-fg-muted hover:text-fg"
         title={group.name}
       >
         {collapsed ? <ChevronRight size={10} /> : <ChevronDown size={10} />}
@@ -1011,6 +1242,8 @@ function SavedHostItem({
     hostTagKey(host.alias),
   );
   const display = nickname ?? host.alias;
+  const pane = usePanesOnHost(host.alias);
+  const state = useHostState(host.alias);
   const menu: MenuEntry[] = [
     {
       id: "connect",
@@ -1055,16 +1288,18 @@ function SavedHostItem({
       })}
       onContextMenu={(e) => openMenu(e, menu)}
       title={`${host.user}@${host.host}:${host.port}${host.key_path ? ` (key: ${host.key_path})` : ""}${nickname ? ` · ${host.alias}` : ""}`}
-      className={clsx(rowClass, reorder?.dragging && "opacity-50")}
-    >
-      <Bookmark size={14} className="shrink-0 text-fg-muted" />
-      <RowLabel text={display} />
-      {nickname && (
-        <span className="shrink-0 truncate text-meta text-fg-muted/60">
-          {host.alias}
-        </span>
+      className={clsx(
+        rowClass,
+        reorder?.dragging && "opacity-50",
+        pane && rowActiveClass,
       )}
+    >
+      {/* config 호스트와 같은 모양 표식 — 저장 호스트만 연결돼도 아무 표시가 없었다. */}
+      <StateDot state={state} />
+      <RowLabel text={display} />
+      {nickname && <AliasHint alias={host.alias} />}
       <InlineTags tags={tags} />
+      <PaneBadge pane={pane} />
       <DeleteBtn
         label={t("sidebar.removeSavedHost", { alias: host.alias })}
         onClick={() => void removeSavedHost(host.alias)}
@@ -1134,6 +1369,7 @@ function BookmarksSection({
       sectionKey="bookmarks"
       title={t("sidebar.bookmarks")}
       count={totalAll}
+      forceOpen={tagFilter.length > 0}
       action={<AddBtn label={t("sidebar.bookmarkActiveTab")} onClick={onAdd} />}
     >
       {/* 섹션 본문 전체가 "여기에 놓으면 북마크" 존 — 행 위에 놓으면 행이 이긴다
@@ -1295,9 +1531,11 @@ function FavoriteGroup({
   onOpen: (hostAlias: string, path: string, pane: PaneId) => void;
 }) {
   const { t } = useTranslation();
-  const collapsed = useUI((s) => s.collapsed[`fav:${alias}`]);
+  const filtering = useFiltering();
+  const collapsed = useUI((s) => s.collapsed[`fav:${alias}`]) && !filtering;
   const toggle = useUI((s) => s.toggleSection);
   const nicks = useHostNicknames((s) => s.byAlias);
+  const hostState = useHostState(alias);
   const { dragKey, insertBeforeKey, onItemMouseDown } = useReorderable({
     group: `fav:${alias}`,
     keys: favs.map((f) => f.id),
@@ -1308,7 +1546,8 @@ function FavoriteGroup({
       <button
         type="button"
         onClick={() => toggle(`fav:${alias}`)}
-        className="flex w-full items-center gap-1 px-2 text-meta text-fg-muted hover:text-fg"
+        aria-expanded={!collapsed}
+        className="flex min-h-6 w-full items-center gap-1 px-2 text-meta text-fg-muted hover:text-fg"
         title={
           connected
             ? t("sidebar.hostConnectedTitle", { alias })
@@ -1316,12 +1555,8 @@ function FavoriteGroup({
         }
       >
         {collapsed ? <ChevronRight size={10} /> : <ChevronDown size={10} />}
-        <span
-          className={clsx(
-            "h-1.5 w-1.5 shrink-0 rounded-full",
-            connected ? "bg-success" : "bg-fg-muted/30",
-          )}
-        />
+        {/* 호스트 목록과 같은 모양 표식 — 예전 색 점(옅은 회색)은 라이트 모드에서 안 보였다. */}
+        <StateDot state={hostState} />
         <span className="truncate">{aliasLabel(alias, nicks)}</span>
         {collapsed && <span className="ml-auto opacity-50">{favs.length}</span>}
       </button>
@@ -1356,13 +1591,26 @@ function FavoriteItem({
   const { t } = useTranslation();
   const path = String(fav.path);
   // 살아있는 연결이 있으면 로컬 북마크와 같은 어휘로 현재 위치를 표시한다(L/R 배지).
-  const liveId = useConnections(
-    (s) =>
-      Object.values(s.active).find(
-        (c) => c.alias === fav.host_alias && c.state.kind === "connected",
-      )?.id ?? null,
+  const live = useConnections((s) =>
+    Object.values(s.active).find(
+      (c) => c.alias === fav.host_alias && c.state.kind === "connected",
+    ),
   );
-  const favPane = usePaneAtKey(liveId ? `ssh:${liveId}` : "", path);
+  // 배지는 이 호스트의 **모든** 연결을 본다 — 같은 alias 로 두 번째 연결을 연 패널도
+  // 표시되게(예전엔 첫 연결 하나와만 비교했고, 그전엔 "ssh:" 접두로 아예 안 켜졌다).
+  const favPane = usePaneAtHostPath(fav.host_alias, path);
+  // 연결돼 있으면 로컬 북마크처럼 파일 드롭 대상(그 폴더로 복사). 예전엔 원격 행에 놓으면
+  // 섹션의 "북마크 추가" 존으로 떨어졌다. 연결이 없으면 지금처럼 북마크 존.
+  const liveSource: SourceId | null = live
+    ? {
+        kind: "ssh",
+        connection_id: live.id,
+        host_ip: live.host_ip,
+        user: live.user,
+      }
+    : null;
+  const dropHover = useDropHover(liveSource ?? { kind: "local" }, path);
+  const dropOver = liveSource !== null && dropHover;
   const tags = tagsFor(
     useTags((s) => s.byKey),
     favTagKey(fav.id),
@@ -1416,11 +1664,13 @@ function FavoriteItem({
       })}
       onContextMenu={(e) => openMenu(e, menu)}
       title={path}
+      {...(liveSource ? dropAttrs(liveSource, path) : {})}
       className={clsx(
         rowClass,
         "pl-4",
         dragging && "opacity-50",
         favPane && rowActiveClass,
+        dropOver && dropHoverClass,
       )}
     >
       <Heart size={14} className="shrink-0 text-fg-muted" />
@@ -1452,32 +1702,37 @@ function HostsSection({
 }) {
   const { t } = useTranslation();
   const allHosts = useConnections((s) => s.hosts);
-  const stateByAlias = useConnections((s) => s.stateByAlias)();
-  const savedCount = useSavedHosts((s) => s.hosts.length);
+  const savedHosts = useSavedHosts((s) => s.hosts);
   const byKey = useTags((s) => s.byKey);
   const active = useTagFilter((s) => s.active);
   const configAliases = new Set(allHosts.map((h) => h.alias));
   const nicks = useHostNicknames((s) => s.byAlias);
   const q = useSidebarFilter((s) => s.q);
   // 태그 필터 — config 호스트는 host:<alias> 키. 이름 필터는 별명 우선(화면에 보이는 것).
-  const hosts = allHosts.filter(
-    (h) =>
-      matchesTagFilter(tagsFor(byKey, hostTagKey(h.alias)), active) &&
-      matchesQuery(nicks[h.alias] ?? h.alias, q),
-  );
+  const visible = (alias: string) =>
+    matchesTagFilter(tagsFor(byKey, hostTagKey(alias)), active) &&
+    matchesQuery(nicks[alias] ?? alias, q);
+  const hosts = allHosts.filter((h) => visible(h.alias));
+  // config 와 같은 alias 의 저장본은 숨겨지므로 개수에서도 뺀다(예전엔 두 번 셌다).
+  const savedOnly = savedHosts.filter((h) => !configAliases.has(h.alias));
+  const savedCount = savedOnly.length;
+  const shown = hosts.length + savedOnly.filter((h) => visible(h.alias)).length;
+  // 이름 필터에 하나도 안 걸리면 다른 섹션처럼 섹션째 숨긴다.
+  if (q.trim() !== "" && shown === 0) return null;
 
   return (
     <Section
       sectionKey="hosts"
       title={t("sidebar.hosts")}
       count={allHosts.length + savedCount}
+      forceOpen={active.length > 0}
       action={
         <div className="flex items-center gap-0.5">
           {/* ~/.ssh/config 를 편집하고 돌아왔을 때 — 예전엔 앱을 다시 켜야 했다. */}
           <button
             type="button"
             onClick={() => void reloadSshHosts()}
-            className="rounded p-0.5 text-fg-muted hover:bg-border hover:text-fg"
+            className={headerBtnClass}
             title={t("sidebar.reloadSshConfig")}
             aria-label={t("sidebar.reloadSshConfig")}
           >
@@ -1493,6 +1748,8 @@ function HostsSection({
           actionLabel={t("sidebar.connectHost")}
           onAction={onAdHocOpen}
         />
+      ) : shown === 0 ? (
+        <Item label={t("sidebar.noTagMatch")} muted />
       ) : (
         <>
           {hosts.length > 0 && <SubLabel>~/.ssh/config</SubLabel>}
@@ -1500,7 +1757,6 @@ function HostsSection({
             <HostItem
               key={h.alias}
               host={h}
-              state={stateByAlias[h.alias] ?? { kind: "disconnected" }}
               onActivate={() => onHostActivate(h.alias)}
             />
           ))}
@@ -1516,19 +1772,19 @@ function HostsSection({
 
 function HostItem({
   host,
-  state,
   onActivate,
 }: {
   host: Host;
-  state: ConnectionState;
   onActivate: () => void;
 }) {
   const { t } = useTranslation();
+  const state = useHostState(host.alias);
   const nicks = useHostNicknames((s) => s.byAlias);
   const byKey = useTags((s) => s.byKey);
   const tags = tagsFor(byKey, hostTagKey(host.alias));
   const nickname = nicks[host.alias];
   const display = nickname ?? host.alias;
+  const pane = usePanesOnHost(host.alias);
 
   // 별명 설정/해제 — config alias 키로 저장. 패널·상태바도 이 별명을 따른다.
   const promptName = () => {
@@ -1569,22 +1825,19 @@ function HostItem({
     <div
       {...openableRow({ onOpen: () => onActivate(), onRename: promptName })}
       onContextMenu={(e) => openMenu(e, menu)}
-      title={`${host.user}@${host.hostname}:${host.port}${host.has_proxy_jump ? " (via jump)" : ""}${nickname ? ` · ${host.alias}` : ""}`}
-      className={rowClass}
+      title={`${host.user}@${host.hostname}:${host.port}${host.has_proxy_jump ? ` (${t("sidebar.viaJump")})` : ""}${nickname ? ` · ${host.alias}` : ""}`}
+      className={clsx(rowClass, pane && rowActiveClass)}
     >
       <StateDot state={state} />
       <RowLabel text={display} />
-      {nickname && (
-        <span className="shrink-0 truncate text-meta text-fg-muted/60">
-          {host.alias}
-        </span>
-      )}
+      {nickname && <AliasHint alias={host.alias} />}
       <InlineTags tags={tags} />
+      <PaneBadge pane={pane} />
       {host.has_proxy_jump && (
         <Network
           size={14}
-          className="ml-auto shrink-0 text-fg-muted"
-          aria-label="ProxyJump"
+          className={clsx("shrink-0 text-fg-muted", !pane && "ml-auto")}
+          aria-label={t("sidebar.viaJump")}
         />
       )}
     </div>
@@ -1596,7 +1849,7 @@ function HostItem({
  * 물론 라이트 모드의 옅은 회색 점도 구분이 안 된다. 채운 원 / 반쯤 찬 원 / 빈 원 /
  * 삼각형으로 가른다 (비교창의 상태 아이콘과 같은 원칙).
  */
-function StateDot({ state }: { state: ConnectionState }) {
+export function StateDot({ state }: { state: ConnectionState }) {
   const { t } = useTranslation();
   const label =
     state.kind === "error" ? state.message : t(`sidebar.state.${state.kind}`);
@@ -1614,7 +1867,8 @@ function StateDot({ state }: { state: ConnectionState }) {
     // 반쯤 찬 원 — 진행 중임을 색 없이도 알 수 있게.
     connecting:
       "border border-warning bg-gradient-to-r from-warning from-50% to-transparent to-50% animate-pulse",
-    disconnected: "border border-fg-muted/50",
+    // 반투명 테두리는 라이트 모드(bg-subtle)에서 거의 사라졌다 — 불투명 muted 로.
+    disconnected: "border border-fg-muted",
   }[state.kind];
   return (
     <span
@@ -1634,6 +1888,7 @@ function Section({
   action,
   children,
   first = false,
+  forceOpen = false,
 }: {
   sectionKey: string;
   title: string;
@@ -1642,22 +1897,25 @@ function Section({
   children: ReactNode;
   /** 첫 섹션은 위 여백 없이 — 여백이 섹션을 나누는 장치라 맨 위엔 필요 없다. */
   first?: boolean;
+  /** 접힘 무시(태그 필터가 이 섹션을 좁히는 중) — 걸린 항목이 접힌 채 숨지 않게. */
+  forceOpen?: boolean;
 }) {
   const collapsed = useUI((s) => s.collapsed[sectionKey]);
   const toggle = useUI((s) => s.toggleSection);
   // 필터 중에는 접힘을 무시한다 — 접힌 섹션 안에 답이 숨으면 필터가 쓸모없다.
   const filtering = useSidebarFilter((s) => s.q.trim() !== "");
-  const open = filtering || !collapsed;
+  const open = filtering || forceOpen || !collapsed;
   return (
     <div className={clsx("flex flex-col", !first && "mt-3.5")}>
       {/* 구분선이 아니라 위 여백이 섹션을 나눈다 — border-border 는 bg-subtle 과
           밝기 차가 라이트 7%·다크 6% 라 선으로는 보이지 않는다. 헤더 아래 hairline 은
           제목을 제 본문에 붙여주는 보조 역할. 스크롤해도 제목이 남도록 sticky. */}
-      <div className="sticky top-0 z-10 flex h-5 shrink-0 items-center gap-1.5 border-b border-border bg-subtle pl-2 pr-1">
+      <div className="sticky top-0 z-10 flex h-6 shrink-0 items-center gap-1 border-b border-border bg-subtle pl-2 pr-1">
         <button
           type="button"
           onClick={() => toggle(sectionKey)}
-          className="flex min-w-0 flex-1 items-center gap-1.5 text-fg-muted hover:text-fg"
+          aria-expanded={open}
+          className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-fg-muted hover:text-fg"
         >
           {open ? (
             <ChevronDown size={12} className="shrink-0" />
@@ -1698,12 +1956,28 @@ function DeleteBtn({ label, onClick }: { label: string; onClick: () => void }) {
   );
 }
 
+/**
+ * 별명 옆 실제 alias — 보조 정보지만 읽혀야 한다. 예전 `text-fg-muted/60` 은 라이트
+ * 모드에서 대비 약 2.2:1 이라 거의 안 보였다. 위계는 크기(11px)로만 낮추고, 긴 alias 가
+ * 별명을 밀어내지 않게 폭을 제한한다.
+ */
+function AliasHint({ alias }: { alias: string }) {
+  return (
+    <span
+      className="min-w-0 max-w-[40%] shrink truncate text-meta text-fg-muted"
+      title={alias}
+    >
+      {alias}
+    </span>
+  );
+}
+
 /** 행에 붙는 태그 표시(작은 회색 #tag). 없으면 렌더 안 함. */
 function InlineTags({ tags }: { tags: string[] }) {
   if (tags.length === 0) return null;
   return (
     <span
-      className="shrink-0 truncate text-meta text-fg-muted/60"
+      className="min-w-0 max-w-[40%] shrink truncate text-meta text-fg-muted"
       title={tags.map((t) => `#${t}`).join(" ")}
     >
       {tags.map((t) => `#${t}`).join(" ")}
@@ -1717,7 +1991,7 @@ function AddBtn({ label, onClick }: { label: string; onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="rounded p-0.5 text-fg-muted hover:bg-border hover:text-fg"
+      className={headerBtnClass}
       aria-label={label}
       title={label}
     >

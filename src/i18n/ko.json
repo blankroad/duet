@@ -525,7 +525,7 @@
   },
   "topbar": {
     "toggleSidebar": "사이드바 토글 ({{key}})",
-    "togglePreview": "미리보기 토글 (F11)",
+    "togglePreview": "미리보기 토글 ({{key}})",
     "compareFolders": "폴더 비교 (왼쪽 ↔ 오른쪽)",
     "undo": "마지막 작업 되돌리기 ({{key}}) — 우클릭: 히스토리",
     "search": "검색 ({{key}})",
@@ -563,6 +563,7 @@
   },
   "shelf": {
     "title": "선반",
+    "source": "원래 위치(소스)",
     "copyHere": "여기로 복사 (활성 패널)",
     "copy": "복사",
     "moveHere": "여기로 이동 (활성 패널)",
@@ -793,6 +794,7 @@
     "renameFailed": "이름 바꾸기 실패: {{err}}",
     "removeBookmarkFailed": "북마크를 지우지 못했습니다: {{err}}",
     "removeFavoriteFailed": "즐겨찾기를 지우지 못했습니다: {{err}}",
+    "removeHostFailed": "호스트를 지우지 못했습니다: {{err}}",
     "bookmarksMigrated": "SSH 북마크 {{count}}개를 호스트 즐겨찾기로 옮겼습니다",
     "noActiveConnection": "이 폴더의 연결을 찾을 수 없습니다",
     "bookmarkedOnHost": "{{host}} 에 북마크: {{name}}",
@@ -853,6 +855,8 @@
     "hostClickConnectTitle": "{{alias}} (항목을 클릭해 연결)",
     "openConnect": "열기 (필요 시 연결)",
     "removeFavorite": "즐겨찾기 제거",
+    "removeFromRecent": "최근 목록에서 제거",
+    "viaJump": "점프 호스트 경유",
     "hosts": "호스트",
     "noHosts": "등록된 호스트가 없습니다.",
     "state": {
@@ -873,6 +877,10 @@
   },
   "tasks": {
     "count": "작업 {{count}}개",
+    "queued": "대기 중",
+    "progress": "작업 진행률",
+    "openDetails": "눌러서 진행 상세 보기",
+    "queuedCount_other": "· 대기 {{count}}",
     "kind": {
       "copy": "복사 중…",
       "move": "이동 중…",
@@ -884,7 +892,14 @@
   },
   "statusbar": {
     "selected": "{{count}}개 선택됨",
-    "originalPath": "원래 위치:"
+    "originalPath": "원래 위치:",
+    "filteredOut_other": "필터로 {{count}}개 가려짐",
+    "hiddenCount_other": "숨김 {{count}}개",
+    "hiddenShown_other": "숨김 {{count}}개 표시 중",
+    "showHiddenTitle": "숨김 파일 표시 ({{key}})",
+    "hideHiddenTitle": "숨김 파일 숨기기 ({{key}})",
+    "paneLeft": "왼쪽 패널 정보",
+    "paneRight": "오른쪽 패널 정보"
   },
   "search": {
     "namePlaceholder": "파일 이름 검색…",

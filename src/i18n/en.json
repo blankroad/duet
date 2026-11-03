@@ -528,7 +528,7 @@
   },
   "topbar": {
     "toggleSidebar": "Toggle sidebar ({{key}})",
-    "togglePreview": "Toggle preview (F11)",
+    "togglePreview": "Toggle preview ({{key}})",
     "compareFolders": "Compare folders (left ↔ right)",
     "undo": "Undo last action ({{key}}) — right-click: history",
     "search": "Search ({{key}})",
@@ -566,6 +566,7 @@
   },
   "shelf": {
     "title": "Shelf",
+    "source": "Source",
     "copyHere": "Copy here (active pane)",
     "copy": "Copy",
     "moveHere": "Move here (active pane)",
@@ -798,6 +799,7 @@
     "renameFailed": "Rename failed: {{err}}",
     "removeBookmarkFailed": "Could not remove the bookmark: {{err}}",
     "removeFavoriteFailed": "Could not remove the favorite: {{err}}",
+    "removeHostFailed": "Could not remove the host: {{err}}",
     "bookmarksMigrated": "Moved {{count}} SSH bookmark(s) to host favorites",
     "noActiveConnection": "No active connection for this folder",
     "bookmarkedOnHost": "Bookmarked on {{host}}: {{name}}",
@@ -858,6 +860,8 @@
     "hostClickConnectTitle": "{{alias}} (click an item to connect)",
     "openConnect": "Open (connect if needed)",
     "removeFavorite": "Remove favorite",
+    "removeFromRecent": "Remove from recent",
+    "viaJump": "via jump host",
     "hosts": "Hosts",
     "noHosts": "No hosts yet.",
     "state": {
@@ -878,6 +882,11 @@
   },
   "tasks": {
     "count": "{{count}} tasks",
+    "queued": "Queued",
+    "progress": "Task progress",
+    "openDetails": "click for progress details",
+    "queuedCount_one": "· {{count}} queued",
+    "queuedCount_other": "· {{count}} queued",
     "kind": {
       "copy": "Copying…",
       "move": "Moving…",
@@ -889,7 +898,17 @@
   },
   "statusbar": {
     "selected": "{{count}} selected",
-    "originalPath": "Original location:"
+    "originalPath": "Original location:",
+    "filteredOut_one": "{{count}} filtered out",
+    "filteredOut_other": "{{count}} filtered out",
+    "hiddenCount_one": "{{count}} hidden",
+    "hiddenCount_other": "{{count}} hidden",
+    "hiddenShown_one": "{{count}} hidden (shown)",
+    "hiddenShown_other": "{{count}} hidden (shown)",
+    "showHiddenTitle": "Show hidden files ({{key}})",
+    "hideHiddenTitle": "Hide hidden files ({{key}})",
+    "paneLeft": "Left pane info",
+    "paneRight": "Right pane info"
   },
   "search": {
     "namePlaceholder": "Search filenames…",

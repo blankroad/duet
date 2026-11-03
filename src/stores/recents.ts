@@ -37,6 +37,8 @@ function save(items: RecentEntry[]): void {
 interface State {
   items: RecentEntry[];
   add: (e: RecentEntry) => void;
+  /** 한 항목만 목록에서 뺀다 — 예전엔 엉뚱한 폴더 하나를 빼려면 전체를 지워야 했다. */
+  remove: (e: RecentEntry) => void;
   clear: () => void;
 }
 
@@ -49,6 +51,13 @@ export const useRecents = create<State>((set) => ({
         0,
         CAP,
       );
+      save(items);
+      return { items };
+    }),
+  remove: (e) =>
+    set((s) => {
+      const k = recentKey(e);
+      const items = s.items.filter((x) => recentKey(x) !== k);
       save(items);
       return { items };
     }),

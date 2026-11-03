@@ -113,7 +113,7 @@ export function ShelfSection() {
               <button
                 type="button"
                 onClick={() => st().clearSection(sec.id)}
-                className="shrink-0 rounded p-0.5 text-fg-muted opacity-0 hover:bg-border hover:text-danger group-hover/sec:opacity-100"
+                className="shrink-0 rounded p-0.5 text-fg-muted opacity-0 hover:bg-border hover:text-danger focus:opacity-100 group-hover/sec:opacity-100"
                 title={t("shelf.clear")}
                 aria-label={t("shelf.clear")}
               >
@@ -124,7 +124,7 @@ export function ShelfSection() {
               <button
                 type="button"
                 onClick={() => st().deleteSection(sec.id)}
-                className="shrink-0 rounded p-0.5 text-fg-muted opacity-0 hover:bg-border hover:text-danger group-hover/sec:opacity-100"
+                className="shrink-0 rounded p-0.5 text-fg-muted opacity-0 hover:bg-border hover:text-danger focus:opacity-100 group-hover/sec:opacity-100"
                 title={t("shelf.deleteSection")}
                 aria-label={t("shelf.deleteSection")}
               >
@@ -146,7 +146,10 @@ export function ShelfSection() {
                 >
                   {it.name}
                 </span>
-                <span className="shrink-0 text-meta opacity-50" title="source">
+                <span
+                  className="shrink-0 text-meta opacity-50"
+                  title={t("shelf.source")}
+                >
                   {it.location.source.kind === "local"
                     ? t("sidebar.local")
                     : sourceLabel(it)}
