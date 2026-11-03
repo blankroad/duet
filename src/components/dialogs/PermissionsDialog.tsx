@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ShieldCheck } from "lucide-react";
 import { commands } from "@/types/bindings";
 import type { EntryRef } from "@/types/bindings";
 import { formatErr } from "@/lib/error";
+import { isImeComposing } from "@/lib/keyEvent";
 import { useToast } from "@/stores/toast";
 import { DialogShell } from "./DialogShell";
 import { DialogButton } from "./DialogButton";
@@ -56,31 +57,51 @@ export function PermissionsDialog({
   const [owner, setOwner] = useState("");
   const [group, setGroup] = useState("");
   const [busy, setBusy] = useState(false);
+  // 선택 항목의 mode 가 서로 다르면(mixed) 사용자가 비트/8진수를 직접 정하기 전까지
+  // mode 는 건드리지 않는다 — 예전엔 지어낸 0644 를 폴더까지 적용해 폴더가 x 를 잃었다.
+  const mixed = initialMode === null;
+  const [touched, setTouched] = useState(false);
+  const octalRef = useRef<HTMLInputElement>(null);
   const showToast = useToast((s) => s.show);
 
   const setModeBoth = (m: number) => {
     setMode(m);
     setOctal(m.toString(8).padStart(3, "0"));
   };
-  const toggleBit = (bit: number) => setModeBoth(mode ^ bit);
+  const toggleBit = (bit: number) => {
+    setTouched(true);
+    setModeBoth(mode ^ bit);
+  };
+  // rwx 9비트만 다룬다 — 4자리(setuid/sticky)는 받아도 버려지므로 3자리만 유효.
+  const octalValid = /^[0-7]{3}$/.test(octal);
   const onOctalChange = (s: string) => {
     setOctal(s);
-    if (/^[0-7]{3,4}$/.test(s)) setMode(parseInt(s, 8) & 0o777);
+    if (/^[0-7]{3}$/.test(s)) {
+      setTouched(true);
+      setMode(parseInt(s, 8));
+    }
   };
 
   const chownWanted = remote && (owner.trim() !== "" || group.trim() !== "");
+  const modeWanted = !mixed || touched;
   const irreversible = recursive || chownWanted;
+  const canApply = !busy && octalValid && (modeWanted || chownWanted);
+  // 폴더가 소유자 실행(x)을 잃으면 열 수 없다 — 적용 전에 알린다.
+  const dirLosesExec = hasDir && modeWanted && (mode & 0o100) === 0;
 
   const apply = async () => {
+    if (!canApply) return;
     setBusy(true);
-    const r = await commands.fsSetPermissions(targets, mode, recursive);
-    if (r.status === "error") {
-      setBusy(false);
-      showToast(
-        t("dialog.permissions.failed", { err: formatErr(r.error) }),
-        "error",
-      );
-      return;
+    if (modeWanted) {
+      const r = await commands.fsSetPermissions(targets, mode, recursive);
+      if (r.status === "error") {
+        setBusy(false);
+        showToast(
+          t("dialog.permissions.failed", { err: formatErr(r.error) }),
+          "error",
+        );
+        return;
+      }
     }
     if (chownWanted) {
       const o = await commands.fsSetOwner(
@@ -120,6 +141,9 @@ export function PermissionsDialog({
       icon={ShieldCheck}
       iconTone={irreversible ? "danger" : "muted"}
       onClose={onClose}
+      // ↵ 힌트대로 Enter = 적용 — 예전 첫 포커스는 체크박스라 Enter 가 아무 일도 안 했다.
+      initialFocus={octalRef}
+      selectOnFocus
       footer={
         <>
           <DialogButton hint="esc" onClick={onClose}>
@@ -128,7 +152,7 @@ export function PermissionsDialog({
           <DialogButton
             tone={irreversible ? "danger" : "primary"}
             hint="enter"
-            disabled={busy}
+            disabled={!canApply}
             onClick={() => void apply()}
           >
             {irreversible
@@ -175,16 +199,33 @@ export function PermissionsDialog({
           {t("dialog.permissions.octal")}
         </span>
         <DialogInput
+          ref={octalRef}
           mono
           type="text"
           value={octal}
+          aria-label={t("dialog.permissions.octal")}
+          aria-invalid={!octalValid}
+          tone={octalValid ? "accent" : "danger"}
           onChange={(e) => onOctalChange(e.target.value)}
-          className="w-20"
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !isImeComposing(e)) {
+              e.preventDefault();
+              void apply();
+            }
+          }}
+          className={octalValid ? "w-20" : "w-20 border-danger"}
         />
-        {initialMode === null && (
-          <span className="text-meta text-fg-muted">
-            {t("dialog.permissions.mixed")}
+        {!octalValid ? (
+          <span className="text-meta text-danger">
+            {t("dialog.permissions.invalidOctal")}
           </span>
+        ) : (
+          mixed &&
+          !touched && (
+            <span className="text-meta text-fg-muted">
+              {t("dialog.permissions.mixedPick")}
+            </span>
+          )
         )}
       </div>
 
@@ -227,6 +268,13 @@ export function PermissionsDialog({
           />
           <span>{t("dialog.permissions.recursive")}</span>
         </label>
+      )}
+
+      {dirLosesExec && (
+        <DialogBand
+          tone="warning"
+          message={t("dialog.permissions.dirNoExec")}
+        />
       )}
 
       {irreversible && (
