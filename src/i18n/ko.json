@@ -123,6 +123,7 @@
       "remoteTrash": "원격 휴지통 (<1>~/.duet-trash</1>) 누적:",
       "remoteTrashPile": " — prune/덮어쓰기 백업이 이 호스트에 쌓입니다.",
       "pruneWarn": "대상 폴더에만 있는 파일이 휴지통으로 이동합니다. 되돌리기 가능 (macOS 로컬: Finder 에서 수동 복원).",
+      "pruneNeedsPreview": "미리보기가 없어 무엇이 휴지통으로 갈지 알 수 없습니다 — 삭제 전파를 끄면 실행할 수 있습니다.",
       "cta": "동기화",
       "ctaPruned": "동기화 + 삭제",
       "desc": "활성 패널에서 반대 패널로 단방향 미러 (선택적 삭제 전파)."

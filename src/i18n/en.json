@@ -124,6 +124,7 @@
       "remoteTrash": "Remote trash (<1>~/.duet-trash</1>) accumulated:",
       "remoteTrashPile": " — prune/overwrite backups pile up on this host.",
       "pruneWarn": "Files only in the target folder move to trash. Undoable (macOS local: restore manually in Finder).",
+      "pruneNeedsPreview": "Without a preview it is unknown what would go to the trash — turn off delete propagation to continue.",
       "cta": "Sync",
       "ctaPruned": "Sync + delete",
       "desc": "One-way mirror from the active pane to the other pane, with optional delete propagation."

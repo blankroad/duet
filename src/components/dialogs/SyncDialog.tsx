@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation, Trans } from "react-i18next";
 import { FilePlus2, FolderSync, Trash2, Loader2 } from "lucide-react";
 import clsx from "clsx";
@@ -33,6 +33,18 @@ export function SyncDialog({ src, dst, onClose, onConfirm }: SyncDialogProps) {
   const [preview, setPreview] = useState<SyncPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [trash, setTrash] = useState<TrashUsage | null>(null);
+  const ctaRef = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  // dry-run 을 보여 주려는 창 — 계산 전에는 실행할 수 없다(무엇이 바뀌는지 모른 채
+  // 확정하던 문제). 미리보기 실패 + 삭제 전파(prune)도 막는다: 몇 개가 지워질지 모른다.
+  const ready = preview != null;
+  const blocked = (!ready && !error) || (error != null && prune);
+
+  // 계산 중엔 [취소] 에 포커스, 끝나면 사용자가 포커스를 옮기지 않았을 때 주 버튼으로.
+  useEffect(() => {
+    if (ready && document.activeElement === cancelRef.current)
+      ctaRef.current?.focus();
+  }, [ready]);
 
   useEffect(() => {
     let stale = false;
@@ -72,14 +84,17 @@ export function SyncDialog({ src, dst, onClose, onConfirm }: SyncDialogProps) {
       description={t("dialog.sync.desc")}
       icon={FolderSync}
       onClose={onClose}
+      initialFocus={ready ? ctaRef : cancelRef}
       footer={
         <>
-          <DialogButton hint="esc" onClick={onClose}>
+          <DialogButton ref={cancelRef} hint="esc" onClick={onClose}>
             {t("common.cancel")}
           </DialogButton>
           <DialogButton
+            ref={ctaRef}
             tone={prune ? "danger" : "primary"}
             hint="enter"
+            disabled={blocked}
             onClick={() => onConfirm(prune)}
           >
             {prune ? t("dialog.sync.ctaPruned") : t("dialog.sync.cta")}
@@ -162,7 +177,14 @@ export function SyncDialog({ src, dst, onClose, onConfirm }: SyncDialogProps) {
       )}
 
       {prune && (
-        <DialogBand tone="warning" message={t("dialog.sync.pruneWarn")} />
+        <DialogBand
+          tone="warning"
+          message={
+            error
+              ? t("dialog.sync.pruneNeedsPreview")
+              : t("dialog.sync.pruneWarn")
+          }
+        />
       )}
     </DialogShell>
   );
