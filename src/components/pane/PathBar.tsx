@@ -20,32 +20,6 @@ import {
 import { platform } from "@tauri-apps/plugin-os";
 import type { Location } from "@/types/bindings";
 
-type Crumb = { label: string; path: string };
-
-/**
- * 경로 → breadcrumb 조각. 소스에 맞는 구분자로 **클릭 시 이동할 절대경로**를 만든다.
- * - 원격(SSH): POSIX (`/`).
- * - 로컬 Windows: `\` (드라이브 루트 `C:\` 처리). 이게 없으면 `/`로 join 돼
- *   `/C:\...` 같은 깨진 경로 → OS error 13(EACCES). (CLAUDE.md §7 — 표시용 분기는
- *   소스 기준으로만, 실제 경로 결합은 여기 한 곳.)
- * 화면상 구분자는 시각적 `/` 로 통일하고, 실제 path 만 올바른 구분자를 쓴다.
- */
-function buildCrumbs(path: string, winLocal: boolean): Crumb[] {
-  const parts = pathSegments(path);
-  const crumbs: Crumb[] = [];
-  let acc = "";
-  for (let i = 0; i < parts.length; i++) {
-    const p = parts[i]!;
-    if (winLocal) {
-      if (i === 0 && /^[A-Za-z]:$/.test(p)) acc = p + "\\";
-      else acc = acc.endsWith("\\") ? acc + p : acc + "\\" + p;
-    } else {
-      acc = acc + "/" + p;
-    }
-    crumbs.push({ label: p, path: acc });
-  }
-  return crumbs;
-}
 import type { ArchiveBrowse } from "@/stores/panes";
 import {
   useBookmarks,
@@ -54,7 +28,7 @@ import {
   sameBookmarkLocation,
 } from "@/stores/bookmarks";
 import { folderName } from "@/lib/entryMenu";
-import { pathSegments } from "@/lib/paths";
+import { archiveCrumbs, buildCrumbs } from "./pathCrumbs";
 import { useHostLabel } from "@/lib/hostLabel";
 import { bookmarkLocation } from "@/lib/bookmarkActions";
 import { useHostFavorites, removeHostFavorite } from "@/stores/hostFavorites";
@@ -142,17 +116,9 @@ export function PathBar({
   };
 
   // 아카이브 내부: 임시경로 대신 archive.zip/sub 상대 breadcrumb.
-  const archiveSegments =
-    archive && location.path.startsWith(archive.root)
-      ? location.path
-          .slice(archive.root.length)
-          .split("/")
-          .filter(Boolean)
-          .map((seg, i, arr) => ({
-            label: seg,
-            path: archive.root + "/" + arr.slice(0, i + 1).join("/"),
-          }))
-      : [];
+  const archiveSegments = archive
+    ? archiveCrumbs(String(location.path), archive.root, winLocal)
+    : [];
 
   // 로컬은 북마크, 원격은 호스트 즐겨찾기 — 두 저장소가 나뉘어 있어도 ★ 하나로
   // 같은 의미(이 폴더가 저장돼 있나 / 토글)를 갖는다. 예전엔 원격에서 ★ 이 절대
