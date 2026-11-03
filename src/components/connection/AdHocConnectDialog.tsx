@@ -277,6 +277,9 @@ export function AdHocConnectDialog({
   const handleConnect = () => void doConnect(false);
 
   const busy = phase.kind === "connecting";
+  // 연결 중·호스트 키 확인 중엔 입력을 잠근다 — 프롬프트가 보여 준 호스트가 아닌
+  // 다른 주소로 고친 뒤 "신뢰"를 누르면 그 다른 호스트의 키를 학습했다.
+  const locked = busy || phase.kind === "host-key";
   return (
     <>
       <DialogShell
@@ -314,6 +317,7 @@ export function AdHocConnectDialog({
             {t("dialog.adhoc.host")}
           </label>
           <DialogInput
+            disabled={locked}
             id="adhoc-host"
             type="text"
             value={host}
@@ -326,6 +330,7 @@ export function AdHocConnectDialog({
             {t("dialog.adhoc.port")}
           </label>
           <DialogInput
+            disabled={locked}
             id="adhoc-port"
             type="number"
             min={1}
@@ -338,6 +343,7 @@ export function AdHocConnectDialog({
             {t("dialog.adhoc.user")}
           </label>
           <DialogInput
+            disabled={locked}
             id="adhoc-user"
             type="text"
             value={user}
@@ -349,6 +355,7 @@ export function AdHocConnectDialog({
             {t("dialog.adhoc.key")}
           </label>
           <DialogInput
+            disabled={locked}
             id="adhoc-key"
             type="text"
             value={keyPath}
@@ -360,6 +367,7 @@ export function AdHocConnectDialog({
             {t("dialog.adhoc.password")}
           </label>
           <DialogInput
+            disabled={locked}
             id="adhoc-pw"
             type="password"
             autoComplete="off"
@@ -426,6 +434,7 @@ export function AdHocConnectDialog({
             <input
               type="checkbox"
               checked={save}
+              disabled={locked}
               onChange={(e) => setSave(e.target.checked)}
             />
             <span>{t("dialog.adhoc.saveHost")}</span>
@@ -440,6 +449,7 @@ export function AdHocConnectDialog({
                   {t("dialog.adhoc.alias")}
                 </label>
                 <DialogInput
+                  disabled={locked}
                   id="adhoc-alias"
                   type="text"
                   value={alias}
@@ -453,6 +463,7 @@ export function AdHocConnectDialog({
                   <input
                     type="checkbox"
                     checked={savePassword}
+                    disabled={locked}
                     onChange={(e) => setSavePassword(e.target.checked)}
                   />
                   <Lock size={11} className="text-fg-muted" />

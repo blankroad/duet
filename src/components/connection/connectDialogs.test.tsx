@@ -3,6 +3,7 @@ import { render, screen, fireEvent, act } from "@testing-library/react";
 import { ConnectionDialog } from "./ConnectionDialog";
 import { AdHocConnectDialog } from "./AdHocConnectDialog";
 import { useConnections } from "@/stores/connections";
+import { useVault } from "@/stores/vault";
 import type { ConnectionDto } from "@/types/bindings";
 
 vi.mock("react-i18next", () => ({
@@ -35,6 +36,8 @@ function deferred<T>() {
 beforeEach(() => {
   for (const f of Object.values(m)) f.mockReset();
   m.connectionClose.mockResolvedValue({ status: "ok", data: null });
+  m.vaultHas.mockResolvedValue({ status: "ok", data: false });
+  useVault.setState({ exists: false, unlocked: false });
   useConnections.setState({
     active: {},
     reconnecting: {},
@@ -130,8 +133,7 @@ describe("AdHocConnectDialog saved password (§5)", () => {
     key_path: null,
   };
 
-  beforeEach(async () => {
-    const { useVault } = await import("@/stores/vault");
+  beforeEach(() => {
     useVault.setState({ exists: true, unlocked: true });
     m.vaultHas.mockResolvedValue({ status: "ok", data: true });
     m.connectionOpenAdhoc.mockResolvedValue({
@@ -179,6 +181,58 @@ describe("AdHocConnectDialog saved password (§5)", () => {
     });
     expect(m.connectionOpenAdhoc).toHaveBeenCalledWith(
       expect.objectContaining({ host: "box.lan", savedPasswordAlias: "box" }),
+    );
+  });
+});
+
+describe("host key prompt pins the endpoint", () => {
+  it("locks the address fields while the fingerprint is shown", async () => {
+    m.connectionOpenAdhoc.mockResolvedValueOnce({
+      status: "error",
+      error: {
+        kind: "HostKeyUnverified",
+        message: {
+          host: "a.lan",
+          fingerprint: "SHA256:TEST-A",
+          changed: false,
+          changed_line: null,
+        },
+      },
+    });
+    render(
+      <AdHocConnectDialog
+        open
+        onClose={vi.fn()}
+        onConnected={vi.fn()}
+        prefill={{
+          alias: "a",
+          host: "a.lan",
+          port: 22,
+          user: "u",
+          key_path: null,
+        }}
+      />,
+    );
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: /dialog.connection.connect/ }),
+      );
+    });
+    const hostInput = screen.getByLabelText(
+      "dialog.adhoc.host",
+    ) as HTMLInputElement;
+    expect(hostInput.disabled).toBe(true);
+    m.connectionOpenAdhoc.mockResolvedValueOnce({
+      status: "error",
+      error: { kind: "AuthFailed" },
+    });
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: /dialog.hostKey.trustCta/ }),
+      );
+    });
+    expect(m.connectionOpenAdhoc).toHaveBeenLastCalledWith(
+      expect.objectContaining({ host: "a.lan", trustHostKey: true }),
     );
   });
 });

@@ -216,8 +216,10 @@ export function ConnectionDialog({
           autoComplete="off"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
+          disabled={busy || phase.kind === "host-key"}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !busy) handleConnect();
+            if (e.key === "Enter" && !e.nativeEvent.isComposing && !busy)
+              handleConnect();
           }}
           className="mt-1"
         />
