@@ -844,7 +844,14 @@
   },
   "statusbar": {
     "selected": "{{count}}개 선택됨",
-    "originalPath": "원래 위치:"
+    "originalPath": "원래 위치:",
+    "filteredOut_other": "필터로 {{count}}개 가려짐",
+    "hiddenCount_other": "숨김 {{count}}개",
+    "hiddenShown_other": "숨김 {{count}}개 표시 중",
+    "showHiddenTitle": "숨김 파일 표시 ({{key}})",
+    "hideHiddenTitle": "숨김 파일 숨기기 ({{key}})",
+    "paneLeft": "왼쪽 패널 정보",
+    "paneRight": "오른쪽 패널 정보"
   },
   "search": {
     "namePlaceholder": "파일 이름 검색…",

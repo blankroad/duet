@@ -847,7 +847,17 @@
   },
   "statusbar": {
     "selected": "{{count}} selected",
-    "originalPath": "Original location:"
+    "originalPath": "Original location:",
+    "filteredOut_one": "{{count}} filtered out",
+    "filteredOut_other": "{{count}} filtered out",
+    "hiddenCount_one": "{{count}} hidden",
+    "hiddenCount_other": "{{count}} hidden",
+    "hiddenShown_one": "{{count}} hidden (shown)",
+    "hiddenShown_other": "{{count}} hidden (shown)",
+    "showHiddenTitle": "Show hidden files ({{key}})",
+    "hideHiddenTitle": "Hide hidden files ({{key}})",
+    "paneLeft": "Left pane info",
+    "paneRight": "Right pane info"
   },
   "search": {
     "namePlaceholder": "Search filenames…",

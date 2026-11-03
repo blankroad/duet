@@ -6,9 +6,12 @@ import {
   computeDisplayed,
   isParentEntry,
 } from "@/stores/panes";
+import { useUI } from "@/stores/ui";
+import { useConnections } from "@/stores/connections";
 import type { Entry } from "@/types/bindings";
 import { formatSize } from "@/lib/format";
 import { useHostLabel } from "@/lib/hostLabel";
+import { useKeyHint } from "@/lib/keyHint";
 import { isVirtualTrash, trashItemFor } from "@/lib/trashView";
 import {
   kindLabel,
@@ -17,40 +20,70 @@ import {
   summarizeEntries,
   countLabel,
 } from "@/lib/fileInfo";
+import { StateDot } from "@/components/Sidebar";
 
 /**
- * StatusBar — 3 구역: 왼쪽=파일/폴더 집계 + 선택, 가운데=커서 항목 상세, 오른쪽=소스.
+ * StatusBar — 3 구역: 왼쪽=보이는 항목 집계 + 가려진 항목 + 선택, 가운데=커서 항목 상세,
+ * 오른쪽=활성 패널(L/R)·소스·연결 상태.
  *
- * "12 files, 3 folders · 1.1 GB    report.pdf — PDF document · 4.2 MB · …    user@host"
+ * "12 files, 3 folders · 1.1 GB · 숨김 4개    report.pdf — PDF · 4.2 MB    ● prod  L"
  *
- * (드래그-아웃은 파일 행을 직접 끌면 됨 — useEntryDrag. 하단 전용 버튼은 제거됨.)
+ * 집계는 **화면에 보이는 목록** 기준이다 — 예전엔 숨김 파일·빠른 필터로 가린 항목까지
+ * 세서 "45개" 라고 하는데 목록엔 15개만 있었다. 가려진 수는 따로 알리고, 숨김 개수는
+ * 눌러서 바로 숨김 파일을 켜고 끈다(패널이 좁으면 그 토글이 `보기` 메뉴 안에 있다).
  */
 export function StatusBar() {
   const { t } = useTranslation();
   const activeId = usePanes((s) => s.activePane);
   const tab = usePanes((s) => activeTab(s, activeId));
+  const singlePane = useUI((s) => s.singlePane);
+  const kToggleHidden = useKeyHint("view.toggleHidden");
 
   const src = tab.location.source;
   const sourceLabel = useHostLabel(src);
+  const connState = useConnections((s) =>
+    src.kind === "ssh" ? s.active[src.connection_id]?.state : undefined,
+  );
 
-  // 왼쪽: 파일/폴더 수 + 총 용량(파일만) + 선택. 커서 이동마다 재계산 안 하게 메모이즈
-  // (집계는 entries, 선택 용량은 entries+selected 에만 의존).
+  const displayed = useMemo(() => computeDisplayed(tab), [tab]);
+
+  // 왼쪽: 보이는 파일/폴더 수 + 총 용량(파일만) + 가려진 수 + 선택.
+  const visible = useMemo(
+    () => displayed.filter((e) => !isParentEntry(e)),
+    [displayed],
+  );
   const { files, folders, totalSize } = useMemo(
-    () => summarizeEntries(tab.entries),
-    [tab.entries],
+    () => summarizeEntries(visible),
+    [visible],
   );
-  const counts = countLabel(files, folders);
+  // 가려진 항목 — 필터로 빠진 것과 숨김이라 빠진 것을 나눠 센다(필터 먼저 적용).
+  const { hiddenCount, filteredOut } = useMemo(() => {
+    const q = tab.filter.toLowerCase();
+    const matched = q
+      ? tab.entries.filter((e) => e.name.toLowerCase().includes(q))
+      : tab.entries;
+    return {
+      hiddenCount: matched.filter((e) => e.hidden).length,
+      filteredOut: tab.entries.length - matched.length,
+    };
+  }, [tab.entries, tab.filter]);
   const selectedCount = tab.selected.size;
-  const selectedSize = useMemo(
-    () =>
-      tab.entries
-        .filter((e: Entry) => tab.selected.has(e.name) && e.size != null)
-        .reduce((sum: number, e: Entry) => sum + (e.size ?? 0), 0),
-    [tab.entries, tab.selected],
-  );
+  // 선택 용량 — 폴더는 "크기 계산"으로 구해 둔 값(dirSizes)이 있으면 더한다. 예전엔
+  // 폴더만 고르면 목록에 크기가 보이는데도 "(0 B)" 였다. 아직 모르는 폴더가 섞이면
+  // 합계 앞에 "≥" 를 붙여 하한임을 알린다.
+  const { selectedSize, sizeUnknown } = useMemo(() => {
+    let sum = 0;
+    let unknown = false;
+    for (const e of tab.entries as Entry[]) {
+      if (!tab.selected.has(e.name)) continue;
+      const size = e.size ?? (e.kind === "dir" ? tab.dirSizes[e.name] : null);
+      if (size != null) sum += size;
+      else if (e.kind === "dir") unknown = true;
+    }
+    return { selectedSize: sum, sizeUnknown: unknown };
+  }, [tab.entries, tab.selected, tab.dirSizes]);
 
   // 가운데: 커서가 올라간 단일 항목(".." 제외)의 상세.
-  const displayed = useMemo(() => computeDisplayed(tab), [tab]);
   const focused = tab.cursorIndex >= 0 ? displayed[tab.cursorIndex] : undefined;
   const focusedMeta =
     focused && !isParentEntry(focused)
@@ -73,19 +106,66 @@ export function StatusBar() {
       : undefined;
 
   const summary = [
-    counts,
+    countLabel(files, folders),
     totalSize > 0 ? formatSize(totalSize) : null,
-    selectedCount > 0
-      ? `${t("statusbar.selected", { count: selectedCount })} (${formatSize(selectedSize)})`
-      : null,
+    filteredOut > 0 ? t("statusbar.filteredOut", { count: filteredOut }) : null,
   ]
     .filter(Boolean)
     .join(" · ");
+  // 크기를 하나도 모르면(계산 안 한 폴더만 선택) 용량은 빼고 개수만.
+  const selectedSizeText =
+    sizeUnknown && selectedSize === 0
+      ? ""
+      : ` (${sizeUnknown ? "≥ " : ""}${formatSize(selectedSize)})`;
+  const selectedText =
+    selectedCount > 0
+      ? `${t("statusbar.selected", { count: selectedCount })}${selectedSizeText}`
+      : null;
+
+  // 숨김 개수 버튼 — 숨기는 중이면 "숨김 N개"(누르면 표시), 보이는 중이면
+  // "숨김 N개 표시 중"(누르면 다시 숨김). 숨김 항목이 없으면 렌더하지 않는다.
+  const hiddenLabel = tab.showHidden
+    ? t("statusbar.hiddenShown", { count: hiddenCount })
+    : t("statusbar.hiddenCount", { count: hiddenCount });
+  const hiddenTitle = tab.showHidden
+    ? t("statusbar.hideHiddenTitle", { key: kToggleHidden })
+    : t("statusbar.showHiddenTitle", { key: kToggleHidden });
+
+  const paneLetter = activeId === "left" ? "L" : "R";
+  const paneTitle =
+    activeId === "left" ? t("statusbar.paneLeft") : t("statusbar.paneRight");
+  const stateLabel =
+    src.kind === "ssh"
+      ? connState?.kind === "error"
+        ? connState.message
+        : t(`sidebar.state.${connState?.kind ?? "disconnected"}`)
+      : null;
 
   return (
     <footer className="flex h-6 items-center gap-3 border-t border-border px-3 text-meta text-fg-muted">
-      <span className="min-w-0 max-w-[50%] truncate" title={summary}>
-        {summary}
+      <span className="flex min-w-0 max-w-[50%] items-center gap-1.5">
+        <span
+          className="min-w-0 truncate"
+          title={[summary, selectedText].filter(Boolean).join(" · ")}
+        >
+          {summary}
+        </span>
+        {hiddenCount > 0 && (
+          <button
+            type="button"
+            onClick={() => usePanes.getState().toggleShowHidden(activeId)}
+            aria-pressed={tab.showHidden}
+            title={hiddenTitle}
+            className="shrink-0 rounded px-1 hover:bg-border hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+          >
+            {hiddenLabel}
+          </button>
+        )}
+        {selectedText && (
+          <span className="min-w-0 shrink-0 truncate text-fg">
+            {selectedText}
+          </span>
+        )}
       </span>
       <span className="min-w-0 flex-1 truncate text-center">
         {focused && focusedMeta && (
@@ -100,8 +180,24 @@ export function StatusBar() {
           </>
         )}
       </span>
-      <span className="min-w-0 max-w-[25%] truncate" title={sourceLabel}>
-        {sourceLabel}
+      <span
+        className="flex min-w-0 max-w-[25%] items-center gap-1.5"
+        title={stateLabel ? `${sourceLabel} — ${stateLabel}` : sourceLabel}
+        data-testid="statusbar-source"
+      >
+        {src.kind === "ssh" && (
+          <StateDot state={connState ?? { kind: "disconnected" }} />
+        )}
+        <span className="min-w-0 truncate">{sourceLabel}</span>
+        {!singlePane && (
+          <span
+            className="shrink-0 rounded-[3px] bg-accent/15 px-1 py-0.5 text-[10px] font-medium leading-none text-accent"
+            title={paneTitle}
+            aria-label={paneTitle}
+          >
+            {paneLetter}
+          </span>
+        )}
       </span>
     </footer>
   );

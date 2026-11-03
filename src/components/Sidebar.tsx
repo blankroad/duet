@@ -1596,7 +1596,7 @@ function HostItem({
  * 물론 라이트 모드의 옅은 회색 점도 구분이 안 된다. 채운 원 / 반쯤 찬 원 / 빈 원 /
  * 삼각형으로 가른다 (비교창의 상태 아이콘과 같은 원칙).
  */
-function StateDot({ state }: { state: ConnectionState }) {
+export function StateDot({ state }: { state: ConnectionState }) {
   const { t } = useTranslation();
   const label =
     state.kind === "error" ? state.message : t(`sidebar.state.${state.kind}`);
