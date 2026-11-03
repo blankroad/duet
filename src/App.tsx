@@ -1754,6 +1754,20 @@ function App() {
       const st = usePanes.getState();
       if (pending?.tabId) {
         const found = findTab(pending.tabId);
+        const loc = found
+          ? st.panes[found.pane].tabs[found.index]!.location
+          : null;
+        // 연결을 기다리는 사이 그 탭을 다른 곳으로 옮겼으면(로컬 폴더 등) 덮지 않는다 —
+        // 이미 rebind 는 끝났으니 반대 패널만 새로 읽고 여기서 멈춘다.
+        const moved =
+          loc !== null &&
+          (loc.source.kind !== "ssh" ||
+            aliasFromConnectionId(loc.source.connection_id) !== alias ||
+            String(loc.path) !== pending.path);
+        if (moved) {
+          for (const other of rebound.panes) onRefresh(other);
+          return;
+        }
         if (found) {
           pane = found.pane;
           if (found.index !== st.panes[pane].activeTabIndex)

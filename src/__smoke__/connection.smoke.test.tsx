@@ -590,4 +590,37 @@ describe("connection smoke: reconnect races", () => {
     });
     expect(rightTab().location.path).toBe("/user-chosen");
   });
+
+  it("a navigation in the same tab during the handshake is not overwritten", async () => {
+    const open = later<unknown>();
+    handlers.connection_open = () => open.promise;
+    await renderApp();
+    act(() => seedDeadNas());
+    fireEvent.click(reconnectButtons()[1]!);
+    await waitFor(() =>
+      expect(calls.some((c) => c.cmd === "connection_open")).toBe(true),
+    );
+    // 사용자가 그 탭에서 로컬 폴더로 이동 (경로 편집).
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit path" })[1]!);
+    const input = screen.getByRole("textbox", { name: "Go to path" });
+    fireEvent.change(input, { target: { value: "/Users/me/Docs" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() =>
+      expect(rightTab().location.path).toBe("/Users/me/Docs"),
+    );
+    await act(async () =>
+      open.resolve({
+        id: "nas:new",
+        alias: "nas",
+        host_ip: "10.0.0.2",
+        user: "u",
+      }),
+    );
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(rightTab().location.path).toBe("/Users/me/Docs");
+    // 같은 호스트의 다른 탭(왼쪽)은 여전히 새 연결로 복구된다.
+    expect(connId(leftTab().location)).toBe("nas:new");
+  });
 });
