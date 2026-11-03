@@ -128,3 +128,9 @@ it("정렬 버튼은 그리드에서도 현재 기준·방향을 보이고 메�
   expect(activeTab(usePanes.getState(), "right").sortOrder).toBe("desc");
   expect(activeTab(usePanes.getState(), "left").sortKey).not.toBe("name");
 });
+it("보기 바로가기 버튼도 키보드 클릭 시 해당 패널을 먼저 활성화한다", () => {
+  render(<PaneToolbar id="right" />);
+  fireEvent.click(screen.getByRole("button", { name: "Tiles" }));
+  expect(usePanes.getState().activePane).toBe("right");
+  expect(activeTab(usePanes.getState(), "right").viewMode).toBe("tiles");
+});

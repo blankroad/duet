@@ -86,6 +86,7 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
               ? "toolbar.viewGrid"
               : "toolbar.viewTiles",
         ),
+        commandId: `view.${mode}`,
         icon:
           mode === viewMode ? <Check size={14} /> : <span className="w-3.5" />,
         onSelect: () => runHere(() => setViewMode(id, mode)),
@@ -100,6 +101,7 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
       {
         id: "sync",
         label: t(syncBrowse ? "toolbar.syncBrowseOn" : "toolbar.syncBrowseOff"),
+        commandId: "view.syncBrowse",
         icon: syncBrowse ? <Check size={14} /> : <FolderSync size={14} />,
         onSelect: () => runHere(toggleSyncBrowse),
       },
@@ -168,7 +170,7 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
           label={t("toolbar.viewDetails")}
           mode="details"
           current={viewMode}
-          onClick={() => setViewMode(id, "details")}
+          onClick={() => runHere(() => setViewMode(id, "details"))}
         >
           <List size={15} />
         </ViewButton>
@@ -176,7 +178,7 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
           label={t("toolbar.viewGrid")}
           mode="grid"
           current={viewMode}
-          onClick={() => setViewMode(id, "grid")}
+          onClick={() => runHere(() => setViewMode(id, "grid"))}
         >
           <LayoutGrid size={15} />
         </ViewButton>
@@ -184,7 +186,7 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
           label={t("toolbar.viewTiles")}
           mode="tiles"
           current={viewMode}
-          onClick={() => setViewMode(id, "tiles")}
+          onClick={() => runHere(() => setViewMode(id, "tiles"))}
         >
           <Rows3 size={15} />
         </ViewButton>
