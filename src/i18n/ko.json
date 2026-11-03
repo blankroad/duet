@@ -920,7 +920,7 @@
     "forward": "앞으로",
     "forwardTitle": "앞으로 ({{key}})",
     "up": "위로",
-    "upTitle": "상위 폴더로 (Backspace)",
+    "upTitle": "상위 폴더로",
     "refreshTitle": "새로고침 ({{key}})",
     "archiveReadOnlyTitle": "{{name}} (읽기 전용)",
     "updateArchive": "아카이브 업데이트",
