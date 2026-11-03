@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { Server } from "lucide-react";
 import {
   usePanes,
   activeTab,
@@ -185,8 +186,12 @@ export function StatusBar() {
         title={stateLabel ? `${sourceLabel} — ${stateLabel}` : sourceLabel}
         data-testid="statusbar-source"
       >
+        {/* 탭·PathBar 원격 배지와 같은 어휘 — Server 아이콘 + 호스트 라벨, 상태는 StateDot. */}
         {src.kind === "ssh" && (
-          <StateDot state={connState ?? { kind: "disconnected" }} />
+          <>
+            <StateDot state={connState ?? { kind: "disconnected" }} />
+            <Server size={12} className="shrink-0" aria-hidden="true" />
+          </>
         )}
         <span className="min-w-0 truncate">{sourceLabel}</span>
         {!singlePane && (

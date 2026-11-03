@@ -208,7 +208,7 @@ describe("상태바", () => {
   });
 });
 
-const cmd = (id: string, defaultKey?: string): Command => ({
+const cmd = (id: string, defaultKey: string): Command => ({
   id,
   label: id,
   category: "View",
