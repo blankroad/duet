@@ -81,14 +81,17 @@ export function EntryList({
   const paneActive = usePanes((s) => s.activePane === id);
   // 인라인 이름 바꾸기 완료 — 시작할 때의 탭·폴더를 기준으로 반영한다. 그 사이 다른
   // 편집이 시작됐으면 그 편집 상태는 지우지 않는다.
+  // 이 함수는 편집기가 **열릴 때의** 렌더에서 만들어진 것이 불린다(InlineRenameInput 이
+  // 고정). 그래서 tabId·location·renameTarget 은 편집을 시작한 시점 값이다.
   const finishRename = (
     oldName: string,
     renamed: boolean,
     newName?: string,
   ) => {
-    const rt = useUI.getState().renameTarget;
-    const origin = rt?.tabId ?? tabId;
-    if (rt?.pane === id && rt.name === oldName)
+    const session = renameTarget;
+    const origin = session?.tabId ?? tabId;
+    // 그 사이 새 편집이 시작됐으면 그 편집 상태는 지우지 않는다.
+    if (useUI.getState().renameTarget === session)
       useUI.getState().clearInlineRename();
     if (!renamed) return;
     if (newName) followRenamedEntry(id, origin, location, oldName, newName);

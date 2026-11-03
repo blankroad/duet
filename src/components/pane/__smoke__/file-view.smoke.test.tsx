@@ -466,3 +466,43 @@ it("↓ 로 다음 파일을 불러오는 동안 이전 미리보기를 흐리�
   expect(screen.getByText("world")).toBeTruthy();
   vi.useRealTimers();
 });
+
+it("늦게 끝난 이름 바꾸기는 그 사이 다른 탭에서 시작한 편집을 건드리지 않는다", async () => {
+  let finishA!: (v: unknown) => void;
+  fsRename.mockImplementationOnce(
+    () =>
+      new Promise((r) => {
+        finishA = r;
+      }),
+  );
+  render(<Harness />);
+  // A 탭: a.txt → zz.txt, 응답 대기
+  act(() => useUI.getState().requestInlineRename("left", "a.txt", tab().id));
+  const inputA = within(row("a.txt")).getByRole("textbox");
+  fireEvent.change(inputA, { target: { value: "zz.txt" } });
+  fireEvent.keyDown(inputA, { key: "Enter" });
+  // 같은 폴더의 B 탭으로 가서 b.txt 편집 시작
+  act(() => {
+    const p = usePanes.getState();
+    p.openTab("left");
+    p.setEntries(
+      "left",
+      DIR,
+      NAMES.map((n) => file(n)),
+      {
+        pushHistory: false,
+      },
+    );
+    p.setCursor(
+      "left",
+      computeDisplayed(tab()).findIndex((e) => e.name === "b.txt"),
+    );
+    useUI.getState().requestInlineRename("left", "b.txt", tab().id);
+  });
+  const sessionB = useUI.getState().renameTarget;
+  await act(async () => finishA({ status: "ok", data: null }));
+  expect(cursorName()).toBe("b.txt");
+  expect(useUI.getState().renameTarget).toBe(sessionB);
+  expect(within(row("b.txt")).getByRole("textbox")).toBeTruthy();
+});
+

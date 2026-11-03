@@ -35,7 +35,10 @@ export function InlineRenameInput({
 }: {
   target: EntryRef;
   isDir: boolean;
-  /** renamed=true 면 호출부가 커서를 새 이름으로 옮기고 목록을 새로고침. */
+  /**
+   * renamed=true 면 호출부가 커서를 새 이름으로 옮기고 목록을 새로고침. **열릴 때의**
+   * 콜백을 부른다(그 렌더의 탭·폴더·편집 세션을 담고 있다).
+   */
   onDone: (renamed: boolean, newName?: string) => void;
   className?: string;
 }) {
@@ -44,6 +47,10 @@ export function InlineRenameInput({
   const [invalid, setInvalid] = useState(false);
   const ref = useRef<HTMLInputElement>(null);
   const doneRef = useRef(false);
+  // 이 편집 세션 — 열릴 때의 renameTarget 과 완료 콜백을 고정한다. 응답을 기다리는 사이
+  // 다른 탭·항목에서 새 편집이 시작돼도 이 세션의 완료가 그쪽을 건드리지 않게.
+  const sessionRef = useRef(useUI.getState().renameTarget);
+  const onDoneRef = useRef(onDone);
   const pendingRef = useRef(false);
 
   useEffect(() => {
@@ -56,7 +63,11 @@ export function InlineRenameInput({
   // 언마운트가 blur 없이 일어나는 경로(가상 스크롤 이탈 등) 커버.
   useEffect(
     () => () => {
-      if (!doneRef.current) useUI.getState().clearInlineRename();
+      if (
+        !doneRef.current &&
+        useUI.getState().renameTarget === sessionRef.current
+      )
+        useUI.getState().clearInlineRename();
     },
     [],
   );
@@ -64,7 +75,7 @@ export function InlineRenameInput({
   const finish = (renamed: boolean, newName?: string) => {
     if (doneRef.current) return;
     doneRef.current = true;
-    onDone(renamed, newName);
+    onDoneRef.current(renamed, newName);
   };
 
   /**
