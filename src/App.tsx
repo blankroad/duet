@@ -50,12 +50,13 @@ import { useContextMenu, type MenuEntry } from "@/stores/contextMenu";
 import { openShellMenu } from "@/lib/shellMenu";
 import { buildEntryMenu, buildEmptyMenu, folderName } from "@/lib/entryMenu";
 import { calcDirSizes } from "@/lib/dirSize";
-import { beginTabNav } from "@/lib/tabNav";
+import { beginTabNav, peekTabNav } from "@/lib/tabNav";
 import { toggleDropTray } from "@/lib/dropTray";
 import {
   childLocation,
   parentPath,
   parentLocation,
+  sameLocation,
   sameLocationDir,
 } from "@/lib/entryDnd";
 import { canExtractArchive } from "@/lib/archive";
@@ -200,7 +201,12 @@ function App() {
     async (
       id: PaneId,
       path: string,
-      opts: { pushHistory?: boolean; focusName?: string } = {},
+      opts: {
+        pushHistory?: boolean;
+        focusName?: string;
+        /** 같은 폴더 다시 읽기 — 진행 중인 이동을 무효화하지 않는다 (tabNav). */
+        refresh?: boolean;
+      } = {},
     ) => {
       const state = usePanes.getState();
       const from = activeTab(state, id);
@@ -211,10 +217,18 @@ function App() {
       // 로드 중 표시 — 느린 SSH ls 에서 이전 목록이 그대로 보여 "무반응"으로
       // 오인되는 것 방지. setEntries 가 성공 시 자동 해제.
       state.setLoading(id, true, tabId);
-      const current = beginTabNav(tabId); // 같은 탭의 더 새 이동이 이기게
+      // 같은 탭의 더 새 이동이 이기게. 새로고침은 세대를 올리지 않는다.
+      const current = opts.refresh ? peekTabNav(tabId) : beginTabNav(tabId);
       try {
         const entries = await listEntries(location);
         if (!current()) return; // 이 탭에서 더 새 이동이 시작됨
+        // 새로고침 응답은 그 탭이 아직 그 폴더일 때만 — 그사이 끝난 이동을
+        // 옛 폴더 목록으로 되돌리지 않게.
+        const now = usePanes
+          .getState()
+          .panes[id].tabs.find((t) => t.id === tabId);
+        if (opts.refresh && (!now || !sameLocation(now.location, location)))
+          return;
         state.setEntries(id, location, entries, {
           tabId,
           pushHistory: opts.pushHistory ?? true,
@@ -223,8 +237,11 @@ function App() {
             : {}),
         });
         // navigate 성공 후 watcher 갱신. 실패는 silent — fs:changed 알림 안 옴
-        // 정도의 영향. (사용자가 명시 새로고침으로 우회 가능.)
-        if (!isVirtualTrash(location)) void commands.paneWatchSet(id, location);
+        // 정도의 영향. (사용자가 명시 새로고침으로 우회 가능.) 감시자는 패널당
+        // 하나 — 그 탭이 지금 보이는 탭일 때만 옮긴다 (숨은 탭의 늦은 이동 제외).
+        const p = usePanes.getState().panes[id];
+        if (!isVirtualTrash(location) && p.tabs[p.activeTabIndex]?.id === tabId)
+          void commands.paneWatchSet(id, location);
         if (opts.pushHistory !== false) {
           if (!isVirtualTrash(location)) {
             recordRecent(location);
@@ -356,6 +373,7 @@ function App() {
         // navigateTo(listEntries)가 trash 목록으로 채운다.
         const r = await commands.trashLocation(src);
         if (r.status === "error") {
+          if (current()) usePanes.getState().setLoading(id, false, startTab.id);
           showToast(
             i18n.t("toast.trashUnavailable", { err: formatErr(r.error) }),
             "error",
@@ -497,6 +515,9 @@ function App() {
           // 1차는 암호 없이 — 암호 zip 이면 NeedPassword → 암호 입력 다이얼로그.
           const r = await commands.fsArchiveOpenForBrowse(archive, null);
           if (r.status === "error") {
+            // 이 열기가 앞선 이동을 대체했으니 그 로딩 표시를 이 작업이 끝낸다 (더
+            // 새 이동이 있으면 그쪽 몫).
+            if (current()) usePanes.getState().setLoading(id, false, tab.id);
             if (r.error.kind === "NeedPassword") {
               useUIDialogs.getState().open({
                 kind: "browse-password",
@@ -554,7 +575,7 @@ function App() {
       // 오류 토스트만 뜨던 것을 막는다. 패널 배너의 "재연결"이 그 경로로 연다.
       if (isRestoredRemote(tab.location)) return;
       // 새로고침은 같은 위치 재로드 — 히스토리(뒤로가기) 에 중복 push 하지 않음.
-      navigate(id, tab.location.path, { pushHistory: false });
+      navigate(id, tab.location.path, { pushHistory: false, refresh: true });
     },
     [navigate],
   );

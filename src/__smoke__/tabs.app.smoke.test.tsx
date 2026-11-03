@@ -27,6 +27,10 @@ const listing: Record<string, unknown[]> = {
 /** 경로별 응답 지연(ms) — 늦은 응답 시나리오용. */
 const delay: Record<string, number> = { "/home/slow": 250 };
 const listCalls: string[] = [];
+/** paneWatchSet 호출 기록 [pane, path] — 감시자가 보이는 탭을 따라가는지. */
+const watchCalls: Array<[string, string]> = [];
+/** true 면 아카이브 열기가 실패한다. */
+const archive = { fail: false };
 
 vi.mock("@tauri-apps/plugin-os", () => ({
   platform: () => "linux",
@@ -87,9 +91,19 @@ vi.mock("@/types/bindings", () => {
         return async () => ({ status: "ok", data: null });
       if (k === "settingsGet") return async () => ({ status: "ok", data: {} });
       // 아카이브 추출은 느리다 — 그 사이 탭 조작 시나리오용.
+      if (k === "paneWatchSet")
+        return async (pane: string, loc: { path: string }) => {
+          watchCalls.push([pane, loc.path]);
+          return { status: "ok", data: null };
+        };
       if (k === "fsArchiveOpenForBrowse")
         return async () => {
           await new Promise((r) => setTimeout(r, 200));
+          if (archive.fail)
+            return {
+              status: "error",
+              error: { kind: "Io", message: "bad archive" },
+            };
           return {
             status: "ok",
             data: { source: { kind: "local" }, path: "/tmp/ex" },
@@ -161,6 +175,8 @@ function cursorTo(name: string) {
 }
 
 beforeEach(() => {
+  archive.fail = false;
+  watchCalls.length = 0;
   clearClosedTabs();
   useToast.getState().clear();
 });
@@ -339,5 +355,82 @@ describe("App — 긴 아카이브 열기 중 탭 조작", () => {
     expect(t.loading).toBe(false);
     expect(t.archive).toBeUndefined();
     expect(t.entries.map((e) => e.name)).toEqual(["o.txt"]);
+  });
+});
+
+describe("App — 새로고침은 진행 중인 이동을 취소하지 않는다", () => {
+  const openOther = async () => {
+    act(() =>
+      usePanes.getState().openTab("left", {
+        source: { kind: "local" },
+        path: "/other",
+      }),
+    );
+    await wait(60);
+    act(() => usePanes.getState().selectTab("left", 0));
+    await wait(60);
+  };
+
+  it("추출 중 Ctrl+R 을 눌러도 아카이브가 열린다", async () => {
+    await boot();
+    cursorTo("x.zip");
+    key({ key: "Enter", code: "Enter" });
+    await wait(50);
+    key({ key: "r", code: "KeyR", ctrlKey: true });
+    await wait(450);
+    const t = activeTab(usePanes.getState(), "left");
+    expect(String(t.location.path)).toBe("/tmp/ex");
+    expect(t.archive?.label).toBe("x.zip");
+  });
+
+  it("추출 중 다른 탭에 갔다 돌아와도 아카이브가 열린다", async () => {
+    await boot();
+    await openOther();
+    cursorTo("x.zip");
+    key({ key: "Enter", code: "Enter" });
+    key({ key: "Tab", code: "Tab", ctrlKey: true });
+    await wait(40);
+    key({ key: "Tab", code: "Tab", ctrlKey: true, shiftKey: true });
+    await wait(450);
+    expect(L().activeTabIndex).toBe(0);
+    expect(String(L().tabs[0]!.location.path)).toBe("/tmp/ex");
+  });
+
+  it("느린 폴더를 여는 중 Ctrl+R 을 눌러도 그 폴더로 간다", async () => {
+    await boot();
+    cursorTo("slow");
+    key({ key: "Enter", code: "Enter" });
+    await wait(20);
+    key({ key: "r", code: "KeyR", ctrlKey: true });
+    await wait(450);
+    const t = activeTab(usePanes.getState(), "left");
+    expect(String(t.location.path)).toBe("/home/slow");
+    expect(t.loading).toBe(false);
+  });
+
+  it("숨은 탭의 늦은 이동은 감시자를 옮기지 않는다", async () => {
+    await boot();
+    await openOther();
+    cursorTo("slow");
+    key({ key: "Enter", code: "Enter" });
+    key({ key: "Tab", code: "Tab", ctrlKey: true });
+    await wait(450);
+    // 숨은 탭에도 결과는 들어간다
+    expect(String(L().tabs[0]!.location.path)).toBe("/home/slow");
+    const lastLeft = watchCalls.filter(([p]) => p === "left").at(-1);
+    expect(lastLeft?.[1]).toBe("/other");
+  });
+
+  it("앞선 이동을 대체한 아카이브 열기가 실패해도 로딩 표시가 끝난다", async () => {
+    await boot();
+    archive.fail = true;
+    cursorTo("slow");
+    key({ key: "Enter", code: "Enter" });
+    cursorTo("x.zip");
+    key({ key: "Enter", code: "Enter" });
+    await wait(450);
+    const t = activeTab(usePanes.getState(), "left");
+    expect(t.loading).toBe(false);
+    expect(useToast.getState().toasts.at(-1)?.kind).toBe("error");
   });
 });
