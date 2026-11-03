@@ -41,11 +41,18 @@ export function cursorTarget(): PreviewTarget | null {
   };
 }
 
+type ReadyState = {
+  phase: "ready";
+  name: string;
+  location: Location;
+  data: PreviewData;
+};
 type LoadState =
   | { phase: "empty" }
-  | { phase: "loading"; name: string }
+  /** `prev` — 직전에 보이던 미리보기. 새 것이 올 때까지 흐리게 남겨 깜빡임을 없앤다. */
+  | { phase: "loading"; name: string; prev?: ReadyState }
   | { phase: "error"; name: string; message: string }
-  | { phase: "ready"; name: string; location: Location; data: PreviewData };
+  | ReadyState;
 
 /** 활성 패널 cursor + location 변화를 추적하는 구독 키. */
 export function cursorPreviewDep(
@@ -92,7 +99,15 @@ export function usePreviewLoad(target: PreviewTarget | null): LoadState {
       return;
     }
     let cancelled = false;
-    setState({ phase: "loading", name: nm });
+    setState((cur) => ({
+      phase: "loading",
+      name: nm,
+      ...(cur.phase === "ready"
+        ? { prev: cur }
+        : cur.phase === "loading" && cur.prev
+          ? { prev: cur.prev }
+          : {}),
+    }));
     const t = setTimeout(async () => {
       // IPC 자체가 reject 해도(채널·직렬화 오류) 로딩에 갇히지 않게 오류로 전환.
       try {
@@ -120,13 +135,28 @@ function PreviewBody({ state }: { state: LoadState }) {
   const { t } = useTranslation();
   if (state.phase === "empty")
     return <Centered>{t("preview.selectFile")}</Centered>;
-  if (state.phase === "loading")
+  if (state.phase === "loading") {
     // 늦게 나타나게(200ms) — 빠른 로컬에서 ↑↓ 할 때 "불러오는 중"이 깜빡이지 않도록.
-    return (
-      <Centered>
-        <span className="animate-fade-in-late">{t("preview.loading")}</span>
-      </Centered>
+    const notice = (
+      <span className="animate-fade-in-late">{t("preview.loading")}</span>
     );
+    if (!state.prev) return <Centered>{notice}</Centered>;
+    // 직전 미리보기를 흐리게 남겨 둔다 — 본문이 비었다 다시 차는 깜빡임 대신.
+    return (
+      <div className="relative h-full" aria-busy="true">
+        <div className="h-full opacity-40">
+          <PreviewView
+            name={state.prev.name}
+            location={state.prev.location}
+            data={state.prev.data}
+          />
+        </div>
+        <div className="pointer-events-none absolute inset-0">
+          <Centered>{notice}</Centered>
+        </div>
+      </div>
+    );
+  }
   if (state.phase === "error")
     return <Centered tone="danger">{state.message}</Centered>;
   return (

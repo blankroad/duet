@@ -440,3 +440,29 @@ it("폴더 우클릭 '폴더에 붙여넣기'는 그 폴더 안으로 계획한�
     expect.objectContaining({ path: "/smoke/box" }),
   );
 });
+
+it("↓ 로 다음 파일을 불러오는 동안 이전 미리보기를 흐리게 남겨 둔다", async () => {
+  vi.useFakeTimers();
+  render(<Harness withPreview />);
+  await act(async () => vi.advanceTimersByTimeAsync(200));
+  expect(screen.getByText("hello")).toBeTruthy();
+  let release!: (v: unknown) => void;
+  fsReadPreview.mockImplementation(
+    () =>
+      new Promise((r) => {
+        release = r;
+      }),
+  );
+  fireEvent.keyDown(window, { key: "ArrowDown" });
+  await act(async () => vi.advanceTimersByTimeAsync(200));
+  // 새 응답 전: 이전 본문이 비지 않고 남아 있다(흐리게).
+  expect(screen.getByText("hello").closest("[aria-busy]")).toBeTruthy();
+  await act(async () =>
+    release({
+      status: "ok",
+      data: { kind: "text", text: "world", truncated: false, total_size: 5 },
+    }),
+  );
+  expect(screen.getByText("world")).toBeTruthy();
+  vi.useRealTimers();
+});
