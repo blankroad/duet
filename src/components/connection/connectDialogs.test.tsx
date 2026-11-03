@@ -315,3 +315,24 @@ describe("AdHocConnectDialog keyboard", () => {
     expect(m.connectionOpenAdhoc).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("pane picker", () => {
+  it("exposes the selected pane to assistive tech and defaults to the given pane", () => {
+    render(
+      <ConnectionDialog
+        alias="nas"
+        onClose={vi.fn()}
+        onConnected={vi.fn()}
+        defaultPane="right"
+      />,
+    );
+    const right = screen.getByRole("button", {
+      name: "dialog.connection.paneRight",
+    });
+    const left = screen.getByRole("button", {
+      name: "dialog.connection.paneLeft",
+    });
+    expect(right.getAttribute("aria-pressed")).toBe("true");
+    expect(left.getAttribute("aria-pressed")).toBe("false");
+  });
+});

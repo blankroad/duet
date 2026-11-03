@@ -538,6 +538,7 @@ function PaneRadio({
   return (
     <button
       type="button"
+      aria-pressed={selected}
       onClick={() => onChange(value)}
       className={
         "flex-1 rounded border px-2 py-1 text-base " +
