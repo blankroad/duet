@@ -45,21 +45,33 @@ function rebindLocation(
   return { ...loc, source };
 }
 
+/**
+ * 탭의 현재 위치·뒤로가기 기록·아카이브 복귀 위치를 **각각** 다시 묶는다 — 지금은
+ * 로컬을 보고 있어도 기록 속 SSH 위치가 죽은 연결이면 뒤로 가기가 실패했다.
+ */
 function rebindTab(tab: TabState, alias: string, source: SshSource): TabState {
   const location = rebindLocation(tab.location, alias, source);
-  if (location === tab.location) return tab;
-  const stack = tab.history.stack.map((l) => rebindLocation(l, alias, source));
-  const archive = tab.archive
-    ? {
-        ...tab.archive,
-        exitTo: rebindLocation(tab.archive.exitTo, alias, source),
-      }
-    : tab.archive;
+  let historyChanged = false;
+  const stack = tab.history.stack.map((l) => {
+    const next = rebindLocation(l, alias, source);
+    if (next !== l) historyChanged = true;
+    return next;
+  });
+  const exitTo = tab.archive
+    ? rebindLocation(tab.archive.exitTo, alias, source)
+    : undefined;
+  const archiveChanged =
+    tab.archive !== undefined && exitTo !== tab.archive.exitTo;
+  if (location === tab.location && !historyChanged && !archiveChanged)
+    return tab;
   return {
     ...tab,
     location,
-    history: { ...tab.history, stack },
-    archive,
+    history: historyChanged ? { ...tab.history, stack } : tab.history,
+    archive:
+      tab.archive && archiveChanged && exitTo
+        ? { ...tab.archive, exitTo }
+        : tab.archive,
   };
 }
 
@@ -86,7 +98,9 @@ export function rebindHostTabs(
         if (next !== t) {
           touched = true;
           count += 1;
-          if (i === p.activeTabIndex) changed.push(id);
+          // 보이는 목록을 다시 읽어야 하는 건 현재 위치가 바뀐 활성 탭뿐.
+          if (i === p.activeTabIndex && next.location !== t.location)
+            changed.push(id);
         }
         return next;
       });
@@ -103,11 +117,16 @@ export function rebindHostTabs(
  */
 export function pruneDeadConnections(alias: string): void {
   const { active, removeActive } = useConnections.getState();
+  // 현재 위치뿐 아니라 뒤로가기 기록·아카이브 복귀 위치가 참조하는 id 도 "사용 중".
   const used = new Set<string>();
+  const mark = (l: Location) => {
+    if (l.source.kind === "ssh") used.add(l.source.connection_id);
+  };
   for (const p of Object.values(usePanes.getState().panes)) {
     for (const t of p.tabs) {
-      if (t.location.source.kind === "ssh")
-        used.add(t.location.source.connection_id);
+      mark(t.location);
+      t.history.stack.forEach(mark);
+      if (t.archive) mark(t.archive.exitTo);
     }
   }
   for (const c of Object.values(active)) {

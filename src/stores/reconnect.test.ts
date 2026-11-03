@@ -121,6 +121,62 @@ describe("rebindHostTabs", () => {
   });
 });
 
+describe("rebindHostTabs history", () => {
+  it("rebinds old SSH history even when the tab currently shows local files", () => {
+    useConnections.setState({
+      active: { "nas:old": conn("nas:old", "nas", "error") },
+    });
+    const [tab] = tabsOf([local("/tmp")]);
+    usePanes.setState({
+      panes: {
+        left: {
+          activeTabIndex: 0,
+          tabs: [
+            {
+              ...tab!,
+              history: {
+                stack: [ssh("nas:old", "/srv/old"), local("/tmp")],
+                index: 1,
+              },
+            },
+          ],
+        },
+        right: { activeTabIndex: 0, tabs: tabsOf([local("/")]) },
+      },
+    });
+    const r = rebindHostTabs("nas", fresh);
+    pruneDeadConnections("nas");
+    expect(r).toEqual({ panes: [], tabs: 1 });
+    expect(usePanes.getState().back("left")?.source).toEqual(fresh);
+  });
+
+  it("keeps entries still referenced only from history", () => {
+    useConnections.setState({
+      active: { "web:old": conn("web:old", "web", "error") },
+    });
+    const [tab] = tabsOf([local("/tmp")]);
+    usePanes.setState({
+      panes: {
+        left: {
+          activeTabIndex: 0,
+          tabs: [
+            {
+              ...tab!,
+              history: {
+                stack: [ssh("web:old", "/w"), local("/tmp")],
+                index: 1,
+              },
+            },
+          ],
+        },
+        right: { activeTabIndex: 0, tabs: tabsOf([local("/")]) },
+      },
+    });
+    pruneDeadConnections("web");
+    expect(useConnections.getState().active["web:old"]).toBeDefined();
+  });
+});
+
 describe("pruneDeadConnections", () => {
   it("drops dead entries of the alias that no tab uses", () => {
     useConnections.setState({
