@@ -757,6 +757,7 @@
     "connectedListFailed": "{{alias}} 연결됨, 목록 조회 실패:\n{{failures}}",
     "reconnectedTabs": "{{alias}} 다시 연결됨 — 탭 {{count}}개 복구",
     "reconnectFailed": "{{alias}} 에 다시 연결하지 못했습니다: {{err}}",
+    "reconnectInProgress": "{{alias}} 에 다시 연결하는 중입니다 — 잠시 후 다시 시도하세요",
     "symlinkFailed": "심볼릭 링크 실패: {{err}}",
     "threeWayApplyFailed": "3-way 적용 실패: {{err}}",
     "mergeFailed": "병합 실패: {{err}}",

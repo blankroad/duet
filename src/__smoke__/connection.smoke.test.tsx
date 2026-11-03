@@ -36,6 +36,9 @@ import { useSavedHosts } from "@/stores/savedHosts";
 import { useVault } from "@/stores/vault";
 import type { Location } from "@/types/bindings";
 
+/** 매 테스트를 같은 빈 레이아웃에서 시작 (store 는 모듈 전역이라 테스트 사이에 남는다). */
+const initialPanes = usePanes.getState();
+
 type Payload = Record<string, unknown> | undefined;
 type Handler = (payload: Payload) => unknown;
 
@@ -132,6 +135,13 @@ async function renderApp() {
       "nas",
     ),
   );
+  // 양쪽 패널의 홈 목록 적용까지 — 늦게 끝난 부트스트랩 이동이 시드한 탭을 덮지 않게.
+  await waitFor(() => {
+    const { left, right } = usePanes.getState().panes;
+    expect(left.tabs[0]!.location.path).toBe("/Users/me");
+    expect(right.tabs[0]!.location.path).toBe("/Users/me");
+    expect(left.tabs[0]!.loading || right.tabs[0]!.loading).toBe(false);
+  });
   await act(async () => {
     await new Promise((r) => setTimeout(r, 50));
   });
@@ -142,6 +152,17 @@ const reconnectButtons = () =>
   screen.queryAllByRole("button", { name: /^Reconnect$/ });
 
 beforeEach(async () => {
+  // 앞 테스트가 저장한 세션(탭 레이아웃)이 복원되면 부트스트랩 이동이 늦게 끝나
+  // 시드한 탭을 덮는다 — 매번 빈 세션으로 시작.
+  try {
+    localStorage.clear();
+  } catch {
+    // jsdom 저장소가 없으면 무시
+  }
+  usePanes.setState({
+    panes: initialPanes.panes,
+    activePane: initialPanes.activePane,
+  });
   await i18n.changeLanguage("en");
   handlers = {};
   calls = [];
@@ -317,5 +338,224 @@ describe("connection smoke: banner reconnect", () => {
     );
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(reconnectButtons()).toHaveLength(2);
+  });
+});
+
+/** 지연 응답 — 테스트가 원하는 순간에 IPC 결과를 돌려준다. */
+function later<T>() {
+  let resolve!: (v: T) => void;
+  let reject!: (e: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+const listedPath = (p: Payload) => (p?.location as Location | undefined)?.path;
+const listedConn = (p: Payload) => {
+  const l = p?.location as Location | undefined;
+  return l ? connId(l) : "";
+};
+
+describe("connection smoke: reconnect races", () => {
+  it("two hosts reconnecting at once each return to their own path", async () => {
+    const opens: Record<string, ReturnType<typeof later<unknown>>> = {};
+    handlers.ssh_config_hosts = () =>
+      ["nas", "web"].map((alias) => ({
+        alias,
+        hostname: `${alias}.lan`,
+        port: 22,
+        user: "u",
+        has_proxy_jump: false,
+      }));
+    handlers.connection_open = (p) => {
+      const d = later<unknown>();
+      opens[String(p?.alias)] = d;
+      return d.promise;
+    };
+    await renderApp();
+    act(() => {
+      useConnections.setState({
+        active: {
+          "nas:old": {
+            id: "nas:old",
+            alias: "nas",
+            host_ip: "10.0.0.1",
+            user: "u",
+            state: { kind: "error", message: "x" },
+          },
+          "web:old": {
+            id: "web:old",
+            alias: "web",
+            host_ip: "10.0.0.1",
+            user: "u",
+            state: { kind: "error", message: "x" },
+          },
+        },
+      });
+      usePanes.setState({
+        panes: {
+          left: {
+            activeTabIndex: 0,
+            tabs: tabsOf([ssh("nas:old", "/srv/nas")]),
+          },
+          right: {
+            activeTabIndex: 0,
+            tabs: tabsOf([ssh("web:old", "/srv/web")]),
+          },
+        },
+      });
+    });
+    const [l, r] = reconnectButtons();
+    fireEvent.click(l!);
+    fireEvent.click(r!);
+    await waitFor(() =>
+      expect(Object.keys(opens).sort()).toEqual(["nas", "web"]),
+    );
+    await act(async () =>
+      opens.nas!.resolve({
+        id: "nas:new",
+        alias: "nas",
+        host_ip: "10.0.0.2",
+        user: "u",
+      }),
+    );
+    await act(async () =>
+      opens.web!.resolve({
+        id: "web:new",
+        alias: "web",
+        host_ip: "10.0.0.3",
+        user: "u",
+      }),
+    );
+    await waitFor(() => {
+      expect(connId(leftTab().location)).toBe("nas:new");
+      expect(connId(rightTab().location)).toBe("web:new");
+    });
+    expect(leftTab().location.path).toBe("/srv/nas");
+    expect(rightTab().location.path).toBe("/srv/web");
+  });
+
+  it("closing the original tab while its listing loads leaves the remaining tab alone", async () => {
+    const listing = later<unknown>();
+    handlers.connection_open = () => ({
+      id: "nas:new",
+      alias: "nas",
+      host_ip: "10.0.0.2",
+      user: "u",
+    });
+    handlers.list_directory = (p) =>
+      listedConn(p) === "nas:new" ? listing.promise : [];
+    await renderApp();
+    act(() => {
+      useConnections.setState({
+        active: {
+          "nas:old": {
+            id: "nas:old",
+            alias: "nas",
+            host_ip: "10.0.0.1",
+            user: "u",
+            state: { kind: "error", message: "x" },
+          },
+        },
+      });
+      usePanes.setState({
+        panes: {
+          left: { activeTabIndex: 0, tabs: tabsOf([local("/tmp")]) },
+          right: {
+            activeTabIndex: 0,
+            tabs: tabsOf([ssh("nas:old", "/srv/data"), local("/spare-local")]),
+          },
+        },
+      });
+    });
+    fireEvent.click(reconnectButtons()[0]!);
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (c) =>
+            c.cmd === "list_directory" && listedConn(c.payload) === "nas:new",
+        ),
+      ).toBe(true),
+    );
+    act(() => usePanes.getState().closeTab("right", 0));
+    await act(async () => listing.resolve([]));
+    expect(rightTab().location).toEqual(local("/spare-local"));
+    expect(calls.some((c) => c.cmd === "ssh_home_directory")).toBe(false);
+  });
+
+  it("after the user switches tabs, a failed listing does not start the home fallback", async () => {
+    const listing = later<unknown>();
+    handlers.connection_open = () => ({
+      id: "nas:new",
+      alias: "nas",
+      host_ip: "10.0.0.2",
+      user: "u",
+    });
+    handlers.list_directory = (p) =>
+      listedConn(p) === "nas:new" && listedPath(p) === "/srv/data"
+        ? listing.promise
+        : [];
+    await renderApp();
+    act(() => seedDeadNas());
+    // 왼쪽은 로컬로 바꿔 둬서 오른쪽 배너만 남긴다.
+    act(() =>
+      usePanes.setState((s) => ({
+        panes: {
+          ...s.panes,
+          left: { activeTabIndex: 0, tabs: tabsOf([local("/Users/me")]) },
+        },
+      })),
+    );
+    fireEvent.click(reconnectButtons()[0]!);
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (c) =>
+            c.cmd === "list_directory" && listedPath(c.payload) === "/srv/data",
+        ),
+      ).toBe(true),
+    );
+    act(() => usePanes.getState().selectTab("right", 0)); // 로컬 /tmp 탭으로
+    await act(async () =>
+      listing.reject({ kind: "NotFound", message: "gone" }),
+    );
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(rightTab().location).toEqual(local("/tmp"));
+    expect(calls.some((c) => c.cmd === "ssh_home_directory")).toBe(false);
+  });
+
+  it("follows the original tab when it is moved to the other pane mid-reconnect", async () => {
+    const open = later<unknown>();
+    handlers.connection_open = () => open.promise;
+    await renderApp();
+    act(() => seedDeadNas());
+    fireEvent.click(reconnectButtons()[1]!);
+    await waitFor(() =>
+      expect(calls.some((c) => c.cmd === "connection_open")).toBe(true),
+    );
+    act(() => {
+      usePanes.getState().setActivePane("right");
+      usePanes.getState().moveActiveTabToOther();
+    });
+    await act(async () =>
+      open.resolve({
+        id: "nas:new",
+        alias: "nas",
+        host_ip: "10.0.0.2",
+        user: "u",
+      }),
+    );
+    await waitFor(() => {
+      const all = [
+        ...usePanes.getState().panes.left.tabs,
+        ...usePanes.getState().panes.right.tabs,
+      ].filter((t) => t.location.path === "/srv/data");
+      expect(all).toHaveLength(1);
+      expect(connId(all[0]!.location)).toBe("nas:new");
+    });
   });
 });

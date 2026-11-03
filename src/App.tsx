@@ -183,6 +183,27 @@ import type {
  * - IPC는 App에서 일괄 처리 → Pane은 dumb
  * - 다크/라이트 모드는 CSS만 (Task 13에서 토글 추가 가능)
  */
+/**
+ * 연결 성공 후 갈 곳 — 호스트-인식 북마크/즐겨찾기/배너 재연결.
+ * `tabId` 가 있으면(배너 재연결) 그 **탭**으로 돌아간다.
+ */
+interface ConnectNav {
+  alias: string;
+  path: string;
+  pane: PaneId;
+  tabId?: string;
+}
+
+/** 탭 id 로 탭 찾기 — 재연결 중 사용자가 탭을 반대 패널로 옮겼을 수 있다. */
+function findTab(tabId: string): { pane: PaneId; index: number } | null {
+  const { panes } = usePanes.getState();
+  for (const pane of ["left", "right"] as const) {
+    const index = panes[pane].tabs.findIndex((t) => t.id === tabId);
+    if (index >= 0) return { pane, index };
+  }
+  return null;
+}
+
 function App() {
   const { call: listDirectory } = useTauri("listDirectory");
   const showToast = useToast((s) => s.show);
@@ -1505,16 +1526,12 @@ function App() {
     reconnect: ReconnectInfo | null;
   }>({ pane: "left", reconnect: null });
   /**
-   * 연결 성공 후 이동할 곳 — 호스트-인식 북마크/즐겨찾기/배너 재연결이 세팅.
-   * `tabId` 가 있으면(배너 재연결) 그 패널의 **그 탭**으로 돌아간다. 대화상자를
-   * 닫으면 지운다(취소한 경로가 다음 연결에 끼어들지 않게).
+   * **대화상자를 거치는** 연결의 갈 곳 — 대화상자가 onConnected 를 부를 때 꺼낸다.
+   * 대화상자 없이 끝나는 배너 재연결은 이 ref 를 쓰지 않고 목표를 직접 넘긴다
+   * (공유 ref 를 await 너머로 들고 있으면 그사이 다른 연결 흐름이 덮어썼다).
+   * 대화상자를 닫으면 지운다(취소한 경로가 다음 연결에 끼어들지 않게).
    */
-  const pendingNav = useRef<{
-    alias: string;
-    path: string;
-    pane: PaneId;
-    tabId?: string;
-  } | null>(null);
+  const pendingNav = useRef<ConnectNav | null>(null);
 
   // ad-hoc connect 다이얼로그 (Sidebar + 버튼, saved host 더블클릭, alias 폴백)
   const [adHocOpen, setAdHocOpen] = useState(false);
@@ -1600,10 +1617,15 @@ function App() {
         });
         return;
       }
+      if (hostAlias in useConnections.getState().reconnecting) {
+        // 배너 재연결이 진행 중 — 대화상자를 하나 더 띄우면 세션이 둘 생긴다.
+        showToast(i18n.t("toast.reconnectInProgress", { alias: hostAlias }));
+        return;
+      }
       pendingNav.current = { alias: hostAlias, path, pane };
       connectToAlias(hostAlias, { pane });
     },
-    [navigateTo, connectToAlias],
+    [navigateTo, connectToAlias, showToast],
   );
 
   const onAliasExecute = useCallback(
@@ -1653,11 +1675,15 @@ function App() {
         })();
         return;
       }
+      if (alias in useConnections.getState().reconnecting) {
+        showToast(i18n.t("toast.reconnectInProgress", { alias }));
+        return;
+      }
       pendingNav.current = null;
       setConnectTarget({ pane });
       setDialogAlias(alias);
     },
-    [navigateTo, setConnectTarget],
+    [navigateTo, setConnectTarget, showToast],
   );
 
   // 팔레트/동적 커맨드용 — 활성 패널 기준 래퍼.
@@ -1696,7 +1722,7 @@ function App() {
    *    가려던 경로가 실패했을 때만.
    */
   const onConnected = useCallback(
-    async (paneId: PaneId, dto: ConnectionDto) => {
+    async (paneId: PaneId, dto: ConnectionDto, nav?: ConnectNav) => {
       const ssh: SshSource = {
         kind: "ssh",
         connection_id: dto.id,
@@ -1706,58 +1732,81 @@ function App() {
         user: dto.user,
       };
       const alias = dto.alias;
-      const pending =
+      // 대화상자 경로의 목표는 자기 alias 일 때만 꺼내 쓴다(다른 요청 것은 건드리지 않음).
+      const fromDialog =
         pendingNav.current?.alias === alias ? pendingNav.current : null;
-      pendingNav.current = null;
+      if (fromDialog) pendingNav.current = null;
+      const pending = nav ?? fromDialog;
 
       const rebound = rebindHostTabs(alias, ssh);
       pruneDeadConnections(alias);
 
-      const pane = pending?.tabId ? pending.pane : paneId;
+      // 착지할 탭을 정하고 끝까지 그 탭에만 쓴다. 배너 재연결이면 버튼이 있던 탭
+      // (반대 패널로 옮겼으면 따라감, 닫혔으면 새 탭), 아니면 대상 패널의 현재 탭.
+      let pane = pending?.tabId ? pending.pane : paneId;
+      let targetId: string;
+      const st = usePanes.getState();
       if (pending?.tabId) {
-        const st = usePanes.getState();
-        const idx = st.panes[pane].tabs.findIndex(
-          (t) => t.id === pending.tabId,
-        );
-        // 그 탭이 닫혔으면 다른 탭을 덮어쓰지 않고 새 탭으로 연다.
-        if (idx < 0) st.openTab(pane, { source: ssh, path: pending.path });
-        else if (idx !== st.panes[pane].activeTabIndex) st.selectTab(pane, idx);
+        const found = findTab(pending.tabId);
+        if (found) {
+          pane = found.pane;
+          if (found.index !== st.panes[pane].activeTabIndex)
+            st.selectTab(pane, found.index);
+          targetId = pending.tabId;
+        } else {
+          st.openTab(pane, { source: ssh, path: pending.path });
+          targetId = activeTab(usePanes.getState(), pane).id;
+        }
+      } else {
+        targetId = activeTab(st, pane).id;
       }
       // 반대 패널의 보이는 탭도 같은 호스트였으면 새 연결로 다시 읽는다.
       for (const other of rebound.panes) if (other !== pane) onRefresh(other);
 
+      /** 사용자가 그사이 탭을 바꾸거나 다른 곳으로 이동했나 — 그러면 손대지 않는다. */
+      const stillTarget = () =>
+        activeTab(usePanes.getState(), pane).id === targetId;
       const failures: string[] = [];
-      /** 이 경로를 패널에 연다. 그사이 사용자가 다른 곳으로 이동했으면 덮지 않는다. */
-      const land = async (path: string): Promise<boolean> => {
+      /** 이 경로를 목표 탭에 연다. stale = 사용자가 그사이 움직였음 → 흐름 전체 중단. */
+      const land = async (
+        path: string,
+      ): Promise<"applied" | "failed" | "stale"> => {
+        if (!stillTarget()) return "stale";
         const loc: Location = { source: ssh, path };
         const seq = ++navSeq.current[pane];
+        const current = () => navSeq.current[pane] === seq && stillTarget();
         try {
           const entries = await listEntries(loc);
-          if (navSeq.current[pane] === seq) {
-            usePanes.getState().setEntries(pane, loc, entries);
-            void commands.paneWatchSet(pane, loc);
-          }
-          return true;
+          if (!current()) return "stale";
+          usePanes.getState().setEntries(pane, loc, entries);
+          void commands.paneWatchSet(pane, loc);
+          return "applied";
         } catch (e) {
+          if (!current()) return "stale";
           // useTauri throws DuetError 또는 IpcError; formatErr 가 양쪽 처리.
           failures.push(`${path}: ${formatErr(e)}`);
-          return false;
+          return "failed";
         }
       };
+      let result: "applied" | "failed" | "stale" = "failed";
       let landed: string | null = null;
-      if (pending && (await land(pending.path))) landed = pending.path;
-      if (landed === null) {
+      if (pending) {
+        result = await land(pending.path);
+        if (result === "applied") landed = pending.path;
+      }
+      if (result === "failed") {
         const homeRes = await commands.sshHomeDirectory(dto.id);
+        if (!stillTarget()) return;
         const tries = ["~", "/"];
         if (homeRes.status === "ok") tries.unshift(homeRes.data);
         else failures.push(`~: ${formatErr(homeRes.error)}`);
         for (const path of tries) {
-          if (await land(path)) {
-            landed = path;
-            break;
-          }
+          result = await land(path);
+          if (result === "applied") landed = path;
+          if (result !== "failed") break;
         }
       }
+      if (result === "stale") return;
       if (landed === null) {
         showToast(
           i18n.t("toast.connectedListFailed", {
@@ -1802,7 +1851,8 @@ function App() {
       const conns = useConnections.getState();
       if (alias in conns.reconnecting) return;
       const tab = activeTab(usePanes.getState(), paneId);
-      pendingNav.current = {
+      // 이 요청만의 목표 — 공유 ref 에 두지 않고 직접 넘긴다(동시 재연결 격리).
+      const nav: ConnectNav = {
         alias,
         path: String(tab.location.path),
         pane: paneId,
@@ -1811,7 +1861,7 @@ function App() {
       // 다른 탭이 이미 다시 연결해 둔 경우 — 새 세션 없이 그 연결에 붙인다.
       const live = conns.liveByAlias(alias);
       if (live) {
-        await onConnected(paneId, live);
+        await onConnected(paneId, live, nav);
         return;
       }
       conns.setReconnecting(alias, true);
@@ -1830,14 +1880,14 @@ function App() {
             ...r.dto,
             state: { kind: "connected" },
           });
-          await onConnected(paneId, r.dto);
+          await onConnected(paneId, r.dto, nav);
         } else if (r.kind === "dialog") {
+          pendingNav.current = nav;
           connectToAlias(alias, {
             pane: paneId,
             reconnect: { pane: paneId, error: r.error },
           });
         } else {
-          pendingNav.current = null;
           showToast(
             i18n.t("toast.reconnectFailed", { alias, err: formatErr(r.error) }),
             "error",

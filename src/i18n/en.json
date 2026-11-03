@@ -760,6 +760,7 @@
     "connectedListFailed": "Connected {{alias}}, but list failed:\n{{failures}}",
     "reconnectedTabs": "Reconnected {{alias}} — {{count}} tabs restored",
     "reconnectFailed": "Couldn't reconnect to {{alias}}: {{err}}",
+    "reconnectInProgress": "Still reconnecting to {{alias}} — try again in a moment",
     "symlinkFailed": "Symlink failed: {{err}}",
     "threeWayApplyFailed": "3-way apply failed: {{err}}",
     "mergeFailed": "Merge failed: {{err}}",
