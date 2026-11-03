@@ -6,7 +6,7 @@ import { useJournal } from "@/stores/journal";
 import { useToast } from "@/stores/toast";
 import { triggerUndo, triggerRedo } from "@/lib/fileActions";
 import { basename } from "@/lib/paths";
-import { displayKey } from "@/lib/keyDisplay";
+import { useKeyHint } from "@/lib/keyHint";
 import type { JournalEntry, Location, OpKind } from "@/types/bindings";
 import { DialogShell } from "./DialogShell";
 import { DialogButton } from "./DialogButton";
@@ -20,6 +20,9 @@ import { DialogButton } from "./DialogButton";
  */
 export function HistoryDialog({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
+  // 현재 키맵의 키 — 되돌리기를 다시 맨 사용자에게 옛 Ctrl+Z 를 가르치지 않게.
+  const undoKey = useKeyHint("edit.undo");
+  const redoKey = useKeyHint("edit.redo");
   const entries = useJournal((s) => s.entries);
   const hasUndoable = useJournal((s) => s.hasUndoable);
   const hasRedoable = useJournal((s) => s.hasRedoable);
@@ -50,7 +53,9 @@ export function HistoryDialog({ onClose }: { onClose: () => void }) {
           >
             <span className="flex items-center gap-1.5">
               <Undo2 size={13} aria-hidden />
-              {t("history.undoLast", { key: displayKey("Ctrl+Z") })}
+              {undoKey
+                ? t("history.undoLast", { key: undoKey })
+                : t("history.undoLastPlain")}
             </span>
           </DialogButton>
           <DialogButton
@@ -59,7 +64,9 @@ export function HistoryDialog({ onClose }: { onClose: () => void }) {
           >
             <span className="flex items-center gap-1.5">
               <Redo2 size={13} aria-hidden />
-              {t("history.redoLast", { key: displayKey("Ctrl+Shift+Z") })}
+              {redoKey
+                ? t("history.redoLast", { key: redoKey })
+                : t("history.redoLastPlain")}
             </span>
           </DialogButton>
         </>
@@ -88,6 +95,7 @@ function HistoryRow({
   isNext: boolean;
 }) {
   const { t } = useTranslation();
+  const undoKey = useKeyHint("edit.undo");
   return (
     <li
       className={clsx(
@@ -98,7 +106,9 @@ function HistoryRow({
       <span className="min-w-0 flex-1 truncate">{opLabel(entry.op, t)}</span>
       {isNext && (
         <span className="shrink-0 rounded bg-subtle px-1.5 py-0.5 text-meta text-accent">
-          {t("history.next", { key: displayKey("Ctrl+Z") })}
+          {undoKey
+            ? t("history.next", { key: undoKey })
+            : t("history.nextPlain")}
         </span>
       )}
       <span className="shrink-0 text-meta text-fg-muted">

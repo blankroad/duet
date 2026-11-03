@@ -440,6 +440,9 @@
     "undoLast": "마지막 작업 되돌리기 ({{key}})",
     "redoLast": "다시 실행 ({{key}})",
     "next": "다음 {{key}}",
+    "undoLastPlain": "마지막 작업 되돌리기",
+    "redoLastPlain": "다시 실행",
+    "nextPlain": "다음 되돌리기",
     "op": {
       "trash": "{{count}}개 휴지통으로 삭제 — {{loc}}",
       "permanentDelete": "{{count}}개 영구 삭제 — {{loc}}",
