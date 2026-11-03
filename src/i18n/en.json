@@ -542,6 +542,8 @@
     "hideHidden": "Hide hidden files ({{key}})",
     "showHidden": "Show hidden files ({{key}})",
     "viewOptions": "View",
+    "hiddenFiles": "Hidden files",
+    "syncBrowse": "Synchronized browsing",
     "newFile": "New file ({{key}})"
   },
   "shelf": {

@@ -35,6 +35,7 @@ import {
 
 import { isVirtualTrash } from "@/lib/trashView";
 import { ToolButton } from "./ToolButton";
+import clsx from "clsx";
 
 interface PaneToolbarProps {
   id: PaneId;
@@ -177,28 +178,32 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
         </ViewButton>
 
         <Divider />
-
-        <ToolButton
-          label={
-            syncBrowse ? t("toolbar.syncBrowseOn") : t("toolbar.syncBrowseOff")
-          }
-          active={syncBrowse}
-          onClick={() => toggleSyncBrowse()}
-        >
-          <FolderSync size={15} />
-        </ToolButton>
-        <ToolButton
-          label={
-            showHidden
-              ? t("toolbar.hideHidden", { key: kHidden })
-              : t("toolbar.showHidden", { key: kHidden })
-          }
-          active={showHidden}
-          onClick={() => toggleShowHidden(id)}
-        >
-          {showHidden ? <Eye size={15} /> : <EyeOff size={15} />}
-        </ToolButton>
       </div>
+      {/* 동기화: 넓으면 항상, 좁아도 켜져 있으면 보인다 (켜진 걸 잊으면 반대 패널이 같이 움직인다). */}
+      <ToolButton
+        className={clsx("toolbar-sync", syncBrowse && "toolbar-sync-on")}
+        label={
+          syncBrowse ? t("toolbar.syncBrowseOn") : t("toolbar.syncBrowseOff")
+        }
+        ariaLabel={t("toolbar.syncBrowse")}
+        active={syncBrowse}
+        onClick={() => runHere(toggleSyncBrowse)}
+      >
+        <FolderSync size={15} />
+      </ToolButton>
+      {/* 숨김 파일: 모든 폭에서 1클릭 (보기 메뉴에도 남긴다). */}
+      <ToolButton
+        label={
+          showHidden
+            ? t("toolbar.hideHidden", { key: kHidden })
+            : t("toolbar.showHidden", { key: kHidden })
+        }
+        ariaLabel={t("toolbar.hiddenFiles")}
+        active={showHidden}
+        onClick={() => runHere(() => toggleShowHidden(id))}
+      >
+        {showHidden ? <Eye size={15} /> : <EyeOff size={15} />}
+      </ToolButton>
       <button
         type="button"
         className="toolbar-view-menu h-7 shrink-0 items-center gap-1 rounded-panel px-1.5 text-fg-muted hover:bg-subtle hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
@@ -214,7 +219,9 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
         ) : (
           <Rows3 size={15} />
         )}
-        <span>{t("toolbar.viewOptions")}</span>
+        <span className="toolbar-view-menu-label">
+          {t("toolbar.viewOptions")}
+        </span>
         <ChevronDown size={12} />
       </button>
     </div>

@@ -7,7 +7,12 @@ import clsx from "clsx";
 interface ToolButtonProps {
   shortLabel?: string;
   alwaysLabel?: boolean;
+  /** 툴팁(title). 상태 문구와 키 힌트를 담을 수 있다. */
   label: string;
+  /** 접근 이름 — 토글은 상태와 무관하게 고정하고 상태는 aria-pressed 로만 전한다. */
+  ariaLabel?: string;
+  /** 반응형 표시용 클래스 (globals.css 컨테이너 쿼리). */
+  className?: string;
   active?: boolean;
   disabled?: boolean;
   onClick: () => void;
@@ -18,6 +23,8 @@ export function ToolButton({
   shortLabel,
   alwaysLabel,
   label,
+  ariaLabel,
+  className,
   active,
   disabled,
   onClick,
@@ -27,14 +34,18 @@ export function ToolButton({
     <button
       type="button"
       title={label}
-      aria-label={label}
+      aria-label={ariaLabel ?? label}
       aria-pressed={active}
       disabled={disabled}
       onClick={onClick}
       className={clsx(
         "flex h-7 min-w-7 shrink-0 items-center justify-center gap-1 rounded-panel px-1.5 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent",
-        "hover:bg-subtle disabled:opacity-30 disabled:hover:bg-transparent",
-        active ? "text-accent" : "text-fg-muted hover:text-fg",
+        "disabled:opacity-30 disabled:hover:bg-transparent",
+        // 켜짐은 색만이 아니라 배경 채움으로도 구분 (라이트 모드 가시성).
+        active
+          ? "bg-active text-accent"
+          : "text-fg-muted hover:bg-subtle hover:text-fg",
+        className,
       )}
     >
       {children}

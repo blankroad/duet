@@ -68,3 +68,18 @@ it("보기 메뉴를 취소하면 설정을 바꾸지 않는다", () => {
   expect(useContextMenu.getState().open).toBe(false);
   expect(activeTab(usePanes.getState(), "right").viewMode).toBe("details");
 });
+it("숨김 파일 토글은 반응형 보기 묶음 밖에서 1클릭으로 바뀐다", () => {
+  const { container } = render(<PaneToolbar id="right" />);
+  const before = activeTab(usePanes.getState(), "right").showHidden;
+  const btn = screen.getByRole("button", { name: "Hidden files" });
+  // jsdom 은 컨테이너 쿼리를 적용하지 않으므로 구조로 확인: 좁은 폭에서 숨는 묶음 밖이어야 한다.
+  expect(btn.closest(".toolbar-view-buttons")).toBeNull();
+  expect(btn.className).not.toMatch(/toolbar-sync/);
+  expect(container.contains(btn)).toBe(true);
+  expect(btn.getAttribute("aria-pressed")).toBe(String(before));
+  fireEvent.click(btn);
+  expect(activeTab(usePanes.getState(), "right").showHidden).toBe(!before);
+  expect(btn.getAttribute("aria-pressed")).toBe(String(!before));
+  expect(usePanes.getState().activePane).toBe("right");
+  expect(activeTab(usePanes.getState(), "left").showHidden).toBe(false);
+});
