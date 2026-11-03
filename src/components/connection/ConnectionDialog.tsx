@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Network, Server } from "lucide-react";
+import { Network, RefreshCw, Server } from "lucide-react";
 import { commands } from "@/types/bindings";
 import type { ConnectionDto, DuetError, HostKeyInfo } from "@/types/bindings";
 import { useConnections, type Host } from "@/stores/connections";
@@ -9,6 +9,9 @@ import { HostKeyPrompt } from "./HostKeyPrompt";
 import { DialogShell } from "@/components/dialogs/DialogShell";
 import { DialogButton } from "@/components/dialogs/DialogButton";
 import { DialogInput } from "@/components/dialogs/DialogInput";
+import { formatErr } from "@/lib/error";
+import { ConnectErrorBox } from "./ConnectErrorBox";
+import { ReconnectTarget, type ReconnectInfo } from "./ReconnectTarget";
 
 /**
  * 새 SSH 연결 다이얼로그.
@@ -26,6 +29,13 @@ export interface ConnectionDialogProps {
   onClose: () => void;
   /** 연결 성공 시 호출 — App 이 이 pane 의 location 을 SSH 로 navigate. */
   onConnected: (pane: PaneId, dto: ConnectionDto) => void;
+  /** 처음 선택돼 있을 패널 — 보통 지금 활성 패널. */
+  defaultPane?: PaneId | undefined;
+  /**
+   * 배너 "재연결" 로 열린 경우 — 패널은 정해져 있으므로 묻지 않고, 자동 재연결이
+   * 실패한 이유(있으면)를 처음부터 보여 준다.
+   */
+  reconnect?: ReconnectInfo | null | undefined;
 }
 
 type DialogPhase =
@@ -38,6 +48,8 @@ export function ConnectionDialog({
   alias,
   onClose,
   onConnected,
+  defaultPane,
+  reconnect,
 }: ConnectionDialogProps) {
   const { t } = useTranslation();
   const hosts = useConnections((s) => s.hosts);
@@ -50,27 +62,70 @@ export function ConnectionDialog({
   const [password, setPassword] = useState("");
   const [phase, setPhase] = useState<DialogPhase>({ kind: "idle" });
   const pwRef = useRef<HTMLInputElement>(null);
+  // 연결 시도 세대 — 연결 중에 닫으면 늦게 온 결과로 패널을 옮기지 않는다.
+  const attempt = useRef(0);
+  // 호스트 키 확인 뒤 재시도용 비밀번호 — 입력칸은 호출 직후 비우고(§5), 신뢰 후
+  // 같은 비번으로 다시 붙을 때만 여기서 꺼낸다. 닫거나 재시도하면 버린다.
+  const retryPw = useRef<string | null>(null);
 
-  // 다이얼로그가 새 호스트로 다시 열릴 때마다 phase + password 초기화.
+  // 다이얼로그가 새 호스트로 다시 열릴 때마다 phase + password + 패널 초기화.
+  // 재연결이면 대화상자 없이 시도했다 실패한 이유로 시작한다(호스트 키면 프롬프트).
   useEffect(() => {
     if (open) {
-      setPhase({ kind: "idle" });
+      attempt.current += 1;
+      retryPw.current = null;
       setPassword("");
+      setTarget(reconnect?.pane ?? defaultPane ?? "left");
+      const e = reconnect?.error;
+      setPhase(
+        !e
+          ? { kind: "idle" }
+          : e.kind === "HostKeyUnverified"
+            ? { kind: "host-key", info: e.message }
+            : { kind: "error", error: e },
+      );
     }
-  }, [open, alias]);
+  }, [open, alias, reconnect, defaultPane]);
+
+  const close = () => {
+    attempt.current += 1;
+    retryPw.current = null;
+    setPassword("");
+    onClose();
+  };
 
   // trust=true 면 미지의 호스트키를 known_hosts 에 기록(TOFU). replaceChanged=true 면
   // *변경된* 키를 백업 후 교체(사용자가 새 fingerprint 검증 후 prompt 에서 명시 승인).
   const doConnect = async (trust: boolean, replaceChanged = false) => {
     if (!host) return;
     setPhase({ kind: "connecting" });
-    const pw = password ? password : null;
-    const result = await commands.connectionOpen(
-      host.alias,
-      pw,
-      trust,
-      replaceChanged,
-    );
+    const pw = password || retryPw.current || null;
+    retryPw.current = null;
+    setPassword(""); // 호출 직후 clear (CLAUDE.md §5)
+    const mine = ++attempt.current;
+    let result: Awaited<ReturnType<typeof commands.connectionOpen>>;
+    try {
+      result = await commands.connectionOpen(
+        host.alias,
+        pw,
+        trust,
+        replaceChanged,
+      );
+    } catch (e) {
+      // IPC 자체 실패(reject) — 버튼이 "연결 중…" 에 멈추지 않게 오류로 보인다.
+      if (mine !== attempt.current) return;
+      setPassword("");
+      setPhase({
+        kind: "error",
+        error: { kind: "ConnectionFailed", message: formatErr(e) },
+      });
+      return;
+    }
+    if (mine !== attempt.current) {
+      // 사용자가 연결 중에 취소함 — 만들어진 연결은 닫는다(원치 않은 세션 방지).
+      if (result.status === "ok") void commands.connectionClose(result.data.id);
+      return;
+    }
     if (result.status === "ok") {
       setPassword(""); // 성공 — 즉시 clear (CLAUDE.md §5)
       const dto = result.data;
@@ -82,12 +137,13 @@ export function ConnectionDialog({
         state: { kind: "connected" },
       });
       onConnected(target, dto);
-      onClose();
+      close();
       return;
     }
     if (result.error.kind === "HostKeyUnverified") {
-      // 호스트키 검증 단계(인증 前) 실패 — password 는 신뢰 재시도 위해 유지
-      // (component-local state 한정, §5). prompt 에서 신뢰하면 doConnect(true) 재호출.
+      // 호스트키 검증 단계(인증 前) 실패 — 신뢰 재시도에 쓸 비번만 ref 에 보관
+      // (component-local, §5). prompt 에서 신뢰하면 doConnect(true) 가 꺼내 쓴다.
+      retryPw.current = pw;
       setPhase({ kind: "host-key", info: result.error.message });
       return;
     }
@@ -100,15 +156,20 @@ export function ConnectionDialog({
   return (
     <DialogShell
       open={open}
-      title={t("dialog.connection.title", { alias })}
+      title={t(
+        reconnect
+          ? "dialog.connection.reconnectTitle"
+          : "dialog.connection.title",
+        { alias },
+      )}
       description={t("dialog.connection.desc", { alias })}
-      icon={Server}
-      onClose={onClose}
+      icon={reconnect ? RefreshCw : Server}
+      onClose={close}
       initialFocus={pwRef}
       footer={
         phase.kind === "host-key" ? undefined : (
           <>
-            <DialogButton hint="esc" onClick={onClose}>
+            <DialogButton hint="esc" onClick={close}>
               {t("common.cancel")}
             </DialogButton>
             <DialogButton
@@ -127,25 +188,29 @@ export function ConnectionDialog({
     >
       {host && <HostInfo host={host} />}
 
-      <div>
-        <div className="text-meta text-fg-muted">
-          {t("dialog.connection.openInPane")}
+      {reconnect ? (
+        <ReconnectTarget pane={reconnect.pane} />
+      ) : (
+        <div>
+          <div className="text-meta text-fg-muted">
+            {t("dialog.connection.openInPane")}
+          </div>
+          <div className="mt-1 flex gap-2">
+            <PaneRadio
+              value="left"
+              current={target}
+              onChange={setTarget}
+              label={t("dialog.connection.paneLeft")}
+            />
+            <PaneRadio
+              value="right"
+              current={target}
+              onChange={setTarget}
+              label={t("dialog.connection.paneRight")}
+            />
+          </div>
         </div>
-        <div className="mt-1 flex gap-2">
-          <PaneRadio
-            value="left"
-            current={target}
-            onChange={setTarget}
-            label={t("dialog.connection.paneLeft")}
-          />
-          <PaneRadio
-            value="right"
-            current={target}
-            onChange={setTarget}
-            label={t("dialog.connection.paneRight")}
-          />
-        </div>
-      </div>
+      )}
 
       <div>
         <label htmlFor="conn-pw" className="block text-meta text-fg-muted">
@@ -159,20 +224,27 @@ export function ConnectionDialog({
           autoComplete="off"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
+          disabled={busy || phase.kind === "host-key"}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !busy) handleConnect();
+            if (e.key === "Enter" && !e.nativeEvent.isComposing && !busy)
+              handleConnect();
           }}
           className="mt-1"
         />
       </div>
 
-      {phase.kind === "error" && <ErrorBox error={phase.error} />}
+      {phase.kind === "error" && (
+        <ConnectErrorBox
+          error={phase.error}
+          authHint={t("dialog.connection.authFailedHint")}
+        />
+      )}
       {phase.kind === "host-key" && (
         <HostKeyPrompt
           info={phase.info}
           onTrust={() => void doConnect(true)}
           onReplace={() => void doConnect(false, true)}
-          onCancel={onClose}
+          onCancel={close}
         />
       )}
     </DialogShell>
@@ -214,6 +286,7 @@ function PaneRadio({
   return (
     <button
       type="button"
+      aria-pressed={selected}
       onClick={() => onChange(value)}
       className={
         "flex-1 rounded border px-2 py-1 text-base " +
@@ -225,27 +298,4 @@ function PaneRadio({
       {label}
     </button>
   );
-}
-
-function ErrorBox({ error }: { error: DuetError }) {
-  const { t } = useTranslation();
-  const message = formatError(error);
-  const isAuth = error.kind === "AuthFailed";
-  return (
-    <div className="mt-3 rounded border border-danger/50 bg-danger/10 p-2 text-meta">
-      <div className="font-medium text-danger">{error.kind}</div>
-      <div className="text-fg-muted">{message}</div>
-      {isAuth && (
-        <div className="mt-1 text-fg-muted">
-          {t("dialog.connection.authFailedHint")}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function formatError(error: DuetError): string {
-  return "message" in error && typeof error.message === "string"
-    ? error.message
-    : error.kind;
 }

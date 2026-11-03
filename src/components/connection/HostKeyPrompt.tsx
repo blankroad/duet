@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation, Trans } from "react-i18next";
 import { ShieldQuestion, ShieldAlert } from "lucide-react";
 import type { HostKeyInfo } from "@/types/bindings";
+import { DialogButton } from "@/components/dialogs/DialogButton";
 
 /**
  * 서버 호스트키 검증 결과 프롬프트 (OpenSSH 방식).
@@ -26,6 +27,12 @@ export function HostKeyPrompt({
 }) {
   const { t } = useTranslation();
   const [verified, setVerified] = useState(false);
+  // 처음 보는 호스트: fingerprint 를 보여 주고 [신뢰] 에 포커스 — Enter 로 승인
+  // (OpenSSH 의 "yes" 와 같은 단계). 키가 **바뀐** 경우엔 포커스를 주지 않는다.
+  const trustRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!info.changed) trustRef.current?.focus();
+  }, [info.changed]);
   if (info.changed) {
     return (
       <div className="mt-3 rounded border border-danger/60 bg-danger/10 p-3 text-meta">
@@ -68,21 +75,12 @@ export function HostKeyPrompt({
           {t("dialog.hostKey.verifiedCheck")}
         </label>
         <div className="mt-3 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
-          >
+          <DialogButton hint="esc" onClick={onCancel}>
             {t("common.close")}
-          </button>
-          <button
-            type="button"
-            disabled={!verified}
-            onClick={onReplace}
-            className="rounded bg-danger px-3 py-1 text-base text-white disabled:cursor-not-allowed disabled:opacity-40"
-          >
+          </DialogButton>
+          <DialogButton tone="danger" disabled={!verified} onClick={onReplace}>
             {t("dialog.hostKey.replaceCta")}
-          </button>
+          </DialogButton>
         </div>
       </div>
     );
@@ -107,20 +105,17 @@ export function HostKeyPrompt({
         value={info.fingerprint}
       />
       <div className="mt-3 flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
-        >
+        <DialogButton hint="esc" onClick={onCancel}>
           {t("common.cancel")}
-        </button>
-        <button
-          type="button"
+        </DialogButton>
+        <DialogButton
+          ref={trustRef}
+          tone="primary"
+          hint="enter"
           onClick={onTrust}
-          className="rounded bg-accent px-3 py-1 text-base text-white"
         >
           {t("dialog.hostKey.trustCta")}
-        </button>
+        </DialogButton>
       </div>
     </div>
   );

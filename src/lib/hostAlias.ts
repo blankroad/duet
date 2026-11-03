@@ -75,3 +75,15 @@ export function prefillFromAlias(alias: string): SavedHost | null {
     key_path: null,
   };
 }
+
+/**
+ * `connection_id` 에서 연결 alias 를 꺼낸다.
+ *
+ * 백엔드 id 는 `<alias>:<uuid>`, 재시작 복원 탭은 `<alias>:restored` 다. ad-hoc alias
+ * 자체가 `user@host:port` 라 `:` 를 품으므로 **마지막** `:` 앞까지가 alias 다 —
+ * 첫 `:` 로 자르면 `user@host` 만 남아 재연결이 빈 ad-hoc 다이얼로그로 떨어졌다.
+ */
+export function aliasFromConnectionId(id: string): string {
+  const colon = id.lastIndexOf(":");
+  return colon > 0 ? id.slice(0, colon) : id;
+}

@@ -1,5 +1,6 @@
 import { usePanes, type PaneId, type RestoredLayout } from "./panes";
 import { useConnections } from "./connections";
+import { aliasFromConnectionId } from "@/lib/hostAlias";
 
 /**
  * 세션(탭 레이아웃) 영속 — 재시작 시 좌/우 패널의 탭 구성·경로·정렬/뷰 복원.
@@ -30,7 +31,7 @@ function snapshot(): RestoredLayout {
         const host =
           src.kind === "ssh"
             ? (useConnections.getState().active[src.connection_id]?.alias ??
-              src.connection_id.split(":")[0])
+              aliasFromConnectionId(src.connection_id))
             : undefined;
         return {
           path: String(t.location.path),

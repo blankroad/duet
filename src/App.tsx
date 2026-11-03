@@ -7,6 +7,14 @@ import { StatusBar } from "@/components/StatusBar";
 import { TasksBar } from "@/components/TasksBar";
 import { ConnectionDialog } from "@/components/connection/ConnectionDialog";
 import { AdHocConnectDialog } from "@/components/connection/AdHocConnectDialog";
+import type { ReconnectInfo } from "@/components/connection/ReconnectTarget";
+import {
+  pruneDeadConnections,
+  quickReconnect,
+  rebindHostTabs,
+  type QuickReconnectResult,
+  type SshSource,
+} from "@/stores/reconnect";
 import { BatchRenameDialog } from "@/components/dialogs/BatchRenameDialog";
 import { CompareDialog } from "@/components/dialogs/CompareDialog";
 import { CompareScanningDialog } from "@/components/dialogs/CompareScanningDialog";
@@ -140,7 +148,11 @@ import { useIndexProgressEvents } from "@/hooks/useIndexProgressEvents";
 import i18n from "@/i18n";
 import { Trans } from "react-i18next";
 import { formatErr } from "@/lib/error";
-import { findSavedHostForAlias, prefillFromAlias } from "@/lib/hostAlias";
+import {
+  aliasFromConnectionId,
+  findSavedHostForAlias,
+  prefillFromAlias,
+} from "@/lib/hostAlias";
 import { platform } from "@tauri-apps/plugin-os";
 import { confirm as tauriConfirm } from "@tauri-apps/plugin-dialog";
 import { commands } from "@/types/bindings";
@@ -171,6 +183,27 @@ import type {
  * - IPC는 App에서 일괄 처리 → Pane은 dumb
  * - 다크/라이트 모드는 CSS만 (Task 13에서 토글 추가 가능)
  */
+/**
+ * 연결 성공 후 갈 곳 — 호스트-인식 북마크/즐겨찾기/배너 재연결.
+ * `tabId` 가 있으면(배너 재연결) 그 **탭**으로 돌아간다.
+ */
+interface ConnectNav {
+  alias: string;
+  path: string;
+  pane: PaneId;
+  tabId?: string;
+}
+
+/** 탭 id 로 탭 찾기 — 재연결 중 사용자가 탭을 반대 패널로 옮겼을 수 있다. */
+function findTab(tabId: string): { pane: PaneId; index: number } | null {
+  const { panes } = usePanes.getState();
+  for (const pane of ["left", "right"] as const) {
+    const index = panes[pane].tabs.findIndex((t) => t.id === tabId);
+    if (index >= 0) return { pane, index };
+  }
+  return null;
+}
+
 function App() {
   const { call: listDirectory } = useTauri("listDirectory");
   const showToast = useToast((s) => s.show);
@@ -194,7 +227,7 @@ function App() {
     if (loc.source.kind !== "ssh") return null;
     const id = loc.source.connection_id;
     return (
-      useConnections.getState().active[id]?.alias ?? id.split(":")[0] ?? null
+      useConnections.getState().active[id]?.alias ?? aliasFromConnectionId(id)
     );
   };
 
@@ -1483,22 +1516,57 @@ function App() {
 
   // 새 연결 다이얼로그 — 호스트 더블클릭/즐겨찾기 자동접속 시 alias 가 들어옴.
   const [dialogAlias, setDialogAlias] = useState<string | null>(null);
-  // 연결 성공 후 이동할 (alias, path) — 호스트-인식 북마크/즐겨찾기 클릭이 세팅.
-  const pendingNav = useRef<{ alias: string; path: string } | null>(null);
+  /**
+   * 연결 대화상자 문맥 — 처음 선택할 패널(보통 활성 패널), 배너 재연결이면 고정
+   * 패널과 대화상자 없이 시도했다 실패한 이유. 예전엔 대화상자가 늘 "왼쪽"으로
+   * 열려 배너 재연결도 패널을 다시 물었다.
+   */
+  const [connectCtx, setConnectCtx] = useState<{
+    pane: PaneId;
+    reconnect: ReconnectInfo | null;
+  }>({ pane: "left", reconnect: null });
+  /**
+   * **대화상자를 거치는** 연결의 갈 곳 — 대화상자가 onConnected 를 부를 때 꺼낸다.
+   * 대화상자 없이 끝나는 배너 재연결은 이 ref 를 쓰지 않고 목표를 직접 넘긴다
+   * (공유 ref 를 await 너머로 들고 있으면 그사이 다른 연결 흐름이 덮어썼다).
+   * 대화상자를 닫으면 지운다(취소한 경로가 다음 연결에 끼어들지 않게).
+   */
+  const pendingNav = useRef<ConnectNav | null>(null);
 
   // ad-hoc connect 다이얼로그 (Sidebar + 버튼, saved host 더블클릭, alias 폴백)
   const [adHocOpen, setAdHocOpen] = useState(false);
   const [adHocPrefill, setAdHocPrefill] = useState<SavedHost | null>(null);
 
+  /** 연결 대화상자 문맥 설정 — 패널 미지정이면 지금 활성 패널. */
+  const setConnectTarget = useCallback(
+    (ctx?: { pane?: PaneId; reconnect?: ReconnectInfo | null }) =>
+      setConnectCtx({
+        pane: ctx?.pane ?? usePanes.getState().activePane,
+        reconnect: ctx?.reconnect ?? null,
+      }),
+    [],
+  );
+
   const onAdHocOpen = useCallback(() => {
+    setConnectTarget();
     setAdHocPrefill(null);
     setAdHocOpen(true);
-  }, []);
+  }, [setConnectTarget]);
 
-  const onSavedActivate = useCallback((host: SavedHost) => {
-    setAdHocPrefill(host);
-    setAdHocOpen(true);
-  }, []);
+  const onSavedActivate = useCallback(
+    (host: SavedHost) => {
+      // 이 저장 호스트의 연결 alias 가 배너 재연결 중이면 대화상자를 또 띄우지 않는다.
+      const connAlias = `${host.user}@${host.host}:${host.port}`;
+      if (connAlias in useConnections.getState().reconnecting) {
+        showToast(i18n.t("toast.reconnectInProgress", { alias: host.alias }));
+        return;
+      }
+      setConnectTarget();
+      setAdHocPrefill(host);
+      setAdHocOpen(true);
+    },
+    [setConnectTarget, showToast],
+  );
 
   /**
    * alias 로 연결 흐름 열기 — 즐겨찾기/북마크/배너 Reconnect 공용.
@@ -1513,7 +1581,11 @@ function App() {
    * 만든 즐겨찾기는 이 라우팅이 없으면 더블클릭해도 무반응이었다.
    */
   const connectToAlias = useCallback(
-    (alias: string) => {
+    (
+      alias: string,
+      ctx?: { pane?: PaneId; reconnect?: ReconnectInfo | null },
+    ) => {
+      setConnectTarget(ctx);
       if (useConnections.getState().hosts.some((h) => h.alias === alias)) {
         setDialogAlias(alias);
         return;
@@ -1522,18 +1594,10 @@ function App() {
         alias,
         useSavedHosts.getState().hosts,
       );
-      if (saved) {
-        onSavedActivate(saved);
-        return;
-      }
-      const prefill = prefillFromAlias(alias);
-      if (prefill) {
-        onSavedActivate(prefill);
-        return;
-      }
-      onAdHocOpen();
+      setAdHocPrefill(saved ?? prefillFromAlias(alias));
+      setAdHocOpen(true);
     },
-    [onSavedActivate, onAdHocOpen],
+    [setConnectTarget],
   );
 
   /**
@@ -1559,10 +1623,15 @@ function App() {
         });
         return;
       }
-      pendingNav.current = { alias: hostAlias, path };
-      connectToAlias(hostAlias);
+      if (hostAlias in useConnections.getState().reconnecting) {
+        // 배너 재연결이 진행 중 — 대화상자를 하나 더 띄우면 세션이 둘 생긴다.
+        showToast(i18n.t("toast.reconnectInProgress", { alias: hostAlias }));
+        return;
+      }
+      pendingNav.current = { alias: hostAlias, path, pane };
+      connectToAlias(hostAlias, { pane });
     },
-    [navigateTo, connectToAlias],
+    [navigateTo, connectToAlias, showToast],
   );
 
   const onAliasExecute = useCallback(
@@ -1589,24 +1658,38 @@ function App() {
     void bookmarkLocation(tab.location, folderName(tab.location));
   }, []);
 
-  const onHostActivate = useCallback((alias: string) => {
-    setDialogAlias(alias);
-  }, []);
-
   /**
-   * SSH 배너 Reconnect — 같은 경로로 복귀시키므로 onOpenHostPath 에 맡긴다
-   * (연결 흐름 라우팅 + pendingNav 로 경로 복원). alias 를 모르면 빈 ad-hoc.
+   * 사이드바/팔레트에서 config 호스트 열기. 이미 연결돼 있으면 대화상자를 다시
+   * 띄워 세션을 하나 더 만들지 않고, 활성 패널을 그 호스트의 홈으로 옮긴다.
    */
-  const onPaneReconnect = useCallback(
-    (alias: string | null, paneId: PaneId) => {
-      if (!alias) {
-        onAdHocOpen();
+  const onHostActivate = useCallback(
+    (alias: string) => {
+      const pane = usePanes.getState().activePane;
+      const live = useConnections.getState().liveByAlias(alias);
+      if (live) {
+        void (async () => {
+          const home = await commands.sshHomeDirectory(live.id);
+          void navigateTo(pane, {
+            source: {
+              kind: "ssh",
+              connection_id: live.id,
+              host_ip: live.host_ip,
+              user: live.user,
+            },
+            path: home.status === "ok" ? home.data : "/",
+          });
+        })();
         return;
       }
-      const path = String(activeTab(usePanes.getState(), paneId).location.path);
-      onOpenHostPath(alias, path, paneId);
+      if (alias in useConnections.getState().reconnecting) {
+        showToast(i18n.t("toast.reconnectInProgress", { alias }));
+        return;
+      }
+      pendingNav.current = null;
+      setConnectTarget({ pane });
+      setDialogAlias(alias);
     },
-    [onOpenHostPath, onAdHocOpen],
+    [navigateTo, setConnectTarget, showToast],
   );
 
   // 팔레트/동적 커맨드용 — 활성 패널 기준 래퍼.
@@ -1636,11 +1719,17 @@ function App() {
     onAliasExecute,
   });
 
-  /** 연결 성공 후 해당 패널을 SSH 위치로 이동. */
+  /**
+   * 연결 성공 후 처리 — 대화상자·배너 재연결 공용.
+   *
+   * 1. 같은 호스트의 끊긴 탭(양쪽 패널·비활성 포함)을 모두 새 연결로 다시 묶는다.
+   * 2. 배너 재연결이면 버튼이 있던 그 탭으로 돌아간다(그사이 탭을 옮겼어도).
+   * 3. 가려던 경로 → 홈 → `~` → `/` 순으로 첫 성공한 위치를 연다. 홈 조회는
+   *    가려던 경로가 실패했을 때만.
+   */
   const onConnected = useCallback(
-    async (paneId: PaneId, dto: ConnectionDto) => {
-      const state = usePanes.getState();
-      const ssh: import("@/types/bindings").SourceId = {
+    async (paneId: PaneId, dto: ConnectionDto, nav?: ConnectNav) => {
+      const ssh: SshSource = {
         kind: "ssh",
         connection_id: dto.id,
         // backend 가 getpeername() 으로 캡처한 실제 peer IP — IpAddr deserialize
@@ -1649,42 +1738,99 @@ function App() {
         user: dto.user,
       };
       const alias = dto.alias;
-      // 호스트-인식 북마크/즐겨찾기로 접속한 경우 그 경로를 먼저 시도.
-      const pending = pendingNav.current;
-      pendingNav.current = null;
-      const candidates: string[] = [];
-      if (pending && pending.alias === alias) candidates.push(pending.path);
-      // 초기 경로 후보: 북마크 경로 → SFTP canonicalize(".") → "~" → "/"
-      // 첫번째 성공한 listDirectory 가 패널에 적용됨.
-      const homeRes = await commands.sshHomeDirectory(dto.id);
-      if (homeRes.status === "ok") candidates.push(homeRes.data);
-      else
-        showToast(
-          i18n.t("toast.sshHomeFailed", { err: formatErr(homeRes.error) }),
-          "error",
-        );
-      candidates.push("~", "/");
+      // 대화상자 경로의 목표는 자기 alias 일 때만 꺼내 쓴다(다른 요청 것은 건드리지 않음).
+      const fromDialog =
+        pendingNav.current?.alias === alias ? pendingNav.current : null;
+      if (fromDialog) pendingNav.current = null;
+      const pending = nav ?? fromDialog;
 
-      let succeeded = false;
+      const rebound = rebindHostTabs(alias, ssh);
+      pruneDeadConnections(alias);
+
+      // 착지할 탭을 정하고 끝까지 그 탭에만 쓴다. 배너 재연결이면 버튼이 있던 탭
+      // (반대 패널로 옮겼으면 따라감, 닫혔으면 새 탭), 아니면 대상 패널의 현재 탭.
+      let pane = pending?.tabId ? pending.pane : paneId;
+      let targetId: string;
+      const st = usePanes.getState();
+      if (pending?.tabId) {
+        const found = findTab(pending.tabId);
+        const loc = found
+          ? st.panes[found.pane].tabs[found.index]!.location
+          : null;
+        // 연결을 기다리는 사이 그 탭을 다른 곳으로 옮겼으면(로컬 폴더 등) 덮지 않는다 —
+        // 이미 rebind 는 끝났으니 반대 패널만 새로 읽고 여기서 멈춘다.
+        const moved =
+          loc !== null &&
+          (loc.source.kind !== "ssh" ||
+            aliasFromConnectionId(loc.source.connection_id) !== alias ||
+            String(loc.path) !== pending.path);
+        if (moved) {
+          for (const other of rebound.panes) onRefresh(other);
+          return;
+        }
+        if (found) {
+          pane = found.pane;
+          if (found.index !== st.panes[pane].activeTabIndex)
+            st.selectTab(pane, found.index);
+          targetId = pending.tabId;
+        } else {
+          st.openTab(pane, { source: ssh, path: pending.path });
+          targetId = activeTab(usePanes.getState(), pane).id;
+        }
+      } else {
+        targetId = activeTab(st, pane).id;
+      }
+      // 반대 패널의 보이는 탭도 같은 호스트였으면 새 연결로 다시 읽는다.
+      for (const other of rebound.panes) if (other !== pane) onRefresh(other);
+
+      /** 사용자가 그사이 탭을 바꾸거나 다른 곳으로 이동했나 — 그러면 손대지 않는다. */
+      const stillTarget = () =>
+        activeTab(usePanes.getState(), pane).id === targetId;
       const failures: string[] = [];
-      for (const path of candidates) {
-        const loc = { source: ssh, path };
+      /** 이 경로를 목표 탭에 연다. stale = 사용자가 그사이 움직였음 → 흐름 전체 중단. */
+      const land = async (
+        path: string,
+      ): Promise<"applied" | "failed" | "stale"> => {
+        if (!stillTarget()) return "stale";
+        const loc: Location = { source: ssh, path };
+        const seq = ++navSeq.current[pane];
+        const current = () => navSeq.current[pane] === seq && stillTarget();
         try {
           const entries = await listEntries(loc);
-          state.setEntries(paneId, loc, entries);
-          state.setActivePane(paneId);
-          showToast(
-            i18n.t("toast.connected", { alias, pane: paneId, path }),
-            "success",
-          );
-          succeeded = true;
-          break;
+          if (!current()) return "stale";
+          usePanes.getState().setEntries(pane, loc, entries);
+          void commands.paneWatchSet(pane, loc);
+          return "applied";
         } catch (e) {
+          if (!current()) return "stale";
           // useTauri throws DuetError 또는 IpcError; formatErr 가 양쪽 처리.
           failures.push(`${path}: ${formatErr(e)}`);
+          return "failed";
+        }
+      };
+      let result: "applied" | "failed" | "stale" = "failed";
+      let landed: string | null = null;
+      if (pending) {
+        result = await land(pending.path);
+        if (result === "applied") landed = pending.path;
+      }
+      if (result === "failed") {
+        // 홈 조회를 기다리는 사이 같은 탭에서 다른 곳으로 이동했으면(navSeq 증가) 멈춘다 —
+        // 이어서 land 가 새 navSeq 를 받아 그 최신 이동을 덮어쓰던 경로.
+        const homeSeq = navSeq.current[pane];
+        const homeRes = await commands.sshHomeDirectory(dto.id);
+        if (!stillTarget() || navSeq.current[pane] !== homeSeq) return;
+        const tries = ["~", "/"];
+        if (homeRes.status === "ok") tries.unshift(homeRes.data);
+        else failures.push(`~: ${formatErr(homeRes.error)}`);
+        for (const path of tries) {
+          result = await land(path);
+          if (result === "applied") landed = path;
+          if (result !== "failed") break;
         }
       }
-      if (!succeeded) {
+      if (result === "stale") return;
+      if (landed === null) {
         showToast(
           i18n.t("toast.connectedListFailed", {
             alias,
@@ -1692,9 +1838,89 @@ function App() {
           }),
           "error",
         );
+        return;
+      }
+      usePanes.getState().setActivePane(pane);
+      const paneLabel = i18n.t(
+        pane === "left"
+          ? "dialog.connection.paneLeft"
+          : "dialog.connection.paneRight",
+      );
+      showToast(
+        pending?.tabId && rebound.tabs > 1
+          ? i18n.t("toast.reconnectedTabs", { alias, count: rebound.tabs })
+          : i18n.t("toast.connected", { alias, pane: paneLabel, path: landed }),
+        "success",
+      );
+    },
+    [listEntries, showToast, onRefresh],
+  );
+
+  /**
+   * SSH 배너 "재연결" — 버튼이 있던 그 패널·그 탭·그 경로로 돌아간다.
+   *
+   * 먼저 대화상자 없이 다시 붙어 본다(키/에이전트, 저장된 비밀번호는 백엔드가
+   * vault 에서 직접). 비밀번호·호스트 키·잠긴 vault 처럼 사람이 답해야 할 때만
+   * 패널이 고정된 대화상자를 연다. 진행 중엔 그 호스트의 배너가 모두 스피너를
+   * 띄우고 버튼이 사라져 연타로 연결이 여러 개 생기지 않는다.
+   */
+  const onPaneReconnect = useCallback(
+    async (alias: string | null, paneId: PaneId) => {
+      const reconnect: ReconnectInfo = { pane: paneId, error: null };
+      if (!alias) {
+        connectToAlias("", { pane: paneId, reconnect });
+        return;
+      }
+      const conns = useConnections.getState();
+      if (alias in conns.reconnecting) return;
+      const tab = activeTab(usePanes.getState(), paneId);
+      // 이 요청만의 목표 — 공유 ref 에 두지 않고 직접 넘긴다(동시 재연결 격리).
+      const nav: ConnectNav = {
+        alias,
+        path: String(tab.location.path),
+        pane: paneId,
+        tabId: tab.id,
+      };
+      // 다른 탭이 이미 다시 연결해 둔 경우 — 새 세션 없이 그 연결에 붙인다.
+      const live = conns.liveByAlias(alias);
+      if (live) {
+        await onConnected(paneId, live, nav);
+        return;
+      }
+      conns.setReconnecting(alias, true);
+      try {
+        let r: QuickReconnectResult;
+        try {
+          r = await quickReconnect(alias);
+        } catch (e) {
+          r = {
+            kind: "failed",
+            error: { kind: "ConnectionFailed", message: formatErr(e) },
+          };
+        }
+        if (r.kind === "ok") {
+          useConnections.getState().upsertActive({
+            ...r.dto,
+            state: { kind: "connected" },
+          });
+          await onConnected(paneId, r.dto, nav);
+        } else if (r.kind === "dialog") {
+          pendingNav.current = nav;
+          connectToAlias(alias, {
+            pane: paneId,
+            reconnect: { pane: paneId, error: r.error },
+          });
+        } else {
+          showToast(
+            i18n.t("toast.reconnectFailed", { alias, err: formatErr(r.error) }),
+            "error",
+          );
+        }
+      } finally {
+        useConnections.getState().setReconnecting(alias, false);
       }
     },
-    [listEntries, showToast],
+    [connectToAlias, onConnected, showToast],
   );
 
   // 부트스트랩: 양쪽 패널 초기 로드 (home 디렉토리, Windows 호환) + saved hosts + bookmarks + hostFavorites
@@ -1826,14 +2052,24 @@ function App() {
 
       <ConnectionDialog
         alias={dialogAlias}
-        onClose={() => setDialogAlias(null)}
+        onClose={() => {
+          pendingNav.current = null;
+          setDialogAlias(null);
+        }}
         onConnected={onConnected}
+        defaultPane={connectCtx.pane}
+        reconnect={connectCtx.reconnect}
       />
       <AdHocConnectDialog
         open={adHocOpen}
-        onClose={() => setAdHocOpen(false)}
+        onClose={() => {
+          pendingNav.current = null;
+          setAdHocOpen(false);
+        }}
         onConnected={onConnected}
         prefill={adHocPrefill}
+        defaultPane={connectCtx.pane}
+        reconnect={connectCtx.reconnect}
       />
 
       {dialog.kind === "batch-rename" && (
