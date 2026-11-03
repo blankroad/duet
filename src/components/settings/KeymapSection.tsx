@@ -37,18 +37,31 @@ export function KeymapSection() {
 
   // 이 명령에 키 지정 — 같은 명령의 예전 사용자 지정은 지운다(편집 = 교체).
   // 예전엔 Ctrl+J → Ctrl+K 로 바꿔도 Ctrl+J 가 표에 안 보이는 채 계속 동작했다.
+  // 저장은 한 번에 하나 — 진행 중엔 편집·초기화 버튼을 막는다. 지울 예전 키는 저장
+  // 응답(최신 store) 기준으로 계산: 빠르게 두 번 바꿔도 숨은 키가 남지 않게.
+  const [saving, setSaving] = useState(false);
   const apply = async (commandId: string, key: string) => {
-    const stale = bindings.filter(
-      (b) => b.command_id === commandId && b.key !== key,
-    );
-    if (!(await setKeymap(key, commandId))) return;
-    for (const b of stale) await unsetKeymap(b.key);
+    setSaving(true);
+    try {
+      if (!(await setKeymap(key, commandId))) return;
+      const stale = useKeymap
+        .getState()
+        .bindings.filter((b) => b.command_id === commandId && b.key !== key);
+      for (const b of stale) await unsetKeymap(b.key);
+    } finally {
+      setSaving(false);
+    }
   };
 
   // 사용자 지정 전부 해제 — 기본 키로. 응답 스냅숏이 뒤섞이지 않게 순서대로.
   const resetCommand = async (commandId: string) => {
-    for (const b of bindings)
-      if (b.command_id === commandId) await unsetKeymap(b.key);
+    setSaving(true);
+    try {
+      for (const b of bindings)
+        if (b.command_id === commandId) await unsetKeymap(b.key);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const onCapture = (commandId: string, key: string) => {
@@ -96,6 +109,7 @@ export function KeymapSection() {
         </div>
         <button
           type="button"
+          disabled={saving}
           onClick={() => {
             void tauriConfirm(t("settings.keymap.restoreConfirm"), {
               title: t("settings.keymap.restoreDefaults"),
@@ -103,7 +117,7 @@ export function KeymapSection() {
               if (ok) void resetKeymap();
             });
           }}
-          className="flex items-center gap-1 rounded border border-border px-2 py-1 text-meta text-fg-muted hover:bg-border hover:text-fg"
+          className="flex items-center gap-1 rounded border border-border px-2 py-1 text-meta text-fg-muted hover:bg-border hover:text-fg disabled:opacity-30"
           title={t("settings.keymap.restoreTitle")}
         >
           <RotateCcw size={12} /> {t("settings.keymap.restoreDefaults")}
@@ -170,16 +184,18 @@ export function KeymapSection() {
               <div className="flex gap-1 text-meta">
                 <button
                   type="button"
+                  disabled={saving}
                   onClick={() => setEditing(cmd.id)}
-                  className="rounded px-1.5 py-0.5 text-fg-muted hover:bg-border hover:text-fg"
+                  className="rounded px-1.5 py-0.5 text-fg-muted hover:bg-border hover:text-fg disabled:opacity-30"
                 >
                   {t("settings.keymap.edit")}
                 </button>
                 {bound && (
                   <button
                     type="button"
+                    disabled={saving}
                     onClick={() => void resetCommand(cmd.id)}
-                    className="rounded px-1.5 py-0.5 text-fg-muted hover:bg-border hover:text-fg"
+                    className="rounded px-1.5 py-0.5 text-fg-muted hover:bg-border hover:text-fg disabled:opacity-30"
                   >
                     {t("settings.keymap.reset")}
                   </button>

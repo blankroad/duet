@@ -196,6 +196,43 @@ describe("설정 › 키맵 편집", () => {
   });
 });
 
+describe("설정 › 키맵 — 저장 중 재편집", () => {
+  it("첫 저장이 끝나기 전엔 다시 편집할 수 없고, 끝나면 예전 키는 지워진다", async () => {
+    type SetResult = Awaited<ReturnType<typeof ipc.keymapSet>>;
+    let finish: () => void = () => {};
+    vi.mocked(ipc.keymapSet).mockImplementationOnce(
+      (key: string, command_id: string) =>
+        new Promise<SetResult>((r) => {
+          finish = () => {
+            store = [...store, { key, command_id }];
+            r({ status: "ok", data: store } as SetResult);
+          };
+        }),
+    );
+    store = [{ key: "F9", command_id: "view.toggleSidebar" }];
+    useKeymap.getState().setAll(store);
+    render(<SettingsDialog onClose={vi.fn()} />);
+    fireEvent.click(screen.getByText("settings.nav.keymap"));
+    const editBtn = () =>
+      rowOf("cmd.view.toggleSidebar").querySelector(
+        "button",
+      ) as HTMLButtonElement;
+    fireEvent.click(editBtn());
+    fireEvent.keyDown(screen.getByLabelText("settings.keymap.pressKey"), {
+      key: "F10",
+    });
+    expect(editBtn().disabled).toBe(true);
+    await act(async () => {
+      finish();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(store).toEqual([{ key: "F10", command_id: "view.toggleSidebar" }]);
+    expect(editBtn().disabled).toBe(false);
+  });
+});
+
 describe("명령 팔레트", () => {
   it("가려진 기본 키는 힌트로 보이지 않는다", () => {
     useKeymap
