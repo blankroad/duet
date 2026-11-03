@@ -26,6 +26,12 @@ export function CommandPalette() {
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  // ↑↓ 로 움직인 커서가 목록 스크롤 밖으로 나가지 않게 — 실행될 항목이 늘 보이도록.
+  useEffect(() => {
+    listRef.current?.children[cursor]?.scrollIntoView?.({ block: "nearest" });
+  }, [cursor]);
 
   useEffect(() => {
     if (isOpen) {
@@ -88,13 +94,20 @@ export function CommandPalette() {
               ref={inputRef}
               type="text"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => {
+                // 검색어가 바뀌면 맨 위 결과부터 — 예전 행 번호에 남으면 Enter 가
+                // 화면 위쪽 최상위 결과가 아닌 다른 명령을 실행했다.
+                setQuery(e.target.value);
+                setCursor(0);
+              }}
               onKeyDown={(e) => {
                 // 조합 중 Enter/↑↓ 는 IME 몫 — 부분 검색어로 실행하지 않는다.
                 if (isImeComposing(e)) return;
                 if (e.key === "ArrowDown") {
                   e.preventDefault();
-                  setCursor((c) => Math.min(ranked.length - 1, c + 1));
+                  setCursor((c) =>
+                    Math.max(0, Math.min(ranked.length - 1, c + 1)),
+                  );
                 } else if (e.key === "ArrowUp") {
                   e.preventDefault();
                   setCursor((c) => Math.max(0, c - 1));
@@ -111,7 +124,7 @@ export function CommandPalette() {
               className="flex-1 bg-transparent font-mono text-base focus:outline-none"
             />
           </div>
-          <div className="max-h-80 overflow-auto py-1">
+          <div ref={listRef} className="max-h-80 overflow-auto py-1">
             {ranked.length === 0 ? (
               <div className="px-3 py-2 text-meta text-fg-muted">
                 {t("palette.noResults")}

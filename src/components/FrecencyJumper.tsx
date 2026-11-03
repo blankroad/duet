@@ -38,6 +38,12 @@ export function FrecencyJumper({
   const [results, setResults] = useState<FrecencyEntry[]>([]);
   const [cursor, setCursor] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  // ↑↓ 로 움직인 커서가 목록 스크롤 밖으로 나가지 않게 — 실행될 항목이 늘 보이도록.
+  useEffect(() => {
+    listRef.current?.children[cursor]?.scrollIntoView?.({ block: "nearest" });
+  }, [cursor]);
 
   useEffect(() => {
     if (isOpen) {
@@ -87,12 +93,17 @@ export function FrecencyJumper({
               ref={inputRef}
               type="text"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setCursor(0);
+              }}
               onKeyDown={(e) => {
                 if (isImeComposing(e)) return;
                 if (e.key === "ArrowDown") {
                   e.preventDefault();
-                  setCursor((c) => Math.min(results.length - 1, c + 1));
+                  setCursor((c) =>
+                    Math.max(0, Math.min(results.length - 1, c + 1)),
+                  );
                 } else if (e.key === "ArrowUp") {
                   e.preventDefault();
                   setCursor((c) => Math.max(0, c - 1));
@@ -109,7 +120,7 @@ export function FrecencyJumper({
               className="flex-1 bg-transparent font-mono text-base focus:outline-none"
             />
           </div>
-          <div className="max-h-80 overflow-auto py-1">
+          <div ref={listRef} className="max-h-80 overflow-auto py-1">
             {results.length === 0 ? (
               <div className="px-3 py-2 text-meta text-fg-muted">
                 {query ? t("jumper.noMatch") : t("jumper.noHistory")}
