@@ -11,7 +11,8 @@ import { useClipboard } from "@/stores/clipboard";
 import { useUIDialogs } from "@/stores/ui-dialogs";
 import { usePalette } from "@/stores/palette";
 import { useSearch } from "@/stores/search";
-import { useUI } from "@/stores/ui";
+import { useUI, densityMetrics } from "@/stores/ui";
+import { setAnchorAt, selectRangeTo } from "@/lib/selectionAnchor";
 import { useKeymap } from "@/stores/keymap";
 import { useCommands } from "@/stores/commands";
 import { formatKeyEvent } from "@/lib/keyEvent";
@@ -27,17 +28,6 @@ function escapeOwnedByOverlay(): boolean {
     useSearch.getState().isOpen ||
     useUI.getState().quickLookOpen
   );
-}
-
-/**
- * Shift 범위 선택의 기준점 — `pane:tabIndex` → displayed 인덱스.
- * Shift 없이 커서를 옮기면 지운다(다음 Shift 이동이 새 기준을 잡게).
- */
-const anchors = new Map<string, number>();
-
-function anchorKey(id: PaneId): string {
-  const p = usePanes.getState().panes[id];
-  return `${id}:${p.activeTabIndex}`;
 }
 
 /**
@@ -71,23 +61,41 @@ function typeaheadJump(id: PaneId, ch: string): void {
   const state = usePanes.getState();
   const tab = activeTab(state, id);
   const list = computeDisplayed(tab);
-  const prefix = typeahead.buf.toLowerCase();
-  // 같은 글자를 반복하면 다음 후보로 순환(탐색기 동작).
+  // 같은 글자를 빠르게 반복하면("aaa") 그 글자로 시작하는 다음 후보로 순환(탐색기 동작).
+  // 예전엔 "aa" 접두사를 찾다 실패해 커서가 멈춰 있었다.
+  const repeat = /^(.)\1+$/su.test(typeahead.buf);
+  const prefix = (repeat ? ch : typeahead.buf).toLowerCase();
   const start =
-    typeahead.buf.length === 1 ? tab.cursorIndex + 1 : tab.cursorIndex;
+    typeahead.buf.length === 1 || repeat
+      ? tab.cursorIndex + 1
+      : tab.cursorIndex;
   for (let i = 0; i < list.length; i++) {
     const idx = (Math.max(0, start) + i) % list.length;
     const e = list[idx];
     if (e && !isParentEntry(e) && e.name.toLowerCase().startsWith(prefix)) {
       state.setCursor(id, idx);
+      setAnchorAt(id, idx);
       return;
     }
   }
 }
 
-/** 한 페이지 = 뷰포트에 들어가는 행 수(대략). 그리드는 행 단위로 맞춘다. */
-function pageStep(tab: ReturnType<typeof activeTab>): number {
-  const rows = 12;
+/**
+ * 한 페이지 = 지금 목록 영역에 보이는 행 수 − 1 (한 줄은 겹쳐 맥락 유지).
+ * 높이를 못 재면(숨김 등) 12행. 그리드는 행 단위로 맞춘다.
+ */
+function pageStep(id: PaneId, tab: ReturnType<typeof activeTab>): number {
+  const m = densityMetrics(useUI.getState().density);
+  const rowPx =
+    tab.viewMode === "grid"
+      ? m.gridCell
+      : tab.viewMode === "tiles"
+        ? m.tile
+        : m.row;
+  const h =
+    document.querySelector<HTMLElement>(`[data-drop-pane="${id}"]`)
+      ?.clientHeight ?? 0;
+  const rows = h > 0 ? Math.max(1, Math.floor(h / rowPx) - 1) : 12;
   return tab.viewMode === "grid" ? rows * Math.max(1, tab.gridCols) : rows;
 }
 
@@ -97,7 +105,7 @@ function moveWithSelection(id: PaneId, delta: number, shift: boolean): void {
   const tab = activeTab(state, id);
   const len = computeDisplayed(tab).length;
   const next = Math.max(0, Math.min(len - 1, tab.cursorIndex + delta));
-  applyMove(id, next, shift, tab.cursorIndex);
+  applyMove(id, next, shift);
 }
 
 /** 특정 인덱스로 점프 + Shift 면 범위 선택. */
@@ -106,25 +114,16 @@ function jumpWithSelection(id: PaneId, index: number, shift: boolean): void {
   const tab = activeTab(state, id);
   const len = computeDisplayed(tab).length;
   const next = Math.max(0, Math.min(len - 1, index));
-  applyMove(id, next, shift, tab.cursorIndex);
+  applyMove(id, next, shift);
 }
 
-function applyMove(
-  id: PaneId,
-  next: number,
-  shift: boolean,
-  from: number,
-): void {
-  const state = usePanes.getState();
-  const key = anchorKey(id);
+/** Shift 면 공용 기준점(selectionAnchor)부터 범위 선택, 아니면 이동 + 기준점 갱신. */
+function applyMove(id: PaneId, next: number, shift: boolean): void {
   if (shift) {
-    const anchor = anchors.get(key) ?? from;
-    anchors.set(key, anchor);
-    state.setCursor(id, next);
-    state.selectRange(id, anchor, next);
+    selectRangeTo(id, next);
   } else {
-    anchors.delete(key);
-    state.setCursor(id, next);
+    usePanes.getState().setCursor(id, next);
+    setAnchorAt(id, next);
   }
 }
 
@@ -198,11 +197,11 @@ export function useKeyboardNav(
           break;
         case "PageDown":
           e.preventDefault();
-          moveWithSelection(id, pageStep(tab), e.shiftKey);
+          moveWithSelection(id, pageStep(id, tab), e.shiftKey);
           break;
         case "PageUp":
           e.preventDefault();
-          moveWithSelection(id, -pageStep(tab), e.shiftKey);
+          moveWithSelection(id, -pageStep(id, tab), e.shiftKey);
           break;
         // Insert — TC 관례: 토글하고 한 칸 내려간다(연속 선택).
         case "Insert": {
@@ -211,19 +210,20 @@ export function useKeyboardNav(
           if (entry && !isParentEntry(entry))
             state.toggleSelected(id, entry.name);
           state.moveCursor(id, 1);
-          anchors.delete(anchorKey(id));
+          setAnchorAt(id, activeTab(usePanes.getState(), id).cursorIndex);
           break;
         }
+        // 그리드 ←→ 도 ↑↓ 와 같은 경로 — Shift 범위 선택·기준점이 같이 동작.
         case "ArrowLeft":
           if (tab.viewMode === "grid") {
             e.preventDefault();
-            state.moveCursor(id, -1);
+            moveWithSelection(id, -1, e.shiftKey);
           }
           break;
         case "ArrowRight":
           if (tab.viewMode === "grid") {
             e.preventDefault();
-            state.moveCursor(id, 1);
+            moveWithSelection(id, 1, e.shiftKey);
           }
           break;
         case "Enter":
@@ -249,6 +249,7 @@ export function useKeyboardNav(
               const entry = computeDisplayed(tab)[tab.cursorIndex];
               if (entry && !isParentEntry(entry))
                 state.toggleSelected(id, entry.name);
+              setAnchorAt(id, tab.cursorIndex);
             }
           } else {
             onQuickLook(id);
