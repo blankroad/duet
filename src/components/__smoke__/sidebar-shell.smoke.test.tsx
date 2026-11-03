@@ -860,3 +860,102 @@ describe("앱 런처 넘침", () => {
     expect(scroller!.querySelectorAll("button").length).toBe(30);
   });
 });
+
+describe("검증 1차 후속 (sol-2 F2~F6)", () => {
+  const winKeys = vi.fn();
+  beforeEach(() => {
+    resetSidebarStores();
+    useTasks.setState({ tasks: new Map(), cancelling: new Set() });
+    useUIDialogs.setState({ dialog: { kind: "none" } });
+    window.addEventListener("keydown", winKeys);
+    winKeys.mockClear();
+  });
+  afterEach(() => window.removeEventListener("keydown", winKeys));
+
+  it("사이드바 행의 Ctrl/⌘+Enter(반대 패널에 열기)는 패널 Enter 로 새지 않는다", async () => {
+    useBookmarks.setState({
+      items: [{ id: "b1", name: "work", location: local("/work") }],
+    });
+    useRecents.setState({
+      items: [{ source: "local", path: "/projects", label: "projects" }],
+    });
+    await renderSidebar();
+    fireEvent.keyDown(row("work"), { key: "Enter", ctrlKey: true });
+    expect(sidebarProps.onOpenLocation).toHaveBeenCalledWith(
+      local("/work"),
+      "right",
+    );
+    // <button> 행(최근)도 같은 규칙.
+    fireEvent.keyDown(row("projects"), { key: "Enter", metaKey: true });
+    expect(winKeys).not.toHaveBeenCalled();
+  });
+
+  it("작업 바·상태바 버튼의 Enter/Space 는 패널 키 처리로 새지 않는다", () => {
+    setTab("left", { entries: [mk(".env", { hidden: true })] });
+    render(
+      <>
+        <TasksBar />
+        <StatusBar />
+      </>,
+    );
+    setTasks([task("big", "running")]);
+    fireEvent.keyDown(screen.getByText("big.zip"), { key: "Enter" });
+    fireEvent.keyDown(
+      screen.getByRole("button", { name: i18n.t("sidebar.cancelTask") }),
+      {
+        key: " ",
+      },
+    );
+    fireEvent.keyDown(
+      screen.getByRole("button", {
+        name: i18n.t("statusbar.hiddenCount", { count: 1 }),
+      }),
+      { key: "Enter" },
+    );
+    expect(winKeys).not.toHaveBeenCalled();
+  });
+
+  it("상단바 버튼을 마우스로 누르면 포커스를 내려놓는다 (Windows 에서 다음 Enter 가 버튼으로 가지 않게)", () => {
+    useCommands.setState({ builtins: [cmd("view.togglePreview", "F11")] });
+    render(<TopBar />);
+    const btn = screen.getByRole("button", {
+      name: i18n.t("topbar.togglePreview", { key: displayKey("F11") }),
+    });
+    btn.focus();
+    fireEvent.click(btn, { detail: 1 });
+    expect(document.activeElement).not.toBe(btn);
+  });
+
+  it("원격 폴더는 메타 크기(4 KiB) 대신 계산한 재귀 크기로 선택 용량을 센다", () => {
+    setTab("left", {
+      location: { source: sshSrc("prod:1"), path: "/srv" },
+      entries: [
+        mk("docs", { kind: "dir", size: 4096 }),
+        mk("a.txt", { size: 0 }),
+      ],
+      dirSizes: { docs: 1048576 },
+      selected: new Set(["docs"]),
+    });
+    render(<StatusBar />);
+    expect(screen.getByText(/\(1(\.0)? MiB\)|\(1(\.0)? MB\)/)).toBeTruthy();
+    // 합계(파일만)에 폴더 메타 크기가 섞이지 않는다 — 파일 0 B 이므로 합계 표시 없음.
+    expect(screen.queryByText(/4(\.0)? KiB|4(\.0)? KB/)).toBeNull();
+  });
+
+  it("같은 호스트의 두 번째 연결을 보는 패널도 원격 즐겨찾기에 배지로 보인다", async () => {
+    useConnections.setState({
+      active: {
+        "prod:1": conn("prod:1", "prod", "connected"),
+        "prod:2": conn("prod:2", "prod", "connected"),
+      },
+    });
+    useHostFavorites.setState({
+      items: [{ id: "f1", host_alias: "prod", name: "logs", path: "/var/log" }],
+    });
+    setTab("left", {
+      location: { source: sshSrc("prod:2"), path: "/var/log" },
+    });
+    await renderSidebar();
+    expect(row("logs").textContent).toContain("L");
+  });
+});

@@ -95,6 +95,10 @@ import { useTagFilter } from "@/stores/tagFilter";
 import { useKeymap } from "@/stores/keymap";
 import { useCommands } from "@/stores/commands";
 import { formatKeyEvent } from "@/lib/keyEvent";
+import {
+  keepButtonActivationLocal,
+  releaseFocusAfterMouse,
+} from "@/lib/keyIsolation";
 import type {
   SavedHost,
   Bookmark as BookmarkType,
@@ -159,7 +163,7 @@ export function Sidebar({
     >
       <aside
         onKeyDown={onSidebarKeyDown}
-        onClick={releaseSidebarFocusAfterMouse}
+        onClick={releaseFocusAfterMouse}
         className="flex w-full min-h-0 flex-col border-r border-border bg-subtle text-base"
       >
         {/* 필터·태그는 스크롤 영역 밖에 고정 — 예전엔 같은 스크롤 안에서 sticky 끼리 겹쳐
@@ -267,6 +271,9 @@ function openableRow(opts: {
       if (e.target !== e.currentTarget) return;
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
+        // 처리한 키는 여기서 끝 — Ctrl/⌘+Enter(반대 패널에 열기)가 aside 를 지나 패널의
+        // Enter(커서 항목 열기)까지 실행되던 문제.
+        e.stopPropagation();
         opts.onOpen(targetPane(e));
         return;
       }
@@ -275,9 +282,11 @@ function openableRow(opts: {
       const cmd = commandForKey(e);
       if (cmd === "file.rename" && opts.onRename) {
         e.preventDefault();
+        e.stopPropagation();
         opts.onRename();
       } else if (cmd === "file.delete" && opts.onRemove) {
         e.preventDefault();
+        e.stopPropagation();
         opts.onRemove();
       }
     },
@@ -335,27 +344,11 @@ function onSidebarKeyDown(e: React.KeyboardEvent<HTMLElement>): void {
   } else if (e.key === "Escape") {
     target.blur();
   }
+  // 행 활성화 키(Enter/Space)는 수식키와 무관하게 사이드바 몫(<button> 행 포함).
+  keepButtonActivationLocal(e);
   const cmd = commandForKey(e);
   const modified = e.ctrlKey || e.metaKey || e.altKey;
   if (cmd ? cmd.startsWith("file.") : !modified) e.stopPropagation();
-}
-
-/**
- * 사이드바 안 버튼(섹션 접기·+·새로고침·태그 칩 등)을 **마우스로** 누른 뒤엔 포커스를
- * 내려놓는다. Windows(WebView2)는 클릭한 버튼이 포커스를 가져서, 그대로 두면 다음 ↑↓·
- * Enter 가 onSidebarKeyDown 에 막혀 패널 목록으로 가지 않는다. 입력칸(필터·선반 이름)은
- * 타이핑하러 누른 것이니 그대로 둔다. 키보드로 누른 경우(detail 0)도 그대로.
- */
-function releaseSidebarFocusAfterMouse(e: React.MouseEvent<HTMLElement>): void {
-  if (e.detail === 0) return;
-  const a = document.activeElement;
-  if (
-    a instanceof HTMLElement &&
-    e.currentTarget.contains(a) &&
-    a.tagName !== "INPUT" &&
-    a.tagName !== "TEXTAREA"
-  )
-    a.blur();
 }
 
 function sidebarRows(root: HTMLElement): HTMLElement[] {
@@ -499,6 +492,24 @@ function usePanesOnHost(alias: string): string {
     for (const id of ["left", "right"] as const) {
       const src = activeTab(s, id).location.source;
       if (src.kind === "ssh" && active[src.connection_id]?.alias === alias)
+        out += id === "left" ? "L" : "R";
+    }
+    return out;
+  });
+}
+
+/** 이 호스트(alias)의 어떤 연결이든 그 경로를 보고 있는 패널 배지("L"/"R"/"LR"). */
+function usePaneAtHostPath(alias: string, path: string): string {
+  const active = useConnections((s) => s.active);
+  return usePanes((s) => {
+    let out = "";
+    for (const id of ["left", "right"] as const) {
+      const loc = activeTab(s, id).location;
+      if (
+        loc.source.kind === "ssh" &&
+        String(loc.path) === path &&
+        active[loc.source.connection_id]?.alias === alias
+      )
         out += id === "left" ? "L" : "R";
     }
     return out;
@@ -1578,8 +1589,9 @@ function FavoriteItem({
       (c) => c.alias === fav.host_alias && c.state.kind === "connected",
     ),
   );
-  // sourceKey(ssh) 는 connection_id 그대로다 — 예전엔 "ssh:" 를 붙여 배지가 켜지지 않았다.
-  const favPane = usePaneAtKey(live?.id ?? "", path);
+  // 배지는 이 호스트의 **모든** 연결을 본다 — 같은 alias 로 두 번째 연결을 연 패널도
+  // 표시되게(예전엔 첫 연결 하나와만 비교했고, 그전엔 "ssh:" 접두로 아예 안 켜졌다).
+  const favPane = usePaneAtHostPath(fav.host_alias, path);
   // 연결돼 있으면 로컬 북마크처럼 파일 드롭 대상(그 폴더로 복사). 예전엔 원격 행에 놓으면
   // 섹션의 "북마크 추가" 존으로 떨어졌다. 연결이 없으면 지금처럼 북마크 존.
   const liveSource: SourceId | null = live

@@ -6,6 +6,10 @@ import type { TaskDto } from "@/types/bindings";
 import { useTasks, selectActive } from "@/stores/tasks";
 import { useUIDialogs } from "@/stores/ui-dialogs";
 import { formatSize } from "@/lib/format";
+import {
+  keepButtonActivationLocal,
+  releaseFocusAfterMouse,
+} from "@/lib/keyIsolation";
 
 /**
  * StatusBar 위 진행률 바.
@@ -32,7 +36,11 @@ export function TasksBar() {
   const open = expanded && others.length > 0;
 
   return (
-    <div className="border-t border-border bg-subtle">
+    <div
+      className="border-t border-border bg-subtle"
+      onKeyDown={keepButtonActivationLocal}
+      onClick={releaseFocusAfterMouse}
+    >
       <div className="flex h-7 items-center gap-2 px-3 text-meta">
         <TaskRow task={lead} />
         {others.length > 0 && (
@@ -136,7 +144,7 @@ function TaskRow({ task }: { task: TaskDto }) {
         title={`${task.title} — ${t("tasks.openDetails")}`}
         className={
           (queued ? "text-fg-muted" : "text-fg") +
-          " min-w-0 flex-1 truncate rounded text-left hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+          " min-h-6 min-w-0 flex-1 truncate rounded text-left hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
         }
       >
         {cancelling ? t("dialog.progress.stopping") : label}

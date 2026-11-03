@@ -20,6 +20,10 @@ import { useSearch } from "@/stores/search";
 import { useUIDialogs } from "@/stores/ui-dialogs";
 import { useToast } from "@/stores/toast";
 import { useKeyHint } from "@/lib/keyHint";
+import {
+  keepButtonActivationLocal,
+  releaseFocusAfterMouse,
+} from "@/lib/keyIsolation";
 import { triggerCompare, triggerUndo } from "@/lib/fileActions";
 import { toggleDropTray } from "@/lib/dropTray";
 import { AppLauncherStrip } from "@/components/AppLauncherStrip";
@@ -57,6 +61,8 @@ export function TopBar() {
   return (
     <header
       data-tauri-drag-region
+      onKeyDown={keepButtonActivationLocal}
+      onClick={releaseFocusAfterMouse}
       className="flex h-10 shrink-0 items-center gap-0.5 border-b border-border px-2"
     >
       {/* 로고/워드마크 — 자식은 pointer-events-none 으로 span 이 드래그 타깃이 되게 */}

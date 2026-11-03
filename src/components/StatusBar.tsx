@@ -13,6 +13,10 @@ import type { Entry } from "@/types/bindings";
 import { formatSize } from "@/lib/format";
 import { useHostLabel } from "@/lib/hostLabel";
 import { useKeyHint } from "@/lib/keyHint";
+import {
+  keepButtonActivationLocal,
+  releaseFocusAfterMouse,
+} from "@/lib/keyIsolation";
 import { isVirtualTrash, trashItemFor } from "@/lib/trashView";
 import {
   kindLabel,
@@ -53,8 +57,18 @@ export function StatusBar() {
     () => displayed.filter((e) => !isParentEntry(e)),
     [displayed],
   );
-  const { files, folders, totalSize } = useMemo(
+  const { files, folders } = useMemo(
     () => summarizeEntries(visible),
+    [visible],
+  );
+  // 총 용량은 파일만 — SFTP 는 폴더에도 디렉터리 메타 크기(4 KiB 등)를 실어 와서
+  // summarizeEntries 의 합계에 섞이면 의미 없는 값이 더해진다.
+  const totalSize = useMemo(
+    () =>
+      visible.reduce(
+        (sum, e) => (e.kind === "dir" ? sum : sum + (e.size ?? 0)),
+        0,
+      ),
     [visible],
   );
   // 가려진 항목 — 필터로 빠진 것과 숨김이라 빠진 것을 나눠 센다(필터 먼저 적용).
@@ -77,7 +91,8 @@ export function StatusBar() {
     let unknown = false;
     for (const e of tab.entries as Entry[]) {
       if (!tab.selected.has(e.name)) continue;
-      const size = e.size ?? (e.kind === "dir" ? tab.dirSizes[e.name] : null);
+      // 폴더는 "크기 계산" 결과만 — 원격 폴더의 메타 크기(4 KiB)는 재귀 크기가 아니다.
+      const size = e.kind === "dir" ? tab.dirSizes[e.name] : e.size;
       if (size != null) sum += size;
       else if (e.kind === "dir") unknown = true;
     }
@@ -143,7 +158,11 @@ export function StatusBar() {
       : null;
 
   return (
-    <footer className="flex h-6 items-center gap-3 border-t border-border px-3 text-meta text-fg-muted">
+    <footer
+      onKeyDown={keepButtonActivationLocal}
+      onClick={releaseFocusAfterMouse}
+      className="flex min-h-6 items-center gap-3 border-t border-border px-3 text-meta text-fg-muted"
+    >
       <span className="flex min-w-0 max-w-[50%] items-center gap-1.5">
         <span
           className="min-w-0 truncate"
@@ -157,7 +176,7 @@ export function StatusBar() {
             onClick={() => usePanes.getState().toggleShowHidden(activeId)}
             aria-pressed={tab.showHidden}
             title={hiddenTitle}
-            className="shrink-0 rounded px-1 hover:bg-border hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+            className="min-h-6 shrink-0 rounded px-1 hover:bg-border hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
           >
             {hiddenLabel}
           </button>
