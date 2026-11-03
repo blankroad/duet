@@ -302,7 +302,9 @@
         "Io": "입력을 확인하세요",
         "NotFound": "찾을 수 없습니다",
         "PermissionDenied": "권한이 없습니다"
-      }
+      },
+      "reconnectTitle": "{{alias}} 에 다시 연결",
+      "reconnectInto": "연결되면 {{pane}} 패널의 그 탭으로 돌아갑니다"
     },
     "adhoc": {
       "title": "호스트에 연결…",
@@ -575,7 +577,12 @@
     "connecting": "{{label}} 에 연결 중…",
     "connectionLost": "연결 끊김",
     "disconnected": "연결 종료됨",
-    "reconnect": "재연결"
+    "reconnect": "재연결",
+    "reconnecting": "{{label}} 에 다시 연결하는 중…",
+    "autoReconnecting": "연결이 끊겨 {{label}} 에 자동으로 다시 연결하는 중…",
+    "notConnected": "연결 안 됨",
+    "restoredReason": "앱을 다시 시작해 아직 연결하지 않은 탭",
+    "closedReason": "연결을 닫았습니다"
   },
   "pane": {
     "emptyFolder": "빈 폴더입니다",
@@ -746,6 +753,8 @@
     "sshHomeFailed": "ssh_home_directory 실패: {{err}}",
     "connected": "연결됨: {{alias}} → {{pane}} 패널 ({{path}})",
     "connectedListFailed": "{{alias}} 연결됨, 목록 조회 실패:\n{{failures}}",
+    "reconnectedTabs": "{{alias}} 다시 연결됨 — 탭 {{count}}개 복구",
+    "reconnectFailed": "{{alias}} 에 다시 연결하지 못했습니다: {{err}}",
     "symlinkFailed": "심볼릭 링크 실패: {{err}}",
     "threeWayApplyFailed": "3-way 적용 실패: {{err}}",
     "mergeFailed": "병합 실패: {{err}}",

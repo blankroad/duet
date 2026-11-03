@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Network, Server } from "lucide-react";
+import { Network, RefreshCw, Server } from "lucide-react";
 import { commands } from "@/types/bindings";
 import type { ConnectionDto, DuetError, HostKeyInfo } from "@/types/bindings";
 import { useConnections, type Host } from "@/stores/connections";
@@ -11,6 +11,7 @@ import { DialogButton } from "@/components/dialogs/DialogButton";
 import { DialogInput } from "@/components/dialogs/DialogInput";
 import { formatErr } from "@/lib/error";
 import { ConnectErrorBox } from "./ConnectErrorBox";
+import { ReconnectTarget, type ReconnectInfo } from "./ReconnectTarget";
 
 /**
  * 새 SSH 연결 다이얼로그.
@@ -28,6 +29,13 @@ export interface ConnectionDialogProps {
   onClose: () => void;
   /** 연결 성공 시 호출 — App 이 이 pane 의 location 을 SSH 로 navigate. */
   onConnected: (pane: PaneId, dto: ConnectionDto) => void;
+  /** 처음 선택돼 있을 패널 — 보통 지금 활성 패널. */
+  defaultPane?: PaneId | undefined;
+  /**
+   * 배너 "재연결" 로 열린 경우 — 패널은 정해져 있으므로 묻지 않고, 자동 재연결이
+   * 실패한 이유(있으면)를 처음부터 보여 준다.
+   */
+  reconnect?: ReconnectInfo | null | undefined;
 }
 
 type DialogPhase =
@@ -40,6 +48,8 @@ export function ConnectionDialog({
   alias,
   onClose,
   onConnected,
+  defaultPane,
+  reconnect,
 }: ConnectionDialogProps) {
   const { t } = useTranslation();
   const hosts = useConnections((s) => s.hosts);
@@ -55,14 +65,23 @@ export function ConnectionDialog({
   // 연결 시도 세대 — 연결 중에 닫으면 늦게 온 결과로 패널을 옮기지 않는다.
   const attempt = useRef(0);
 
-  // 다이얼로그가 새 호스트로 다시 열릴 때마다 phase + password 초기화.
+  // 다이얼로그가 새 호스트로 다시 열릴 때마다 phase + password + 패널 초기화.
+  // 재연결이면 대화상자 없이 시도했다 실패한 이유로 시작한다(호스트 키면 프롬프트).
   useEffect(() => {
     if (open) {
       attempt.current += 1;
-      setPhase({ kind: "idle" });
       setPassword("");
+      setTarget(reconnect?.pane ?? defaultPane ?? "left");
+      const e = reconnect?.error;
+      setPhase(
+        !e
+          ? { kind: "idle" }
+          : e.kind === "HostKeyUnverified"
+            ? { kind: "host-key", info: e.message }
+            : { kind: "error", error: e },
+      );
     }
-  }, [open, alias]);
+  }, [open, alias, reconnect, defaultPane]);
 
   const close = () => {
     attempt.current += 1;
@@ -129,9 +148,14 @@ export function ConnectionDialog({
   return (
     <DialogShell
       open={open}
-      title={t("dialog.connection.title", { alias })}
+      title={t(
+        reconnect
+          ? "dialog.connection.reconnectTitle"
+          : "dialog.connection.title",
+        { alias },
+      )}
       description={t("dialog.connection.desc", { alias })}
-      icon={Server}
+      icon={reconnect ? RefreshCw : Server}
       onClose={close}
       initialFocus={pwRef}
       footer={
@@ -156,25 +180,29 @@ export function ConnectionDialog({
     >
       {host && <HostInfo host={host} />}
 
-      <div>
-        <div className="text-meta text-fg-muted">
-          {t("dialog.connection.openInPane")}
+      {reconnect ? (
+        <ReconnectTarget pane={reconnect.pane} />
+      ) : (
+        <div>
+          <div className="text-meta text-fg-muted">
+            {t("dialog.connection.openInPane")}
+          </div>
+          <div className="mt-1 flex gap-2">
+            <PaneRadio
+              value="left"
+              current={target}
+              onChange={setTarget}
+              label={t("dialog.connection.paneLeft")}
+            />
+            <PaneRadio
+              value="right"
+              current={target}
+              onChange={setTarget}
+              label={t("dialog.connection.paneRight")}
+            />
+          </div>
         </div>
-        <div className="mt-1 flex gap-2">
-          <PaneRadio
-            value="left"
-            current={target}
-            onChange={setTarget}
-            label={t("dialog.connection.paneLeft")}
-          />
-          <PaneRadio
-            value="right"
-            current={target}
-            onChange={setTarget}
-            label={t("dialog.connection.paneRight")}
-          />
-        </div>
-      </div>
+      )}
 
       <div>
         <label htmlFor="conn-pw" className="block text-meta text-fg-muted">

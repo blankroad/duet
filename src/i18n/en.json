@@ -305,7 +305,9 @@
         "Io": "Check the input",
         "NotFound": "Not found",
         "PermissionDenied": "Permission denied"
-      }
+      },
+      "reconnectTitle": "Reconnect to {{alias}}",
+      "reconnectInto": "Returns to the same tab in the {{pane}} pane once connected"
     },
     "adhoc": {
       "title": "Connect to host…",
@@ -578,7 +580,12 @@
     "connecting": "Connecting to {{label}}…",
     "connectionLost": "Connection lost",
     "disconnected": "Disconnected",
-    "reconnect": "Reconnect"
+    "reconnect": "Reconnect",
+    "reconnecting": "Reconnecting to {{label}}…",
+    "autoReconnecting": "Connection dropped — reconnecting to {{label}} automatically…",
+    "notConnected": "Not connected",
+    "restoredReason": "restored after restart, not connected yet",
+    "closedReason": "connection was closed"
   },
   "pane": {
     "emptyFolder": "This folder is empty",
@@ -749,6 +756,8 @@
     "sshHomeFailed": "ssh_home_directory failed: {{err}}",
     "connected": "Connected: {{alias}} → {{pane}} pane ({{path}})",
     "connectedListFailed": "Connected {{alias}}, but list failed:\n{{failures}}",
+    "reconnectedTabs": "Reconnected {{alias}} — {{count}} tabs restored",
+    "reconnectFailed": "Couldn't reconnect to {{alias}}: {{err}}",
     "symlinkFailed": "Symlink failed: {{err}}",
     "threeWayApplyFailed": "3-way apply failed: {{err}}",
     "mergeFailed": "Merge failed: {{err}}",

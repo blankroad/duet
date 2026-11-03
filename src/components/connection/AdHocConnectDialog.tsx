@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Lock, Server, Unlock } from "lucide-react";
+import { Lock, RefreshCw, Server, Unlock } from "lucide-react";
 import { commands } from "@/types/bindings";
 import type {
   ConnectionDto,
@@ -18,6 +18,7 @@ import { DialogShell } from "@/components/dialogs/DialogShell";
 import { DialogButton } from "@/components/dialogs/DialogButton";
 import { DialogInput } from "@/components/dialogs/DialogInput";
 import { ConnectErrorBox } from "./ConnectErrorBox";
+import { ReconnectTarget, type ReconnectInfo } from "./ReconnectTarget";
 import { formatErr } from "@/lib/error";
 
 /**
@@ -34,6 +35,10 @@ export interface AdHocConnectDialogProps {
   onClose: () => void;
   onConnected: (pane: PaneId, dto: ConnectionDto) => void;
   prefill?: SavedHost | null;
+  /** 처음 선택돼 있을 패널 — 보통 지금 활성 패널. */
+  defaultPane?: PaneId | undefined;
+  /** 배너 "재연결" 로 열린 경우 — 패널을 묻지 않고 자동 재연결 실패 이유를 보여 준다. */
+  reconnect?: ReconnectInfo | null | undefined;
 }
 
 type Phase =
@@ -47,6 +52,8 @@ export function AdHocConnectDialog({
   onClose,
   onConnected,
   prefill,
+  defaultPane,
+  reconnect,
 }: AdHocConnectDialogProps) {
   const { t } = useTranslation();
   const upsertActive = useConnections((s) => s.upsertActive);
@@ -76,6 +83,20 @@ export function AdHocConnectDialog({
   const saveAfterUnlock = useRef<(() => Promise<void>) | null>(null);
   // 연결 시도 세대 — 연결 중에 닫으면 늦게 온 결과로 패널을 옮기지 않는다.
   const attempt = useRef(0);
+
+  // 열릴 때마다(open false→true) 패널과 첫 안내를 정한다.
+  useEffect(() => {
+    if (!open) return;
+    setTarget(reconnect?.pane ?? defaultPane ?? "left");
+    const e = reconnect?.error;
+    setPhase(
+      !e
+        ? { kind: "idle" }
+        : e.kind === "HostKeyUnverified"
+          ? { kind: "host-key", info: e.message }
+          : { kind: "error", error: e },
+    );
+  }, [open, reconnect, defaultPane]);
 
   // 다이얼로그가 열릴 때 prefill 적용 (한 번만 — open false→true edge).
   useEffect(() => {
@@ -251,9 +272,13 @@ export function AdHocConnectDialog({
     <>
       <DialogShell
         open={open}
-        title={t("dialog.adhoc.title")}
+        title={
+          reconnect && prefill
+            ? t("dialog.connection.reconnectTitle", { alias: prefill.alias })
+            : t("dialog.adhoc.title")
+        }
         description={t("dialog.adhoc.desc")}
-        icon={Server}
+        icon={reconnect ? RefreshCw : Server}
         onClose={handleClose}
         footer={
           phase.kind === "host-key" ? undefined : (
@@ -340,25 +365,29 @@ export function AdHocConnectDialog({
           />
         </div>
 
-        <div>
-          <div className="text-meta text-fg-muted">
-            {t("dialog.connection.openInPane")}
+        {reconnect ? (
+          <ReconnectTarget pane={reconnect.pane} />
+        ) : (
+          <div>
+            <div className="text-meta text-fg-muted">
+              {t("dialog.connection.openInPane")}
+            </div>
+            <div className="mt-1 flex gap-2">
+              <PaneRadio
+                value="left"
+                current={target}
+                onChange={setTarget}
+                label={t("dialog.connection.paneLeft")}
+              />
+              <PaneRadio
+                value="right"
+                current={target}
+                onChange={setTarget}
+                label={t("dialog.connection.paneRight")}
+              />
+            </div>
           </div>
-          <div className="mt-1 flex gap-2">
-            <PaneRadio
-              value="left"
-              current={target}
-              onChange={setTarget}
-              label={t("dialog.connection.paneLeft")}
-            />
-            <PaneRadio
-              value="right"
-              current={target}
-              onChange={setTarget}
-              label={t("dialog.connection.paneRight")}
-            />
-          </div>
-        </div>
+        )}
 
         {/* Saved password 가 vault 에 있고 vault 잠겨있으면 unlock 안내. */}
         {prefill && vault.exists && !vault.unlocked && (
