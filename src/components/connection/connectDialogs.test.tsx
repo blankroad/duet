@@ -286,3 +286,32 @@ describe("password handling (§5)", () => {
     );
   });
 });
+
+describe("AdHocConnectDialog keyboard", () => {
+  it("submits with Enter from a field", async () => {
+    m.connectionOpenAdhoc.mockResolvedValue({
+      status: "error",
+      error: { kind: "AuthFailed" },
+    });
+    render(
+      <AdHocConnectDialog
+        open
+        onClose={vi.fn()}
+        onConnected={vi.fn()}
+        prefill={{
+          alias: "box",
+          host: "box.lan",
+          port: 22,
+          user: "u",
+          key_path: null,
+        }}
+      />,
+    );
+    await act(async () => {
+      fireEvent.keyDown(screen.getByLabelText("dialog.adhoc.password"), {
+        key: "Enter",
+      });
+    });
+    expect(m.connectionOpenAdhoc).toHaveBeenCalledTimes(1);
+  });
+});

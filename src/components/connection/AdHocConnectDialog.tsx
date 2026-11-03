@@ -300,6 +300,15 @@ export function AdHocConnectDialog({
         description={t("dialog.adhoc.desc")}
         icon={reconnect ? RefreshCw : Server}
         onClose={handleClose}
+        // 입력칸에서 Enter = 연결 (버튼에 ↵ 힌트가 있는데 동작하지 않았다).
+        onKeyDown={(e) => {
+          if (e.key !== "Enter" || e.nativeEvent.isComposing || locked) return;
+          const el = e.target;
+          if (!(el instanceof HTMLInputElement) || el.type === "checkbox")
+            return;
+          e.preventDefault();
+          handleConnect();
+        }}
         footer={
           phase.kind === "host-key" ? undefined : (
             <>
