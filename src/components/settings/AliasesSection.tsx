@@ -8,17 +8,19 @@ import {
 import { useSavedHosts } from "@/stores/savedHosts";
 import { usePanes, activeTab } from "@/stores/panes";
 import type { AliasKind } from "@/types/bindings";
+import { useTranslation } from "react-i18next";
 
 export function AliasesSection() {
+  const { t } = useTranslation();
   const items = useUserAliases((s) => s.items);
   const [adding, setAdding] = useState(false);
 
   return (
     <div className="space-y-2">
       <div className="grid grid-cols-[1fr_5rem_1fr_2rem] gap-2 border-b border-border px-2 py-1 text-meta text-fg-muted">
-        <div>Name</div>
-        <div>Kind</div>
-        <div>Target</div>
+        <div>{t("settings.aliases.name")}</div>
+        <div>{t("settings.aliases.kind")}</div>
+        <div>{t("settings.aliases.target")}</div>
         <div></div>
       </div>
       {items.map((a) => (
@@ -27,7 +29,9 @@ export function AliasesSection() {
           className="grid grid-cols-[1fr_5rem_1fr_2rem] items-center gap-2 px-2 py-0.5 text-base hover:bg-subtle"
         >
           <div className="truncate">{a.name}</div>
-          <div className="text-meta text-fg-muted">{a.kind.kind}</div>
+          <div className="text-meta text-fg-muted">
+            {t(`settings.aliases.kind_${a.kind.kind}`)}
+          </div>
           <div className="truncate font-mono text-meta">
             {a.kind.kind === "navigate"
               ? `${a.kind.location.source.kind === "ssh" ? "ssh:" : ""}${a.kind.location.path}`
@@ -37,7 +41,7 @@ export function AliasesSection() {
             type="button"
             onClick={() => void removeUserAlias(a.id)}
             className="rounded p-0.5 text-fg-muted hover:bg-border hover:text-danger"
-            aria-label="Remove alias"
+            aria-label={t("settings.aliases.remove")}
           >
             <X size={11} />
           </button>
@@ -51,7 +55,7 @@ export function AliasesSection() {
           onClick={() => setAdding(true)}
           className="flex items-center gap-1 rounded border border-dashed border-border px-2 py-1 text-meta text-fg-muted hover:bg-subtle"
         >
-          <Plus size={11} /> Add alias
+          <Plus size={11} /> {t("settings.aliases.add")}
         </button>
       )}
     </div>
@@ -59,6 +63,7 @@ export function AliasesSection() {
 }
 
 function AddForm({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation();
   const savedHosts = useSavedHosts((s) => s.hosts);
   const [name, setName] = useState("");
   const [kindStr, setKindStr] = useState<"navigate" | "connect">("navigate");
@@ -84,7 +89,7 @@ function AddForm({ onClose }: { onClose: () => void }) {
     <div className="rounded border border-accent bg-subtle p-2">
       <div className="grid grid-cols-[5rem_1fr] items-center gap-2 text-base">
         <label htmlFor="alias-name" className="text-fg-muted">
-          Name
+          {t("settings.aliases.name")}
         </label>
         <input
           id="alias-name"
@@ -95,7 +100,7 @@ function AddForm({ onClose }: { onClose: () => void }) {
           className="rounded border border-border bg-base px-2 py-1 font-mono"
         />
         <label htmlFor="alias-kind" className="text-fg-muted">
-          Kind
+          {t("settings.aliases.kind")}
         </label>
         <select
           id="alias-kind"
@@ -103,12 +108,12 @@ function AddForm({ onClose }: { onClose: () => void }) {
           onChange={(e) => setKindStr(e.target.value as "navigate" | "connect")}
           className="rounded border border-border bg-base px-2 py-1"
         >
-          <option value="navigate">Navigate (active tab location)</option>
-          <option value="connect">Connect (saved host)</option>
+          <option value="navigate">{t("settings.aliases.navigateOpt")}</option>
+          <option value="connect">{t("settings.aliases.connectOpt")}</option>
         </select>
         {kindStr === "navigate" ? (
           <>
-            <div className="text-fg-muted">Target</div>
+            <div className="text-fg-muted">{t("settings.aliases.target")}</div>
             <div className="truncate font-mono text-meta text-fg-muted">
               {tab.location.path}
             </div>
@@ -116,7 +121,7 @@ function AddForm({ onClose }: { onClose: () => void }) {
         ) : (
           <>
             <label htmlFor="alias-host" className="text-fg-muted">
-              Host
+              {t("settings.aliases.host")}
             </label>
             <select
               id="alias-host"
@@ -125,7 +130,7 @@ function AddForm({ onClose }: { onClose: () => void }) {
               className="rounded border border-border bg-base px-2 py-1"
             >
               {savedHosts.length === 0 ? (
-                <option value="">(no saved hosts)</option>
+                <option value="">{t("settings.aliases.noHosts")}</option>
               ) : (
                 savedHosts.map((h) => (
                   <option key={h.alias} value={h.alias}>
@@ -143,14 +148,14 @@ function AddForm({ onClose }: { onClose: () => void }) {
           onClick={onClose}
           className="rounded border border-border px-3 py-1 text-base hover:bg-base"
         >
-          Cancel
+          {t("common.cancel")}
         </button>
         <button
           type="button"
           onClick={() => void submit()}
           className="rounded bg-accent px-3 py-1 text-base text-white"
         >
-          Add
+          {t("settings.aliases.addCta")}
         </button>
       </div>
     </div>

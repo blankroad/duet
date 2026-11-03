@@ -9,6 +9,7 @@ import { syncAppSettings, toastSettingsSaveFailed } from "@/stores/settings";
 import { useUI, type Density } from "@/stores/ui";
 import { setLang, storedLang, type LangSetting } from "@/i18n";
 import { applyTheme } from "@/lib/theme";
+import { useKeyHint } from "@/lib/keyHint";
 import { formatErr } from "@/lib/error";
 import { buildSettingsPatch as buildPatch } from "@/lib/settingsPatch";
 
@@ -26,6 +27,8 @@ export function GeneralSection() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // 영구 삭제 키 — 켜져 있을 때만 명령이 등록되므로 꺼져 있으면 키 없이 표시.
+  const permKey = useKeyHint("file.deletePerm");
   // 탐색기 통합 상태 (Windows 전용, 레지스트리가 SoT). 두 토글이 같은 키군을 만지므로
   // busy 플래그 하나로 직렬화한다.
   const [openInDuet, setOpenInDuet] = useState(false);
@@ -413,7 +416,9 @@ export function GeneralSection() {
         />
         <div className="flex-1">
           <div className="text-base">
-            Enable permanent delete (Shift+Delete)
+            {permKey
+              ? t("settings.permDeleteKey", { key: permKey })
+              : t("settings.permDelete")}
           </div>
           <div className="text-meta text-fg-muted">
             {t("settings.permDeleteHint")}

@@ -4,6 +4,7 @@ import { commands } from "@/types/bindings";
 import { buildSettingsPatch } from "@/lib/settingsPatch";
 import { ICON_PALETTE, paletteIcon } from "@/lib/iconPalette";
 import { useAppSettings, toastSettingsSaveFailed } from "@/stores/settings";
+import { useTranslation } from "react-i18next";
 
 /** 확장자 정규화 — 소문자, 선두 점 제거, trim. */
 function normExt(s: string): string {
@@ -15,6 +16,7 @@ function normExt(s: string): string {
  * 저장은 settings.ext_icon_overrides, 즉시 반영은 useAppSettings.
  */
 export function ExtIconsSection() {
+  const { t } = useTranslation();
   const [map, setMap] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [ext, setExt] = useState("");
@@ -59,7 +61,10 @@ export function ExtIconsSection() {
     void persist(next);
   };
 
-  if (loading) return <div className="text-base text-fg-muted">Loading…</div>;
+  if (loading)
+    return (
+      <div className="text-base text-fg-muted">{t("settings.loading")}</div>
+    );
 
   const entries = Object.entries(map).sort(([a], [b]) => a.localeCompare(b));
   const pending = normExt(ext);
@@ -67,10 +72,9 @@ export function ExtIconsSection() {
   return (
     <div className="space-y-4">
       <div>
-        <div className="text-base">Custom file icons</div>
+        <div className="text-base">{t("settings.icons.title")}</div>
         <div className="text-meta text-fg-muted">
-          Assign an icon to a file extension — overrides the built-in icon. Type
-          an extension, then click a shape (its color comes with it).
+          {t("settings.icons.desc")}
         </div>
       </div>
 
@@ -94,7 +98,7 @@ export function ExtIconsSection() {
                 <button
                   type="button"
                   onClick={() => remove(e)}
-                  aria-label="Remove"
+                  aria-label={t("settings.remove")}
                   className="rounded p-1 text-fg-muted hover:bg-border hover:text-fg"
                 >
                   <X size={13} />
@@ -109,14 +113,14 @@ export function ExtIconsSection() {
         <input
           value={ext}
           onChange={(e) => setExt(e.target.value)}
-          placeholder="extension — e.g. pptx"
+          placeholder={t("settings.icons.extPlaceholder")}
           spellCheck={false}
           className="w-48 rounded border border-border bg-subtle px-2 py-1 font-mono text-base focus:border-accent focus:outline-none"
         />
         <div className="text-meta text-fg-muted">
           {pending
-            ? `Pick an icon for .${pending}:`
-            : "Type an extension above, then click an icon."}
+            ? t("settings.icons.pick", { ext: pending })
+            : t("settings.icons.typeFirst")}
         </div>
         <div className="grid grid-cols-8 gap-1">
           {ICON_PALETTE.map((p) => (

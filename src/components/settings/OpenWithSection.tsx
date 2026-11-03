@@ -4,6 +4,8 @@ import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { commands } from "@/types/bindings";
 import { buildSettingsPatch } from "@/lib/settingsPatch";
 import { toastSettingsSaveFailed } from "@/stores/settings";
+import { useTranslation } from "react-i18next";
+import { basename } from "@/lib/paths";
 
 /** 확장자 정규화 — 소문자, 선두 점 제거, trim. */
 function normExt(s: string): string {
@@ -11,7 +13,7 @@ function normExt(s: string): string {
 }
 /** 앱 경로에서 표시용 이름(마지막 컴포넌트). */
 function appName(p: string): string {
-  return p.split(/[/\\]/).filter(Boolean).pop() ?? p;
+  return basename(p, p);
 }
 
 /**
@@ -19,6 +21,7 @@ function appName(p: string): string {
  * 저장은 settings.ext_app_overrides (backend open_path 가 읽음).
  */
 export function OpenWithSection() {
+  const { t } = useTranslation();
   const [map, setMap] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [ext, setExt] = useState("");
@@ -53,7 +56,7 @@ export function OpenWithSection() {
     if (!e) return;
     const picked = await openFileDialog({
       multiple: false,
-      title: `Choose a program for .${e}`,
+      title: t("settings.openWith.chooseTitle", { ext: e }),
     });
     if (typeof picked === "string") {
       void persist({ ...map, [e]: picked });
@@ -66,7 +69,10 @@ export function OpenWithSection() {
     void persist(next);
   };
 
-  if (loading) return <div className="text-base text-fg-muted">Loading…</div>;
+  if (loading)
+    return (
+      <div className="text-base text-fg-muted">{t("settings.loading")}</div>
+    );
 
   const entries = Object.entries(map).sort(([a], [b]) => a.localeCompare(b));
   const pending = normExt(ext);
@@ -74,12 +80,9 @@ export function OpenWithSection() {
   return (
     <div className="space-y-4">
       <div>
-        <div className="text-base">
-          Open with — default program by extension
-        </div>
+        <div className="text-base">{t("settings.openWith.title")}</div>
         <div className="text-meta text-fg-muted">
-          Pick which program opens files of a given extension. Falls back to the
-          OS default when unset. Type an extension, then choose a program.
+          {t("settings.openWith.desc")}
         </div>
       </div>
 
@@ -98,7 +101,7 @@ export function OpenWithSection() {
               <button
                 type="button"
                 onClick={() => remove(e)}
-                aria-label="Remove"
+                aria-label={t("settings.remove")}
                 className="rounded p-1 text-fg-muted hover:bg-border hover:text-fg"
               >
                 <X size={13} />
@@ -112,7 +115,7 @@ export function OpenWithSection() {
         <input
           value={ext}
           onChange={(e) => setExt(e.target.value)}
-          placeholder="extension — e.g. psd"
+          placeholder={t("settings.openWith.extPlaceholder")}
           spellCheck={false}
           className="w-48 rounded border border-border bg-subtle px-2 py-1 font-mono text-base focus:border-accent focus:outline-none"
         />
@@ -123,7 +126,7 @@ export function OpenWithSection() {
           className="flex items-center gap-1.5 rounded border border-border px-3 py-1 text-base hover:bg-subtle disabled:opacity-30"
         >
           <FolderOpen size={14} className="text-fg-muted" />
-          Choose program…
+          {t("settings.openWith.choose")}
         </button>
       </div>
     </div>
