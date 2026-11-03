@@ -149,8 +149,9 @@ export function useMarquee(opts: {
       // 이어서 Shift+↓·Enter 가 마키 결과에서 이어지게.
       const { idx, down } = lastHitRef.current;
       if (draggingRef.current && idx.length > 0) {
-        const lo = Math.min(...idx);
-        const hi = Math.max(...idx);
+        // 스프레드 대신 reduce — 아주 많은 히트에서도 인자 개수 한계에 안 걸린다.
+        const lo = idx.reduce((a, b) => (b < a ? b : a));
+        const hi = idx.reduce((a, b) => (b > a ? b : a));
         usePanes.getState().setCursor(id, down ? hi : lo);
         setAnchorAt(id, down ? lo : hi);
       }

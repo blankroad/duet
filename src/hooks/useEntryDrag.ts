@@ -235,10 +235,17 @@ export function useEntryDrag(id: PaneId) {
         cleanup();
         useDragState.getState().end();
         document.body.style.cursor = "";
-        window.addEventListener("mouseup", () => suppressNextClick(), {
+        // 창 밖에서 버튼을 놓아 mouseup 이 안 오면 다음 평범한 클릭을 삼키지 않게
+        // 잠시 뒤 스스로 거둔다.
+        const onRelease = () => suppressNextClick();
+        window.addEventListener("mouseup", onRelease, {
           capture: true,
           once: true,
         });
+        setTimeout(
+          () => window.removeEventListener("mouseup", onRelease, true),
+          1500,
+        );
       };
 
       const cleanup = () => {
