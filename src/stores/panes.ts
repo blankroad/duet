@@ -223,7 +223,6 @@ export function activeTab(state: PanesState, id: PaneId): TabState {
   return p.tabs[p.activeTabIndex] ?? p.tabs[0]!;
 }
 
-/** 액션 안에서 active tab 만 변경하는 헬퍼. */
 /**
  * 표시 순서가 바뀌는 변경(정렬·숨김 토글) 뒤에도 커서가 **보던 항목**(이름)을 따라가게.
  * 예전엔 역순 정렬 뒤 커서가 같은 인덱스의 다른 파일에 남거나(Enter·F2·Delete 대상이
@@ -242,6 +241,7 @@ function keepCursor(prev: TabState, next: TabState): TabState {
   return { ...next, cursorIndex };
 }
 
+/** 액션 안에서 active tab 만 변경하는 헬퍼. */
 function withActiveTab(p: PaneState, fn: (t: TabState) => TabState): PaneState {
   const i = p.activeTabIndex;
   const cur = p.tabs[i];

@@ -419,17 +419,15 @@ it("폴더 우클릭 '폴더에 붙여넣기'는 그 폴더 안으로 계획한�
         pushHistory: false,
       }),
   );
-  useClipboard
-    .getState()
-    .set(
-      [
-        {
-          location: { source: { kind: "local" }, path: "/elsewhere" },
-          name: "x.txt",
-        },
-      ],
-      "copy",
-    );
+  useClipboard.getState().set(
+    [
+      {
+        location: { source: { kind: "local" }, path: "/elsewhere" },
+        name: "x.txt",
+      },
+    ],
+    "copy",
+  );
   render(<Harness />);
   fireEvent.contextMenu(rowInner("box"), { clientX: 40, clientY: 40 });
   await act(async () =>
