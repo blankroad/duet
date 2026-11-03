@@ -1,3 +1,4 @@
+import i18n from "@/i18n";
 import { create } from "zustand";
 import { commands } from "@/types/bindings";
 import { useToast } from "@/stores/toast";
@@ -28,7 +29,12 @@ export async function addUserAlias(
     useUserAliases.getState().setAll(r.data);
     return true;
   }
-  useToast.getState().show(`Add alias: ${formatErr(r.error)}`, "error");
+  useToast
+    .getState()
+    .show(
+      i18n.t("settings.aliases.addFailed", { err: formatErr(r.error) }),
+      "error",
+    );
   return false;
 }
 

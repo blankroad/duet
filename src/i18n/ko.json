@@ -676,6 +676,7 @@
       "pressKey": "키를 누르세요…",
       "conflictPrompt": "{{key}} 는 ‘{{command}}’ 에 지정되어 있습니다. 이 명령으로 옮길까요?",
       "conflictReplace": "바꾸기",
+      "bindFailed": "단축키 지정 실패: {{err}}",
       "shadowed": "기본 키 {{key}} 를 ‘{{command}}’ 가 사용 중"
     },
     "desc": "앱 설정",
@@ -747,7 +748,8 @@
       "addCta": "추가",
       "navigateOpt": "이동 (활성 탭 위치)",
       "connectOpt": "접속 (저장된 호스트)",
-      "noHosts": "(저장된 호스트 없음)"
+      "noHosts": "(저장된 호스트 없음)",
+      "addFailed": "별칭 추가 실패: {{err}}"
     },
     "sizeUnits": "파일 크기 단위",
     "sizeUnitsHint": "이진은 탐색기와, 십진은 파인더와 같은 값입니다.",

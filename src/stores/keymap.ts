@@ -1,3 +1,4 @@
+import i18n from "@/i18n";
 import { create } from "zustand";
 import { commands } from "@/types/bindings";
 import { useToast } from "@/stores/toast";
@@ -87,7 +88,12 @@ export async function setKeymap(
     useKeymap.getState().setAll(r.data);
     return true;
   }
-  useToast.getState().show(`Bind key: ${formatErr(r.error)}`, "error");
+  useToast
+    .getState()
+    .show(
+      i18n.t("settings.keymap.bindFailed", { err: formatErr(r.error) }),
+      "error",
+    );
   return false;
 }
 

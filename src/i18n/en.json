@@ -681,6 +681,7 @@
       "pressKey": "Press key…",
       "conflictPrompt": "{{key}} is assigned to “{{command}}”. Move it to this command?",
       "conflictReplace": "Replace",
+      "bindFailed": "Could not bind key: {{err}}",
       "shadowed": "Default key {{key}} is used by “{{command}}”"
     },
     "desc": "Application settings",
@@ -752,7 +753,8 @@
       "addCta": "Add",
       "navigateOpt": "Navigate (active tab location)",
       "connectOpt": "Connect (saved host)",
-      "noHosts": "(no saved hosts)"
+      "noHosts": "(no saved hosts)",
+      "addFailed": "Could not add alias: {{err}}"
     },
     "sizeUnits": "File size units",
     "sizeUnitsHint": "Binary matches Windows; decimal matches Finder.",
