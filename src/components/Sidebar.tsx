@@ -420,8 +420,9 @@ function openMenu(e: React.MouseEvent, items: MenuEntry[]): void {
   e.preventDefault();
   e.stopPropagation();
   // 우클릭 mousedown 이 행(tabindex=0)에 준 포커스를 내려놓는다 — 메뉴를 실행한 뒤 누른
-  // Delete 가 패널 대신 이 북마크를 지우던 문제(우클릭은 늘 마우스라 detail 을 안 본다).
-  (e.currentTarget as HTMLElement).blur();
+  // Delete 가 패널 대신 이 북마크를 지우던 문제. 키보드로 연 메뉴(메뉴 키·Shift+F10,
+  // button 0)는 ↑↓ 로 고른 위치를 지키도록 포커스를 둔다.
+  if (e.button === 2) (e.currentTarget as HTMLElement).blur();
   useContextMenu.getState().openAt(e.clientX, e.clientY, items);
 }
 

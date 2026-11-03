@@ -980,7 +980,11 @@ describe("검증 2차 후속 (opus-3 Med-1)", () => {
     await renderSidebar();
     const bm = row("work");
     bm.focus();
-    fireEvent.contextMenu(bm);
+    // 키보드로 연 메뉴(button 0)는 고른 행 포커스를 지킨다.
+    fireEvent.contextMenu(bm, { button: 0 });
+    expect(document.activeElement).toBe(bm);
+    act(() => useContextMenu.getState().close());
+    fireEvent.contextMenu(bm, { button: 2 });
     expect(document.activeElement).not.toBe(bm);
     act(() => useContextMenu.getState().close());
     fireEvent.keyDown(document.body, { key: "Delete", code: "Delete" });
