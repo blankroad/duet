@@ -44,6 +44,7 @@ const mkTab = (path: string, entries: Entry[] = []): TabState => ({
   filterFocused: false,
   dirSizes: {},
   history: { stack: [], index: 0 },
+  pinned: false,
 });
 
 describe("root parent entry (..)", () => {

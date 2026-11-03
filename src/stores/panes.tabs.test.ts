@@ -17,7 +17,7 @@ function seedFour() {
     panes: {
       ...st.panes,
       left: {
-        tabs: [{ ...cur, location: loc("/a") }],
+        tabs: [{ ...cur, location: loc("/a"), pinned: false }],
         activeTabIndex: 0,
       },
     },
@@ -146,5 +146,92 @@ describe("panes — 같은 경로, 다른 소스", () => {
     expect(t.location.source.kind).toBe("ssh");
     expect(t.history.stack.length).toBe(2);
     expect(t.history.index).toBe(1);
+  });
+});
+
+describe("panes — 핀 탭", () => {
+  beforeEach(seedFour);
+  const pins = () => usePanes.getState().panes.left.tabs.map((t) => t.pinned);
+  const activePath = () =>
+    String(usePanes.getState().panes.left.tabs[activeIdx()]!.location.path);
+
+  it("핀하면 핀 구간 끝으로 가고 활성 탭은 그대로", () => {
+    usePanes.getState().togglePinTab("left", 2); // /c
+    expect(paths()).toEqual(["/c", "/a", "/b", "/d"]);
+    expect(pins()).toEqual([true, false, false, false]);
+    expect(activePath()).toBe("/d");
+    usePanes.getState().togglePinTab("left", 3); // /d
+    expect(paths()).toEqual(["/c", "/d", "/a", "/b"]);
+    expect(activePath()).toBe("/d");
+  });
+
+  it("해제하면 일반 구간 맨 앞으로", () => {
+    usePanes.getState().togglePinTab("left", 2); // [c*, a, b, d]
+    usePanes.getState().togglePinTab("left", 3); // [c*, d*, a, b]
+    usePanes.getState().togglePinTab("left", 0); // c 해제 → [d*, c, a, b]
+    expect(paths()).toEqual(["/d", "/c", "/a", "/b"]);
+    expect(pins()).toEqual([true, false, false, false]);
+  });
+
+  it("핀 탭은 closeTab 으로 닫히지 않는다 (X·가운데 클릭·Ctrl+W 공통)", () => {
+    usePanes.getState().togglePinTab("left", 0);
+    expect(usePanes.getState().closeTab("left", 0)).toBe(false);
+    expect(paths()).toEqual(["/a", "/b", "/c", "/d"]);
+    expect(usePanes.getState().closeTab("left", 1)).toBe(true);
+    expect(paths()).toEqual(["/a", "/c", "/d"]);
+  });
+
+  it("다른 탭 모두 닫기 — 지목한 탭과 핀이 남고 지목한 탭이 활성", () => {
+    usePanes.getState().togglePinTab("left", 0); // a*
+    usePanes.getState().closeOtherTabs("left", 2); // /c
+    expect(paths()).toEqual(["/a", "/c"]);
+    expect(activePath()).toBe("/c");
+  });
+
+  it("오른쪽 탭 모두 닫기 — 핀은 오른쪽이어도 남는다", () => {
+    usePanes.getState().togglePinTab("left", 1); // [b*, a, c, d]
+    usePanes.getState().closeTabsToRight("left", 0); // b 오른쪽 일반 탭 전부
+    expect(paths()).toEqual(["/b"]);
+    expect(activePath()).toBe("/b");
+  });
+
+  it("모두 닫기 — 핀이 있으면 핀만 남고 마지막 핀이 활성", () => {
+    usePanes.getState().togglePinTab("left", 0); // a*
+    usePanes.getState().togglePinTab("left", 1); // b*
+    usePanes.getState().closeAllTabs("left"); // 활성 /d 는 일반 탭
+    expect(paths()).toEqual(["/a", "/b"]);
+    expect(activePath()).toBe("/b");
+  });
+
+  it("모두 닫기 — 활성이 핀이면 그 핀이 활성으로 남는다", () => {
+    usePanes.getState().togglePinTab("left", 0);
+    usePanes.getState().togglePinTab("left", 1);
+    usePanes.getState().selectTab("left", 0);
+    usePanes.getState().closeAllTabs("left");
+    expect(paths()).toEqual(["/a", "/b"]);
+    expect(activePath()).toBe("/a");
+  });
+
+  it("새 탭은 핀 구간 안에 들어가지 않는다", () => {
+    usePanes.getState().togglePinTab("left", 0);
+    usePanes.getState().togglePinTab("left", 1); // [a*, b*, c, d]
+    usePanes.getState().openTab("left", loc("/x"), { after: 0 });
+    expect(paths()).toEqual(["/a", "/b", "/x", "/c", "/d"]);
+    expect(pins()).toEqual([true, true, false, false, false]);
+  });
+
+  it("핀 탭을 반대 패널로 옮기면 그쪽 핀 구간 끝에 핀인 채로 들어간다", () => {
+    usePanes.getState().togglePinTab("left", 0); // a* 활성 아님
+    usePanes.getState().selectTab("left", 0);
+    usePanes.getState().setActivePane("left");
+    const right = () => usePanes.getState().panes.right;
+    const before = right().tabs.length;
+    usePanes.getState().moveActiveTabToOther();
+    expect(right().tabs.length).toBe(before + 1);
+    expect(right().tabs[0]!.pinned).toBe(true);
+    expect(String(right().tabs[0]!.location.path)).toBe("/a");
+    expect(right().activeTabIndex).toBe(0);
+    // 원상복구 — 다른 테스트가 오른쪽 패널을 쓰지 않도록.
+    usePanes.getState().moveActiveTabToOther();
   });
 });

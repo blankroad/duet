@@ -14,7 +14,7 @@ import { aliasFromConnectionId } from "@/lib/hostAlias";
 const KEY = "duet.session.v1";
 
 /** 현재 panes 상태에서 로컬 탭만 추려 슬림 레이아웃으로 직렬화. */
-function snapshot(): RestoredLayout {
+export function snapshot(): RestoredLayout {
   const s = usePanes.getState();
   const slimPane = (id: PaneId): RestoredLayout["panes"][PaneId] => {
     const p = s.panes[id];
@@ -40,6 +40,8 @@ function snapshot(): RestoredLayout {
           sortOrder: t.sortOrder,
           showHidden: t.showHidden,
           viewMode: t.viewMode,
+          // 핀일 때만 기록 — 필드 추가만이라 KEY(v1) 유지, 구버전 앱은 무시한다.
+          ...(t.pinned ? { pinned: true } : {}),
         };
       }),
     };

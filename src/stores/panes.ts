@@ -54,6 +54,12 @@ export interface TabState {
   archive?: ArchiveBrowse | undefined;
   /** 휴지통 탐색 중이면 휴지통 루트 경로 — "Put back" 노출 + 떠나면 해제. */
   trashRoot?: string | undefined;
+  /**
+   * 고정(핀) 탭. 패널의 탭 배열에서 **항상 앞쪽 연속 구간**에 모인다(불변식 —
+   * 모든 삽입·이동이 `pinnedCount` 경계를 지킨다). 실수 닫기(X·가운데 클릭·Ctrl+W·
+   * 일괄 닫기)에서 보호되고 세션에 저장된다. 핀 탭 안에서의 폴더 이동은 자유.
+   */
+  pinned: boolean;
 }
 
 export interface PaneState {
@@ -70,13 +76,19 @@ interface PanesState {
    * `after` 를 주면 그 탭 바로 오른쪽에, 아니면 맨 끝에 넣는다 (Ctrl+T 는 브라우저처럼 끝).
    */
   openTab: (id: PaneId, location?: Location, opts?: { after?: number }) => void;
-  closeTab: (id: PaneId, index: number) => void;
-  /** `index` 만 남기고 나머지를 닫는다 (탭 우클릭 "다른 탭 모두 닫기"). */
+  /** 탭 하나 닫기. 핀 탭·마지막 한 장은 닫지 않고 false (호출부가 안내). */
+  closeTab: (id: PaneId, index: number) => boolean;
+  /** `index` 와 핀 탭만 남기고 나머지를 닫는다 (탭 우클릭 "다른 탭 모두 닫기"). */
   closeOtherTabs: (id: PaneId, index: number) => void;
-  /** `index` 오른쪽 탭들을 닫는다. */
+  /** `index` 오른쪽의 고정 안 된 탭들을 닫는다. */
   closeTabsToRight: (id: PaneId, index: number) => void;
-  /** 활성 탭만 남기고 모두 닫는다 — 어느 탭에서 눌러도 결과가 같다. */
+  /**
+   * 핀이 있으면 고정 안 된 탭을 모두 닫는다. 핀이 없으면 활성 탭만 남긴다
+   * (패널은 탭이 최소 1개 필요) — 어느 탭에서 눌러도 결과가 같다.
+   */
   closeAllTabs: (id: PaneId) => void;
+  /** 고정/고정 해제 — 핀하면 핀 구간 끝으로, 해제하면 일반 구간 맨 앞으로 간다. */
+  togglePinTab: (id: PaneId, index: number) => void;
   selectTab: (id: PaneId, index: number) => void;
   // existing — 활성 탭에 dispatch
   setEntries: (
@@ -163,6 +175,8 @@ export interface RestoredLayout {
         sortOrder: SortOrder;
         showHidden: boolean;
         viewMode: ViewMode;
+        /** 고정 탭이면 true. 없으면(구버전 세션 포함) 일반 탭. */
+        pinned?: boolean;
       }>;
     }
   >;
@@ -223,6 +237,7 @@ const initialTab = (location: Location = home()): TabState => ({
   filterFocused: false,
   dirSizes: {},
   history: { stack: [location], index: 0 },
+  pinned: false,
 });
 
 const initialPane = (): PaneState => ({
@@ -234,6 +249,31 @@ const initialPane = (): PaneState => ({
 export function activeTab(state: PanesState, id: PaneId): TabState {
   const p = state.panes[id];
   return p.tabs[p.activeTabIndex] ?? p.tabs[0]!;
+}
+
+/** 앞쪽 연속 핀 구간의 길이 = 첫 일반 탭의 인덱스. */
+export function pinnedCount(p: PaneState): number {
+  let k = 0;
+  while (k < p.tabs.length && p.tabs[k]!.pinned) k += 1;
+  return k;
+}
+
+/**
+ * 핀 탭을 앞으로 모으는 stable partition — 각 구간 안의 순서는 유지하고, 활성
+ * 탭은 **id 로** 따라간다(사라졌으면 `fallbackId`, 그것도 없으면 0).
+ */
+function arrangePane(
+  tabs: TabState[],
+  activeId: string | undefined,
+  fallbackId?: string,
+): PaneState {
+  const ordered = [
+    ...tabs.filter((t) => t.pinned),
+    ...tabs.filter((t) => !t.pinned),
+  ];
+  let i = ordered.findIndex((t) => t.id === activeId);
+  if (i < 0) i = ordered.findIndex((t) => t.id === fallbackId);
+  return { tabs: ordered, activeTabIndex: Math.max(0, i) };
 }
 
 /** 액션 안에서 active tab 만 변경하는 헬퍼. */
@@ -259,19 +299,25 @@ export const usePanes = create<PanesState>((set, get) => ({
       const p = s.panes[id];
       const cur = p.tabs[p.activeTabIndex] ?? p.tabs[0]!;
       const nt = initialTab(location ?? cur.location);
-      const at =
+      // 새 탭은 일반 탭 — 핀 구간 안으로는 들어가지 않는다.
+      const at = Math.max(
+        pinnedCount(p),
         opts?.after === undefined
           ? p.tabs.length
-          : Math.min(Math.max(0, opts.after + 1), p.tabs.length);
+          : Math.min(Math.max(0, opts.after + 1), p.tabs.length),
+      );
       const tabs = [...p.tabs.slice(0, at), nt, ...p.tabs.slice(at)];
       return {
         panes: { ...s.panes, [id]: { tabs, activeTabIndex: at } },
       };
     }),
-  closeTab: (id, index) =>
+  closeTab: (id, index) => {
+    const p = get().panes[id];
+    const target = p.tabs[index];
+    // 핀 탭은 X·가운데 클릭·Ctrl+W·팔레트 어느 경로로도 닫히지 않는다 — 가드를
+    // 여기(store)에 둬야 키맵·팔레트 경로가 새지 않는다.
+    if (!target || target.pinned || p.tabs.length <= 1) return false;
     set((s) => {
-      const p = s.panes[id];
-      if (p.tabs.length <= 1) return s;
       const tabs = p.tabs.slice();
       tabs.splice(index, 1);
       let next = p.activeTabIndex;
@@ -281,34 +327,64 @@ export const usePanes = create<PanesState>((set, get) => ({
         next = p.activeTabIndex - 1;
       }
       return { panes: { ...s.panes, [id]: { tabs, activeTabIndex: next } } };
-    }),
+    });
+    return true;
+  },
   closeOtherTabs: (id, index) =>
     set((s) => {
       const p = s.panes[id];
-      const keep = p.tabs[index];
-      if (!keep || p.tabs.length <= 1) return s;
+      const target = p.tabs[index];
+      if (!target) return s;
+      const tabs = p.tabs.filter((t, i) => i === index || t.pinned);
+      if (tabs.length === p.tabs.length) return s;
+      // 누른 탭이 활성이 된다 (브라우저 관례).
       return {
-        panes: { ...s.panes, [id]: { tabs: [keep], activeTabIndex: 0 } },
+        panes: {
+          ...s.panes,
+          [id]: { tabs, activeTabIndex: tabs.indexOf(target) },
+        },
       };
     }),
   closeTabsToRight: (id, index) =>
     set((s) => {
       const p = s.panes[id];
-      if (index < 0 || index >= p.tabs.length - 1) return s;
-      const tabs = p.tabs.slice(0, index + 1);
-      // 닫힌 탭이 활성이었으면 기준 탭으로 옮겨온다.
-      const next = Math.min(p.activeTabIndex, index);
-      return { panes: { ...s.panes, [id]: { tabs, activeTabIndex: next } } };
+      const target = p.tabs[index];
+      if (!target) return s;
+      const tabs = p.tabs.filter((t, i) => i <= index || t.pinned);
+      if (tabs.length === p.tabs.length) return s;
+      // 활성 탭이 남았으면 그대로, 닫혔으면 기준 탭으로 옮겨온다.
+      const activeId = p.tabs[p.activeTabIndex]?.id;
+      return {
+        panes: { ...s.panes, [id]: arrangePane(tabs, activeId, target.id) },
+      };
     }),
   closeAllTabs: (id) =>
     set((s) => {
       const p = s.panes[id];
-      // 패널은 탭이 최소 1개 필요하다 — 보고 있던 탭을 남긴다.
-      const keep = p.tabs[p.activeTabIndex] ?? p.tabs[0];
-      if (!keep || p.tabs.length <= 1) return s;
+      const active = p.tabs[p.activeTabIndex] ?? p.tabs[0];
+      if (!active) return s;
+      const pinned = p.tabs.filter((t) => t.pinned);
+      // 핀이 있으면 핀만 남기고(활성이 일반 탭이었으면 마지막 핀으로), 없으면 패널은
+      // 탭이 최소 1개 필요하므로 보고 있던 탭을 남긴다.
+      const tabs = pinned.length > 0 ? pinned : [active];
+      if (tabs.length === p.tabs.length) return s;
+      const fallback = tabs[tabs.length - 1]!.id;
       return {
-        panes: { ...s.panes, [id]: { tabs: [keep], activeTabIndex: 0 } },
+        panes: { ...s.panes, [id]: arrangePane(tabs, active.id, fallback) },
       };
+    }),
+  togglePinTab: (id, index) =>
+    set((s) => {
+      const p = s.panes[id];
+      const target = p.tabs[index];
+      if (!target) return s;
+      const tabs = p.tabs.map((t, i) =>
+        i === index ? { ...t, pinned: !t.pinned } : t,
+      );
+      // 핀 구간이 항상 앞쪽이므로 stable partition 만으로 "핀 = 핀 구간 끝,
+      // 해제 = 일반 구간 맨 앞" 이 된다.
+      const activeId = p.tabs[p.activeTabIndex]?.id;
+      return { panes: { ...s.panes, [id]: arrangePane(tabs, activeId) } };
     }),
   selectTab: (id, index) =>
     set((s) => {
@@ -434,13 +510,16 @@ export const usePanes = create<PanesState>((set, get) => ({
           sortOrder: t.sortOrder,
           showHidden: t.showHidden,
           viewMode: t.viewMode,
+          pinned: t.pinned === true,
         }));
         if (tabs.length === 0) return initialPane();
         const activeTabIndex = Math.min(
           Math.max(0, slim.activeTabIndex),
           tabs.length - 1,
         );
-        return { tabs, activeTabIndex };
+        // 손으로 고친/섞인 데이터 대비 핀 구간을 다시 맞춘다 — 저장된 활성 탭은
+        // 정렬 전에 잡아 둔 id 로 따라간다(인덱스를 먼저 쓰면 다른 탭이 활성이 됨).
+        return arrangePane(tabs, tabs[activeTabIndex]?.id);
       };
       return {
         panes: {
@@ -778,12 +857,14 @@ export const usePanes = create<PanesState>((set, get) => ({
         srcTabs = [initialTab()];
         srcActive = 0;
       }
-      const dstTabs = [...dst.tabs, tab];
+      // 핀 탭은 핀인 채로 상대 패널 핀 구간 끝에, 일반 탭은 맨 끝에.
+      const at = tab.pinned ? pinnedCount(dst) : dst.tabs.length;
+      const dstTabs = [...dst.tabs.slice(0, at), tab, ...dst.tabs.slice(at)];
       return {
         panes: {
           ...s.panes,
           [from]: { tabs: srcTabs, activeTabIndex: srcActive },
-          [to]: { tabs: dstTabs, activeTabIndex: dstTabs.length - 1 },
+          [to]: { tabs: dstTabs, activeTabIndex: at },
         },
         activePane: to, // 이동한 탭을 따라 포커스 이동
       };

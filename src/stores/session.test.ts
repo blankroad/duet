@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { usePanes, isRestoredRemote, type RestoredLayout } from "./panes";
-import { loadSession } from "./session";
+import { loadSession, snapshot } from "./session";
 
 // 이 jsdom 환경의 localStorage 는 기능이 없어(=recents 가 try/catch 로 감싸는 이유)
 // 인메모리로 stub.
@@ -162,5 +162,62 @@ describe("session restore — 원격 탭", () => {
     const tab = usePanes.getState().panes.left.tabs[0]!;
     expect(tab.location.source.kind).toBe("local");
     expect(isRestoredRemote(tab.location)).toBe(false);
+  });
+});
+
+describe("session — 핀 탭", () => {
+  beforeEach(() => mem.clear());
+  const slim = (path: string, pinned?: boolean) => ({
+    path,
+    sortKey: "name" as const,
+    sortOrder: "asc" as const,
+    showHidden: false,
+    viewMode: "details" as const,
+    ...(pinned === undefined ? {} : { pinned }),
+  });
+
+  it("구버전 세션(pinned 없음)은 모두 일반 탭으로 복원", () => {
+    usePanes.getState().restoreLayout(layout);
+    expect(usePanes.getState().panes.left.tabs.map((t) => t.pinned)).toEqual([
+      false,
+      false,
+    ]);
+  });
+
+  it("핀 저장 → 복원 왕복, 일반 탭엔 pinned 필드를 쓰지 않는다", () => {
+    usePanes.getState().restoreLayout({
+      activePane: "left",
+      panes: {
+        left: { activeTabIndex: 1, tabs: [slim("/a", true), slim("/b")] },
+        right: { activeTabIndex: 0, tabs: [slim("/c")] },
+      },
+    });
+    const saved = snapshot();
+    expect(saved.panes.left.tabs[0]!.pinned).toBe(true);
+    expect("pinned" in saved.panes.left.tabs[1]!).toBe(false);
+    usePanes.getState().restoreLayout(saved);
+    const left = usePanes.getState().panes.left;
+    expect(left.tabs.map((t) => t.pinned)).toEqual([true, false]);
+    expect(left.activeTabIndex).toBe(1);
+  });
+
+  it("핀이 뒤섞인 데이터는 핀을 앞으로 모으고 저장된 활성 탭을 유지", () => {
+    usePanes.getState().restoreLayout({
+      activePane: "left",
+      panes: {
+        left: {
+          activeTabIndex: 0,
+          tabs: [slim("/a"), slim("/b", true), slim("/c")],
+        },
+        right: { activeTabIndex: 0, tabs: [slim("/d")] },
+      },
+    });
+    const left = usePanes.getState().panes.left;
+    expect(left.tabs.map((t) => String(t.location.path))).toEqual([
+      "/b",
+      "/a",
+      "/c",
+    ]);
+    expect(String(left.tabs[left.activeTabIndex]!.location.path)).toBe("/a");
   });
 });
