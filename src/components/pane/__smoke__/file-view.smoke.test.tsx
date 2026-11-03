@@ -17,12 +17,14 @@ vi.mock("@tauri-apps/plugin-os", () => ({ platform: () => "macos" }));
 const fsReadPreview = vi.fn();
 const fsRename = vi.fn();
 const listDirectory = vi.fn();
+const fsCopyPlan = vi.fn();
 vi.mock("@/types/bindings", () => ({
   commands: new Proxy(
     {
       fsReadPreview: (...a: unknown[]) => fsReadPreview(...a),
       fsRename: (...a: unknown[]) => fsRename(...a),
       listDirectory: (...a: unknown[]) => listDirectory(...a),
+      fsCopyPlan: (...a: unknown[]) => fsCopyPlan(...a),
     } as Record<string, unknown>,
     {
       get: (t, k: string) =>
@@ -41,6 +43,8 @@ const { useContextMenu } = await import("@/stores/contextMenu");
 const { useKeyboardNav } = await import("@/hooks/useKeyboardNav");
 const { buildEntryMenu, buildEmptyMenu } = await import("@/lib/entryMenu");
 const { resetAnchors } = await import("@/lib/selectionAnchor");
+const { clearHover } = await import("@/stores/previewHover");
+const { useClipboard } = await import("@/stores/clipboard");
 const i18n = (await import("@/i18n")).default;
 
 const DIR: Location = { source: { kind: "local" }, path: "/smoke" };
@@ -170,6 +174,12 @@ beforeEach(async () => {
   await i18n.changeLanguage("en");
   vi.clearAllMocks();
   resetAnchors();
+  clearHover();
+  useClipboard.getState().clear();
+  fsCopyPlan.mockResolvedValue({
+    status: "error",
+    error: { kind: "Io", message: "stop" },
+  });
   fsReadPreview.mockResolvedValue({
     status: "ok",
     data: { kind: "text", text: "hello", truncated: false, total_size: 5 },
@@ -351,10 +361,84 @@ it("Space 를 다른 커맨드에 매면 Quick Look 이 열리지 않는다", as
   fireEvent.keyDown(window, { key: " " });
   expect(useUI.getState().quickLookOpen).toBe(true);
   act(() => useUI.getState().closeQuickLook());
-  useKeymap.setState({
-    bindings: [{ key: "Space", command_id: "view.refresh" }],
-  });
+  act(() =>
+    useKeymap.setState({
+      bindings: [{ key: "Space", command_id: "view.refresh" }],
+    }),
+  );
   fireEvent.keyDown(window, { key: " " });
   expect(useUI.getState().quickLookOpen).toBe(false);
-  useKeymap.setState({ bindings: [] });
+  act(() => useKeymap.setState({ bindings: [] }));
+});
+
+it.each(["grid", "tiles"] as const)(
+  "%s 보기에서도 항목을 가리키면 미리보기가 바뀐다",
+  async (mode) => {
+    vi.useFakeTimers();
+    act(() => usePanes.getState().setViewMode("left", mode));
+    render(<Harness withPreview />);
+    fireEvent.mouseEnter(row("d.txt"), { clientX: 30, clientY: 30 });
+    await act(async () => vi.advanceTimersByTimeAsync(200));
+    expect(fsReadPreview).toHaveBeenLastCalledWith(
+      expect.objectContaining({ path: "/smoke/d.txt" }),
+    );
+    vi.useRealTimers();
+  },
+);
+
+it("폴더 항목 수를 못 읽으면 '세는 중' 대신 확인 불가를 보인다", async () => {
+  vi.useFakeTimers();
+  listDirectory.mockResolvedValue({
+    status: "error",
+    error: { kind: "Io", message: "denied" },
+  });
+  const dir: Entry = { ...file("box"), kind: "dir", size: null };
+  act(() => {
+    usePanes
+      .getState()
+      .setEntries("left", DIR, [dir, ...NAMES.map((n) => file(n))], {
+        pushHistory: false,
+      });
+    usePanes.getState().setCursor(
+      "left",
+      computeDisplayed(tab()).findIndex((e) => e.name === "box"),
+    );
+  });
+  render(<Harness withPreview />);
+  await act(async () => vi.advanceTimersByTimeAsync(400));
+  expect(screen.getByText("Unavailable")).toBeTruthy();
+  vi.useRealTimers();
+});
+
+it("폴더 우클릭 '폴더에 붙여넣기'는 그 폴더 안으로 계획한다", async () => {
+  const dir: Entry = { ...file("box"), kind: "dir", size: null };
+  act(() =>
+    usePanes
+      .getState()
+      .setEntries("left", DIR, [dir, ...NAMES.map((n) => file(n))], {
+        pushHistory: false,
+      }),
+  );
+  useClipboard
+    .getState()
+    .set(
+      [
+        {
+          location: { source: { kind: "local" }, path: "/elsewhere" },
+          name: "x.txt",
+        },
+      ],
+      "copy",
+    );
+  render(<Harness />);
+  fireEvent.contextMenu(rowInner("box"), { clientX: 40, clientY: 40 });
+  await act(async () =>
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: /Paste into folder/ }),
+    ),
+  );
+  expect(fsCopyPlan).toHaveBeenCalledWith(
+    expect.any(Array),
+    expect.objectContaining({ path: "/smoke/box" }),
+  );
 });
