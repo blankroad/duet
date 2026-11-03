@@ -804,6 +804,8 @@
     "taskDoneGeneric": "작업 완료",
     "taskCancelled": "취소됨: {{title}}",
     "taskCancelledGeneric": "작업 취소됨",
+    "taskFailed": "작업 실패 — {{msg}}",
+    "dialogQueued": "작업 하나가 확인을 기다립니다 — 지금 창을 닫으면 이어서 표시됩니다.",
     "trashOpenHint": "휴지통 항목은 제자리로 복원한 뒤 열 수 있어요",
     "trashOnlyPutBack": "휴지통에서는 제자리로 복원만 가능합니다",
     "purgeDone": "{{count}}개 영구 삭제됨",

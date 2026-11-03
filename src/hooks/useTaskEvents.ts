@@ -4,7 +4,7 @@ import i18n from "@/i18n";
 import { events, commands } from "@/types/bindings";
 import { useTasks } from "@/stores/tasks";
 import { useToast } from "@/stores/toast";
-import { useUIDialogs } from "@/stores/ui-dialogs";
+import { useUIDialogs, type DialogState } from "@/stores/ui-dialogs";
 import { takeElevatable, elevatableDestKind } from "@/lib/elevatePending";
 import { takeExtract } from "@/lib/extractPending";
 
@@ -19,6 +19,12 @@ const SUCCESS_TOAST_MIN_MS = 2000;
 const startedAt = new Map<string, number>();
 /** DuetError Display 가 로컬 access-denied 를 나타내는지 (승격 재시도 후보). */
 const PERM_DENIED = /permission denied|os error 5|access is denied/i;
+
+/** 백그라운드 작업의 질문 — 쓰던 창이 있으면 대기열에 넣고 알린다. */
+function openOrQueue(d: DialogState): void {
+  if (!useUIDialogs.getState().openWhenFree(d))
+    useToast.getState().show(i18n.t("toast.dialogQueued"));
+}
 
 /**
  * 백엔드 task-event 구독 + 부트스트랩.
@@ -125,7 +131,7 @@ export function useTaskEvents() {
           // 열어 재시도 (틀린 암호 재입력 포함).
           const extract = takeExtract(id);
           if (extract && payload.change.error.kind === "NeedPassword") {
-            useUIDialogs.getState().open({
+            openOrQueue({
               kind: "extract-password",
               plan: extract.plan,
               wrong: extract.attempted,
@@ -136,19 +142,22 @@ export function useTaskEvents() {
           // 보호 폴더 복사가 권한으로 실패했으면(Windows) 관리자 승격 재시도 다이얼로그.
           // 그 외엔 조용한 실패 방지용 토스트.
           const retry = takeElevatable(id);
+          const failed = () =>
+            useToast
+              .getState()
+              .show(i18n.t("toast.taskFailed", { msg }), "error");
           if (retry && PERM_DENIED.test(msg)) {
-            const dialogs = useUIDialogs.getState();
             if (elevatableDestKind(retry) === "ssh") {
               // 원격 보호 경로 → sudo 재시도.
-              dialogs.open({ kind: "sudo-op", pending: retry });
+              openOrQueue({ kind: "sudo-op", pending: retry });
             } else if (isWindows) {
               // 로컬 Windows 보호 경로 → UAC 승격.
-              dialogs.open({ kind: "elevate-op", pending: retry });
+              openOrQueue({ kind: "elevate-op", pending: retry });
             } else {
-              useToast.getState().show(`Operation failed — ${msg}`, "error");
+              failed();
             }
           } else {
-            useToast.getState().show(`Operation failed — ${msg}`, "error");
+            failed();
           }
           remove(id);
           break;

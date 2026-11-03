@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { useUIDialogs } from "./ui-dialogs";
 
 describe("ui-dialogs store", () => {
-  beforeEach(() => useUIDialogs.setState({ dialog: { kind: "none" } }));
+  beforeEach(() =>
+    useUIDialogs.setState({ dialog: { kind: "none" }, queue: [] }),
+  );
 
   it("opens and closes", () => {
     useUIDialogs.getState().open({ kind: "settings" });
@@ -17,5 +19,27 @@ describe("ui-dialogs store", () => {
       .getState()
       .open({ kind: "progress", title: "x", taskId: "tid" });
     expect(useUIDialogs.getState().dialog.kind).toBe("progress");
+  });
+
+  it("openWhenFree: 쓰던 창이 있으면 갈아치우지 않고 닫힌 뒤 연다", () => {
+    const d = useUIDialogs.getState();
+    d.open({ kind: "batch-rename", targets: [] });
+    expect(d.openWhenFree({ kind: "shortcuts" })).toBe(false);
+    expect(useUIDialogs.getState().dialog.kind).toBe("batch-rename");
+    useUIDialogs.getState().close();
+    expect(useUIDialogs.getState().dialog.kind).toBe("shortcuts");
+    useUIDialogs.getState().close();
+    expect(useUIDialogs.getState().dialog.kind).toBe("none");
+  });
+
+  it("openWhenFree: 비어 있거나 진행률 창이면 바로 연다", () => {
+    expect(useUIDialogs.getState().openWhenFree({ kind: "history" })).toBe(
+      true,
+    );
+    useUIDialogs.getState().open({ kind: "progress", title: "x", taskId: "t" });
+    expect(useUIDialogs.getState().openWhenFree({ kind: "shortcuts" })).toBe(
+      true,
+    );
+    expect(useUIDialogs.getState().dialog.kind).toBe("shortcuts");
   });
 });

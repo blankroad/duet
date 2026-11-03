@@ -809,6 +809,8 @@
     "taskDoneGeneric": "Task completed",
     "taskCancelled": "Cancelled: {{title}}",
     "taskCancelledGeneric": "Task cancelled",
+    "taskFailed": "Operation failed — {{msg}}",
+    "dialogQueued": "A task is waiting for your answer — it appears when you close this dialog.",
     "trashOpenHint": "Put the item back before opening it",
     "trashOnlyPutBack": "Items in the trash can only be put back",
     "purgeDone": "{{count}} item(s) permanently deleted",

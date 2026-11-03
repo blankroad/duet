@@ -66,12 +66,35 @@ export type DialogState =
 
 interface State {
   dialog: DialogState;
+  /** `openWhenFree` 로 미뤄 둔 대화상자 — 지금 창이 닫히면 차례로 연다. */
+  queue: DialogState[];
   open: (d: DialogState) => void;
+  /**
+   * 사용자가 쓰던 대화상자를 갈아치우지 않는 열기 — 백그라운드 작업이 묻는 것
+   * (sudo·권한 상승·압축 암호)용. 아무것도 없거나 진행률 창이면 바로 열고, 아니면
+   * 대기열에 넣는다. 반환값 = 바로 열렸는가. 예전엔 이름변경 규칙·비교 결정 등을
+   * 입력하던 창이 예고 없이 사라졌다.
+   */
+  openWhenFree: (d: DialogState) => boolean;
   close: () => void;
 }
 
-export const useUIDialogs = create<State>((set) => ({
+export const useUIDialogs = create<State>((set, get) => ({
   dialog: { kind: "none" },
+  queue: [],
   open: (d) => set({ dialog: d }),
-  close: () => set({ dialog: { kind: "none" } }),
+  openWhenFree: (d) => {
+    const cur = get().dialog.kind;
+    if (cur === "none" || cur === "progress") {
+      set({ dialog: d });
+      return true;
+    }
+    set((s) => ({ queue: [...s.queue, d] }));
+    return false;
+  },
+  close: () =>
+    set((s) => {
+      const [next, ...rest] = s.queue;
+      return { dialog: next ?? { kind: "none" }, queue: rest };
+    }),
 }));
