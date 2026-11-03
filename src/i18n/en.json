@@ -714,7 +714,7 @@
     "winIcons": "Use Windows file icons",
     "winIconsHint": "Show the same per-type icons as File Explorer for local files. Off = duet's built-in colored glyphs. Remote (SSH) files always use glyphs.",
     "permDelete": "Enable permanent delete (Shift+Delete)",
-    "permDelete": "Enable permanent delete",
+    "permDeletePlain": "Enable permanent delete",
     "permDeleteKey": "Enable permanent delete ({{key}})",
     "permDeleteHint": "Off by default. Even when on, deleting requires typing a word to confirm.",
     "permDeleteWarn": "Permanent delete is risky.",

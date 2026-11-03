@@ -418,7 +418,7 @@ export function GeneralSection() {
           <div className="text-base">
             {permKey
               ? t("settings.permDeleteKey", { key: permKey })
-              : t("settings.permDelete")}
+              : t("settings.permDeletePlain")}
           </div>
           <div className="text-meta text-fg-muted">
             {t("settings.permDeleteHint")}

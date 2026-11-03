@@ -709,7 +709,7 @@
     "winIcons": "Windows 파일 아이콘 사용",
     "winIconsHint": "로컬 파일에 탐색기와 같은 종류별 아이콘을 씁니다. 끄면 duet 내장 색 글리프. 원격(SSH) 파일은 항상 글리프.",
     "permDelete": "영구 삭제 사용 (Shift+Delete)",
-    "permDelete": "영구 삭제 사용",
+    "permDeletePlain": "영구 삭제 사용",
     "permDeleteKey": "영구 삭제 사용 ({{key}})",
     "permDeleteHint": "기본은 꺼짐. 켜도 삭제할 때 단어를 입력해 확인해야 합니다.",
     "permDeleteWarn": "영구 삭제는 되돌릴 수 없습니다.",
