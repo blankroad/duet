@@ -23,6 +23,23 @@ import { sameLocationDir } from "@/lib/entryDnd";
 /** 탭 id → 기준점 (그 폴더 위치와 함께 — 다른 폴더로 가면 무효). */
 const anchors = new Map<string, { name: string; location: Location }>();
 
+/**
+ * 탭이 다른 폴더로 가면 그 탭의 기준점을 지운다. 위치 비교만으로는 하위 폴더에 들어갔다
+ * 돌아오면(Backspace) 예전 기준점이 되살아나, 올라온 직후 Shift+↓ 가 오래전 클릭 위치부터
+ * 범위를 잡았다. 같은 폴더 새로고침은 위치가 그대로라 기준점이 유지된다.
+ */
+usePanes.subscribe((s, prev) => {
+  if (anchors.size === 0) return;
+  for (const id of ["left", "right"] as const) {
+    if (s.panes[id] === prev.panes[id]) continue;
+    for (const t of s.panes[id].tabs) {
+      const before = prev.panes[id].tabs.find((p) => p.id === t.id);
+      if (before && !sameLocationDir(before.location, t.location))
+        anchors.delete(t.id);
+    }
+  }
+});
+
 /** 기준점을 표시 목록의 `index` 항목으로 둔다. 범위 밖이면 지운다. */
 export function setAnchorAt(id: PaneId, index: number): void {
   const tab = activeTab(usePanes.getState(), id);

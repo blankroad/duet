@@ -129,3 +129,17 @@ it("forgets the range anchor when the tab moves to another folder", () => {
   selectRangeTo("left", at("a"));
   expect(selected()).toEqual(["a"]);
 });
+
+it("does not revive an old anchor after entering a subfolder and coming back", () => {
+  setAnchorAt("left", at("b"));
+  const p = usePanes.getState();
+  p.setEntries("left", { source: { kind: "local" }, path: "/kn/sub" }, [
+    file("x"),
+  ]);
+  p.setEntries("left", DIR, ["a", "b", "c", "d", "e", "f"].map(file), {
+    focusName: "d",
+  });
+  expect(cursorName()).toBe("d");
+  fireEvent.keyDown(window, { key: "ArrowDown", shiftKey: true });
+  expect(selected()).toEqual(["d", "e"]);
+});
