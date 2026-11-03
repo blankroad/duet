@@ -1,8 +1,12 @@
 import { useState, lazy, Suspense } from "react";
+import { useTranslation } from "react-i18next";
 import { commands } from "@/types/bindings";
 import type { Location, PreviewData } from "@/types/bindings";
 import { formatSize } from "@/lib/format";
+import { formatErr } from "@/lib/error";
 import { previewStreamUrl } from "@/lib/previewUrl";
+import { useToast } from "@/stores/toast";
+import i18n from "@/i18n";
 
 // 무거운 스택은 lazy chunk 로 분리.
 const PreviewContent = lazy(() =>
@@ -29,10 +33,11 @@ export function PreviewView({
   location: Location;
   data: PreviewData;
 }) {
+  const { t } = useTranslation();
   switch (data.kind) {
     case "text":
       return (
-        <Suspense fallback={<Centered>Loading…</Centered>}>
+        <Suspense fallback={<Centered>{t("preview.loading")}</Centered>}>
           <PreviewContent
             name={name}
             text={data.text ?? ""}
@@ -52,10 +57,11 @@ export function PreviewView({
       );
     case "pdf":
       return (
-        <Suspense fallback={<Centered>Loading…</Centered>}>
+        <Suspense fallback={<Centered>{t("preview.loading")}</Centered>}>
           <PreviewPdf
+            key={location.path}
             url={previewStreamUrl(location)}
-            onFallback={() => void commands.openPath(location, false)}
+            fallback={<OpenExternalButton location={location} />}
           />
         </Suspense>
       );
@@ -72,18 +78,59 @@ export function PreviewView({
     case "binary":
       return (
         <NoPreview
-          label={`Binary file · ${formatSize(data.total_size)}`}
+          label={t("preview.binaryFile", {
+            size: formatSize(data.total_size),
+          })}
           location={location}
         />
       );
     case "toolarge":
       return (
         <NoPreview
-          label={`Too large to preview · ${formatSize(data.total_size)}`}
+          label={t("preview.tooLarge", { size: formatSize(data.total_size) })}
           location={location}
         />
       );
   }
+}
+
+/**
+ * 기본 앱으로 열기 — 원격은 임시로 내려받은 뒤 열려 시간이 걸린다. 그동안 버튼을 잠가
+ * 중복 다운로드를 막고, 실패하면 이유를 토스트로 알린다(예전엔 눌러도 반응이 없었다).
+ */
+export function OpenExternalButton({ location }: { location: Location }) {
+  const { t } = useTranslation();
+  const [pending, setPending] = useState(false);
+  const onClick = async () => {
+    setPending(true);
+    try {
+      const r = await commands.openPath(location, false);
+      if (r.status === "error")
+        useToast
+          .getState()
+          .show(
+            i18n.t("preview.openFailed", { err: formatErr(r.error) }),
+            "error",
+          );
+    } catch (e) {
+      useToast
+        .getState()
+        .show(i18n.t("preview.openFailed", { err: formatErr(e) }), "error");
+    } finally {
+      setPending(false);
+    }
+  };
+  return (
+    <button
+      type="button"
+      disabled={pending}
+      aria-busy={pending}
+      onClick={() => void onClick()}
+      className="rounded border border-border px-3 py-1 text-base hover:bg-subtle disabled:opacity-60"
+    >
+      {pending ? t("preview.opening") : t("preview.openDefault")}
+    </button>
+  );
 }
 
 /** 미리보기 불가(바이너리/대용량) — 외부 앱 열기 제공. */
@@ -92,13 +139,7 @@ function NoPreview({ label, location }: { label: string; location: Location }) {
     <Centered>
       <div className="flex flex-col items-center gap-2">
         <span>{label}</span>
-        <button
-          type="button"
-          onClick={() => void commands.openPath(location, false)}
-          className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
-        >
-          Open in default app
-        </button>
+        <OpenExternalButton location={location} />
       </div>
     </Centered>
   );
@@ -112,20 +153,21 @@ function MediaPreview({
   kind: "audio" | "video";
   location: Location;
 }) {
+  const { t } = useTranslation();
   const [failed, setFailed] = useState(false);
   const url = previewStreamUrl(location);
   if (failed) {
     return (
       <Centered>
         <div className="flex flex-col items-center gap-2">
-          <span>Cannot play {kind} here</span>
-          <button
-            type="button"
-            onClick={() => void commands.openPath(location, false)}
-            className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
-          >
-            Open in default app
-          </button>
+          <span>
+            {t(
+              kind === "audio"
+                ? "preview.cannotPlayAudio"
+                : "preview.cannotPlayVideo",
+            )}
+          </span>
+          <OpenExternalButton location={location} />
         </div>
       </Centered>
     );

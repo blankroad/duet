@@ -11,6 +11,7 @@ import {
 } from "@/stores/panes";
 import { useUI } from "@/stores/ui";
 import { usePreviewHover, dropHoverTarget } from "@/stores/previewHover";
+import { childLocation } from "@/lib/entryDnd";
 import { usePreviewWidth } from "@/stores/previewWidth";
 import { beginWidthDrag } from "@/stores/panelWidth";
 import { formatErr } from "@/lib/error";
@@ -31,10 +32,9 @@ export function cursorTarget(): PreviewTarget | null {
   const displayed = selectDisplayedEntries(s.activePane, s);
   const entry = displayed[tab.cursorIndex];
   if (!entry || entry.name === "..") return null;
-  const base = tab.location.path;
-  const sep = base.endsWith("/") ? "" : "/";
   return {
-    location: { source: tab.location.source, path: base + sep + entry.name },
+    // 경로 결합은 공용 헬퍼로 — Windows `C:\dir` 에 "/" 를 섞지 않게 (CLAUDE.md §7).
+    location: childLocation(tab.location, entry.name),
     entry,
     paneId: s.activePane,
   };
@@ -57,7 +57,8 @@ export function cursorPreviewDep(
     tab.location.source.kind === "ssh"
       ? tab.location.source.connection_id.toString()
       : "local";
-  return `${s.activePane}|${srcKey}|${tab.location.path}|${entry?.name ?? ""}|${entry?.kind ?? ""}`;
+  // size·mtime 포함 — 같은 이름 파일을 고친 뒤 새로고침하면 미리보기·속성도 다시 읽는다.
+  return `${s.activePane}|${srcKey}|${tab.location.path}|${entry?.name ?? ""}|${entry?.kind ?? ""}|${entry?.size ?? ""}|${entry?.modified_ms ?? ""}`;
 }
 
 function locKey(loc: Location | null): string {
@@ -72,7 +73,10 @@ export function usePreviewLoad(target: PreviewTarget | null): LoadState {
   const fileLoc =
     target && target.entry.kind === "file" ? target.location : null;
   const name = target?.entry.name ?? "";
-  const key = locKey(fileLoc);
+  // 같은 경로라도 크기·수정 시각이 바뀌면(외부 편집 후 새로고침) 다시 읽는다.
+  const key = fileLoc
+    ? `${locKey(fileLoc)}|${target?.entry.size ?? ""}|${target?.entry.modified_ms ?? ""}`
+    : "";
   const locRef = useRef(fileLoc);
   locRef.current = fileLoc;
   const nameRef = useRef(name);
@@ -89,11 +93,18 @@ export function usePreviewLoad(target: PreviewTarget | null): LoadState {
     let cancelled = false;
     setState({ phase: "loading", name: nm });
     const t = setTimeout(async () => {
-      const r = await commands.fsReadPreview(loc);
-      if (cancelled) return;
-      if (r.status === "ok")
-        setState({ phase: "ready", name: nm, location: loc, data: r.data });
-      else setState({ phase: "error", name: nm, message: formatErr(r.error) });
+      // IPC 자체가 reject 해도(채널·직렬화 오류) 로딩에 갇히지 않게 오류로 전환.
+      try {
+        const r = await commands.fsReadPreview(loc);
+        if (cancelled) return;
+        if (r.status === "ok")
+          setState({ phase: "ready", name: nm, location: loc, data: r.data });
+        else
+          setState({ phase: "error", name: nm, message: formatErr(r.error) });
+      } catch (e) {
+        if (!cancelled)
+          setState({ phase: "error", name: nm, message: formatErr(e) });
+      }
     }, 150);
     return () => {
       cancelled = true;
@@ -109,7 +120,12 @@ function PreviewBody({ state }: { state: LoadState }) {
   if (state.phase === "empty")
     return <Centered>{t("preview.selectFile")}</Centered>;
   if (state.phase === "loading")
-    return <Centered>{t("preview.loading")}</Centered>;
+    // 늦게 나타나게(200ms) — 빠른 로컬에서 ↑↓ 할 때 "불러오는 중"이 깜빡이지 않도록.
+    return (
+      <Centered>
+        <span className="animate-fade-in-late">{t("preview.loading")}</span>
+      </Centered>
+    );
   if (state.phase === "error")
     return <Centered tone="danger">{state.message}</Centered>;
   return (

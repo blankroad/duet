@@ -967,6 +967,16 @@
     "perms": "Perms",
     "where": "Where",
     "truncated": "Preview truncated — file is larger",
+    "countFailed": "Unavailable",
+    "binaryFile": "Binary file · {{size}}",
+    "tooLarge": "Too large to preview · {{size}}",
+    "openDefault": "Open in default app",
+    "opening": "Opening…",
+    "openFailed": "Couldn't open: {{err}}",
+    "cannotPlayAudio": "This audio can't be played here",
+    "cannotPlayVideo": "This video can't be played here",
+    "pdfFailed": "Cannot render PDF",
+    "pdfTruncated": "Showing the first {{shown}} pages (of {{total}})",
     "resizeTitle": "Drag to resize · double-click to reset"
   },
   "dnd": {
