@@ -650,7 +650,8 @@ export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
     },
     {
       id: "split-ext",
-      label: i18n.t(splitExt ? "pane.hideExtColumn" : "pane.showExtColumn"),
+      // 체크로 상태를 보이므로 라벨은 고정 — "숨기기 ✓" 처럼 거꾸로 읽히지 않게.
+      label: i18n.t("menu.extColumn"),
       icon: splitExt ? <Check size={ICON} /> : <Columns3 size={ICON} />,
       onSelect: () => useUI.getState().toggleSplitExt(),
     },

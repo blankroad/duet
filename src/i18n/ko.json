@@ -459,6 +459,7 @@
     "openParent": "상위 폴더 열기",
     "copyParentPath": "상위 폴더 경로 복사",
     "moreOptions": "추가 옵션",
+    "extColumn": "확장자 열",
     "copyToOtherPane": "반대 패널로 복사",
     "moveToOtherPane": "반대 패널로 이동",
     "addToShelf": "선반에 담기",

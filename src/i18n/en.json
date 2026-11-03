@@ -462,6 +462,7 @@
     "openParent": "Open parent folder",
     "copyParentPath": "Copy parent path",
     "moreOptions": "More options",
+    "extColumn": "Extension column",
     "copyToOtherPane": "Copy to other pane",
     "moveToOtherPane": "Move to other pane",
     "addToShelf": "Add to shelf",
