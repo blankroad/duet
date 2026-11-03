@@ -35,6 +35,7 @@ import { TasksBar } from "@/components/TasksBar";
 import { useTasks } from "@/stores/tasks";
 import { useUIDialogs } from "@/stores/ui-dialogs";
 import type { TaskDto } from "@/types/bindings";
+import { usePromptDialog } from "@/stores/promptDialog";
 
 // commands.* 는 무엇을 부르든 빈 성공 — 컴포넌트가 부트스트랩 중 부르는 IPC 를 흡수한다.
 vi.mock("@/types/bindings", () => {
@@ -557,5 +558,105 @@ describe("작업 바", () => {
       kind: "progress",
       taskId: "big",
     });
+  });
+});
+
+describe("사이드바 — 키가 패널로 새지 않는다", () => {
+  const winKeys = vi.fn();
+  beforeEach(() => {
+    resetSidebarStores();
+    useCommands.setState({
+      builtins: [
+        { ...cmd("file.delete", "Delete"), category: "File" },
+        { ...cmd("file.rename", "F2"), category: "File" },
+        cmd("view.togglePreview", "F11"),
+      ],
+      dynamic: [],
+    });
+    useKeymap.setState({ bindings: [] });
+    usePromptDialog.setState({ req: null });
+    useBookmarks.setState({
+      items: [{ id: "b1", name: "work", location: local("/work") }],
+    });
+    useRecents.setState({
+      items: [{ source: "local", path: "/projects", label: "projects" }],
+    });
+    window.addEventListener("keydown", winKeys);
+    winKeys.mockClear();
+  });
+  afterEach(() => window.removeEventListener("keydown", winKeys));
+
+  it("북마크 행에서 Delete 는 북마크만 지우고 패널(휴지통 삭제)로 가지 않는다", async () => {
+    await renderSidebar();
+    const bm = row("work");
+    bm.focus();
+    await act(async () => {
+      fireEvent.keyDown(bm, { key: "Delete", code: "Delete" });
+    });
+    expect(winKeys).not.toHaveBeenCalled();
+    expect(useBookmarks.getState().items).toHaveLength(0);
+  });
+
+  it("이름 바꾸기 키는 키맵을 따른다 — F2 를 다른 커맨드에 매면 행 이름 바꾸기도 안 뜬다", async () => {
+    await renderSidebar();
+    const bm = row("work");
+    fireEvent.keyDown(bm, { key: "F2", code: "F2" });
+    expect(usePromptDialog.getState().req).not.toBeNull();
+    act(() => usePromptDialog.getState().settle(null));
+    useKeymap.setState({
+      bindings: [
+        { key: "F2", command_id: "view.togglePreview" },
+        { key: "Shift+R", command_id: "file.rename" },
+      ],
+    });
+    fireEvent.keyDown(bm, { key: "F2", code: "F2" });
+    expect(usePromptDialog.getState().req).toBeNull();
+    // 파일 외 커맨드(미리보기 토글)는 사이드바에서도 그대로 전역으로 통과한다.
+    expect(winKeys).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(bm, { key: "R", code: "KeyR", shiftKey: true });
+    expect(usePromptDialog.getState().req).not.toBeNull();
+  });
+
+  it("필터에서 ↓ 로 결과 행에 들어가 ↑↓ 로 움직이고 Esc 로 나온다", async () => {
+    await renderSidebar();
+    const filter = screen.getByLabelText(i18n.t("sidebar.filterLabel"));
+    fireEvent.change(filter, { target: { value: "o" } });
+    fireEvent.keyDown(filter, { key: "ArrowDown" });
+    const first = document.activeElement as HTMLElement;
+    expect(first.hasAttribute("data-sidebar-row")).toBe(true);
+    // 입력칸 키는 전역 처리기가 원래 무시한다 — 여기서부터 행 위의 키만 본다.
+    winKeys.mockClear();
+    fireEvent.keyDown(first, { key: "ArrowDown" });
+    const second = document.activeElement as HTMLElement;
+    expect(second).not.toBe(first);
+    expect(second.hasAttribute("data-sidebar-row")).toBe(true);
+    fireEvent.keyDown(second, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(first);
+    expect(winKeys).not.toHaveBeenCalled();
+    fireEvent.keyDown(first, { key: "Escape" });
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it("필터에서 Enter 는 첫 결과를 연다", async () => {
+    await renderSidebar();
+    const filter = screen.getByLabelText(i18n.t("sidebar.filterLabel"));
+    fireEvent.change(filter, { target: { value: "work" } });
+    fireEvent.keyDown(filter, { key: "Enter" });
+    expect(sidebarProps.onOpenLocation).toHaveBeenCalledWith(
+      local("/work"),
+      "left",
+    );
+  });
+
+  it("마우스로 행을 열면 포커스를 내려놓아 이어지는 키가 패널로 간다", async () => {
+    await renderSidebar();
+    const bm = row("work");
+    bm.focus();
+    fireEvent.click(bm, { detail: 1 });
+    expect(document.activeElement).not.toBe(bm);
+    const recent = row("projects");
+    recent.focus();
+    fireEvent.click(recent, { detail: 1 });
+    expect(document.activeElement).not.toBe(recent);
   });
 });

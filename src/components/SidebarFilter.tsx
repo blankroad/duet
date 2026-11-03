@@ -3,6 +3,9 @@ import { useTranslation } from "react-i18next";
 import { Search, X } from "lucide-react";
 import { useSidebarFilter, matchRange } from "@/stores/sidebarFilter";
 
+/** 키보드 이동(↑/↓)·필터 ↓/Enter 대상인 사이드바 행 표식 속성. */
+export const SIDEBAR_ROW = "data-sidebar-row";
+
 /**
  * 사이드바 상단 이름 필터 — 항목이 쌓이면 눈으로 훑는 수밖에 없던 문제.
  * 패널 필터바와 같은 어휘("필터…"). Esc 로 지우고 포커스를 뺀다.
@@ -10,6 +13,8 @@ import { useSidebarFilter, matchRange } from "@/stores/sidebarFilter";
  * 기본 단축키는 없다: `Ctrl+F` 는 패널 빠른 필터가 이미 쓰고 있고 키는 전부 keymap 에서
  * 정하는 게 원칙(CLAUDE.md). 대신 `view.focusSidebarFilter` command 로 등록돼 있어
  * 커맨드 팔레트에서 바로 쓰거나 원하는 키에 맬 수 있다.
+ *
+ * ↓ = 첫 결과 행으로 포커스, Enter = 첫 결과 열기, Esc = 지우고 나가기.
  */
 export function SidebarFilter() {
   const { t } = useTranslation();
@@ -43,7 +48,18 @@ export function SidebarFilter() {
               e.preventDefault();
               clear();
               ref.current?.blur();
+              return;
             }
+            // 필터에서 결과로 — ↓ 는 첫 행에 포커스(이후 ↑↓ 로 이동), Enter 는 첫 행 열기.
+            // 예전엔 걸러 놓고 마우스로 돌아가야 했다.
+            if (e.key !== "ArrowDown" && e.key !== "Enter") return;
+            const first = ref.current
+              ?.closest("[data-sidebar]")
+              ?.querySelector<HTMLElement>(`[${SIDEBAR_ROW}]`);
+            if (!first) return;
+            e.preventDefault();
+            if (e.key === "ArrowDown") first.focus();
+            else first.click();
           }}
           aria-label={t("sidebar.filterLabel")}
           className="min-w-0 flex-1 bg-transparent text-meta text-fg placeholder:text-fg-muted focus:outline-none"

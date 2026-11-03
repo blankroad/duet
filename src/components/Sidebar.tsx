@@ -56,7 +56,11 @@ import {
 } from "@/stores/places";
 import { useRecents, type RecentEntry } from "@/stores/recents";
 import { useSidebarFilter, matchesQuery } from "@/stores/sidebarFilter";
-import { SidebarFilter, RowLabel } from "@/components/SidebarFilter";
+import {
+  SidebarFilter,
+  RowLabel,
+  SIDEBAR_ROW,
+} from "@/components/SidebarFilter";
 import { useSidebarWidth } from "@/stores/sidebarWidth";
 import { beginWidthDrag } from "@/stores/panelWidth";
 import { useDragState } from "@/stores/dragState";
@@ -88,6 +92,9 @@ import {
   favTagKey,
 } from "@/stores/tags";
 import { useTagFilter } from "@/stores/tagFilter";
+import { useKeymap } from "@/stores/keymap";
+import { useCommands } from "@/stores/commands";
+import { formatKeyEvent } from "@/lib/keyEvent";
 import type {
   SavedHost,
   Bookmark as BookmarkType,
@@ -146,10 +153,14 @@ export function Sidebar({
 
   return (
     <div
+      data-sidebar=""
       className="relative flex min-h-0 shrink-0"
       style={{ width, maxWidth: "100%" }}
     >
-      <aside className="flex w-full min-h-0 flex-col overflow-y-auto border-r border-border bg-subtle pb-2 text-base">
+      <aside
+        onKeyDown={onSidebarKeyDown}
+        className="flex w-full min-h-0 flex-col overflow-y-auto border-r border-border bg-subtle pb-2 text-base"
+      >
         {/* 태스크 진행은 TasksBar(하단, 사이드바 접힘과 무관)로 일원화 — 중복 제거. */}
         <SidebarFilter />
         <TagBar />
@@ -236,7 +247,11 @@ function openableRow(opts: {
   return {
     role: "button",
     tabIndex: 0,
-    onClick: (e: React.MouseEvent) => opts.onOpen(targetPane(e)),
+    [SIDEBAR_ROW]: "",
+    onClick: (e: React.MouseEvent<HTMLElement>) => {
+      opts.onOpen(targetPane(e));
+      releaseFocusIfMouse(e);
+    },
     onDoubleClick: (e: React.MouseEvent) => {
       // 클릭에서 이미 열었으므로 중복 이동만 막는다.
       e.preventDefault();
@@ -248,15 +263,93 @@ function openableRow(opts: {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
         opts.onOpen(targetPane(e));
-      } else if (e.key === "F2" && opts.onRename) {
+        return;
+      }
+      // 이름 바꾸기·제거는 하드코딩한 F2/Delete 가 아니라 **현재 키맵**의 파일 이름 변경·
+      // 삭제 키를 따른다(사이드바 문맥에선 그 항목에 적용). 패널로 새는 건 aside 가 막는다.
+      const cmd = commandForKey(e);
+      if (cmd === "file.rename" && opts.onRename) {
         e.preventDefault();
         opts.onRename();
-      } else if (e.key === "Delete" && opts.onRemove) {
+      } else if (cmd === "file.delete" && opts.onRemove) {
         e.preventDefault();
         opts.onRemove();
       }
     },
   } as const;
+}
+
+/** 키보드 이동(↑/↓) 대상 행 표식 — `<button>` 행과 openableRow 행이 공유. */
+const sidebarRowAttr = { [SIDEBAR_ROW]: "" } as const;
+
+/**
+ * 마우스로 행을 눌렀으면 포커스를 내려놓는다 — 그래야 바로 이어지는 ↑↓·Enter·Delete 가
+ * 방금 연 패널 목록으로 간다(파인더처럼). 키보드로 연 경우(detail 0)는 사이드바에 남는다.
+ */
+function releaseFocusIfMouse(e: React.MouseEvent<HTMLElement>): void {
+  if (e.detail > 0) e.currentTarget.blur();
+}
+
+/**
+ * 키 이벤트를 현재 키맵으로 풀어 커맨드 id 로 — 전역 단축키 처리와 같은 규칙
+ * (사용자 override 우선, 없으면 defaultKey/altKeys).
+ */
+function commandForKey(e: React.KeyboardEvent): string | undefined {
+  const key = formatKeyEvent(e.nativeEvent);
+  if (!key) return undefined;
+  const override = useKeymap.getState().bindings.find((b) => b.key === key);
+  if (override) return override.command_id;
+  const { builtins, dynamic } = useCommands.getState();
+  return [...builtins, ...dynamic].find(
+    (c) => c.defaultKey === key || c.altKeys?.includes(key),
+  )?.id;
+}
+
+/**
+ * 사이드바 안(입력칸 제외)에 키보드 포커스가 있을 때의 키 처리 — aside 의 onKeyDown.
+ *
+ * 패널 목록의 키 처리(useKeyboardNav·전역 단축키)는 window 에서 포커스와 무관하게
+ * 돌아서, 예전엔 북마크 행에서 Delete 를 누르면 북마크가 지워지면서 **활성 패널의
+ * 선택 파일까지 휴지통으로** 갔다(F2·Enter·Tab·↑↓ 도 패널이 가로챘다). 사이드바가
+ * 포커스를 가진 동안은 수식키 없는 키와 파일 커맨드를 여기서 멈춘다 — Ctrl+B·팔레트
+ * 같은 다른 전역 단축키와 F11 같은 파일 외 커맨드는 그대로 통과.
+ *
+ * - ↑/↓: 이전/다음 행으로 포커스  · Home/End: 처음/끝 행
+ * - Esc: 사이드바를 떠난다(포커스 해제 → 다시 패널 키)
+ */
+function onSidebarKeyDown(e: React.KeyboardEvent<HTMLElement>): void {
+  const target = e.target as HTMLElement;
+  if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    focusSiblingRow(e.currentTarget, target, e.key === "ArrowDown" ? 1 : -1);
+  } else if (e.key === "Home" || e.key === "End") {
+    e.preventDefault();
+    const rows = sidebarRows(e.currentTarget);
+    (e.key === "Home" ? rows[0] : rows[rows.length - 1])?.focus();
+  } else if (e.key === "Escape") {
+    target.blur();
+  }
+  const cmd = commandForKey(e);
+  const modified = e.ctrlKey || e.metaKey || e.altKey;
+  if (cmd ? cmd.startsWith("file.") : !modified) e.stopPropagation();
+}
+
+function sidebarRows(root: HTMLElement): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>(`[${SIDEBAR_ROW}]`));
+}
+
+/** `from` 기준 delta 칸 떨어진 행으로 포커스. `from` 이 행이 아니면(필터 등) 첫/끝 행. */
+function focusSiblingRow(
+  root: HTMLElement,
+  from: HTMLElement,
+  delta: 1 | -1,
+): void {
+  const rows = sidebarRows(root);
+  const cur = rows.indexOf(from.closest<HTMLElement>(`[${SIDEBAR_ROW}]`)!);
+  const next =
+    cur < 0 ? (delta > 0 ? rows[0] : rows[rows.length - 1]) : rows[cur + delta];
+  next?.focus();
 }
 
 /**
@@ -523,9 +616,11 @@ function PlacesSection({
       {localHome && source.kind !== "local" && !filtering && (
         <button
           type="button"
-          onClick={(e) =>
-            onOpenLocation(localLocation(localHome), targetPane(e))
-          }
+          {...sidebarRowAttr}
+          onClick={(e) => {
+            onOpenLocation(localLocation(localHome), targetPane(e));
+            releaseFocusIfMouse(e);
+          }}
           title={t("sidebar.thisPcTitle")}
           className={clsx(rowClass, "w-full text-left font-medium text-accent")}
         >
@@ -594,10 +689,12 @@ function PlaceItem({
   return (
     <button
       type="button"
+      {...sidebarRowAttr}
       {...dropAttrs(source, path)}
-      onClick={(e) =>
-        onOpenLocation(locationForSource(source, path), targetPane(e))
-      }
+      onClick={(e) => {
+        onOpenLocation(locationForSource(source, path), targetPane(e));
+        releaseFocusIfMouse(e);
+      }}
       onContextMenu={(e) => openMenu(e, menu)}
       title={path}
       className={clsx(
@@ -635,7 +732,11 @@ function TrashItem({
   return (
     <button
       type="button"
-      onClick={(e) => onTrashActivate(targetPane(e))}
+      {...sidebarRowAttr}
+      onClick={(e) => {
+        onTrashActivate(targetPane(e));
+        releaseFocusIfMouse(e);
+      }}
       onContextMenu={(e) => openMenu(e, menu)}
       title={t("sidebar.trashTitle")}
       className={clsx(rowClass, "w-full text-left")}
@@ -817,7 +918,11 @@ function RecentItem({
   return (
     <button
       type="button"
-      onClick={(e) => open(targetPane(e))}
+      {...sidebarRowAttr}
+      onClick={(e) => {
+        open(targetPane(e));
+        releaseFocusIfMouse(e);
+      }}
       onContextMenu={(e) => openMenu(e, menu)}
       title={title}
       className={clsx(rowClass, "w-full text-left")}
