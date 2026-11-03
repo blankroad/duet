@@ -88,11 +88,14 @@ export const useUIDialogs = create<State>((set, get) => ({
   // 확정 핸들러는 흔히 close() 직후 open(진행률 등)을 부른다 — close 가 대기열에서 꺼낸
   // 창을 그 open 이 덮어 잃지 않게, 대기열 맨 앞으로 되돌린다.
   open: (d) =>
-    set((s) =>
-      s.fromQueue && s.dialog.kind !== "none"
-        ? { dialog: d, queue: [s.dialog, ...s.queue], fromQueue: false }
-        : { dialog: d, fromQueue: false },
-    ),
+    // open({ kind: "none" }) 로 닫는 경로도 있다(비교 스캔 취소 등) — close 와 같게.
+    d.kind === "none"
+      ? get().close()
+      : set((s) =>
+          s.fromQueue && s.dialog.kind !== "none"
+            ? { dialog: d, queue: [s.dialog, ...s.queue], fromQueue: false }
+            : { dialog: d, fromQueue: false },
+        ),
   openWhenFree: (d) => {
     const cur = get().dialog.kind;
     if (cur === "none" || cur === "progress") {

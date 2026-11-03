@@ -60,4 +60,12 @@ describe("ui-dialogs store", () => {
     useUIDialogs.getState().close();
     expect(useUIDialogs.getState().dialog.kind).toBe("none");
   });
+
+  it("open({kind:'none'}) 로 닫아도 대기 중이던 창을 연다", () => {
+    const d = useUIDialogs.getState();
+    d.open({ kind: "compare-scanning" });
+    expect(d.openWhenFree({ kind: "shortcuts" })).toBe(false);
+    useUIDialogs.getState().open({ kind: "none" });
+    expect(useUIDialogs.getState().dialog.kind).toBe("shortcuts");
+  });
 });
