@@ -79,3 +79,50 @@ describe("panes — 탭 닫기", () => {
     expect(activeIdx()).toBe(0);
   });
 });
+
+describe("panes — 늦게 도착한 목록은 요청한 탭에만", () => {
+  beforeEach(seedFour);
+  const tabAt = (i: number) => usePanes.getState().panes.left.tabs[i]!;
+
+  it("요청한 탭이 닫혔으면 응답을 버린다 (남은 탭 경로 불변)", () => {
+    usePanes.getState().selectTab("left", 0);
+    const reqTab = tabAt(0).id; // /a 에서 /a/child 로 이동 요청
+    usePanes.getState().closeOtherTabs("left", 1); // /b 만 남음, 여전히 index 0
+    usePanes
+      .getState()
+      .setEntries("left", loc("/a/child"), [], { tabId: reqTab });
+    expect(paths()).toEqual(["/b"]);
+  });
+
+  it("요청한 탭이 비활성이 됐어도 그 탭에 적용한다", () => {
+    usePanes.getState().selectTab("left", 1);
+    const reqTab = tabAt(1).id;
+    usePanes.getState().selectTab("left", 3);
+    usePanes.getState().setEntries("left", loc("/b/x"), [], { tabId: reqTab });
+    expect(paths()).toEqual(["/a", "/b/x", "/c", "/d"]);
+    expect(activeIdx()).toBe(3);
+  });
+
+  it("setLoading 도 tabId 로 대상 탭을 고른다", () => {
+    const reqTab = tabAt(0).id;
+    usePanes.getState().setLoading("left", true, reqTab);
+    expect(tabAt(0).loading).toBe(true);
+    expect(tabAt(3).loading).toBe(false);
+  });
+});
+
+describe("panes — 새 탭 위치", () => {
+  beforeEach(seedFour);
+
+  it("after 를 주면 그 탭 바로 오른쪽에 생기고 활성이 된다", () => {
+    usePanes.getState().openTab("left", loc("/a/sub"), { after: 0 });
+    expect(paths()).toEqual(["/a", "/a/sub", "/b", "/c", "/d"]);
+    expect(activeIdx()).toBe(1);
+  });
+
+  it("after 없으면 맨 끝 (Ctrl+T)", () => {
+    usePanes.getState().openTab("left");
+    expect(paths()).toEqual(["/a", "/b", "/c", "/d", "/d"]);
+    expect(activeIdx()).toBe(4);
+  });
+});

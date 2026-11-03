@@ -65,7 +65,11 @@ interface PanesState {
   panes: Record<PaneId, PaneState>;
   activePane: PaneId;
   // tab management
-  openTab: (id: PaneId, location?: Location) => void;
+  /**
+   * 새 탭. `location` 생략 시 활성 탭 위치(아카이브·휴지통 문맥 포함)를 연다.
+   * `after` 를 주면 그 탭 바로 오른쪽에, 아니면 맨 끝에 넣는다 (Ctrl+T 는 브라우저처럼 끝).
+   */
+  openTab: (id: PaneId, location?: Location, opts?: { after?: number }) => void;
   closeTab: (id: PaneId, index: number) => void;
   /** `index` 만 남기고 나머지를 닫는다 (탭 우클릭 "다른 탭 모두 닫기"). */
   closeOtherTabs: (id: PaneId, index: number) => void;
@@ -79,7 +83,16 @@ interface PanesState {
     id: PaneId,
     location: Location,
     entries: Entry[],
-    opts?: { pushHistory?: boolean; focusName?: string },
+    opts?: {
+      pushHistory?: boolean;
+      focusName?: string;
+      /**
+       * 이 목록을 요청한 탭 id. 주면 **그 탭에만** 적용하고, 그 탭이 닫혔으면 버린다.
+       * 비동기 목록이 도착하는 사이 탭이 닫히거나 바뀌면 남은 탭의 경로·목록이
+       * 다른 탭의 결과로 덮어써졌다. 생략하면 활성 탭(예전 동작).
+       */
+      tabId?: string;
+    },
   ) => void;
   setActivePane: (id: PaneId) => void;
   moveCursor: (id: PaneId, delta: number) => void;
@@ -108,7 +121,7 @@ interface PanesState {
   cycleViewMode: (id: PaneId) => void;
   setGridCols: (id: PaneId, cols: number) => void;
   /** 디렉토리 로드 시작/종료 표시 — navigate 가 set, setEntries 가 자동 해제. */
-  setLoading: (id: PaneId, loading: boolean) => void;
+  setLoading: (id: PaneId, loading: boolean, tabId?: string) => void;
   setFilter: (id: PaneId, filter: string) => void;
   setFilterFocused: (id: PaneId, focused: boolean) => void;
   /** 아카이브 브라우즈 컨텍스트 설정/해제 (진입 시 set, null=해제). */
@@ -241,15 +254,18 @@ export const usePanes = create<PanesState>((set, get) => ({
     right: initialPane(),
   },
   activePane: "left",
-  openTab: (id, location) =>
+  openTab: (id, location, opts) =>
     set((s) => {
       const p = s.panes[id];
       const cur = p.tabs[p.activeTabIndex] ?? p.tabs[0]!;
-      const loc = location ?? cur.location;
-      const nt = initialTab(loc);
-      const tabs = [...p.tabs, nt];
+      const nt = initialTab(location ?? cur.location);
+      const at =
+        opts?.after === undefined
+          ? p.tabs.length
+          : Math.min(Math.max(0, opts.after + 1), p.tabs.length);
+      const tabs = [...p.tabs.slice(0, at), nt, ...p.tabs.slice(at)];
       return {
-        panes: { ...s.panes, [id]: { tabs, activeTabIndex: tabs.length - 1 } },
+        panes: { ...s.panes, [id]: { tabs, activeTabIndex: at } },
       };
     }),
   closeTab: (id, index) =>
@@ -305,7 +321,11 @@ export const usePanes = create<PanesState>((set, get) => ({
       // 저장 전 경로 정규화 — C:\/ 등 혼합/중복 구분자를 네이티브로(표시·영속 일관).
       const loc: Location = { ...location, path: normalizePath(location.path) };
       const p = s.panes[id];
-      const cur = p.tabs[p.activeTabIndex];
+      const targetIndex =
+        opts?.tabId === undefined
+          ? p.activeTabIndex
+          : p.tabs.findIndex((t) => t.id === opts.tabId);
+      const cur = p.tabs[targetIndex];
       if (!cur) return s;
       const navigated = cur.location.path !== loc.path;
       const pushHistory = opts?.pushHistory ?? true;
@@ -381,7 +401,9 @@ export const usePanes = create<PanesState>((set, get) => ({
         archive,
         trashRoot,
       };
-      return { panes: { ...s.panes, [id]: withActiveTab(p, () => nextTab) } };
+      const tabs = p.tabs.slice();
+      tabs[targetIndex] = nextTab;
+      return { panes: { ...s.panes, [id]: { ...p, tabs } } };
     }),
   setActivePane: (id) => set({ activePane: id }),
   restoreLayout: (layout) =>
@@ -634,15 +656,20 @@ export const usePanes = create<PanesState>((set, get) => ({
         },
       };
     }),
-  setLoading: (id, loading) =>
-    set((s) => ({
-      panes: {
-        ...s.panes,
-        [id]: withActiveTab(s.panes[id], (t) =>
-          t.loading === loading ? t : { ...t, loading },
-        ),
-      },
-    })),
+  setLoading: (id, loading, tabId) =>
+    set((s) => {
+      const p = s.panes[id];
+      // tabId 가 있으면 그 탭(활성이 아니어도), 없으면 활성 탭.
+      const i =
+        tabId === undefined
+          ? p.activeTabIndex
+          : p.tabs.findIndex((t) => t.id === tabId);
+      const cur = p.tabs[i];
+      if (!cur || cur.loading === loading) return s;
+      const tabs = p.tabs.slice();
+      tabs[i] = { ...cur, loading };
+      return { panes: { ...s.panes, [id]: { ...p, tabs } } };
+    }),
   setFilter: (id, filter) =>
     set((s) => ({
       panes: {

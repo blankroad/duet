@@ -205,15 +205,20 @@ function App() {
       opts: { pushHistory?: boolean; focusName?: string } = {},
     ) => {
       const state = usePanes.getState();
-      const location = { ...activeTab(state, id).location, path };
+      const from = activeTab(state, id);
+      const location = { ...from.location, path };
+      // 요청한 탭 — 응답이 올 때 그 탭이 닫혔거나 다른 탭이 활성이어도 남의 탭을
+      // 덮어쓰지 않게 id 로 대상을 고정한다.
+      const tabId = from.id;
       // 로드 중 표시 — 느린 SSH ls 에서 이전 목록이 그대로 보여 "무반응"으로
       // 오인되는 것 방지. setEntries 가 성공 시 자동 해제.
-      state.setLoading(id, true);
+      state.setLoading(id, true, tabId);
       const seq = ++navSeq.current[id];
       try {
         const entries = await listEntries(location);
         if (navSeq.current[id] !== seq) return; // 더 새 이동이 시작됨
         state.setEntries(id, location, entries, {
+          tabId,
           pushHistory: opts.pushHistory ?? true,
           ...(opts.focusName !== undefined
             ? { focusName: opts.focusName }
@@ -232,7 +237,7 @@ function App() {
         }
       } catch (e) {
         if (navSeq.current[id] !== seq) return; // 낡은 요청의 실패는 무시
-        usePanes.getState().setLoading(id, false);
+        usePanes.getState().setLoading(id, false, tabId);
         // 사용자가 더블클릭해도 silent fail 면 무반응으로 인식. toast 로 노출.
         showToast(
           i18n.t("toast.cannotOpen", { name: path, err: formatErr(e) }),
@@ -250,12 +255,14 @@ function App() {
       location: Location,
       opts: { pushHistory?: boolean } = {},
     ) => {
-      usePanes.getState().setLoading(id, true);
+      const tabId = activeTab(usePanes.getState(), id).id;
+      usePanes.getState().setLoading(id, true, tabId);
       const seq = ++navSeq.current[id];
       try {
         const entries = await listEntries(location);
         if (navSeq.current[id] !== seq) return;
         usePanes.getState().setEntries(id, location, entries, {
+          tabId,
           pushHistory: opts.pushHistory ?? true,
         });
         if (!isVirtualTrash(location)) void commands.paneWatchSet(id, location);
@@ -269,7 +276,7 @@ function App() {
         }
       } catch (e) {
         if (navSeq.current[id] !== seq) return;
-        usePanes.getState().setLoading(id, false);
+        usePanes.getState().setLoading(id, false, tabId);
         showToast(
           i18n.t("toast.cannotOpen", {
             name: location.path,
@@ -504,6 +511,9 @@ function App() {
   const onRefresh = useCallback(
     (id: PaneId) => {
       const tab = activeTab(usePanes.getState(), id);
+      // 복원된(아직 연결 안 된) 원격 탭은 읽을 연결이 없다 — 죽은 id 로 IPC 를 보내
+      // 오류 토스트만 뜨던 것을 막는다. 패널 배너의 "재연결"이 그 경로로 연다.
+      if (isRestoredRemote(tab.location)) return;
       // 새로고침은 같은 위치 재로드 — 히스토리(뒤로가기) 에 중복 push 하지 않음.
       navigate(id, tab.location.path, { pushHistory: false });
     },
@@ -516,9 +526,13 @@ function App() {
    * `selectTab` 은 순수 store 액션이라, 전환해 온 탭은 예전 목록을 그대로 보여 주고
    * (그 사이 다른 탭에서 만든 파일이 안 보였다) `pane_watch_set` 은 마지막 navigate
    * 경로에 머물러 그 탭에서는 자동 새로고침이 아예 오지 않았다.
+   *
+   * 인덱스가 아니라 **탭 id** 를 본다 — 0번 활성 탭을 닫거나 "다른 탭 모두 닫기"·
+   * 반대 패널로 이동·패널 교환처럼 번호는 그대로인 채 보이는 탭이 바뀌는 경우를
+   * 번호로는 놓쳤다.
    */
-  const leftTab = usePanes((s) => s.panes.left.activeTabIndex);
-  const rightTab = usePanes((s) => s.panes.right.activeTabIndex);
+  const leftTab = usePanes((s) => activeTab(s, "left").id);
+  const rightTab = usePanes((s) => activeTab(s, "right").id);
   const prevTabIdx = useRef({ left: leftTab, right: rightTab });
   useEffect(() => {
     for (const id of ["left", "right"] as const) {
@@ -864,9 +878,12 @@ function App() {
       openInNewTab: () => {
         const st = usePanes.getState();
         const id = st.activePane;
-        const target = cursorFolderLocation(id);
-        st.openTab(id);
-        void navigateTo(id, target);
+        // 대상 위치로 바로 탭을 만든다 — 목록은 탭 전환 effect 가 읽는다. 예전엔
+        // 현재 폴더 복제 탭을 만든 뒤 navigateTo 했는데, effect 의 새로고침이 더 새
+        // 요청이 되어 navigateTo 결과가 버려지고 현재 폴더가 열렸다.
+        st.openTab(id, cursorFolderLocation(id), {
+          after: st.panes[id].activeTabIndex,
+        });
       },
       gotoTab: (n) => {
         const st = usePanes.getState();
@@ -1640,6 +1657,8 @@ function App() {
   const onConnected = useCallback(
     async (paneId: PaneId, dto: ConnectionDto) => {
       const state = usePanes.getState();
+      // 접속은 수 초 걸린다 — 그 사이 다른 탭을 골라도 접속을 시작한 탭에 연다.
+      const tabId = activeTab(state, paneId).id;
       const ssh: import("@/types/bindings").SourceId = {
         kind: "ssh",
         connection_id: dto.id,
@@ -1671,7 +1690,7 @@ function App() {
         const loc = { source: ssh, path };
         try {
           const entries = await listEntries(loc);
-          state.setEntries(paneId, loc, entries);
+          state.setEntries(paneId, loc, entries, { tabId });
           state.setActivePane(paneId);
           showToast(
             i18n.t("toast.connected", { alias, pane: paneId, path }),
