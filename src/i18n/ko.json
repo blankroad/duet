@@ -920,6 +920,8 @@
     "forward": "앞으로",
     "forwardTitle": "앞으로 ({{key}})",
     "up": "위로",
+    "upTitle": "상위 폴더로 (Backspace)",
+    "refreshTitle": "새로고침 ({{key}})",
     "archiveReadOnlyTitle": "{{name}} (읽기 전용)",
     "updateArchive": "아카이브 업데이트",
     "updateArchiveTitle": "편집 내용을 아카이브로 다시 압축 (이전 버전은 .bak 보존 — 되돌리기 가능)",

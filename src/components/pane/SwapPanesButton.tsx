@@ -18,7 +18,7 @@ export function SwapPanesButton() {
         onClick={swapPanes}
         title={t("pathbar.swapPanesTitle", { key: kSwap })}
         aria-label={t("pathbar.swapPanes")}
-        className="rounded-panel p-1 text-fg-muted transition-colors hover:bg-subtle hover:text-fg"
+        className="flex h-6 w-6 items-center justify-center rounded-panel text-fg-muted transition-colors hover:bg-subtle hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
       >
         <ArrowLeftRight size={14} />
       </button>

@@ -925,6 +925,8 @@
     "forward": "Forward",
     "forwardTitle": "Forward ({{key}})",
     "up": "Up",
+    "upTitle": "Up to parent folder (Backspace)",
+    "refreshTitle": "Refresh ({{key}})",
     "archiveReadOnlyTitle": "{{name}} (read-only)",
     "updateArchive": "Update archive",
     "updateArchiveTitle": "Repack your edits back into the archive (previous version kept as .bak — undoable)",

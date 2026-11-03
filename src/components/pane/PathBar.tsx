@@ -36,6 +36,10 @@ import { useHostFavorites, removeHostFavorite } from "@/stores/hostFavorites";
 import { useContextMenu, type MenuEntry } from "@/stores/contextMenu";
 import { useToast } from "@/stores/toast";
 
+/** 경로 바 아이콘 버튼 — 24px 타깃, muted 아이콘, accent 포커스 링(도구 모음과 같은 어휘). */
+const NAV_BUTTON =
+  "flex h-6 w-6 shrink-0 items-center justify-center rounded p-1 text-fg-muted hover:bg-border hover:text-fg disabled:opacity-30 disabled:hover:bg-transparent focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent";
+
 interface PathBarProps {
   location: Location;
   /** 아카이브 내부 탐색 중이면 set — breadcrumb 를 archive.zip/sub 로 표시. */
@@ -64,7 +68,7 @@ interface PathBarProps {
  * 패널 상단 경로 표시 + 네비 버튼.
  * DESIGN.md "패널 헤더 (PathBar)" 참조.
  *
- * MVP-0: breadcrumb 표시 + 새로고침. 직접 입력 모드(Ctrl+L)는 추후.
+ * 현재 폴더 이름 클릭·연필·Ctrl+L 로 경로 직접 입력, `…` 로 상위 폴더 이동.
  */
 export function PathBar({
   location,
@@ -88,6 +92,7 @@ export function PathBar({
   const kBack = useKeyHint("nav.back");
   const kForward = useKeyHint("nav.forward");
   const kNewTab = useKeyHint("tab.new");
+  const kRefresh = useKeyHint("view.refresh");
   const { t } = useTranslation();
   const isLocal = location.source.kind === "local";
   const sourceTitle = useHostLabel(location.source);
@@ -246,7 +251,7 @@ export function PathBar({
           type="button"
           onClick={onBack}
           disabled={!canBack}
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded p-1 text-fg-muted hover:bg-border hover:text-fg disabled:opacity-30"
+          className={NAV_BUTTON}
           aria-label={t("pathbar.back")}
           title={t("pathbar.backTitle", { key: kBack })}
         >
@@ -256,17 +261,19 @@ export function PathBar({
           type="button"
           onClick={onForward}
           disabled={!canForward}
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded p-1 text-fg-muted hover:bg-border hover:text-fg disabled:opacity-30"
+          className={NAV_BUTTON}
           aria-label={t("pathbar.forward")}
           title={t("pathbar.forwardTitle", { key: kForward })}
         >
           <ArrowRight size={14} />
         </button>
         <button
+          type="button"
           onClick={onUp}
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded p-1 hover:bg-border disabled:opacity-30"
+          className={NAV_BUTTON}
           disabled={!onUp || !canUp}
           aria-label={t("pathbar.up")}
+          title={t("pathbar.upTitle")}
         >
           <ArrowUp size={14} />
         </button>
@@ -290,6 +297,7 @@ export function PathBar({
             />
             {onUpdateArchive ? (
               <button
+                type="button"
                 onClick={onUpdateArchive}
                 className="ml-1 shrink-0 rounded bg-accent/10 px-1.5 text-meta text-accent hover:bg-accent/20"
                 title={t("pathbar.updateArchiveTitle")}
@@ -348,40 +356,44 @@ export function PathBar({
       <div className="path-actions ml-auto flex shrink-0 items-center">
         {onNewTab && (
           <button
+            type="button"
             onClick={onNewTab}
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded p-1 hover:bg-border"
+            className={NAV_BUTTON}
             aria-label={t("tabs.newTab")}
             title={t("pathbar.newTabTitle", { key: kNewTab })}
           >
-            <Plus size={14} className="text-fg-muted" />
+            <Plus size={14} />
           </button>
         )}
-        {!archive && !editing && (
+        {!archive && !trash && !editing && (
           <button
+            type="button"
             onClick={startEdit}
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded p-1 hover:bg-border"
+            className={NAV_BUTTON}
             aria-label={t("pathbar.editPath")}
             title={t("pathbar.editPathTitle", { key: kEditPath })}
           >
-            <Pencil size={13} className="text-fg-muted" />
+            <Pencil size={13} />
           </button>
         )}
         {/* 즐겨찾기 바로가기 드롭다운 (TC 식) — 이 host/소스의 저장 폴더로 이동 */}
         {!archive && (
           <button
+            type="button"
             onClick={openFavorites}
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded p-1 hover:bg-border"
+            className={NAV_BUTTON}
             aria-label={t("pathbar.favorites")}
             title={t("pathbar.favoritesTitle")}
           >
-            <BookMarked size={14} className="text-fg-muted" />
+            <BookMarked size={14} />
           </button>
         )}
         {/* 아카이브 임시경로는 북마크하면 dangling 되므로 숨김 */}
         {!archive && (
           <button
+            type="button"
             onClick={toggleBookmark}
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded p-1 hover:bg-border"
+            className={NAV_BUTTON}
             aria-label={
               bookmarked
                 ? t("sidebar.removeBookmark")
@@ -395,15 +407,17 @@ export function PathBar({
           >
             <Star
               size={14}
-              className={bookmarked ? "text-accent" : "text-fg-muted"}
+              className={bookmarked ? "text-accent" : undefined}
               fill={bookmarked ? "currentColor" : "none"}
             />
           </button>
         )}
         <button
+          type="button"
           onClick={onRefresh}
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded p-1 hover:bg-border"
+          className={NAV_BUTTON}
           aria-label={t("menu.refresh")}
+          title={t("pathbar.refreshTitle", { key: kRefresh })}
         >
           <RotateCw size={14} />
         </button>
