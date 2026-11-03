@@ -257,19 +257,25 @@ function App() {
     async (
       id: PaneId,
       location: Location,
-      opts: { pushHistory?: boolean } = {},
-    ) => {
-      const tabId = activeTab(usePanes.getState(), id).id;
+      /** `tabId`: 이동할 탭 (긴 작업 전에 잡아 둔 탭). 생략하면 지금 활성 탭. */
+      opts: { pushHistory?: boolean; tabId?: string } = {},
+    ): Promise<boolean> => {
+      const tabId = opts.tabId ?? activeTab(usePanes.getState(), id).id;
       usePanes.getState().setLoading(id, true, tabId);
       const seq = ++navSeq.current[id];
       try {
         const entries = await listEntries(location);
-        if (navSeq.current[id] !== seq) return;
+        if (navSeq.current[id] !== seq) return false;
         usePanes.getState().setEntries(id, location, entries, {
           tabId,
           pushHistory: opts.pushHistory ?? true,
         });
-        if (!isVirtualTrash(location)) void commands.paneWatchSet(id, location);
+        // 그 탭이 닫혔으면 아무것도 적용되지 않았다.
+        const p = usePanes.getState().panes[id];
+        if (!p.tabs.some((t) => t.id === tabId)) return false;
+        // 감시자는 패널당 하나 — 그 탭이 지금 보이는 탭일 때만 옮긴다.
+        if (!isVirtualTrash(location) && p.tabs[p.activeTabIndex]?.id === tabId)
+          void commands.paneWatchSet(id, location);
         if (opts.pushHistory !== false) {
           if (!isVirtualTrash(location)) {
             recordRecent(location);
@@ -278,8 +284,9 @@ function App() {
             void commands.frecencyRecord(location, aliasOf(location)); // 점퍼(Ctrl+J) 랭킹용
           }
         }
+        return true;
       } catch (e) {
-        if (navSeq.current[id] !== seq) return;
+        if (navSeq.current[id] !== seq) return false;
         usePanes.getState().setLoading(id, false, tabId);
         showToast(
           i18n.t("toast.cannotOpen", {
@@ -288,6 +295,7 @@ function App() {
           }),
           "error",
         );
+        return false;
       }
     },
     [listEntries, showToast],
@@ -306,13 +314,21 @@ function App() {
    */
   const syncMirror = useCallback(
     (opposite: PaneId, target: Location) => {
+      // 반대 패널의 지금 탭에 고정 — 목록이 오는 사이 그쪽 탭을 바꾸거나 닫아도 남의
+      // 탭을 덮어쓰지 않게. 그쪽에서 더 새 이동이 시작되면(navSeq) 이 동행은 버린다.
+      const tabId = activeTab(usePanes.getState(), opposite).id;
+      const seq = ++navSeq.current[opposite];
       void (async () => {
         try {
           const entries = await listEntries(target);
-          usePanes
-            .getState()
-            .setEntries(opposite, target, entries, { pushHistory: true });
-          void commands.paneWatchSet(opposite, target);
+          if (navSeq.current[opposite] !== seq) return;
+          usePanes.getState().setEntries(opposite, target, entries, {
+            pushHistory: true,
+            tabId,
+          });
+          const p = usePanes.getState().panes[opposite];
+          if (p.tabs[p.activeTabIndex]?.id === tabId)
+            void commands.paneWatchSet(opposite, target);
         } catch {
           /* 반대편에 대응 경로 없음 — 동행 skip */
         }
@@ -325,7 +341,8 @@ function App() {
   const onTrashActivate = useCallback(
     (pane?: PaneId) => {
       const id = pane ?? usePanes.getState().activePane;
-      const src = activeTab(usePanes.getState(), id).location.source;
+      const startTab = activeTab(usePanes.getState(), id);
+      const src = startTab.location.source;
       void (async () => {
         // Windows 로컬은 backend 가 가상 location(shell:RecycleBinFolder)을 반환 —
         // navigateTo(listEntries)가 trash 목록으로 채운다.
@@ -337,8 +354,9 @@ function App() {
           );
           return;
         }
-        await navigateTo(id, r.data);
-        usePanes.getState().setTrashRoot(id, r.data.path);
+        // 휴지통 위치를 묻는 사이 탭을 바꿔도 시작한 탭이 휴지통이 된다.
+        if (await navigateTo(id, r.data, { tabId: startTab.id }))
+          usePanes.getState().setTrashRoot(id, r.data.path, startTab.id);
       })();
     },
     [navigateTo, showToast],
@@ -484,12 +502,16 @@ function App() {
             );
             return;
           }
-          await navigateTo(id, r.data);
-          usePanes.getState().setArchiveContext(id, {
-            label: entry.name,
-            root: r.data.path,
-            exitTo: tab.location,
-          });
+          // 추출은 오래 걸린다 — 그 사이 탭을 바꿔도 목록과 아카이브 문맥이 같은
+          // 탭(시작한 탭)에 붙게 한다. 예전엔 목록과 문맥이 서로 다른 탭에 붙었다.
+          if (await navigateTo(id, r.data, { tabId: tab.id }))
+            usePanes
+              .getState()
+              .setArchiveContext(
+                id,
+                { label: entry.name, root: r.data.path, exitTo: tab.location },
+                tab.id,
+              );
         })();
         return;
       }
@@ -1683,6 +1705,10 @@ function App() {
       const state = usePanes.getState();
       // 접속은 수 초 걸린다 — 그 사이 다른 탭을 골라도 접속을 시작한 탭에 연다.
       const tabId = activeTab(state, paneId).id;
+      // 첫 목록을 읽는 사이 그 패널에서 사용자가 새로 이동하면(navSeq 증가) 이
+      // 초기 위치로 되돌리지 않는다.
+      const seq = ++navSeq.current[paneId];
+      const superseded = () => navSeq.current[paneId] !== seq;
       const ssh: import("@/types/bindings").SourceId = {
         kind: "ssh",
         connection_id: dto.id,
@@ -1700,6 +1726,7 @@ function App() {
       // 초기 경로 후보: 북마크 경로 → SFTP canonicalize(".") → "~" → "/"
       // 첫번째 성공한 listDirectory 가 패널에 적용됨.
       const homeRes = await commands.sshHomeDirectory(dto.id);
+      if (superseded()) return;
       if (homeRes.status === "ok") candidates.push(homeRes.data);
       else
         showToast(
@@ -1714,6 +1741,7 @@ function App() {
         const loc = { source: ssh, path };
         try {
           const entries = await listEntries(loc);
+          if (superseded()) return;
           state.setEntries(paneId, loc, entries, { tabId });
           state.setActivePane(paneId);
           showToast(
@@ -1724,6 +1752,7 @@ function App() {
           break;
         } catch (e) {
           // useTauri throws DuetError 또는 IpcError; formatErr 가 양쪽 처리.
+          if (superseded()) return;
           failures.push(`${path}: ${formatErr(e)}`);
         }
       }
@@ -1980,14 +2009,19 @@ function App() {
           archiveName={dialog.archive.name}
           onClose={closeDialog}
           submit={async (pw) => {
+            const tabId = activeTab(usePanes.getState(), dialog.paneId).id;
             const r = await commands.fsArchiveOpenForBrowse(dialog.archive, pw);
             if (r.status === "ok") {
-              await navigateTo(dialog.paneId, r.data);
-              usePanes.getState().setArchiveContext(dialog.paneId, {
-                label: dialog.archive.name,
-                root: r.data.path,
-                exitTo: dialog.archive.location,
-              });
+              if (await navigateTo(dialog.paneId, r.data, { tabId }))
+                usePanes.getState().setArchiveContext(
+                  dialog.paneId,
+                  {
+                    label: dialog.archive.name,
+                    root: r.data.path,
+                    exitTo: dialog.archive.location,
+                  },
+                  tabId,
+                );
               return "ok";
             }
             if (r.error.kind === "NeedPassword") return "retry";

@@ -152,9 +152,13 @@ interface PanesState {
   setFilter: (id: PaneId, filter: string) => void;
   setFilterFocused: (id: PaneId, focused: boolean) => void;
   /** 아카이브 브라우즈 컨텍스트 설정/해제 (진입 시 set, null=해제). */
-  setArchiveContext: (id: PaneId, ctx: ArchiveBrowse | null) => void;
+  setArchiveContext: (
+    id: PaneId,
+    ctx: ArchiveBrowse | null,
+    tabId?: string,
+  ) => void;
   /** 휴지통 루트 설정/해제 (휴지통 이동 시 set). */
-  setTrashRoot: (id: PaneId, root: string | null) => void;
+  setTrashRoot: (id: PaneId, root: string | null, tabId?: string) => void;
   /** "크기 계산" 결과 기록 — 크기 컬럼에 폴더 재귀 크기 표시. 계산이 비동기라
    *  도착 시점에 탭이 바뀌었을 수 있어 tabId 로 대상 탭을 지정(없어졌으면 무시). */
   setDirSize: (id: PaneId, tabId: string, name: string, bytes: number) => void;
@@ -289,6 +293,21 @@ function arrangePane(
   let i = ordered.findIndex((t) => t.id === activeId);
   if (i < 0) i = ordered.findIndex((t) => t.id === fallbackId);
   return { tabs: ordered, activeTabIndex: Math.max(0, i) };
+}
+
+/** `tabId` 의 탭(생략 시 활성 탭)만 변경 — 그 탭이 없으면(닫힘) 그대로. */
+function withTab(
+  p: PaneState,
+  tabId: string | undefined,
+  fn: (t: TabState) => TabState,
+): PaneState {
+  if (tabId === undefined) return withActiveTab(p, fn);
+  const i = p.tabs.findIndex((t) => t.id === tabId);
+  const cur = p.tabs[i];
+  if (!cur) return p;
+  const tabs = p.tabs.slice();
+  tabs[i] = fn(cur);
+  return { ...p, tabs };
 }
 
 /** 일괄 닫기에서 빠진 탭들을 닫은 탭 스택에 기록 (왼쪽부터). */
@@ -888,11 +907,11 @@ export const usePanes = create<PanesState>((set, get) => ({
         })),
       },
     })),
-  setArchiveContext: (id, ctx) =>
+  setArchiveContext: (id, ctx, tabId) =>
     set((s) => ({
       panes: {
         ...s.panes,
-        [id]: withActiveTab(s.panes[id], (t) => ({
+        [id]: withTab(s.panes[id], tabId, (t) => ({
           ...t,
           archive: ctx ?? undefined,
         })),
@@ -908,11 +927,11 @@ export const usePanes = create<PanesState>((set, get) => ({
       tabs[i] = { ...cur, dirSizes: { ...cur.dirSizes, [name]: bytes } };
       return { panes: { ...s.panes, [id]: { ...p, tabs } } };
     }),
-  setTrashRoot: (id, root) =>
+  setTrashRoot: (id, root, tabId) =>
     set((s) => ({
       panes: {
         ...s.panes,
-        [id]: withActiveTab(s.panes[id], (t) => ({
+        [id]: withTab(s.panes[id], tabId, (t) => ({
           ...t,
           trashRoot: root ?? undefined,
         })),

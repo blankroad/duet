@@ -371,3 +371,26 @@ describe("applyTabDefaults", () => {
     expect(left.tabs.every((t) => t.viewMode === "tiles")).toBe(true);
   });
 });
+
+describe("panes — 긴 작업의 문맥은 시작한 탭에", () => {
+  beforeEach(seedFour);
+  const ctx = { label: "x.zip", root: "/tmp/x", exitTo: loc("/a") };
+
+  it("setArchiveContext/setTrashRoot 에 tabId 를 주면 비활성 탭에도 그 탭에만 붙는다", () => {
+    const first = usePanes.getState().panes.left.tabs[0]!.id;
+    usePanes.getState().setArchiveContext("left", ctx, first);
+    usePanes.getState().setTrashRoot("left", "/trash", first);
+    const tabs = usePanes.getState().panes.left.tabs;
+    expect(tabs[0]!.archive).toEqual(ctx);
+    expect(tabs[0]!.trashRoot).toBe("/trash");
+    expect(tabs[3]!.archive).toBeUndefined();
+    expect(tabs[3]!.trashRoot).toBeUndefined();
+  });
+
+  it("닫힌 탭 id 면 아무 탭도 바뀌지 않는다", () => {
+    usePanes.getState().setArchiveContext("left", ctx, "gone");
+    expect(usePanes.getState().panes.left.tabs.every((t) => !t.archive)).toBe(
+      true,
+    );
+  });
+});
