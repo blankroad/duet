@@ -43,7 +43,10 @@ export function PreviewPdf({
         doc = await pdfjsLib.getDocument({ url }).promise;
         if (cancelled) return;
         const pages = Math.min(doc.numPages, MAX_PAGES);
-        setPages({ shown: pages, total: doc.numPages });
+        const total = doc.numPages;
+        // 첫 페이지가 그려질 때까지 "불러오는 중"을 유지한다 — 문서 정보만 받고 첫 페이지를
+        // 기다리는 동안(원격) 빈 화면이 이어지지 않게. 그 뒤에 절단 안내를 보인다.
+        let shownInfo = false;
         for (let i = 1; i <= pages; i += 1) {
           const page = await doc.getPage(i);
           if (cancelled) return;
@@ -58,7 +61,13 @@ export function PreviewPdf({
           if (!ctx) continue;
           container.appendChild(canvas);
           await page.render({ canvasContext: ctx, viewport }).promise;
+          if (cancelled) return;
+          if (!shownInfo) {
+            shownInfo = true;
+            setPages({ shown: pages, total });
+          }
         }
+        if (!shownInfo) setPages({ shown: pages, total });
       } catch {
         if (!cancelled) setFailed(true);
       }
