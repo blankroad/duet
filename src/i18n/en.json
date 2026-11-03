@@ -295,7 +295,19 @@
       "authFailedHint": "Key/agent + (if entered) password all failed. Check the password and retry.",
       "connecting": "Connecting…",
       "connect": "Connect",
-      "desc": "Open a new SSH connection to {{alias}} and attach it to a pane."
+      "desc": "Open a new SSH connection to {{alias}} and attach it to a pane.",
+      "errorTitle": {
+        "default": "Couldn't connect",
+        "AuthFailed": "Authentication failed",
+        "ConnectionFailed": "Can't reach the server",
+        "HostKeyUnverified": "Host key not verified",
+        "Ssh": "SSH error",
+        "Io": "Check the input",
+        "NotFound": "Not found",
+        "PermissionDenied": "Permission denied"
+      },
+      "reconnectTitle": "Reconnect to {{alias}}",
+      "reconnectInto": "Returns to the same tab in the {{pane}} pane once connected"
     },
     "adhoc": {
       "title": "Connect to host…",
@@ -568,7 +580,20 @@
     "connecting": "Connecting to {{label}}…",
     "connectionLost": "Connection lost",
     "disconnected": "Disconnected",
-    "reconnect": "Reconnect"
+    "reconnect": "Reconnect",
+    "reconnecting": "Reconnecting to {{label}}…",
+    "autoReconnecting": "Connection dropped — reconnecting to {{label}} automatically…",
+    "notConnected": "Not connected",
+    "restoredReason": "restored after restart, not connected yet",
+    "closedReason": "connection was closed",
+    "stop": "Stop",
+    "stopHint": "Stop reconnecting automatically",
+    "reason": {
+      "authFailed": "couldn't authenticate again — press Reconnect to enter the password",
+      "aliasRemoved": "this host is no longer in ~/.ssh/config",
+      "adhocUnsupported": "directly entered hosts don't reconnect automatically — press Reconnect",
+      "configUnreadable": "stopped reconnecting: ~/.ssh/config could not be read"
+    }
   },
   "pane": {
     "emptyFolder": "This folder is empty",
@@ -739,6 +764,9 @@
     "sshHomeFailed": "ssh_home_directory failed: {{err}}",
     "connected": "Connected: {{alias}} → {{pane}} pane ({{path}})",
     "connectedListFailed": "Connected {{alias}}, but list failed:\n{{failures}}",
+    "reconnectedTabs": "Reconnected {{alias}} — {{count}} tabs restored",
+    "reconnectFailed": "Couldn't reconnect to {{alias}}: {{err}}",
+    "reconnectInProgress": "Still reconnecting to {{alias}} — try again in a moment",
     "symlinkFailed": "Symlink failed: {{err}}",
     "threeWayApplyFailed": "3-way apply failed: {{err}}",
     "mergeFailed": "Merge failed: {{err}}",

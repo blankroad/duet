@@ -48,6 +48,12 @@ export interface ActiveConnection {
 interface ConnectionsState {
   hosts: Host[];
   active: Record<string, ActiveConnection>;
+  /**
+   * 배너 "재연결" 이 진행 중인 alias — 그 호스트의 배너들이 스피너를 띄우고 버튼을
+   * 막는다(연타로 연결이 여러 개 생기지 않게). 백엔드 자동 재연결은 `connecting`
+   * 상태로 따로 보인다.
+   */
+  reconnecting: Record<string, true>;
 
   setHosts: (hosts: Host[]) => void;
   /** 새 활성 연결 등록 (또는 같은 id 가 있으면 갱신). */
@@ -56,6 +62,8 @@ interface ConnectionsState {
   removeActive: (id: ConnectionId) => void;
   /** 특정 연결의 state 만 갱신. id 가 없으면 no-op. */
   setState: (id: ConnectionId, state: ConnectionState) => void;
+  /** alias 의 수동 재연결 진행 표시를 켜고 끈다. */
+  setReconnecting: (alias: string, on: boolean) => void;
   /**
    * alias 별 가장 최근 연결 상태 — Sidebar 가 호스트마다 점 표시할 때 사용.
    * 같은 alias 로 여러 연결이 있으면 우선순위: connected > connecting > error > disconnected.
@@ -91,6 +99,7 @@ const statePriority = (s: ConnectionState): number => {
 export const useConnections = create<ConnectionsState>((set, get) => ({
   hosts: [],
   active: {},
+  reconnecting: {},
 
   setHosts: (hosts) => set({ hosts }),
 
@@ -110,6 +119,15 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
       const cur = s.active[id];
       if (!cur) return s;
       return { active: { ...s.active, [id]: { ...cur, state } } };
+    }),
+
+  setReconnecting: (alias, on) =>
+    set((s) => {
+      if (on === alias in s.reconnecting) return s;
+      const next = { ...s.reconnecting };
+      if (on) next[alias] = true;
+      else delete next[alias];
+      return { reconnecting: next };
     }),
 
   stateByAlias: () => {
@@ -142,8 +160,9 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
  * "다시 연결"로 살릴 수 있다.
  */
 export async function disconnectAlias(alias: string): Promise<number> {
+  // error entry 는 백엔드 pool 에 이미 없다(재연결 포기) — IPC 를 보내도 할 일이 없다.
   const targets = Object.values(useConnections.getState().active).filter(
-    (c) => c.alias === alias,
+    (c) => c.alias === alias && c.state.kind !== "error",
   );
   let closed = 0;
   for (const c of targets) {

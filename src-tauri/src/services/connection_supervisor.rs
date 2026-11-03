@@ -118,14 +118,15 @@ async fn reconnect_loop(
         let host = match all_hosts.iter().find(|h| h.alias == alias) {
             Some(h) => h.clone(),
             None => {
-                // alias 가 config 에서 사라짐 — 더는 시도 의미 없음.
+                // alias 가 config 에 없음 — 더는 시도 의미 없음. ad-hoc 연결은 처음부터
+                // config 에 없으므로 "지워졌다" 가 아니라 미지원이라고 알린다.
                 final_failure(
                     &pool,
                     &app,
                     &id,
                     &alias,
                     &user,
-                    "host alias removed from ~/.ssh/config",
+                    missing_alias_reason(&alias),
                 )
                 .await;
                 return;
@@ -186,6 +187,38 @@ async fn reconnect_loop(
             }
         }
     }
+    // 여기 닿는 건 마지막 시도까지 ~/.ssh/config 를 읽지 못한 경우뿐 — 종료 상태를
+    // 알리지 않으면 프론트가 영원히 "연결 중" 에 머물고 재연결 버튼도 안 나온다.
+    final_failure(
+        &pool,
+        &app,
+        &id,
+        &alias,
+        &user,
+        "could not read ~/.ssh/config while reconnecting",
+    )
+    .await;
+}
+
+/// `user@host:port` 형식인가 — `connection_open_adhoc` 이 만드는 alias.
+/// port 는 마지막 `:` 뒤 숫자 (IPv6 호스트 대비).
+fn is_adhoc_alias(alias: &str) -> bool {
+    let Some((user, rest)) = alias.split_once('@') else {
+        return false;
+    };
+    let Some((host, port)) = rest.rsplit_once(':') else {
+        return false;
+    };
+    !user.is_empty() && !host.is_empty() && port.parse::<u16>().is_ok()
+}
+
+/// config 에서 alias 를 찾지 못했을 때 배너에 보일 이유.
+fn missing_alias_reason(alias: &str) -> &'static str {
+    if is_adhoc_alias(alias) {
+        "automatic reconnect is not supported for directly entered hosts — press Reconnect"
+    } else {
+        "host alias removed from ~/.ssh/config"
+    }
 }
 
 async fn final_failure(
@@ -208,4 +241,28 @@ async fn final_failure(
     .emit(app);
     pool.remove(id).await;
     info!(connection = %id.0, reason, "reconnect gave up");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn adhoc_alias_is_detected() {
+        assert!(is_adhoc_alias("root@10.0.0.5:22"));
+        assert!(is_adhoc_alias("u@::1:2222"));
+        assert!(!is_adhoc_alias("nas"));
+        assert!(!is_adhoc_alias("u@host"));
+        assert!(!is_adhoc_alias("@host:22"));
+        assert!(!is_adhoc_alias("u@host:http"));
+    }
+
+    #[test]
+    fn missing_alias_reason_matches_host_kind() {
+        assert!(missing_alias_reason("u@box.lan:22").contains("not supported"));
+        assert_eq!(
+            missing_alias_reason("nas"),
+            "host alias removed from ~/.ssh/config"
+        );
+    }
 }
