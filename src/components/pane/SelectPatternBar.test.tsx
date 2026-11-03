@@ -163,5 +163,5 @@ it("수식키 조합은 바 안에서도 전역 명령으로 간다 (Ctrl+→, S
   expect(calcSize).toHaveBeenCalledOnce();
   expect(fireEvent.keyDown(apply, { key: "Tab", shiftKey: true })).toBe(true);
   expect(usePanes.getState().activePane).toBe("left");
-  useCommands.getState().setBuiltins([]);
+  act(() => useCommands.getState().setBuiltins([]));
 });
