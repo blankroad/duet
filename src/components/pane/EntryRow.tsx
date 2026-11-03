@@ -11,6 +11,8 @@ import i18n from "@/i18n";
 interface EntryRowProps {
   entry: Entry;
   isCursor: boolean;
+  /** 이 패널이 활성(키 입력을 받는) 패널인가 — 비활성 패널 커서 바는 회색. */
+  paneActive?: boolean;
   isSelected: boolean;
   /** Ctrl+X 로 잘라내기 대기 중 — 흐리게(반투명) 표시. */
   isCut: boolean;
@@ -22,9 +24,17 @@ interface EntryRowProps {
   dirSize?: number | undefined;
   /** 인라인 이름변경(F2) 중이면 대상 EntryRef — 이름 셀이 input 으로 전환. */
   renameRef?: EntryRef | null;
-  onRenameDone?: (renamed: boolean) => void;
+  onRenameDone?: (renamed: boolean, newName?: string) => void;
   onClick: (e: React.MouseEvent) => void;
   onDoubleClick: () => void;
+}
+
+/**
+ * 커서 바 색 — 활성 패널은 accent, 비활성 패널은 회색. 양쪽 패널에 똑같은 파란 바가
+ * 있으면 키 입력이 어느 쪽으로 가는지 패널 테두리 1px 로만 알 수 있었다.
+ */
+export function cursorBar(paneActive: boolean): string {
+  return paneActive ? "border-l-accent" : "border-l-fg-muted/50";
 }
 
 /**
@@ -37,6 +47,7 @@ interface EntryRowProps {
 export function EntryRow({
   entry,
   isCursor,
+  paneActive = true,
   isSelected,
   isCut,
   splitExt,
@@ -55,7 +66,7 @@ export function EntryRow({
           // h-full: 행 높이는 가상 스크롤 래퍼(밀도 설정 반영)가 결정.
           "flex h-full items-center gap-2 px-2 text-base cursor-default hover:bg-subtle",
           isCursor
-            ? "border-l-2 border-l-accent pl-[6px]"
+            ? clsx("border-l-2 pl-[6px]", cursorBar(paneActive))
             : "border-l-2 border-l-transparent",
         )}
         onClick={onClick}
@@ -78,7 +89,7 @@ export function EntryRow({
         // 선택된 행은 hover 로 회색(bg-subtle) 덮어쓰지 않음 — 마키 드래그 중
         // 포인터가 지나가도 파란 선택색 유지 (hover 변종이 specificity 로 이김).
         isSelected ? "bg-active" : "hover:bg-subtle",
-        isCursor && "border-l-2 border-l-accent pl-[6px]",
+        isCursor && clsx("border-l-2 pl-[6px]", cursorBar(paneActive)),
         !isCursor && "border-l-2 border-l-transparent",
       )}
       onClick={onClick}

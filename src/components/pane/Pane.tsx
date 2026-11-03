@@ -11,6 +11,7 @@ import { SelectPatternBar } from "./SelectPatternBar";
 import { ConnectionBanner } from "./ConnectionBanner";
 import { PaneToolbar } from "./PaneToolbar";
 import { EntryList } from "./EntryList";
+import { setAnchorAt, selectRangeTo } from "@/lib/selectionAnchor";
 import { EntryGrid } from "./EntryGrid";
 import {
   usePanes,
@@ -69,7 +70,6 @@ export function Pane({
   const setActivePane = usePanes((s) => s.setActivePane);
   const setCursor = usePanes((s) => s.setCursor);
   const toggleSelected = usePanes((s) => s.toggleSelected);
-  const setSelected = usePanes((s) => s.setSelected);
   const clearSelection = usePanes((s) => s.clearSelection);
   const toggleSortKey = usePanes((s) => s.toggleSortKey);
   const setGridCols = usePanes((s) => s.setGridCols);
@@ -100,22 +100,17 @@ export function Pane({
   const handleEntryClick = (index: number, e?: React.MouseEvent) => {
     const entry = displayed[index];
     const selectable = entry && !isParentEntry(entry);
+    // 범위 기준점은 키보드와 공용(selectionAnchor) — Shift 클릭은 기준점을 옮기지 않는다.
     if (e?.shiftKey && selectable) {
-      const anchor = tab.cursorIndex >= 0 ? tab.cursorIndex : index;
-      const lo = Math.min(anchor, index);
-      const hi = Math.max(anchor, index);
-      const names = displayed
-        .slice(lo, hi + 1)
-        .filter((x) => !isParentEntry(x))
-        .map((x) => x.name);
-      setSelected(id, names);
-      setCursor(id, index);
+      selectRangeTo(id, index);
     } else if (e && (e.ctrlKey || e.metaKey) && selectable) {
       toggleSelected(id, entry.name);
       setCursor(id, index);
+      setAnchorAt(id, index);
     } else {
       clearSelection(id);
       setCursor(id, index);
+      setAnchorAt(id, index);
       // single-click-open: 수식키 없는 일반 클릭은 폴더/파일을 바로 연다(부모 ".." 포함).
       if (singleClickOpen && entry) activate(entry);
     }

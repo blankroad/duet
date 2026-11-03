@@ -14,11 +14,14 @@ import {
 import { setHoverEntry, clearHover } from "@/stores/previewHover";
 import { useUI, densityMetrics } from "@/stores/ui";
 import { InlineRenameInput } from "./InlineRenameInput";
+import { cursorBar } from "./EntryRow";
+import i18n from "@/i18n";
 import { formatSize, formatTime } from "@/lib/format";
 import { EntryIcon } from "@/lib/fileIcon";
 import { useAppSettings } from "@/stores/settings";
 import { thumbUrl } from "@/lib/previewUrl";
 import { childLocation } from "@/lib/entryDnd";
+import { followRenamedEntry } from "@/lib/renameReveal";
 import { useCutNames } from "@/hooks/useCutNames";
 import { useMarquee } from "@/hooks/useMarquee";
 import { useEntryDrag } from "@/hooks/useEntryDrag";
@@ -69,6 +72,26 @@ export function EntryGrid({
   const renameTarget = useUI((s) => s.renameTarget);
   // 썸네일 URL 빌드용 — 현재 패널 폴더 location.
   const location = usePanes((s) => activeTab(s, id).location);
+  const tabId = usePanes((s) => activeTab(s, id).id);
+  const paneActive = usePanes((s) => s.activePane === id);
+  // 인라인 이름 바꾸기 완료 — 시작할 때의 탭·폴더를 기준으로 반영한다. 그 사이 다른
+  // 편집이 시작됐으면 그 편집 상태는 지우지 않는다.
+  // 이 함수는 편집기가 **열릴 때의** 렌더에서 만들어진 것이 불린다(InlineRenameInput 이
+  // 고정). 그래서 tabId·location·renameTarget 은 편집을 시작한 시점 값이다.
+  const finishRename = (
+    oldName: string,
+    renamed: boolean,
+    newName?: string,
+  ) => {
+    const session = renameTarget;
+    const origin = session?.tabId ?? tabId;
+    // 그 사이 새 편집이 시작됐으면 그 편집 상태는 지우지 않는다.
+    if (useUI.getState().renameTarget === session)
+      useUI.getState().clearInlineRename();
+    if (!renamed) return;
+    if (newName) followRenamedEntry(id, origin, location, oldName, newName);
+    onRenamed();
+  };
   // "크기 계산" 결과 — 타일 메타의 폴더 크기 표시.
   const dirSizes = usePanes((s) => activeTab(s, id).dirSizes);
   // Ctrl+X 로 잘라내기 대기 중인 이름 — 해당 셀을 흐리게 표시.
@@ -121,6 +144,19 @@ export function EntryGrid({
       });
     }
   }, [cursorIndex, cols, virtualizer]);
+
+  // 다른 폴더·탭으로 바뀌면 맨 위에서 시작해 커서로 (EntryList 와 같은 이유).
+  const viewKey = `${tabId}|${location.path}`;
+  useEffect(() => {
+    const el = parentRef.current;
+    if (!el) return;
+    el.scrollTop = 0;
+    if (cursorIndex >= 0)
+      virtualizer.scrollToIndex(Math.floor(cursorIndex / cols), {
+        align: "auto",
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewKey]);
 
   const { marquee, onContainerMouseDown } = useMarquee({
     id,
@@ -192,6 +228,7 @@ export function EntryGrid({
                   entry,
                   location,
                   isCursor,
+                  paneActive,
                   isSelected,
                   isCut: cutNames.has(entry.name),
                   dirSize: dirSizes[entry.name],
@@ -199,14 +236,14 @@ export function EntryGrid({
                   renameRef:
                     renameTarget?.pane === id &&
                     renameTarget.name === entry.name &&
+                    (renameTarget.tabId ?? tabId) === tabId &&
                     !isParentEntry(entry)
                       ? { location, name: entry.name }
                       : null,
-                  onRenameDone: (renamed) => {
-                    useUI.getState().clearInlineRename();
-                    if (renamed) onRenamed();
-                  },
-                  onMouseEnter: () => setHoverEntry(id, entry),
+                  onRenameDone: (renamed, newName) =>
+                    finishRename(entry.name, renamed, newName),
+                  onMouseEnter: (e) =>
+                    setHoverEntry(id, entry, { x: e.clientX, y: e.clientY }),
                   onMouseDown: (e) => {
                     // 아이콘/이름(핸들) 위에서만 드래그 시작 — 그 외 여백은 마키로.
                     if (
@@ -251,6 +288,8 @@ interface CellProps {
   entry: Entry;
   location: Location;
   isCursor: boolean;
+  /** 활성 패널인가 — 비활성 패널 커서 테두리는 회색(EntryRow 와 같은 어휘). */
+  paneActive: boolean;
   isSelected: boolean;
   /** Ctrl+X 로 잘라내기 대기 중 — 아이콘/이름을 흐리게 표시. */
   isCut: boolean;
@@ -259,12 +298,17 @@ interface CellProps {
   highlight: boolean;
   /** 인라인 이름변경(F2) 중이면 대상 EntryRef — 이름 라벨이 input 으로 전환. */
   renameRef: EntryRef | null;
-  onRenameDone: (renamed: boolean) => void;
-  onMouseEnter: () => void;
+  onRenameDone: (renamed: boolean, newName?: string) => void;
+  onMouseEnter: (e: React.MouseEvent) => void;
   onMouseDown: (e: React.MouseEvent) => void;
   onContextMenu: (e: React.MouseEvent) => void;
   onClick: (e: React.MouseEvent) => void;
   onDoubleClick: () => void;
+}
+
+/** 그리드 셀 커서 테두리 — 활성 패널 accent, 비활성 패널 회색. */
+function cellCursor(paneActive: boolean): string {
+  return paneActive ? "border-accent" : "border-fg-muted/50";
 }
 
 /** 썸네일 대상 이미지 확장자(백엔드 활성 코덱과 일치). 로컬·원격 모두. */
@@ -344,6 +388,7 @@ function GridCell({
   entry,
   location,
   isCursor,
+  paneActive,
   isSelected,
   isCut,
   highlight,
@@ -365,10 +410,10 @@ function GridCell({
         onContextMenu={onContextMenu}
         onClick={onClick}
         onDoubleClick={onDoubleClick}
-        title="Parent folder — drop here to move/copy up"
+        title={i18n.t("pane.parentFolderDrop")}
         className={clsx(
           "m-1 flex flex-col items-center justify-center gap-1 rounded-panel border border-transparent p-2 cursor-default hover:bg-subtle",
-          isCursor && "border-accent",
+          isCursor && cellCursor(paneActive),
           highlight && "ring-2 ring-inset ring-accent",
         )}
       >
@@ -383,13 +428,14 @@ function GridCell({
     <div
       data-entry={entry.name}
       data-drop-folder={entry.kind === "dir" ? entry.name : undefined}
+      onMouseEnter={onMouseEnter}
       onMouseDown={onMouseDown}
       onContextMenu={onContextMenu}
       className={clsx(
         "m-1 flex flex-col items-center justify-center gap-1 rounded-panel border p-2 cursor-default",
         // 선택 셀은 hover 회색으로 덮지 않음 (마키 드래그 중 파란 선택색 유지).
         isSelected ? "bg-active" : "border-transparent hover:bg-subtle",
-        isCursor ? "border-accent" : "border-transparent",
+        isCursor ? cellCursor(paneActive) : "border-transparent",
         highlight && "ring-2 ring-inset ring-accent",
       )}
       onClick={onClick}
@@ -433,6 +479,7 @@ function TileRow({
   entry,
   location,
   isCursor,
+  paneActive,
   isSelected,
   isCut,
   dirSize,
@@ -455,11 +502,11 @@ function TileRow({
         onContextMenu={onContextMenu}
         onClick={onClick}
         onDoubleClick={onDoubleClick}
-        title="Parent folder — drop here to move/copy up"
+        title={i18n.t("pane.parentFolderDrop")}
         className={clsx(
           "flex h-full items-center gap-3 px-3 cursor-default hover:bg-subtle",
           isCursor
-            ? "border-l-2 border-l-accent pl-[10px]"
+            ? clsx("border-l-2 pl-[10px]", cursorBar(paneActive))
             : "border-l-2 border-l-transparent",
           highlight && "ring-2 ring-inset ring-accent",
         )}
@@ -473,6 +520,7 @@ function TileRow({
     <div
       data-entry={entry.name}
       data-drop-folder={entry.kind === "dir" ? entry.name : undefined}
+      onMouseEnter={onMouseEnter}
       onMouseDown={onMouseDown}
       onContextMenu={onContextMenu}
       className={clsx(
@@ -480,7 +528,7 @@ function TileRow({
         // 선택 행은 hover 회색으로 덮지 않음 (마키 드래그 중 파란 선택색 유지).
         isSelected ? "bg-active" : "hover:bg-subtle",
         isCursor
-          ? "border-l-2 border-l-accent pl-[10px]"
+          ? clsx("border-l-2 pl-[10px]", cursorBar(paneActive))
           : "border-l-2 border-l-transparent",
         highlight && "ring-2 ring-inset ring-accent",
       )}

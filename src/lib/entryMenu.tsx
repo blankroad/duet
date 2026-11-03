@@ -17,6 +17,10 @@ import {
   LayoutGrid,
   ArrowDownUp,
   Eye,
+  EyeOff,
+  Check,
+  ChevronUp,
+  ChevronDown,
   ExternalLink,
   FilePen,
   FolderSearch,
@@ -42,6 +46,7 @@ import { basename } from "@/lib/paths";
 import { canExtractArchive } from "@/lib/archive";
 import {
   usePanes,
+  activeTab,
   type PaneId,
   type SortKey,
   type ViewMode,
@@ -70,7 +75,8 @@ import {
   triggerNewSymlink,
   triggerSync,
   triggerCompare,
-  copyPathsOf,
+  copySelectionPaths,
+  copySelectionNames,
   clipCopy,
   clipCut,
   clipPaste,
@@ -116,20 +122,13 @@ function sshAlias(location: Location): string | null {
   return conn?.alias ?? null;
 }
 
-async function copyText(text: string): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(text);
-    useToast.getState().show(`Copied: ${text}`, "success");
-  } catch {
-    useToast.getState().show("Clipboard unavailable", "error");
-  }
-}
-
 /** OS 파일 매니저에서 항목 위치 표시 (로컬 전용). */
 async function revealEntry(target: Location): Promise<void> {
   const r = await commands.revealPath(target);
   if (r.status === "error")
-    useToast.getState().show(`Reveal failed: ${formatErr(r.error)}`, "error");
+    useToast
+      .getState()
+      .show(i18n.t("toast.revealFailed", { err: formatErr(r.error) }), "error");
 }
 
 /** 해당 폴더에서 OS 터미널 열기 (로컬 전용). */
@@ -138,15 +137,22 @@ async function openTerminalAt(target: Location): Promise<void> {
   if (r.status === "error")
     useToast
       .getState()
-      .show(`Open terminal failed: ${formatErr(r.error)}`, "error");
+      .show(
+        i18n.t("toast.openTerminalFailed", { err: formatErr(r.error) }),
+        "error",
+      );
 }
 
 /** 원격 파일을 에디터로 열고 변경 시 자동 재업로드(편집 라운드트립). */
 async function editRemoteEntry(target: Location, name: string): Promise<void> {
   const r = await commands.sshEditOpen(target);
   const toast = useToast.getState().show;
-  if (r.status === "error") toast(`Edit failed: ${formatErr(r.error)}`);
-  else toast(`Editing ${name} — changes auto-upload`);
+  if (r.status === "error")
+    toast(
+      i18n.t("toast.remoteEditFailed", { err: formatErr(r.error) }),
+      "error",
+    );
+  else toast(i18n.t("toast.remoteEditing", { name }));
 }
 
 export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
@@ -216,6 +222,8 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
     );
   }
 
+  // 순서는 DESIGN.md "우클릭 메뉴" — 열기 · 클립보드 · 이름 변경/삭제 가 위, 드문 도구가 아래.
+  // ① 열기
   if (!multi) {
     if (isDir) {
       items.push(
@@ -230,17 +238,29 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
           id: "open-other",
           label: i18n.t("menu.openInOtherPane"),
           icon: <PanelRight size={ICON} />,
+          commandId: "pane.openInOther",
           onSelect: () => onOpenInOtherPane(paneId, entry),
         },
       );
     } else {
-      items.push({
-        id: "open",
-        label: i18n.t("menu.open"),
-        icon: <ExternalLink size={ICON} />,
-        shortcut: "Enter",
-        onSelect: () => onActivate(paneId, entry),
-      });
+      items.push(
+        {
+          id: "open",
+          label: i18n.t("menu.open"),
+          icon: <ExternalLink size={ICON} />,
+          shortcut: "Enter",
+          onSelect: () => onActivate(paneId, entry),
+        },
+        {
+          // Space 로 여는 큰 미리보기 — 메뉴에서도 찾을 수 있게.
+          id: "quick-look",
+          label: i18n.t("menu.quickLook"),
+          icon: <Eye size={ICON} />,
+          commandId: "view.quickLook",
+          shortcut: "Space",
+          onSelect: () => useUI.getState().toggleQuickLook(),
+        },
+      );
       // 원격 파일: 편집 라운드트립(다운로드→에디터→저장 시 자동 재업로드).
       if (location.source.kind === "ssh") {
         items.push({
@@ -283,6 +303,9 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
     );
   }
 
+  // ② 클립보드. 폴더 하나를 우클릭했으면 "이 폴더에 붙여넣기"(그 폴더 안으로) —
+  // Ctrl+V(현재 폴더) 와 대상이 달라 키 힌트를 붙이지 않는다.
+  const pasteInto = !multi && isDir;
   items.push(
     {
       id: "clip-copy",
@@ -300,150 +323,33 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
     },
     {
       id: "clip-paste",
-      label: i18n.t("menu.pasteIntoFolder"),
+      label: i18n.t(pasteInto ? "menu.pasteIntoFolder" : "menu.paste"),
       icon: <ClipboardPaste size={ICON} />,
-      commandId: "file.clipPaste",
+      ...(pasteInto ? {} : { commandId: "file.clipPaste" }),
       disabled: !useClipboard.getState().entry,
-      onSelect: () => void clipPaste(open, showToast),
+      onSelect: () =>
+        void clipPaste(open, showToast, pasteInto ? child : undefined),
     },
     sep(),
-    {
-      id: "copy",
-      label: i18n.t("menu.copyToOtherPane"),
-      icon: <Copy size={ICON} />,
-      commandId: "file.copy",
-      onSelect: () => void triggerCopy(open, showToast),
-    },
-    {
-      id: "move",
-      label: i18n.t("menu.moveToOtherPane"),
-      icon: <FolderInput size={ICON} />,
-      commandId: "file.move",
-      onSelect: () => void triggerMove(open, showToast),
-    },
-    {
-      id: "shelf-add",
-      label: i18n.t("menu.addToShelf"),
-      icon: <Layers size={ICON} />,
-      commandId: "shelf.add",
-      onSelect: () => addSelectionToShelf(showToast),
-    },
-    {
-      id: "compress",
-      label: i18n.t("menu.compress"),
-      icon: <Package size={ICON} />,
-      onSelect: () => triggerCompress(open, showToast),
-    },
-    // 폴더(또는 다중 선택에 폴더 포함 가능성) — 재귀 크기 계산해 크기 컬럼에 표시.
-    ...(isDir || multi
-      ? [
-          {
-            id: "calc-size",
-            label: i18n.t("menu.calculateSize"),
-            icon: <Sigma size={ICON} />,
-            commandId: "file.calcSize",
-            onSelect: () => void calcDirSizes(paneId),
-          } as MenuEntry,
-        ]
-      : []),
-    // 파일(또는 다중 선택에 파일 포함 가능성) — 무결성 해시 다이얼로그.
-    ...(!isDir || multi
-      ? [
-          {
-            id: "checksum",
-            label: i18n.t("menu.checksum"),
-            icon: <Hash size={ICON} />,
-            onSelect: () => triggerChecksum(open, showToast),
-          } as MenuEntry,
-        ]
-      : []),
-    // POSIX 권한 편집 — 원격 또는 로컬 unix (Windows 로컬은 POSIX 권한 없음).
-    ...(location.source.kind === "ssh" || !isWindows()
-      ? [
-          {
-            id: "permissions",
-            label: i18n.t("menu.permissions"),
-            icon: <Lock size={ICON} />,
-            onSelect: () => triggerPermissions(open, showToast),
-          } as MenuEntry,
-        ]
-      : []),
-    sep(),
-    {
-      id: "rename",
-      label: i18n.t("menu.rename"),
-      icon: <Pencil size={ICON} />,
-      commandId: "file.rename",
-      disabled: multi,
-      onSelect: () => triggerRename(showToast),
-    },
-    ...(multi
-      ? [
-          {
-            id: "batch-rename",
-            label: i18n.t("menu.batchRename"),
-            icon: <Pencil size={ICON} />,
-            onSelect: () => triggerBatchRename(open, showToast),
-          } as MenuEntry,
-        ]
-      : []),
-    {
-      id: "mkdir",
-      label: i18n.t(
-        !multi && entry.kind === "dir"
-          ? "menu.newFolderInside"
-          : "menu.newFolder",
-      ),
-      icon: <FolderPlus size={ICON} />,
-      ...(!multi && entry.kind === "dir"
-        ? {}
-        : { commandId: "file.newFolder" }),
-      onSelect: () =>
-        triggerMkdir(open, !multi && entry.kind === "dir" ? child : location),
-    },
-    {
-      id: "new-file",
-      label: i18n.t(
-        !multi && entry.kind === "dir" ? "menu.newFileInside" : "menu.newFile",
-      ),
-      icon: <FilePlus size={ICON} />,
-      ...(!multi && entry.kind === "dir" ? {} : { commandId: "file.newFile" }),
-      onSelect: () =>
-        triggerNewFile(open, !multi && entry.kind === "dir" ? child : location),
-    },
-    {
-      id: "bookmark",
-      label: i18n.t("menu.addToBookmarks"),
-      icon: <Star size={ICON} />,
-      onSelect: () => void bookmarkLocation(child, entry.name),
-    },
   );
 
-  if (alias) {
-    items.push({
-      id: "host-fav",
-      label: i18n.t("menu.addToHostFavorites"),
-      icon: <Heart size={ICON} />,
-      onSelect: () =>
-        void addHostFavorite(alias, entry.name, String(child.path)),
-    });
-  }
-
+  // ③ 이름 변경 · 삭제
   items.push(
-    {
-      id: "copy-path",
-      label: i18n.t("menu.copyPath"),
-      icon: <ClipboardCopy size={ICON} />,
-      // 로컬은 백엔드 Path::join 으로 — Windows 드라이브문자·네이티브 구분자 보존(§7).
-      onSelect: () =>
-        void copyPathsOf([{ location, name: entry.name }], showToast),
-    },
-    {
-      id: "copy-name",
-      label: i18n.t("menu.copyName"),
-      onSelect: () => void copyText(entry.name),
-    },
-    sep(),
+    multi
+      ? {
+          id: "batch-rename",
+          label: i18n.t("menu.batchRename"),
+          icon: <Pencil size={ICON} />,
+          commandId: "file.rename",
+          onSelect: () => triggerBatchRename(open, showToast),
+        }
+      : {
+          id: "rename",
+          label: i18n.t("menu.rename"),
+          icon: <Pencil size={ICON} />,
+          commandId: "file.rename",
+          onSelect: () => triggerRename(showToast),
+        },
     {
       id: "delete",
       label: i18n.t("menu.delete"),
@@ -465,6 +371,121 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
       onSelect: () => void triggerDelete("permanent", open, showToast),
     });
   }
+  items.push(sep());
+
+  // ④ 반대 패널 · 선반
+  items.push(
+    {
+      id: "copy",
+      label: i18n.t("menu.copyToOtherPane"),
+      icon: <Copy size={ICON} />,
+      commandId: "file.copy",
+      onSelect: () => void triggerCopy(open, showToast),
+    },
+    {
+      id: "move",
+      label: i18n.t("menu.moveToOtherPane"),
+      icon: <FolderInput size={ICON} />,
+      commandId: "file.move",
+      onSelect: () => void triggerMove(open, showToast),
+    },
+    {
+      id: "shelf-add",
+      label: i18n.t("menu.addToShelf"),
+      icon: <Layers size={ICON} />,
+      commandId: "shelf.add",
+      onSelect: () => addSelectionToShelf(showToast),
+    },
+    sep(),
+  );
+
+  // ⑤ 새로 만들기 (폴더 하나를 우클릭했으면 그 안에)
+  const inside = !multi && isDir;
+  items.push(
+    {
+      id: "mkdir",
+      label: i18n.t(inside ? "menu.newFolderInside" : "menu.newFolder"),
+      icon: <FolderPlus size={ICON} />,
+      ...(inside ? {} : { commandId: "file.newFolder" }),
+      onSelect: () => triggerMkdir(open, inside ? child : location),
+    },
+    {
+      id: "new-file",
+      label: i18n.t(inside ? "menu.newFileInside" : "menu.newFile"),
+      icon: <FilePlus size={ICON} />,
+      ...(inside ? {} : { commandId: "file.newFile" }),
+      onSelect: () => triggerNewFile(open, inside ? child : location),
+    },
+    sep(),
+  );
+
+  // ⑥ 도구
+  items.push({
+    id: "compress",
+    label: i18n.t("menu.compress"),
+    icon: <Package size={ICON} />,
+    onSelect: () => triggerCompress(open, showToast),
+  });
+  // 폴더(또는 다중 선택에 폴더 포함 가능성) — 재귀 크기 계산해 크기 컬럼에 표시.
+  if (isDir || multi)
+    items.push({
+      id: "calc-size",
+      label: i18n.t("menu.calculateSize"),
+      icon: <Sigma size={ICON} />,
+      commandId: "file.calcSize",
+      onSelect: () => void calcDirSizes(paneId),
+    });
+  // 파일(또는 다중 선택에 파일 포함 가능성) — 무결성 해시 다이얼로그.
+  if (!isDir || multi)
+    items.push({
+      id: "checksum",
+      label: i18n.t("menu.checksum"),
+      icon: <Hash size={ICON} />,
+      onSelect: () => triggerChecksum(open, showToast),
+    });
+  // POSIX 권한 편집 — 원격 또는 로컬 unix (Windows 로컬은 POSIX 권한 없음).
+  if (location.source.kind === "ssh" || !isWindows())
+    items.push({
+      id: "permissions",
+      label: i18n.t("menu.permissions"),
+      icon: <Lock size={ICON} />,
+      onSelect: () => triggerPermissions(open, showToast),
+    });
+  items.push(sep());
+
+  // ⑦ 경로·이름 복사, 북마크 — 단축키와 같은 동작(선택 전체 대상)이라 힌트를 붙인다.
+  items.push(
+    {
+      id: "copy-path",
+      label: i18n.t("menu.copyPath"),
+      icon: <ClipboardCopy size={ICON} />,
+      commandId: "file.copyPath",
+      // 로컬은 백엔드 Path::join 으로 — Windows 드라이브문자·네이티브 구분자 보존(§7).
+      onSelect: () => void copySelectionPaths(showToast),
+    },
+    {
+      id: "copy-name",
+      label: i18n.t("menu.copyName"),
+      commandId: "file.copyName",
+      onSelect: () => void copySelectionNames(showToast),
+    },
+    {
+      id: "bookmark",
+      label: i18n.t("menu.addToBookmarks"),
+      icon: <Star size={ICON} />,
+      onSelect: () => void bookmarkLocation(child, entry.name),
+    },
+  );
+
+  if (alias) {
+    items.push({
+      id: "host-fav",
+      label: i18n.t("menu.addToHostFavorites"),
+      icon: <Heart size={ICON} />,
+      onSelect: () =>
+        void addHostFavorite(alias, entry.name, String(child.path)),
+    });
+  }
 
   return items;
 }
@@ -477,18 +498,21 @@ export interface EmptyMenuDeps {
   inVirtualTrash?: boolean;
 }
 
+// 라벨은 메뉴를 열 때 번역한다 — 모듈 로드 시점에 고정하면 언어를 바꿔도 그대로였다.
 const SORTS: { key: SortKey; label: string }[] = [
-  { key: "name", label: i18n.t("menu.sortName") },
-  { key: "size", label: i18n.t("menu.sortSize") },
-  { key: "mtime", label: i18n.t("menu.sortMtime") },
-  { key: "kind", label: i18n.t("menu.sortKind") },
-  { key: "ext", label: i18n.t("menu.sortExt") },
+  { key: "name", label: "menu.sortName" },
+  { key: "size", label: "menu.sortSize" },
+  { key: "mtime", label: "menu.sortMtime" },
+  { key: "kind", label: "menu.sortKind" },
+  { key: "ext", label: "menu.sortExt" },
 ];
 const VIEWS: { mode: ViewMode; label: string }[] = [
-  { mode: "details", label: i18n.t("menu.viewDetails") },
-  { mode: "grid", label: i18n.t("menu.viewGrid") },
-  { mode: "tiles", label: i18n.t("menu.viewTiles") },
+  { mode: "details", label: "menu.viewDetails" },
+  { mode: "grid", label: "menu.viewGrid" },
+  { mode: "tiles", label: "menu.viewTiles" },
 ];
+/** 체크 아이콘 자리 — 고르지 않은 항목도 같은 폭을 차지해 라벨이 나란히 선다. */
+const blank = () => <span style={{ width: ICON }} />;
 
 export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
   const { paneId, location, onRefresh, inVirtualTrash } = deps;
@@ -519,6 +543,9 @@ export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
   }
   const p = usePanes.getState();
   const alias = sshAlias(location);
+  // 지금 상태(보기 방식·정렬·숨김 파일·확장자 열)를 체크로 보여 준다 — 툴바 보기 메뉴와 같은 어휘.
+  const tab = activeTab(p, paneId);
+  const splitExt = useUI.getState().splitExt;
 
   const items: MenuEntry[] = [
     {
@@ -590,7 +617,8 @@ export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
       icon: <LayoutGrid size={ICON} />,
       children: VIEWS.map((v) => ({
         id: `view-${v.mode}`,
-        label: v.label,
+        label: i18n.t(v.label),
+        icon: tab.viewMode === v.mode ? <Check size={ICON} /> : blank(),
         onSelect: () => p.setViewMode(paneId, v.mode),
       })),
     },
@@ -598,25 +626,33 @@ export function buildEmptyMenu(deps: EmptyMenuDeps): MenuEntry[] {
       id: "sort",
       label: i18n.t("menu.sortBy"),
       icon: <ArrowDownUp size={ICON} />,
+      // 현재 정렬 기준은 방향 화살표로 — 다시 누르면 열 머리글처럼 방향이 바뀐다.
       children: SORTS.map((s) => ({
         id: `sort-${s.key}`,
-        label: s.label,
+        label: i18n.t(s.label),
+        icon:
+          tab.sortKey !== s.key ? (
+            blank()
+          ) : tab.sortOrder === "asc" ? (
+            <ChevronUp size={ICON} aria-label={i18n.t("menu.sortAsc")} />
+          ) : (
+            <ChevronDown size={ICON} aria-label={i18n.t("menu.sortDesc")} />
+          ),
         onSelect: () => p.toggleSortKey(paneId, s.key),
       })),
     },
     {
       id: "hidden",
       label: i18n.t("menu.toggleHidden"),
-      icon: <Eye size={ICON} />,
+      icon: tab.showHidden ? <Check size={ICON} /> : <EyeOff size={ICON} />,
       commandId: "view.toggleHidden",
       onSelect: () => p.toggleShowHidden(paneId),
     },
     {
       id: "split-ext",
-      label: useUI.getState().splitExt
-        ? "Hide extension column"
-        : "Show extension column",
-      icon: <Columns3 size={ICON} />,
+      // 체크로 상태를 보이므로 라벨은 고정 — "숨기기 ✓" 처럼 거꾸로 읽히지 않게.
+      label: i18n.t("menu.extColumn"),
+      icon: splitExt ? <Check size={ICON} /> : <Columns3 size={ICON} />,
       onSelect: () => useUI.getState().toggleSplitExt(),
     },
     sep(),

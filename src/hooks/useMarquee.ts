@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import { usePanes, activeTab, type PaneId } from "@/stores/panes";
 import type { Entry } from "@/types/bindings";
 import { exceedsThreshold, type Rect } from "@/lib/marquee";
+import { setAnchorAt } from "@/lib/selectionAnchor";
 
 const EDGE = 28; // 가장자리 자동 스크롤 감지 폭(px)
 const MAX_SPEED = 22; // 프레임당 최대 스크롤(px)
@@ -45,6 +46,10 @@ export function useMarquee(opts: {
   const dirtyRef = useRef(false);
   const baseRef = useRef<string[]>([]); // additive 기준 선택
   const lastSelRef = useRef<string[]>([]); // 마지막 적용 선택(중복 setState 방지)
+  const lastHitRef = useRef<{ idx: number[]; down: boolean }>({
+    idx: [],
+    down: true,
+  }); // 마지막 히트 인덱스 + 끄는 방향(아래/위) — 끝날 때 커서·기준점
   const beginRef = useRef<(() => void) | null>(null);
 
   const entriesRef = useRef(entries);
@@ -69,8 +74,9 @@ export function useMarquee(opts: {
       const rect: Rect = { x1: start.x, y1: start.y, x2: x, y2: y };
       setMarquee(rect);
       if (!exceedsThreshold(x - start.x, y - start.y)) return;
-      const hit = hitRef
-        .current(rect)
+      const hitIdx = hitRef.current(rect);
+      lastHitRef.current = { idx: hitIdx, down: y >= start.y };
+      const hit = hitIdx
         .map((i) => entriesRef.current[i]?.name)
         .filter((n): n is string => n !== undefined);
       const names = baseRef.current.length
@@ -134,7 +140,22 @@ export function useMarquee(opts: {
       lastClientRef.current = { x: e.clientX, y: e.clientY };
       dirtyRef.current = true;
     };
+    // 마키 중 휠 스크롤도 선택에 반영(예전엔 포인터를 움직여야 갱신됐다).
+    const onScroll = () => {
+      if (draggingRef.current) dirtyRef.current = true;
+    };
     const onUp = () => {
+      // 마키로 고른 게 있으면 커서는 끝낸 쪽 항목, 범위 기준점은 시작 쪽 항목으로 —
+      // 이어서 Shift+↓·Enter 가 마키 결과에서 이어지게.
+      const { idx, down } = lastHitRef.current;
+      if (draggingRef.current && idx.length > 0) {
+        // 스프레드 대신 reduce — 아주 많은 히트에서도 인자 개수 한계에 안 걸린다.
+        const lo = idx.reduce((a, b) => (b < a ? b : a));
+        const hi = idx.reduce((a, b) => (b > a ? b : a));
+        usePanes.getState().setCursor(id, down ? hi : lo);
+        setAnchorAt(id, down ? lo : hi);
+      }
+      lastHitRef.current = { idx: [], down: true };
       draggingRef.current = false;
       startRef.current = null;
       lastClientRef.current = null;
@@ -150,9 +171,12 @@ export function useMarquee(opts: {
     beginRef.current = () => {
       if (raf === null) raf = requestAnimationFrame(tick);
     };
+    const scrollEl = scrollRef.current;
+    scrollEl?.addEventListener("scroll", onScroll);
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
     return () => {
+      scrollEl?.removeEventListener("scroll", onScroll);
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
       if (raf !== null) cancelAnimationFrame(raf);
@@ -166,6 +190,13 @@ export function useMarquee(opts: {
     const el = scrollRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
+    // 스크롤바 위 mousedown 은 스크롤 조작 — 마키로 받으면 선택이 지워지고 끄는 동안
+    // 지나간 행이 줄줄이 선택됐다. (clientWidth/Height 는 스크롤바를 뺀 내용 영역.)
+    if (
+      e.clientX - r.left >= el.clientWidth ||
+      e.clientY - r.top >= el.clientHeight
+    )
+      return;
     const x = e.clientX - r.left + el.scrollLeft;
     const y = e.clientY - r.top + el.scrollTop;
     const additive = e.ctrlKey || e.metaKey;

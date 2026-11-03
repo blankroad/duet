@@ -627,12 +627,16 @@ function App() {
       if (entry.name === "..") {
         const par = parentLocation(activeTab(s, id).location);
         const parentItems: MenuEntry[] = [
-          { id: "up", label: "Open parent folder", onSelect: () => onUp(id) },
+          {
+            id: "up",
+            label: i18n.t("menu.openParent"),
+            onSelect: () => onUp(id),
+          },
         ];
         if (par) {
           parentItems.push({
             id: "copy-parent-path",
-            label: "Copy parent path",
+            label: i18n.t("menu.copyParentPath"),
             onSelect: () => {
               // forward-slash 통일(D:/test/test1) — copyPathsOf 와 동일.
               void navigator.clipboard
@@ -686,7 +690,7 @@ function App() {
           { kind: "separator" },
           {
             id: "win-more",
-            label: "More options",
+            label: i18n.t("menu.moreOptions"),
             loadChildren: async () => {
               const shell = await shellPromise;
               return shell ? shell.entries : [];
@@ -734,7 +738,7 @@ function App() {
           { kind: "separator" },
           {
             id: "win-more",
-            label: "More options",
+            label: i18n.t("menu.moreOptions"),
             loadChildren: async () => {
               const shell = await shellPromise;
               return shell ? shell.entries : [];

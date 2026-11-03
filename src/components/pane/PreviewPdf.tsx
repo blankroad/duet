@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import * as pdfjsLib from "pdfjs-dist";
 // Vite ?url — 번들된 워커 에셋 경로. CSP worker-src 'self' blob: 로 허용.
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -10,21 +11,30 @@ const MAX_PAGES = 20;
 
 /**
  * PDF 미리보기 — pdf.js 로 `duet-preview://` 스트림을 canvas 렌더.
- * 무거운 스택이라 호출부에서 lazy-load. 실패 시 onFallback(외부 앱 열기).
+ * 무거운 스택이라 호출부에서 lazy-load. 실패 시 fallback(외부 앱 열기 버튼).
+ *
+ * 문서를 받는 동안(원격은 특히 오래 걸림) "불러오는 중"을 보이고, 앞 20페이지만 그렸으면
+ * 전체 페이지 수와 함께 알려 준다 — 예전엔 빈 화면이 이어지고 뒤 페이지가 없다는 걸 몰랐다.
  */
 export function PreviewPdf({
   url,
-  onFallback,
+  fallback,
 }: {
   url: string;
-  onFallback: () => void;
+  fallback: ReactNode;
 }) {
+  const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const [failed, setFailed] = useState(false);
+  const [pages, setPages] = useState<{ shown: number; total: number } | null>(
+    null,
+  );
 
   useEffect(() => {
     let cancelled = false;
     let doc: pdfjsLib.PDFDocumentProxy | null = null;
+    setPages(null);
+    setFailed(false);
     void (async () => {
       const container = containerRef.current;
       if (!container) return;
@@ -33,6 +43,10 @@ export function PreviewPdf({
         doc = await pdfjsLib.getDocument({ url }).promise;
         if (cancelled) return;
         const pages = Math.min(doc.numPages, MAX_PAGES);
+        const total = doc.numPages;
+        // 첫 페이지가 그려질 때까지 "불러오는 중"을 유지한다 — 문서 정보만 받고 첫 페이지를
+        // 기다리는 동안(원격) 빈 화면이 이어지지 않게. 그 뒤에 절단 안내를 보인다.
+        let shownInfo = false;
         for (let i = 1; i <= pages; i += 1) {
           const page = await doc.getPage(i);
           if (cancelled) return;
@@ -47,7 +61,13 @@ export function PreviewPdf({
           if (!ctx) continue;
           container.appendChild(canvas);
           await page.render({ canvasContext: ctx, viewport }).promise;
+          if (cancelled) return;
+          if (!shownInfo) {
+            shownInfo = true;
+            setPages({ shown: pages, total });
+          }
         }
+        if (!shownInfo) setPages({ shown: pages, total });
       } catch {
         if (!cancelled) setFailed(true);
       }
@@ -61,16 +81,30 @@ export function PreviewPdf({
   if (failed) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center text-meta text-fg-muted">
-        <span>Cannot render PDF</span>
-        <button
-          type="button"
-          onClick={onFallback}
-          className="rounded border border-border px-3 py-1 text-base hover:bg-subtle"
-        >
-          Open in default app
-        </button>
+        <span>{t("preview.pdfFailed")}</span>
+        {fallback}
       </div>
     );
   }
-  return <div ref={containerRef} className="p-1" />;
+  return (
+    <div>
+      {pages === null && (
+        <div className="p-4 text-center text-meta text-fg-muted">
+          <span className="animate-fade-in-late">{t("preview.loading")}</span>
+        </div>
+      )}
+      <div ref={containerRef} className="p-1" />
+      {pages !== null && pages.total > pages.shown && (
+        <div className="flex flex-col items-center gap-2 border-t border-border px-2 py-2 text-center text-meta text-fg-muted">
+          <span>
+            {t("preview.pdfTruncated", {
+              shown: pages.shown,
+              total: pages.total,
+            })}
+          </span>
+          {fallback}
+        </div>
+      )}
+    </div>
+  );
 }

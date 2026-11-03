@@ -86,3 +86,35 @@ describe("panes.setEntries — 새로고침에서 자리 유지", () => {
     expect(tab().selected.size).toBe(0);
   });
 });
+
+describe("panes — 정렬·숨김 토글에서 커서가 보던 항목을 지킨다", () => {
+  const hidden = (name: string): Entry => ({ ...file(name), hidden: true });
+  beforeEach(() => {
+    const p = usePanes.getState();
+    p.closeAllTabs("left");
+    p.setEntries("left", DIR, list(), { pushHistory: false });
+  });
+
+  it("같은 열을 다시 눌러 역순이 돼도 커서 항목은 그대로", () => {
+    const p = usePanes.getState();
+    p.setCursor(
+      "left",
+      computeDisplayed(tab()).findIndex((e) => e.name === "b.txt"),
+    );
+    p.toggleSortKey("left", tab().sortKey);
+    expect(cursorName()).toBe("b.txt");
+    p.toggleSortKey("left", tab().sortKey === "name" ? "size" : "name");
+    expect(cursorName()).toBe("b.txt");
+  });
+
+  it("숨김 파일을 감추면 그 항목은 선택에서 빠진다", () => {
+    const p = usePanes.getState();
+    if (!tab().showHidden) p.toggleShowHidden("left");
+    p.setEntries("left", DIR, [...list(), hidden(".secret")], {
+      pushHistory: false,
+    });
+    p.setSelected("left", [".secret", "a.txt"]);
+    p.toggleShowHidden("left");
+    expect([...tab().selected]).toEqual(["a.txt"]);
+  });
+});

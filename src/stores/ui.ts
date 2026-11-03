@@ -105,8 +105,10 @@ interface UIState {
   selectPatternNonce: number;
   requestSelectPattern: (pane: PaneId, mode: "add" | "remove") => void;
   /** 인라인 이름변경(F2) 대상 — 해당 pane 의 행/셀이 편집 input 으로 전환. */
-  renameTarget: { pane: PaneId; name: string } | null;
-  requestInlineRename: (pane: PaneId, name: string) => void;
+  /** 인라인 이름 바꾸기 대상. `tabId` 는 시작한 탭 — 같은 폴더의 다른 탭으로 옮겨도
+   *  편집기가 따라가지 않고, 늦은 완료가 그 탭에만 반영되게. */
+  renameTarget: { pane: PaneId; name: string; tabId?: string } | null;
+  requestInlineRename: (pane: PaneId, name: string, tabId?: string) => void;
   clearInlineRename: () => void;
   /** 목록 밀도 (행 높이). 비민감 UI 설정 — localStorage 영속. */
   density: Density;
@@ -175,7 +177,8 @@ export const useUI = create<UIState>((set) => ({
       selectPatternNonce: s.selectPatternNonce + 1,
     })),
   renameTarget: null,
-  requestInlineRename: (pane, name) => set({ renameTarget: { pane, name } }),
+  requestInlineRename: (pane, name, tabId) =>
+    set({ renameTarget: { pane, name, ...(tabId ? { tabId } : {}) } }),
   clearInlineRename: () => set({ renameTarget: null }),
   density: loadDensity(),
   setDensity: (d) => {

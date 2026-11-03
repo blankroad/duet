@@ -50,7 +50,9 @@ export function PreviewInspector({
   const itemsRow =
     folderCount == null
       ? t("preview.counting")
-      : t("preview.itemCount", { count: folderCount });
+      : folderCount === "error"
+        ? t("preview.countFailed")
+        : t("preview.itemCount", { count: folderCount });
 
   let sizeRow: ReactNode;
   if (!isDir) sizeRow = entry.size != null ? formatSize(entry.size) : "—";
@@ -119,13 +121,13 @@ function Row({
 }
 
 /** 폴더 직계 항목 수 (디바운스). location null(파일)이면 비활성. */
-function useFolderCount(location: Location | null): number | null {
+function useFolderCount(location: Location | null): number | "error" | null {
   const key = location
     ? `${location.source.kind === "ssh" ? location.source.connection_id : "local"}|${location.path}`
     : "";
   const locRef = useRef(location);
   locRef.current = location;
-  const [count, setCount] = useState<number | null>(null);
+  const [count, setCount] = useState<number | "error" | null>(null);
 
   useEffect(() => {
     setCount(null);
@@ -133,9 +135,14 @@ function useFolderCount(location: Location | null): number | null {
     if (!loc) return;
     let cancelled = false;
     const t = setTimeout(async () => {
-      const r = await commands.listDirectory(loc);
-      if (cancelled) return;
-      if (r.status === "ok") setCount(r.data.length);
+      // 실패(권한·연결)면 "세는 중"에 머물지 않고 확인 불가로 끝낸다.
+      try {
+        const r = await commands.listDirectory(loc);
+        if (cancelled) return;
+        setCount(r.status === "ok" ? r.data.length : "error");
+      } catch {
+        if (!cancelled) setCount("error");
+      }
     }, 200);
     return () => {
       cancelled = true;

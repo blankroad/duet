@@ -17,6 +17,7 @@ import {
 import { addBookmark } from "@/stores/bookmarks";
 import { planTransferTo } from "@/lib/fileActions";
 import { resolveDragPaths, startDragWithPaths } from "@/lib/dragOut";
+import { rememberSelfDrag } from "@/lib/selfDrag";
 import { useUIDialogs } from "@/stores/ui-dialogs";
 import { useToast } from "@/stores/toast";
 import i18n from "@/i18n";
@@ -48,7 +49,8 @@ export function useEntryDrag(id: PaneId) {
       const sx = e.clientX;
       const sy = e.clientY;
       // 시작 시점 모디파이어 — OS 드래그는 도중 전환 불가라 여기서 확정.
-      const wantMove = e.ctrlKey || e.shiftKey;
+      // macOS 는 Ctrl+클릭이 우클릭이라 Finder 처럼 Cmd 도 이동으로 받는다.
+      const wantMove = e.ctrlKey || e.shiftKey || e.metaKey;
       const tab = activeTab(usePanes.getState(), id);
       const isLocal = tab.location.source.kind === "local";
       // Ctrl 없는 로컬 = OS 드래그-아웃 경로.
@@ -103,8 +105,14 @@ export function useEntryDrag(id: PaneId) {
             // OS 네이티브 드래그로 인계 — 동기 발사(제스처 유지). 인앱 리스너 정리.
             handedToOs = true;
             cleanup();
-            if (osPaths.length > 0) startDragWithPaths(osPaths);
-            else void resolveDragPaths(targets).then(startDragWithPaths);
+            // 같은 창에 도로 놓으면 바깥 파일처럼 들어온다 — 같은 폴더·자기 자신
+            // 드롭을 걸러 낼 수 있게 기록(useOsFileDrop).
+            const fire = (paths: string[]) => {
+              rememberSelfDrag(paths, tab.location, names);
+              startDragWithPaths(paths);
+            };
+            if (osPaths.length > 0) fire(osPaths);
+            else void resolveDragPaths(targets).then(fire);
             suppressNextClick();
             return;
           }
@@ -116,12 +124,16 @@ export function useEntryDrag(id: PaneId) {
               names.length === 1
                 ? (names[0] ?? "")
                 : i18n.t("dnd.items", { count: names.length }),
+            mode: wantMove ? "move" : "copy",
             x: ev.clientX,
             y: ev.clientY,
           });
           document.body.style.cursor = "grabbing";
+          window.addEventListener("keydown", onKey, true);
         }
-        const d = resolveDropAt(ev.clientX, ev.clientY);
+        const raw = resolveDropAt(ev.clientX, ev.clientY);
+        // 놓아도 아무 일 없는 곳(원래 폴더·끄는 폴더 자신)은 강조하지 않는다.
+        const d = raw && !isNoopDrop(raw) ? raw : null;
         // 사이드바(위치·볼륨·북마크)도 드롭 대상 — 패널 밖이라 위와 겹치지 않는다.
         const sb = resolveSidebarDropAt(ev.clientX, ev.clientY);
         useDragState
@@ -202,9 +214,44 @@ export function useEntryDrag(id: PaneId) {
         );
       };
 
+      /** 이 드롭이 원래 폴더나 끄는 항목 자신(폴더)으로 가는가 — 놓아도 무의미. */
+      const isNoopDrop = (d: { pane: PaneId; folder: string | null }) => {
+        const dstLoc = activeTab(usePanes.getState(), d.pane).location;
+        const dst = dropDestination(dstLoc, d.folder);
+        return (
+          sameLocation(tab.location, dst) ||
+          targets.some((t) =>
+            sameLocation(childLocation(t.location, t.name), dst),
+          )
+        );
+      };
+
+      // 인앱 드래그 중 Esc = 취소(아무 데도 놓지 않음). 목록의 Esc(선택 해제)까지
+      // 가지 않게 캡처 단계에서 먹는다. 버튼을 놓을 때 생기는 click 도 삼킨다.
+      const onKey = (k: KeyboardEvent) => {
+        if (k.key !== "Escape") return;
+        k.preventDefault();
+        k.stopImmediatePropagation();
+        cleanup();
+        useDragState.getState().end();
+        document.body.style.cursor = "";
+        // 창 밖에서 버튼을 놓아 mouseup 이 안 오면 다음 평범한 클릭을 삼키지 않게
+        // 잠시 뒤 스스로 거둔다.
+        const onRelease = () => suppressNextClick();
+        window.addEventListener("mouseup", onRelease, {
+          capture: true,
+          once: true,
+        });
+        setTimeout(
+          () => window.removeEventListener("mouseup", onRelease, true),
+          1500,
+        );
+      };
+
       const cleanup = () => {
         window.removeEventListener("mousemove", onMove);
         window.removeEventListener("mouseup", onUp, true);
+        window.removeEventListener("keydown", onKey, true);
       };
 
       window.addEventListener("mousemove", onMove);

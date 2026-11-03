@@ -11,6 +11,8 @@ interface DragState {
   source: Location | null;
   targets: EntryRef[];
   label: string;
+  /** 놓으면 할 일 — 시작할 때 수식키로 정해진다. 고스트에 배지로 표시. */
+  mode: "copy" | "move";
   /** 커서 위치 (viewport px) — 고스트 추적. */
   x: number;
   y: number;
@@ -23,6 +25,7 @@ interface DragState {
     source: Location;
     targets: EntryRef[];
     label: string;
+    mode?: "copy" | "move";
     x: number;
     y: number;
   }) => void;
@@ -41,6 +44,7 @@ export const useDragState = create<DragState>((set) => ({
   source: null,
   targets: [],
   label: "",
+  mode: "copy",
   x: 0,
   y: 0,
   overPane: null,
@@ -49,6 +53,7 @@ export const useDragState = create<DragState>((set) => ({
   start: (p) =>
     set({
       ...p,
+      mode: p.mode ?? "copy",
       active: true,
       overPane: null,
       overFolder: null,

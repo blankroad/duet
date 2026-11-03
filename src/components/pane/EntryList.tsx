@@ -13,6 +13,7 @@ import {
   type SortOrder,
 } from "@/stores/panes";
 import { childLocation } from "@/lib/entryDnd";
+import { followRenamedEntry } from "@/lib/renameReveal";
 import { setHoverEntry, clearHover } from "@/stores/previewHover";
 import { useUI, densityMetrics } from "@/stores/ui";
 import { useContextMenu } from "@/stores/contextMenu";
@@ -76,6 +77,26 @@ export function EntryList({
   const rowHeight = densityMetrics(useUI((s) => s.density)).row;
   // OS 아이콘(EntryIcon localPath)용 — 현재 패널 폴더 location. 원격이면 null 전달.
   const location = usePanes((s) => activeTab(s, id).location);
+  const tabId = usePanes((s) => activeTab(s, id).id);
+  const paneActive = usePanes((s) => s.activePane === id);
+  // 인라인 이름 바꾸기 완료 — 시작할 때의 탭·폴더를 기준으로 반영한다. 그 사이 다른
+  // 편집이 시작됐으면 그 편집 상태는 지우지 않는다.
+  // 이 함수는 편집기가 **열릴 때의** 렌더에서 만들어진 것이 불린다(InlineRenameInput 이
+  // 고정). 그래서 tabId·location·renameTarget 은 편집을 시작한 시점 값이다.
+  const finishRename = (
+    oldName: string,
+    renamed: boolean,
+    newName?: string,
+  ) => {
+    const session = renameTarget;
+    const origin = session?.tabId ?? tabId;
+    // 그 사이 새 편집이 시작됐으면 그 편집 상태는 지우지 않는다.
+    if (useUI.getState().renameTarget === session)
+      useUI.getState().clearInlineRename();
+    if (!renamed) return;
+    if (newName) followRenamedEntry(id, origin, location, oldName, newName);
+    onRenamed();
+  };
   // "크기 계산" 결과(name → bytes) — 폴더 행의 크기 컬럼 표시.
   const dirSizes = usePanes((s) => activeTab(s, id).dirSizes);
   // Ctrl+X 로 잘라내기 대기 중인 이름 — 해당 행을 흐리게 표시.
@@ -113,6 +134,19 @@ export function EntryList({
       virtualizer.scrollToIndex(cursorIndex, { align: "auto" });
     }
   }, [cursorIndex, virtualizer]);
+
+  // 다른 폴더·탭으로 바뀌면 맨 위에서 시작해 커서로 — 커서 인덱스가 같으면(보통 0)
+  // 위 effect 가 안 돌아, 새 폴더가 이전 폴더의 스크롤 위치(중간)부터 보였다.
+  const viewKey = `${tabId}|${location.path}`;
+  useEffect(() => {
+    const el = parentRef.current;
+    if (!el) return;
+    el.scrollTop = 0;
+    if (cursorIndex >= 0)
+      virtualizer.scrollToIndex(cursorIndex, { align: "auto" });
+    // 폴더·탭이 바뀔 때만 — 커서 이동은 위 effect 담당.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewKey]);
 
   // 이 패널의 빈 영역 위로 드래그 중 (폴더 위가 아닐 때) — 패널 하이라이트
   const paneHighlight = dragActive && overThisPane && overFolder === null;
@@ -281,7 +315,9 @@ export function EntryList({
                 key={vi.key}
                 data-entry={entry.name}
                 data-drop-folder={isDropFolder ? entry.name : undefined}
-                onMouseEnter={() => setHoverEntry(id, entry)}
+                onMouseEnter={(e) =>
+                  setHoverEntry(id, entry, { x: e.clientX, y: e.clientY })
+                }
                 onMouseDown={(e) => {
                   // 아이콘/이름(드래그 핸들) 위에서만 항목 드래그 시작. 그 외
                   // (Size/Modified 컬럼 등 여백)은 컨테이너 마키 선택으로 흘려보냄.
@@ -307,6 +343,7 @@ export function EntryList({
                 <EntryRow
                   entry={entry}
                   isCursor={cursorIndex === vi.index}
+                  paneActive={paneActive}
                   isSelected={selected.has(entry.name)}
                   isCut={cutNames.has(entry.name)}
                   splitExt={splitExt}
@@ -319,14 +356,14 @@ export function EntryList({
                   renameRef={
                     renameTarget?.pane === id &&
                     renameTarget.name === entry.name &&
+                    (renameTarget.tabId ?? tabId) === tabId &&
                     !isParentEntry(entry)
                       ? { location, name: entry.name }
                       : null
                   }
-                  onRenameDone={(renamed) => {
-                    useUI.getState().clearInlineRename();
-                    if (renamed) onRenamed();
-                  }}
+                  onRenameDone={(renamed, newName) =>
+                    finishRename(entry.name, renamed, newName)
+                  }
                   onClick={(e) => onCursorMove(vi.index, e)}
                   onDoubleClick={() => onActivate(entry, vi.index)}
                 />
@@ -379,6 +416,10 @@ function ColumnHeader({
   return (
     <button
       type="button"
+      // 정렬 상태를 보조기술에도 — 현재 열만 방향을 알린다.
+      aria-sort={
+        active ? (order === "asc" ? "ascending" : "descending") : undefined
+      }
       onClick={() => onClick(col)}
       className={`relative flex h-6 items-center gap-1 hover:text-fg ${className} ${active ? "text-fg" : ""}`}
     >

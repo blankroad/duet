@@ -466,6 +466,15 @@
     "copy": "Copy",
     "cut": "Cut",
     "pasteIntoFolder": "Paste into folder",
+    "quickLook": "Quick Look",
+    "sortAsc": "Ascending",
+    "sortDesc": "Descending",
+    "submenuLoading": "Loading…",
+    "submenuEmpty": "(none)",
+    "openParent": "Open parent folder",
+    "copyParentPath": "Copy parent path",
+    "moreOptions": "More options",
+    "extColumn": "Extension column",
     "copyToOtherPane": "Copy to other pane",
     "moveToOtherPane": "Move to other pane",
     "addToShelf": "Add to shelf",
@@ -621,7 +630,8 @@
     "hideExtColumn": "Hide extension column",
     "showExtColumn": "Show extension column",
     "resizeColumn": "Drag to resize column",
-    "parentFolder": "Parent folder"
+    "parentFolder": "Parent folder",
+    "parentFolderDrop": "Parent folder — drop here to move/copy up"
   },
   "settings": {
     "title": "Settings",
@@ -797,6 +807,12 @@
     "bookmarkAdded": "Bookmarked “{{name}}”",
     "bookmarkLocalOnly": "Bookmarks are local-only — use ★ in the path bar for remote",
     "renameFailed": "Rename failed: {{err}}",
+    "revealFailed": "Reveal failed: {{err}}",
+    "openTerminalFailed": "Open terminal failed: {{err}}",
+    "remoteEditFailed": "Edit failed: {{err}}",
+    "remoteEditing": "Editing {{name}} — changes auto-upload",
+    "pasteIntoSelf": "Can't paste a folder into itself",
+    "importFailed": "Import failed: {{err}}",
     "removeBookmarkFailed": "Could not remove the bookmark: {{err}}",
     "removeFavoriteFailed": "Could not remove the favorite: {{err}}",
     "removeHostFailed": "Could not remove the host: {{err}}",
@@ -1016,6 +1032,7 @@
     "info": "Info",
     "close": "Close preview",
     "closeTitle": "Close preview (F11)",
+    "closeTitleKey": "Close preview ({{key}})",
     "selectFile": "Select a file to preview",
     "selectItem": "Select a file or folder",
     "loading": "Loading…",
@@ -1031,10 +1048,23 @@
     "perms": "Perms",
     "where": "Where",
     "truncated": "Preview truncated — file is larger",
+    "countFailed": "Unavailable",
+    "binaryFile": "Binary file · {{size}}",
+    "tooLarge": "Too large to preview · {{size}}",
+    "openDefault": "Open in default app",
+    "opening": "Opening…",
+    "openFailed": "Couldn't open: {{err}}",
+    "cannotPlayAudio": "This audio can't be played here",
+    "cannotPlayVideo": "This video can't be played here",
+    "pdfFailed": "Cannot render PDF",
+    "pdfTruncated": "Showing the first {{shown}} pages (of {{total}})",
     "resizeTitle": "Drag to resize · double-click to reset"
   },
   "dnd": {
-    "items": "{{count}} items"
+    "items": "{{count}} items",
+    "copy": "Copy",
+    "move": "Move",
+    "escCancel": "Esc to cancel"
   },
   "cmd": {
     "tab": {

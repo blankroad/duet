@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import clsx from "clsx";
 import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 import { commands } from "@/types/bindings";
@@ -10,10 +11,12 @@ import {
   type PaneId,
 } from "@/stores/panes";
 import { useUI } from "@/stores/ui";
-import { usePreviewHover } from "@/stores/previewHover";
+import { usePreviewHover, dropHoverTarget } from "@/stores/previewHover";
+import { childLocation } from "@/lib/entryDnd";
 import { usePreviewWidth } from "@/stores/previewWidth";
 import { beginWidthDrag } from "@/stores/panelWidth";
 import { formatErr } from "@/lib/error";
+import { useKeyHint } from "@/lib/keyHint";
 import { PreviewView, Centered } from "@/components/pane/PreviewView";
 import { PreviewInspector } from "@/components/pane/PreviewInspector";
 
@@ -31,20 +34,28 @@ export function cursorTarget(): PreviewTarget | null {
   const displayed = selectDisplayedEntries(s.activePane, s);
   const entry = displayed[tab.cursorIndex];
   if (!entry || entry.name === "..") return null;
-  const base = tab.location.path;
-  const sep = base.endsWith("/") ? "" : "/";
   return {
-    location: { source: tab.location.source, path: base + sep + entry.name },
+    // 경로 결합은 공용 헬퍼로 — Windows `C:\dir` 에 "/" 를 섞지 않게 (CLAUDE.md §7).
+    location: childLocation(tab.location, entry.name),
     entry,
     paneId: s.activePane,
   };
 }
 
+type ReadyState = {
+  phase: "ready";
+  name: string;
+  location: Location;
+  data: PreviewData;
+  /** 읽은 파일 버전(경로+크기+수정시각) — 같은 경로라도 바뀌면 PDF·미디어를 다시 그린다. */
+  version: string;
+};
 type LoadState =
   | { phase: "empty" }
-  | { phase: "loading"; name: string }
+  /** `prev` — 직전에 보이던 미리보기. 새 것이 올 때까지 흐리게 남겨 깜빡임을 없앤다. */
+  | { phase: "loading"; name: string; prev?: ReadyState }
   | { phase: "error"; name: string; message: string }
-  | { phase: "ready"; name: string; location: Location; data: PreviewData };
+  | ReadyState;
 
 /** 활성 패널 cursor + location 변화를 추적하는 구독 키. */
 export function cursorPreviewDep(
@@ -57,7 +68,8 @@ export function cursorPreviewDep(
     tab.location.source.kind === "ssh"
       ? tab.location.source.connection_id.toString()
       : "local";
-  return `${s.activePane}|${srcKey}|${tab.location.path}|${entry?.name ?? ""}|${entry?.kind ?? ""}`;
+  // size·mtime 포함 — 같은 이름 파일을 고친 뒤 새로고침하면 미리보기·속성도 다시 읽는다.
+  return `${s.activePane}|${srcKey}|${tab.location.path}|${entry?.name ?? ""}|${entry?.kind ?? ""}|${entry?.size ?? ""}|${entry?.modified_ms ?? ""}`;
 }
 
 function locKey(loc: Location | null): string {
@@ -72,7 +84,10 @@ export function usePreviewLoad(target: PreviewTarget | null): LoadState {
   const fileLoc =
     target && target.entry.kind === "file" ? target.location : null;
   const name = target?.entry.name ?? "";
-  const key = locKey(fileLoc);
+  // 같은 경로라도 크기·수정 시각이 바뀌면(외부 편집 후 새로고침) 다시 읽는다.
+  const key = fileLoc
+    ? `${locKey(fileLoc)}|${target?.entry.size ?? ""}|${target?.entry.modified_ms ?? ""}`
+    : "";
   const locRef = useRef(fileLoc);
   locRef.current = fileLoc;
   const nameRef = useRef(name);
@@ -82,18 +97,40 @@ export function usePreviewLoad(target: PreviewTarget | null): LoadState {
   useEffect(() => {
     const loc = locRef.current;
     const nm = nameRef.current;
+    const version = key;
     if (!loc) {
       setState({ phase: "empty" });
       return;
     }
     let cancelled = false;
-    setState({ phase: "loading", name: nm });
+    setState((cur) => ({
+      phase: "loading",
+      name: nm,
+      ...(cur.phase === "ready"
+        ? { prev: cur }
+        : cur.phase === "loading" && cur.prev
+          ? { prev: cur.prev }
+          : {}),
+    }));
     const t = setTimeout(async () => {
-      const r = await commands.fsReadPreview(loc);
-      if (cancelled) return;
-      if (r.status === "ok")
-        setState({ phase: "ready", name: nm, location: loc, data: r.data });
-      else setState({ phase: "error", name: nm, message: formatErr(r.error) });
+      // IPC 자체가 reject 해도(채널·직렬화 오류) 로딩에 갇히지 않게 오류로 전환.
+      try {
+        const r = await commands.fsReadPreview(loc);
+        if (cancelled) return;
+        if (r.status === "ok")
+          setState({
+            phase: "ready",
+            name: nm,
+            location: loc,
+            data: r.data,
+            version,
+          });
+        else
+          setState({ phase: "error", name: nm, message: formatErr(r.error) });
+      } catch (e) {
+        if (!cancelled)
+          setState({ phase: "error", name: nm, message: formatErr(e) });
+      }
     }, 150);
     return () => {
       cancelled = true;
@@ -106,18 +143,57 @@ export function usePreviewLoad(target: PreviewTarget | null): LoadState {
 
 function PreviewBody({ state }: { state: LoadState }) {
   const { t } = useTranslation();
+  // ready 와 "불러오는 중(직전 내용 유지)"은 **같은 트리**로 그린다 — 모양이 바뀌면 React 가
+  // 직전 미리보기를 다시 마운트해 PDF·영상을 또 받았다. 기다리는 동안 직전 본문은 표시
+  // 전용(inert): 흐린 "기본 앱으로 열기"를 누르면 지금 고른 파일이 아니라 직전 파일이 열렸다.
+  const shown: ReadyState | undefined =
+    state.phase === "ready"
+      ? state
+      : state.phase === "loading"
+        ? state.prev
+        : undefined;
+  const busy = state.phase === "loading";
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    // React 18 은 inert 속성을 모른다 — 직접 토글(포인터·키보드·보조기술 모두 차단).
+    el.toggleAttribute("inert", busy);
+    // 조작할 수 없는 동안 직전 오디오·영상이 계속 재생되지 않게 멈춘다.
+    if (busy)
+      el.querySelectorAll<HTMLMediaElement>("audio,video").forEach((m) =>
+        m.pause(),
+      );
+  }, [busy, shown]);
   if (state.phase === "empty")
     return <Centered>{t("preview.selectFile")}</Centered>;
-  if (state.phase === "loading")
-    return <Centered>{t("preview.loading")}</Centered>;
   if (state.phase === "error")
     return <Centered tone="danger">{state.message}</Centered>;
+  // 늦게 나타나게(200ms) — 빠른 로컬에서 ↑↓ 할 때 "불러오는 중"이 깜빡이지 않도록.
+  const notice = (
+    <span className="animate-fade-in-late">{t("preview.loading")}</span>
+  );
+  if (!shown) return <Centered>{notice}</Centered>;
   return (
-    <PreviewView
-      name={state.name}
-      location={state.location}
-      data={state.data}
-    />
+    <div className="relative h-full" aria-busy={busy || undefined}>
+      <div
+        ref={bodyRef}
+        className={clsx("h-full", busy && "pointer-events-none opacity-40")}
+        aria-hidden={busy || undefined}
+      >
+        <PreviewView
+          name={shown.name}
+          location={shown.location}
+          data={shown.data}
+          version={shown.version}
+        />
+      </div>
+      {busy && (
+        <div className="pointer-events-none absolute inset-0">
+          <Centered>{notice}</Centered>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -129,8 +205,14 @@ function PreviewBody({ state }: { state: LoadState }) {
 export function PreviewPane({ below = false }: { below?: boolean }) {
   const { t } = useTranslation();
   const togglePreview = useUI((s) => s.togglePreview);
+  const closeKey = useKeyHint("view.togglePreview");
   const hover = usePreviewHover((s) => s.target);
   const cursorKey = usePanes(cursorPreviewDep);
+  // 커서가 움직이면(키보드·클릭) 그게 가장 최근 의도 — 남아 있던 호버를 놓아 미리보기가
+  // 커서를 따라가게 한다. 마우스를 목록 위에 둔 채 ↑↓ 하면 예전 호버 항목에 멈춰 있었다.
+  useEffect(() => {
+    dropHoverTarget();
+  }, [cursorKey]);
   // 호버 우선, 없으면 cursor. cursorKey 는 cursorTarget()(비반응 getState)의
   // 재평가 트리거라 의도적 의존성.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -167,7 +249,12 @@ export function PreviewPane({ below = false }: { below?: boolean }) {
         </span>
         <button
           type="button"
-          title={t("preview.closeTitle")}
+          // 현재 키맵의 키로 안내 — "F11" 고정이라 맥 기본키·사용자 키와 달랐다.
+          title={
+            closeKey
+              ? t("preview.closeTitleKey", { key: closeKey })
+              : t("preview.close")
+          }
           aria-label={t("preview.close")}
           onClick={() => togglePreview()}
           className="flex h-6 w-6 shrink-0 items-center justify-center rounded-panel text-fg-muted hover:bg-subtle hover:text-fg"

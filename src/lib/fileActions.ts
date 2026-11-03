@@ -71,12 +71,12 @@ export function resolveActiveTargets(): ActiveCtx {
 
 /** F2 — 단일 선택만 rename. 다이얼로그 대신 행 안 인라인 편집. */
 export function triggerRename(showToast: ToastFn): void {
-  const { active, targets } = resolveActiveTargets();
+  const { active, tab, targets } = resolveActiveTargets();
   if (targets.length !== 1) {
     showToast(i18n.t("toast.renameSelectOne"));
     return;
   }
-  useUI.getState().requestInlineRename(active, targets[0]!.name);
+  useUI.getState().requestInlineRename(active, targets[0]!.name, tab.id);
 }
 
 /** 여러 항목 일괄 이름변경 — 규칙/미리보기 다이얼로그 오픈 (1개 이상). */
@@ -229,18 +229,21 @@ export function clipCut(showToast: ToastFn): void {
   showToast(i18n.t("toast.cutItems", { count: targets.length }), "success");
 }
 
-/** Ctrl+V — 클립보드 항목을 활성 패널 현재 폴더로 붙여넣기(copy/move, 확인 다이얼로그 경유). */
+/**
+ * Ctrl+V — 클립보드 항목을 활성 패널 현재 폴더로 붙여넣기(copy/move, 확인 다이얼로그 경유).
+ * `into` 를 주면 그 폴더로(폴더 우클릭 "이 폴더에 붙여넣기").
+ */
 export async function clipPaste(
   open: OpenFn,
   showToast: ToastFn,
+  into?: Location,
 ): Promise<void> {
   const clip = useClipboard.getState().entry;
   if (!clip || clip.targets.length === 0) {
     showToast(i18n.t("toast.clipboardEmpty"));
     return;
   }
-  const { tab } = resolveActiveTargets();
-  const dst = tab.location;
+  const dst = into ?? resolveActiveTargets().tab.location;
   if (isVirtualTrash(dst)) {
     showToast(i18n.t("toast.trashOnlyPutBack"), "error");
     return;
@@ -251,6 +254,15 @@ export async function clipPaste(
     clip.targets.every((t) => sameLocation(t.location, dst))
   ) {
     showToast(i18n.t("toast.alreadyInFolder"));
+    return;
+  }
+  // 폴더를 자기 자신 안으로 붙여넣기 — 드래그와 같은 규칙으로 막는다.
+  if (
+    clip.targets.some((t) =>
+      sameLocation(childLocation(t.location, t.name), dst),
+    )
+  ) {
+    showToast(i18n.t("toast.pasteIntoSelf"), "error");
     return;
   }
   await planTransferTo(clip.targets, dst, clip.mode, open, showToast);
