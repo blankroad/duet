@@ -38,6 +38,8 @@ import type { TaskDto } from "@/types/bindings";
 import { usePromptDialog } from "@/stores/promptDialog";
 import { useContextMenu, type MenuItem } from "@/stores/contextMenu";
 import { useHostNicknames } from "@/stores/hostNicknames";
+import { beginWidthDrag } from "@/stores/panelWidth";
+import { reorderSavedHosts } from "@/stores/savedHosts";
 
 // commands.* 는 무엇을 부르든 빈 성공 — 컴포넌트가 부트스트랩 중 부르는 IPC 를 흡수한다.
 vi.mock("@/types/bindings", () => {
@@ -779,5 +781,47 @@ describe("사이드바 — 최근·즐겨찾기", () => {
       kind: "ssh",
       connection_id: "prod:1",
     });
+  });
+});
+
+describe("폭 드래그·재정렬 생명주기", () => {
+  beforeEach(resetSidebarStores);
+
+  it("폭 드래그가 취소(pointercancel)되면 이후 포인터 이동이 폭을 바꾸지 않는다", () => {
+    const setWidth = vi.fn();
+    beginWidthDrag(
+      {
+        preventDefault: () => {},
+        clientX: 100,
+      } as unknown as React.PointerEvent,
+      "right",
+      200,
+      setWidth,
+    );
+    window.dispatchEvent(new MouseEvent("pointermove", { clientX: 120 }));
+    expect(setWidth).toHaveBeenLastCalledWith(220);
+    window.dispatchEvent(new Event("pointercancel"));
+    setWidth.mockClear();
+    window.dispatchEvent(new MouseEvent("pointermove", { clientX: 160 }));
+    expect(setWidth).not.toHaveBeenCalled();
+    expect(document.body.style.cursor).toBe("");
+  });
+
+  it("그룹 밖 저장 호스트만 재정렬해도 IPC 왕복 동안 그룹 멤버가 사라지지 않는다", async () => {
+    const h = (alias: string) => ({
+      alias,
+      host: alias,
+      port: 22,
+      user: "u",
+      key_path: null,
+    });
+    useSavedHosts.setState({ hosts: [h("a"), h("g"), h("b")] });
+    const p = reorderSavedHosts(["b", "a"]);
+    expect(useSavedHosts.getState().hosts.map((x) => x.alias)).toEqual([
+      "b",
+      "g",
+      "a",
+    ]);
+    await p;
   });
 });

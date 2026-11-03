@@ -67,12 +67,19 @@ export function beginWidthDrag(
   const sign = edge === "right" ? 1 : -1;
   const move = (ev: PointerEvent) =>
     setWidth(startWidth + sign * (ev.clientX - startX));
-  const up = () => {
+  // 끝내는 길은 셋 — 손을 뗌(up), 제스처 취소(pointercancel), 창 포커스 잃음(blur).
+  // 예전엔 up 만 받아서, 취소된 뒤에도 다음 포인터 이동이 저장 폭을 바꿨다.
+  const prevCursor = document.body.style.cursor;
+  const end = () => {
     window.removeEventListener("pointermove", move);
-    window.removeEventListener("pointerup", up);
-    document.body.style.cursor = "";
+    window.removeEventListener("pointerup", end);
+    window.removeEventListener("pointercancel", end);
+    window.removeEventListener("blur", end);
+    document.body.style.cursor = prevCursor;
   };
   document.body.style.cursor = "col-resize";
   window.addEventListener("pointermove", move);
-  window.addEventListener("pointerup", up);
+  window.addEventListener("pointerup", end);
+  window.addEventListener("pointercancel", end);
+  window.addEventListener("blur", end);
 }

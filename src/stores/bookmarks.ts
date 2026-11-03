@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { reorderInSlots } from "@/lib/reorderSlots";
 import { commands } from "@/types/bindings";
 import { formatErr } from "@/lib/error";
 import type { Bookmark, Location } from "@/types/bindings";
@@ -87,10 +88,8 @@ export async function removeBookmark(id: string): Promise<void> {
 /** 드래그 재정렬 — id 순서대로. 낙관적 갱신 후 백엔드 반환값으로 정합. */
 export async function reorderBookmarks(ids: string[]): Promise<void> {
   const prev = useBookmarks.getState().items;
-  const byId = new Map(prev.map((b) => [b.id, b]));
-  const optimistic = ids
-    .map((id) => byId.get(id))
-    .filter((b): b is Bookmark => b !== undefined);
+  // 필터로 일부만 보일 때도 나머지를 지우지 않게 — 자리 채우기(백엔드와 같은 규칙).
+  const optimistic = reorderInSlots(prev, (b) => b.id, ids);
   useBookmarks.getState().setAll(optimistic);
   const r = await commands.bookmarksReorder(ids);
   if (r.status === "ok") useBookmarks.getState().setAll(r.data);
