@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { PaneToolbar } from "./PaneToolbar";
 import { ContextMenu } from "@/components/ContextMenu";
 import { usePanes, activeTab } from "@/stores/panes";
@@ -67,4 +73,71 @@ it("보기 메뉴를 취소하면 설정을 바꾸지 않는다", () => {
   fireEvent.keyDown(window, { key: "Escape" });
   expect(useContextMenu.getState().open).toBe(false);
   expect(activeTab(usePanes.getState(), "right").viewMode).toBe("details");
+});
+it("숨김 파일 토글은 반응형 보기 묶음 밖에서 1클릭으로 바뀐다", () => {
+  const { container } = render(<PaneToolbar id="right" />);
+  const before = activeTab(usePanes.getState(), "right").showHidden;
+  const btn = screen.getByRole("button", { name: "Hidden files" });
+  // jsdom 은 컨테이너 쿼리를 적용하지 않으므로 구조로 확인: 좁은 폭에서 숨는 묶음 밖이어야 한다.
+  expect(btn.closest(".toolbar-view-buttons")).toBeNull();
+  expect(btn.className).not.toMatch(/toolbar-sync/);
+  expect(container.contains(btn)).toBe(true);
+  expect(btn.getAttribute("aria-pressed")).toBe(String(before));
+  fireEvent.click(btn);
+  expect(activeTab(usePanes.getState(), "right").showHidden).toBe(!before);
+  expect(btn.getAttribute("aria-pressed")).toBe(String(!before));
+  expect(usePanes.getState().activePane).toBe("right");
+  expect(activeTab(usePanes.getState(), "left").showHidden).toBe(false);
+});
+it("필터 버튼은 해당 패널의 빠른 필터를 열고, 걸린 필터를 눌림으로 보인다", () => {
+  render(<PaneToolbar id="right" />);
+  const btn = screen.getByRole("button", { name: "Name filter" });
+  expect(btn.getAttribute("aria-pressed")).toBe("false");
+  fireEvent.click(btn);
+  expect(usePanes.getState().activePane).toBe("right");
+  expect(activeTab(usePanes.getState(), "right").filterFocused).toBe(true);
+  expect(activeTab(usePanes.getState(), "left").filterFocused).toBe(false);
+  act(() => usePanes.getState().setFilter("right", "log"));
+  expect(btn.getAttribute("aria-pressed")).toBe("true");
+  expect(btn.getAttribute("title")).toMatch(/log/);
+  act(() => {
+    usePanes.getState().setFilter("right", "");
+    usePanes.getState().setFilterFocused("right", false);
+  });
+});
+it("정렬 버튼은 그리드에서도 현재 기준·방향을 보이고 메뉴로 바꾼다", () => {
+  usePanes.getState().setViewMode("right", "grid");
+  usePanes.getState().setSort("right", "mtime", "desc");
+  render(
+    <>
+      <PaneToolbar id="right" />
+      <ContextMenu />
+    </>,
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Sort: Modified · Descending" }),
+  );
+  fireEvent.click(screen.getByText("Name"));
+  expect(activeTab(usePanes.getState(), "right").sortKey).toBe("name");
+  expect(activeTab(usePanes.getState(), "right").sortOrder).toBe("asc");
+  expect(usePanes.getState().activePane).toBe("right");
+  fireEvent.click(
+    screen.getByRole("button", { name: "Sort: Name · Ascending" }),
+  );
+  fireEvent.click(screen.getByText("Descending"));
+  expect(activeTab(usePanes.getState(), "right").sortOrder).toBe("desc");
+  expect(activeTab(usePanes.getState(), "left").sortKey).not.toBe("name");
+});
+it("보기 바로가기 버튼도 키보드 클릭 시 해당 패널을 먼저 활성화한다", () => {
+  render(<PaneToolbar id="right" />);
+  fireEvent.click(screen.getByRole("button", { name: "Tiles" }));
+  expect(usePanes.getState().activePane).toBe("right");
+  expect(activeTab(usePanes.getState(), "right").viewMode).toBe("tiles");
+});
+it("좁은 폭용 보기 버튼 툴팁에 현재 정렬이 보인다", () => {
+  usePanes.getState().setSort("right", "size", "desc");
+  render(<PaneToolbar id="right" />);
+  expect(screen.getByRole("button", { name: "View" }).title).toBe(
+    "View — Sort: Size · Descending",
+  );
 });

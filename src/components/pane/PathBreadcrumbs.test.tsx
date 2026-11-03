@@ -24,7 +24,8 @@ it.each([
   fireEvent.click(screen.getAllByRole("button")[0]!);
   const parents = useContextMenu.getState().items;
   expect(parents).toHaveLength(2);
-  const parent = parents[1]!;
+  // 가까운 부모가 첫 항목.
+  const parent = parents[0]!;
   if (!isSeparator(parent)) parent.onSelect?.();
   expect(navigate).toHaveBeenCalledWith(items[1]!.path);
   fireEvent.click(screen.getByText("duet"));
@@ -38,4 +39,31 @@ it("루트에서는 불필요한 상위 폴더 버튼을 표시하지 않는다"
     />,
   );
   expect(screen.getAllByRole("button")).toHaveLength(1);
+});
+it("현재 폴더 클릭 핸들러가 있으면 재이동 대신 그것을 부르고, 메뉴 머리 항목을 앞에 붙인다", () => {
+  const navigate = vi.fn();
+  const edit = vi.fn();
+  const copy = vi.fn();
+  render(
+    <PathBreadcrumbs
+      items={[
+        { label: "/", path: "/" },
+        { label: "a", path: "/a" },
+        { label: "b", path: "/a/b" },
+      ]}
+      onNavigate={navigate}
+      onCurrentClick={edit}
+      menuHead={[{ id: "copy", label: "Copy path", onSelect: copy }]}
+    />,
+  );
+  fireEvent.click(screen.getByText("b"));
+  expect(edit).toHaveBeenCalledOnce();
+  expect(navigate).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Parent folders" }));
+  const menu = useContextMenu.getState().items;
+  expect(menu.map((m) => (isSeparator(m) ? "-" : m.label))).toEqual([
+    "Copy path",
+    "a",
+    "/",
+  ]);
 });

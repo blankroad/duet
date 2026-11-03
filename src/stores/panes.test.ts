@@ -253,6 +253,48 @@ describe("panes — sort/hidden via active tab", () => {
       selectDisplayedEntries("left", usePanes.getState()).map((e) => e.name),
     ).toEqual([".bashrc", "README.md"]);
   });
+
+  it("toggleShowHidden keeps the cursor on the same entry", () => {
+    usePanes
+      .getState()
+      .setEntries("left", { source: { kind: "local" }, path: "/" }, [
+        mk(".a", "file", 100, 0, true),
+        mk("b", "file"),
+        mk("c", "file"),
+      ]);
+    usePanes.getState().setCursor("left", 1); // "c"
+    usePanes.getState().toggleShowHidden("left");
+    const t = activeTab(usePanes.getState(), "left");
+    expect(
+      selectDisplayedEntries("left", usePanes.getState())[t.cursorIndex]?.name,
+    ).toBe("c");
+    usePanes.getState().toggleShowHidden("left");
+    const t2 = activeTab(usePanes.getState(), "left");
+    expect(
+      selectDisplayedEntries("left", usePanes.getState())[t2.cursorIndex]?.name,
+    ).toBe("c");
+  });
+
+  it("going up with an active filter puts the cursor on the folder left", () => {
+    const local = { kind: "local" as const };
+    usePanes
+      .getState()
+      .setEntries("left", { source: local, path: "/child" }, [mk("x.txt")]);
+    usePanes.getState().setFilter("left", "txt");
+    usePanes
+      .getState()
+      .setEntries(
+        "left",
+        { source: local, path: "/" },
+        [mk("aaa", "dir"), mk("child", "dir")],
+        { focusName: "child" },
+      );
+    const t = activeTab(usePanes.getState(), "left");
+    expect(t.filter).toBe("");
+    expect(
+      selectDisplayedEntries("left", usePanes.getState())[t.cursorIndex]?.name,
+    ).toBe("child");
+  });
 });
 
 describe("panes — '..' parent row", () => {

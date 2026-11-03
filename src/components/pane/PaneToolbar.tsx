@@ -13,8 +13,8 @@ import {
   FolderSync,
   Check,
   ChevronDown,
+  ArrowDownUp,
 } from "lucide-react";
-import clsx from "clsx";
 import { useTranslation } from "react-i18next";
 import { useKeyHint } from "@/lib/keyHint";
 import {
@@ -35,6 +35,14 @@ import {
 } from "@/lib/fileActions";
 
 import { isVirtualTrash } from "@/lib/trashView";
+import { ToolButton } from "./ToolButton";
+import { FilterToolButton } from "./FilterToolButton";
+import {
+  SortMenuButton,
+  sortMenuEntries,
+  useSortSummary,
+} from "./SortMenuButton";
+import clsx from "clsx";
 
 interface PaneToolbarProps {
   id: PaneId;
@@ -64,6 +72,7 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
   const toggleSyncBrowse = useUI((s) => s.toggleSyncBrowse);
   const open = useUIDialogs((s) => s.open);
   const showToast = useToast((s) => s.show);
+  const { summary: sortSummary } = useSortSummary(id);
 
   const runHere = (action: () => void) => {
     usePanes.getState().setActivePane(id);
@@ -82,14 +91,22 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
               ? "toolbar.viewGrid"
               : "toolbar.viewTiles",
         ),
+        commandId: `view.${mode}`,
         icon:
           mode === viewMode ? <Check size={14} /> : <span className="w-3.5" />,
         onSelect: () => runHere(() => setViewMode(id, mode)),
       })),
+      {
+        id: "sort",
+        label: t("menu.sortBy"),
+        icon: <ArrowDownUp size={14} />,
+        children: sortMenuEntries(id, t),
+      },
       { kind: "separator" },
       {
         id: "sync",
         label: t(syncBrowse ? "toolbar.syncBrowseOn" : "toolbar.syncBrowseOff"),
+        commandId: "view.syncBrowse",
         icon: syncBrowse ? <Check size={14} /> : <FolderSync size={14} />,
         onSelect: () => runHere(toggleSyncBrowse),
       },
@@ -150,12 +167,15 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
 
       <div className="flex-1" />
 
+      <FilterToolButton id={id} />
+      <SortMenuButton id={id} />
+
       <div className="toolbar-view-buttons items-center gap-0.5">
         <ViewButton
           label={t("toolbar.viewDetails")}
           mode="details"
           current={viewMode}
-          onClick={() => setViewMode(id, "details")}
+          onClick={() => runHere(() => setViewMode(id, "details"))}
         >
           <List size={15} />
         </ViewButton>
@@ -163,7 +183,7 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
           label={t("toolbar.viewGrid")}
           mode="grid"
           current={viewMode}
-          onClick={() => setViewMode(id, "grid")}
+          onClick={() => runHere(() => setViewMode(id, "grid"))}
         >
           <LayoutGrid size={15} />
         </ViewButton>
@@ -171,41 +191,46 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
           label={t("toolbar.viewTiles")}
           mode="tiles"
           current={viewMode}
-          onClick={() => setViewMode(id, "tiles")}
+          onClick={() => runHere(() => setViewMode(id, "tiles"))}
         >
           <Rows3 size={15} />
         </ViewButton>
 
         <Divider />
-
-        <ToolButton
-          label={
-            syncBrowse ? t("toolbar.syncBrowseOn") : t("toolbar.syncBrowseOff")
-          }
-          active={syncBrowse}
-          onClick={() => toggleSyncBrowse()}
-        >
-          <FolderSync size={15} />
-        </ToolButton>
-        <ToolButton
-          label={
-            showHidden
-              ? t("toolbar.hideHidden", { key: kHidden })
-              : t("toolbar.showHidden", { key: kHidden })
-          }
-          active={showHidden}
-          onClick={() => toggleShowHidden(id)}
-        >
-          {showHidden ? <Eye size={15} /> : <EyeOff size={15} />}
-        </ToolButton>
       </div>
+      {/* 동기화: 넓으면 항상, 좁아도 켜져 있으면 보인다 (켜진 걸 잊으면 반대 패널이 같이 움직인다). */}
+      <ToolButton
+        className={clsx("toolbar-sync", syncBrowse && "toolbar-sync-on")}
+        label={
+          syncBrowse ? t("toolbar.syncBrowseOn") : t("toolbar.syncBrowseOff")
+        }
+        ariaLabel={t("toolbar.syncBrowse")}
+        active={syncBrowse}
+        onClick={() => runHere(toggleSyncBrowse)}
+      >
+        <FolderSync size={15} />
+      </ToolButton>
+      {/* 숨김 파일: 모든 폭에서 1클릭 (보기 메뉴에도 남긴다). */}
+      <ToolButton
+        label={
+          showHidden
+            ? t("toolbar.hideHidden", { key: kHidden })
+            : t("toolbar.showHidden", { key: kHidden })
+        }
+        ariaLabel={t("toolbar.hiddenFiles")}
+        active={showHidden}
+        onClick={() => runHere(() => toggleShowHidden(id))}
+      >
+        {showHidden ? <Eye size={15} /> : <EyeOff size={15} />}
+      </ToolButton>
       <button
         type="button"
         className="toolbar-view-menu h-7 shrink-0 items-center gap-1 rounded-panel px-1.5 text-fg-muted hover:bg-subtle hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
         onClick={openViewMenu}
         aria-haspopup="menu"
         aria-label={t("toolbar.viewOptions")}
-        title={t("toolbar.viewOptions")}
+        // 좁은 폭에선 정렬 버튼이 접히므로 현재 정렬을 여기 툴팁으로도 보인다.
+        title={`${t("toolbar.viewOptions")} — ${sortSummary}`}
       >
         {viewMode === "details" ? (
           <List size={15} />
@@ -214,7 +239,9 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
         ) : (
           <Rows3 size={15} />
         )}
-        <span>{t("toolbar.viewOptions")}</span>
+        <span className="toolbar-view-menu-label">
+          {t("toolbar.viewOptions")}
+        </span>
         <ChevronDown size={12} />
       </button>
     </div>
@@ -223,53 +250,6 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
 
 function Divider() {
   return <div className="mx-1 h-4 w-px shrink-0 bg-border" />;
-}
-
-interface ToolButtonProps {
-  shortLabel?: string;
-  alwaysLabel?: boolean;
-  label: string;
-  active?: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}
-
-function ToolButton({
-  shortLabel,
-  alwaysLabel,
-  label,
-  active,
-  disabled,
-  onClick,
-  children,
-}: ToolButtonProps) {
-  return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      aria-pressed={active}
-      disabled={disabled}
-      onClick={onClick}
-      className={clsx(
-        "flex h-7 min-w-7 shrink-0 items-center justify-center gap-1 rounded-panel px-1.5 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent",
-        "hover:bg-subtle disabled:opacity-30 disabled:hover:bg-transparent",
-        active ? "text-accent" : "text-fg-muted hover:text-fg",
-      )}
-    >
-      {children}
-      {shortLabel && (
-        <span
-          className={
-            alwaysLabel ? "toolbar-create-label" : "toolbar-action-label"
-          }
-        >
-          {shortLabel}
-        </span>
-      )}
-    </button>
-  );
 }
 
 function ViewButton({

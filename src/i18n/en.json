@@ -554,6 +554,14 @@
     "hideHidden": "Hide hidden files ({{key}})",
     "showHidden": "Show hidden files ({{key}})",
     "viewOptions": "View",
+    "hiddenFiles": "Hidden files",
+    "syncBrowse": "Synchronized browsing",
+    "filter": "Filter names in this folder ({{key}})",
+    "filterActive": "Filter: “{{text}}” ({{key}})",
+    "filterName": "Name filter",
+    "sortTitle": "Sort: {{key}} · {{order}}",
+    "sortAsc": "Ascending",
+    "sortDesc": "Descending",
     "newFile": "New file ({{key}})"
   },
   "shelf": {
@@ -574,7 +582,13 @@
   "selectPattern": {
     "select": "Select",
     "deselect": "Deselect",
-    "placeholder": "Pattern (e.g. *.ts, img_??.png, report)"
+    "placeholder": "Pattern (e.g. *.ts, img_??.png, report)",
+    "noMatch": "No matches: {{pattern}}",
+    "selected_one": "{{count}} item selected",
+    "selected_other": "{{count}} items selected",
+    "deselected_one": "{{count}} item deselected",
+    "deselected_other": "{{count}} items deselected",
+    "switchMode": "Switch between select and deselect"
   },
   "banner": {
     "connecting": "Connecting to {{label}}…",
@@ -939,6 +953,8 @@
     "forward": "Forward",
     "forwardTitle": "Forward ({{key}})",
     "up": "Up",
+    "upTitle": "Up to parent folder",
+    "refreshTitle": "Refresh ({{key}})",
     "archiveReadOnlyTitle": "{{name}} (read-only)",
     "updateArchive": "Update archive",
     "updateArchiveTitle": "Repack your edits back into the archive (previous version kept as .bak — undoable)",
@@ -948,6 +964,7 @@
     "newTabTitle": "New tab ({{key}})",
     "editPath": "Edit path",
     "editPathTitle": "Edit path / go to location ({{key}})",
+    "currentTitle": "{{path}} — click to edit, right-click to copy",
     "favorites": "Favorites",
     "favoritesTitle": "Favorites — go to a saved folder",
     "noFavorites": "No favorites yet",

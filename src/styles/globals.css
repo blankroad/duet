@@ -342,31 +342,69 @@ textarea,
   min-height: 32px;
 }
 @container pane (max-width: 420px) {
-  .toolbar-create-label {
-    display: none;
-  }
   .path-actions {
     grid-column: 1 / -1;
     padding-bottom: 2px;
   }
 }
 
-/* 좁은 패널은 보기 메뉴, 넓은 패널은 직접 조작 버튼과 작업 라벨. */
+/*
+ * 패널 도구 모음 폭 단계 — 자주 쓰는 토글(숨김·필터)은 모든 폭에서 1클릭.
+ * 좁을수록 글자 라벨과 보기 바로가기를 먼저 접고, 접힌 것은 `보기` 메뉴로 간다.
+ *   ~359  : 파일 작업 아이콘 + 필터·숨김 + 보기 메뉴(아이콘, 정렬 포함)
+ *   360~  : 정렬 버튼, 보기 메뉴 글자
+ *   400~  : 동기화가 켜져 있으면 버튼으로 보인다
+ *   500~  : 새 폴더·새 파일 글자
+ *   560~  : 보기 바로가기·동기화 버튼 (보기 메뉴 대신)
+ *   600~  : 정렬 기준 글자 (영어 560px 에서 여유 0 이던 것을 미룸)
+ *   720~  : 복사·이동·삭제 글자
+ */
 .toolbar-view-buttons,
-.toolbar-action-label {
+.toolbar-action-label,
+.toolbar-create-label,
+.toolbar-view-menu-label,
+.toolbar-sort,
+.toolbar-sort-label,
+.toolbar-sync {
   display: none;
 }
 .toolbar-view-menu {
   display: flex;
 }
-@container pane (min-width: 560px) {
-  .toolbar-view-buttons {
+@container pane (min-width: 360px) {
+  .toolbar-view-menu-label {
+    display: inline;
+  }
+  .toolbar-sort {
     display: flex;
   }
-  .toolbar-action-label {
+}
+@container pane (min-width: 400px) {
+  .toolbar-sync-on {
+    display: flex;
+  }
+}
+@container pane (min-width: 500px) {
+  .toolbar-create-label {
     display: inline;
+  }
+}
+@container pane (min-width: 560px) {
+  .toolbar-view-buttons,
+  .toolbar-sync {
+    display: flex;
   }
   .toolbar-view-menu {
     display: none;
+  }
+}
+@container pane (min-width: 600px) {
+  .toolbar-sort-label {
+    display: inline;
+  }
+}
+@container pane (min-width: 720px) {
+  .toolbar-action-label {
+    display: inline;
   }
 }
