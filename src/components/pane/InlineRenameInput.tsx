@@ -61,16 +61,23 @@ export function InlineRenameInput({
   }, [target.name, isDir]);
 
   // 언마운트가 blur 없이 일어나는 경로(가상 스크롤 이탈 등) 커버.
-  useEffect(
-    () => () => {
-      if (
-        !doneRef.current &&
-        useUI.getState().renameTarget === sessionRef.current
-      )
-        useUI.getState().clearInlineRename();
-    },
-    [],
-  );
+  // 개발 모드 StrictMode 는 effect 를 정리 → 재실행하므로, 정리 직후 바로 지우면 편집기가
+  // 열리자마자 닫혔다. 한 틱 미뤄 다시 마운트되지 않았을 때만 지운다.
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      queueMicrotask(() => {
+        if (
+          !mountedRef.current &&
+          !doneRef.current &&
+          useUI.getState().renameTarget === sessionRef.current
+        )
+          useUI.getState().clearInlineRename();
+      });
+    };
+  }, []);
 
   const finish = (renamed: boolean, newName?: string) => {
     if (doneRef.current) return;

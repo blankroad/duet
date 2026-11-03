@@ -9,6 +9,8 @@ import {
 import { InlineRenameInput } from "./InlineRenameInput";
 import { commands } from "@/types/bindings";
 import { useToast } from "@/stores/toast";
+import { useUI } from "@/stores/ui";
+import { StrictMode } from "react";
 import i18n from "@/i18n";
 
 vi.mock("@tauri-apps/plugin-os", () => ({ platform: () => "macos" }));
@@ -106,4 +108,16 @@ it("unlocks the editor for retry when the rename IPC itself rejects", async () =
   );
   fireEvent.keyDown(input, { key: "Escape" });
   expect(onDone).toHaveBeenCalledWith(false, undefined);
+});
+
+it("stays open under StrictMode's dev double effect run", async () => {
+  act(() => useUI.getState().requestInlineRename("left", target.name));
+  render(
+    <StrictMode>
+      <InlineRenameInput target={target} isDir={false} onDone={vi.fn()} />
+    </StrictMode>,
+  );
+  await act(async () => {}); // 미룬 정리(microtask)까지
+  expect(useUI.getState().renameTarget?.name).toBe(target.name);
+  act(() => useUI.getState().clearInlineRename());
 });
