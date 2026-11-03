@@ -26,6 +26,8 @@ export function SudoPasswordDialog({
   const [password, setPassword] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const submit = () => {
+    // 빈 비밀번호로 sudo 를 돌리면 "틀린 비밀번호" 로 되돌아올 뿐이다.
+    if (!password) return;
     const pw = password;
     setPassword(""); // §5: 즉시 clear
     onConfirm(pw);
@@ -46,7 +48,12 @@ export function SudoPasswordDialog({
           <DialogButton hint="esc" onClick={cancel}>
             {t("common.cancel")}
           </DialogButton>
-          <DialogButton tone="primary" hint="enter" onClick={submit}>
+          <DialogButton
+            tone="primary"
+            hint="enter"
+            disabled={!password}
+            onClick={submit}
+          >
             {t("dialog.sudoPassword.cta")}
           </DialogButton>
         </>

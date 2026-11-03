@@ -34,6 +34,7 @@ export function MasterPasswordDialog({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const confirmRef = useRef<HTMLInputElement>(null);
 
   const reset = () => {
     setPw("");
@@ -82,6 +83,16 @@ export function MasterPasswordDialog({
   const onEnter = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !busy && !isImeComposing(e)) void handleSubmit();
   };
+  // 만들기: 첫 칸 Enter 는 확인 칸으로 — 예전엔 바로 제출해 "불일치" 오류부터 떴다.
+  const onFirstEnter = (e: React.KeyboardEvent) => {
+    if (mode === "create" && e.key === "Enter" && !isImeComposing(e)) {
+      e.preventDefault();
+      if (pw) confirmRef.current?.focus();
+      else setError(t("dialog.masterPassword.errRequired"));
+      return;
+    }
+    onEnter(e);
+  };
 
   return (
     <DialogShell
@@ -129,11 +140,12 @@ export function MasterPasswordDialog({
         autoComplete="off"
         value={pw}
         onChange={(e) => setPw(e.target.value)}
-        onKeyDown={onEnter}
+        onKeyDown={onFirstEnter}
         placeholder={t("dialog.masterPassword.placeholder")}
       />
       {mode === "create" && (
         <DialogInput
+          ref={confirmRef}
           mono
           type="password"
           autoComplete="off"
