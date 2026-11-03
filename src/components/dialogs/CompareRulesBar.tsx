@@ -32,6 +32,7 @@ export function CompareRulesBar({
   }, []);
 
   const run = () => {
+    if (busy) return; // 비교 중 무시 칸 Enter — 버튼처럼 한 번만
     const globs = ignore
       .split(/[\s,]+/)
       .map((s) => s.trim())
