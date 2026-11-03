@@ -111,6 +111,13 @@ export interface BuiltinDeps {
   syncFolders: () => void;
   swapPanes: () => void;
   moveTabToOther: () => void;
+  /** 활성 탭 고정/해제. */
+  togglePinTab: () => void;
+  /** 가장 최근에 닫은 탭 다시 열기. */
+  reopenClosedTab: () => void;
+  /** 활성 탭을 한 칸 왼쪽/오른쪽으로 (핀 경계는 넘지 않음). */
+  moveTabLeft: () => void;
+  moveTabRight: () => void;
   // bookmark
   toggleBookmark: () => void;
   // settings / palette
@@ -245,6 +252,34 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
         label: "Move tab to other panel",
         category: "Tab",
         action: deps.moveTabToOther,
+      },
+      {
+        // 기본 키 없음 — 브라우저 표준이 없고 VS Code 는 chord. 키맵에서 지정.
+        id: "tab.togglePin",
+        label: "Pin/unpin tab",
+        category: "Tab",
+        action: deps.togglePinTab,
+      },
+      {
+        id: "tab.reopenClosed",
+        label: "Reopen closed tab",
+        category: "Tab",
+        defaultKey: "Ctrl+Shift+T",
+        action: deps.reopenClosedTab,
+      },
+      {
+        id: "tab.moveLeft",
+        label: "Move tab left",
+        category: "Tab",
+        defaultKey: "Ctrl+Shift+PageUp",
+        action: deps.moveTabLeft,
+      },
+      {
+        id: "tab.moveRight",
+        label: "Move tab right",
+        category: "Tab",
+        defaultKey: "Ctrl+Shift+PageDown",
+        action: deps.moveTabRight,
       },
       {
         id: "nav.back",

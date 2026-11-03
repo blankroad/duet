@@ -1019,7 +1019,25 @@
     "closeOthers": "Close other tabs",
     "closeRight": "Close tabs to the right",
     "closeAll": "Close all tabs",
-    "duplicate": "Duplicate tab"
+    "duplicate": "Duplicate tab",
+    "pin": "Pin tab",
+    "unpin": "Unpin tab",
+    "pinnedTab": "Pinned tab",
+    "closeUnpinned": "Close unpinned tabs",
+    "pinnedCannotClose": "Pinned tabs don't close — unpin it first",
+    "reopenClosed": "Reopen closed tab",
+    "moveLeft": "Move tab left",
+    "moveRight": "Move tab right",
+    "list": "Tabs"
+  },
+  "source": {
+    "local": "Local",
+    "connected": "Connected",
+    "connecting": "Connecting",
+    "disconnected": "Disconnected",
+    "error": "Connection error",
+    "restored": "Not connected — reconnect needed",
+    "closed": "Connection closed"
   },
   "filter": {
     "placeholder": "Filter…",
@@ -1072,7 +1090,12 @@
       "close": "Close tab",
       "next": "Next tab",
       "prev": "Previous tab",
-      "moveToOther": "Move tab to other panel"
+      "moveToOther": "Move tab to other panel",
+      "togglePin": "Pin/unpin tab",
+      "reopenClosed": "Reopen closed tab",
+      "moveLeft": "Move tab left",
+      "moveRight": "Move tab right",
+      "openInNew": "Open folder in new tab"
     },
     "nav": {
       "back": "Go back",

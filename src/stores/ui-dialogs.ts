@@ -35,7 +35,13 @@ export type DialogState =
   | { kind: "compress"; items: EntryRef[]; defaultName: string }
   // wrong=true 는 직전 암호가 틀려 task 가 NeedPassword 로 실패한 재시도.
   | { kind: "extract-password"; plan: ExtractPlan; wrong?: boolean }
-  | { kind: "browse-password"; paneId: PaneId; archive: EntryRef }
+  | {
+      kind: "browse-password";
+      paneId: PaneId;
+      archive: EntryRef;
+      /** 열기를 시작한 탭 — 암호를 묻는 사이 탭을 바꿔도 그 탭에 연다. */
+      tabId?: string;
+    }
   | { kind: "repack-confirm"; plan: CompressPlan; label: string }
   | { kind: "sync-confirm"; plan: SyncPlan; srcLabel: string; dstLabel: string }
   | { kind: "compare"; plan: ComparePlan }

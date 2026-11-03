@@ -8,9 +8,8 @@ import {
 } from "@/stores/panes";
 import { useConnections } from "@/stores/connections";
 import { commands } from "@/types/bindings";
-import { useHostNicknames } from "@/stores/hostNicknames";
 import { aliasFromConnectionId } from "@/lib/hostAlias";
-import { aliasLabel } from "@/lib/hostLabel";
+import { useHostLabel } from "@/lib/hostLabel";
 
 /**
  * SSH 패널 연결 상태 배너 — 끊긴 연결을 사이드바 점 색이 아니라 패널 안에서
@@ -59,15 +58,12 @@ export function ConnectionBanner({
   const reconnecting = useConnections((s) =>
     alias ? alias in s.reconnecting : false,
   );
-  const nicks = useHostNicknames((s) => s.byAlias);
+  // 표시는 탭·소스 칩과 같은 라벨(별명 → alias → user@ip), 재연결 대상은 raw alias.
+  const label = useHostLabel(source);
 
   if (!connId || source.kind !== "ssh") return null;
   const state = conn?.state ?? { kind: "disconnected" as const };
   if (state.kind === "connected") return null;
-
-  const label = alias
-    ? aliasLabel(alias, nicks)
-    : `${source.user}@${source.host_ip}`;
 
   if (state.kind === "connecting" || reconnecting) {
     const text = t(

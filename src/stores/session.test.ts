@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { usePanes, isRestoredRemote, type RestoredLayout } from "./panes";
-import { loadSession } from "./session";
+import { loadSession, snapshot } from "./session";
 
 // 이 jsdom 환경의 localStorage 는 기능이 없어(=recents 가 try/catch 로 감싸는 이유)
 // 인메모리로 stub.
@@ -162,5 +162,176 @@ describe("session restore — 원격 탭", () => {
     const tab = usePanes.getState().panes.left.tabs[0]!;
     expect(tab.location.source.kind).toBe("local");
     expect(isRestoredRemote(tab.location)).toBe(false);
+  });
+});
+
+describe("session — 핀 탭", () => {
+  beforeEach(() => mem.clear());
+  const slim = (path: string, pinned?: boolean) => ({
+    path,
+    sortKey: "name" as const,
+    sortOrder: "asc" as const,
+    showHidden: false,
+    viewMode: "details" as const,
+    ...(pinned === undefined ? {} : { pinned }),
+  });
+
+  it("구버전 세션(pinned 없음)은 모두 일반 탭으로 복원", () => {
+    usePanes.getState().restoreLayout(layout);
+    expect(usePanes.getState().panes.left.tabs.map((t) => t.pinned)).toEqual([
+      false,
+      false,
+    ]);
+  });
+
+  it("핀 저장 → 복원 왕복, 일반 탭엔 pinned 필드를 쓰지 않는다", () => {
+    usePanes.getState().restoreLayout({
+      activePane: "left",
+      panes: {
+        left: { activeTabIndex: 1, tabs: [slim("/a", true), slim("/b")] },
+        right: { activeTabIndex: 0, tabs: [slim("/c")] },
+      },
+    });
+    const saved = snapshot();
+    expect(saved.panes.left.tabs[0]!.pinned).toBe(true);
+    expect("pinned" in saved.panes.left.tabs[1]!).toBe(false);
+    usePanes.getState().restoreLayout(saved);
+    const left = usePanes.getState().panes.left;
+    expect(left.tabs.map((t) => t.pinned)).toEqual([true, false]);
+    expect(left.activeTabIndex).toBe(1);
+  });
+
+  it("핀이 뒤섞인 데이터는 핀을 앞으로 모으고 저장된 활성 탭을 유지", () => {
+    usePanes.getState().restoreLayout({
+      activePane: "left",
+      panes: {
+        left: {
+          activeTabIndex: 0,
+          tabs: [slim("/a"), slim("/b", true), slim("/c")],
+        },
+        right: { activeTabIndex: 0, tabs: [slim("/d")] },
+      },
+    });
+    const left = usePanes.getState().panes.left;
+    expect(left.tabs.map((t) => String(t.location.path))).toEqual([
+      "/b",
+      "/a",
+      "/c",
+    ]);
+    expect(String(left.tabs[left.activeTabIndex]!.location.path)).toBe("/a");
+  });
+});
+
+describe("session — 아카이브 탭", () => {
+  it("아카이브를 보던 탭은 원래 폴더로 저장된다 (핀 유지)", () => {
+    usePanes.getState().restoreLayout({
+      activePane: "left",
+      panes: {
+        left: {
+          activeTabIndex: 0,
+          tabs: [
+            {
+              path: "/docs",
+              sortKey: "name",
+              sortOrder: "asc",
+              showHidden: false,
+              viewMode: "details",
+              pinned: true,
+            },
+          ],
+        },
+        right: { activeTabIndex: 0, tabs: [] },
+      },
+    });
+    usePanes.getState().setActivePane("left");
+    usePanes.getState().setArchiveContext("left", {
+      label: "x.zip",
+      root: "/tmp/duet-archive/abc/content",
+      exitTo: { source: { kind: "local" }, path: "/docs" },
+    });
+    usePanes
+      .getState()
+      .setEntries(
+        "left",
+        { source: { kind: "local" }, path: "/tmp/duet-archive/abc/content" },
+        [],
+      );
+    const saved = snapshot().panes.left.tabs;
+    expect(saved).toHaveLength(1);
+    expect(saved[0]!.path).toBe("/docs");
+    expect(saved[0]!.pinned).toBe(true);
+  });
+});
+
+describe("session — 손상 데이터", () => {
+  beforeEach(() => mem.clear());
+  const put = (v: unknown) =>
+    localStorage.setItem("duet.session.v1", JSON.stringify(v));
+
+  it("tabs 가 배열이 아니면 null (부팅이 throw 하지 않게)", () => {
+    put({ activePane: "left", panes: { left: {}, right: {} } });
+    expect(loadSession()).toBeNull();
+  });
+
+  it("잘못된 탭만 버리고 필드는 기본값으로 정규화한다", () => {
+    put({
+      activePane: "sideways",
+      panes: {
+        left: {
+          tabs: [
+            { path: "/ok", sortKey: "bogus", viewMode: 3, pinned: "yes" },
+            { nope: 1 },
+            null,
+          ],
+        },
+        right: { activeTabIndex: 0, tabs: [] },
+      },
+    });
+    const v = loadSession();
+    expect(v?.activePane).toBe("left");
+    expect(v?.panes.left.activeTabIndex).toBe(0);
+    expect(v?.panes.left.tabs).toEqual([
+      {
+        path: "/ok",
+        sortKey: "mtime",
+        sortOrder: "desc",
+        showHidden: false,
+        viewMode: "details",
+      },
+    ]);
+  });
+
+  it("핀 필드는 true 일 때만 살린다", () => {
+    put({
+      activePane: "left",
+      panes: {
+        left: { activeTabIndex: 0, tabs: [{ path: "/a", pinned: true }] },
+        right: { activeTabIndex: 0, tabs: [] },
+      },
+    });
+    expect(loadSession()?.panes.left.tabs[0]?.pinned).toBe(true);
+  });
+});
+
+describe("session — 손상 탭 앞에 있는 활성 탭", () => {
+  beforeEach(() => mem.clear());
+  it("버려진 탭만큼 당겨져도 원래 활성 탭을 유지한다", () => {
+    localStorage.setItem(
+      "duet.session.v1",
+      JSON.stringify({
+        activePane: "left",
+        panes: {
+          left: {
+            activeTabIndex: 1,
+            tabs: [null, { path: "/wanted" }, { path: "/other" }],
+          },
+          right: { activeTabIndex: 0, tabs: [] },
+        },
+      }),
+    );
+    const v = loadSession()!;
+    expect(v.panes.left.tabs[v.panes.left.activeTabIndex]!.path).toBe(
+      "/wanted",
+    );
   });
 });

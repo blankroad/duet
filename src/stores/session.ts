@@ -1,4 +1,11 @@
-import { usePanes, type PaneId, type RestoredLayout } from "./panes";
+import {
+  usePanes,
+  defaultOrderFor,
+  type PaneId,
+  type RestoredLayout,
+  type SortKey,
+  type ViewMode,
+} from "./panes";
 import { useConnections } from "./connections";
 import { aliasFromConnectionId } from "@/lib/hostAlias";
 
@@ -14,32 +21,35 @@ import { aliasFromConnectionId } from "@/lib/hostAlias";
 const KEY = "duet.session.v1";
 
 /** 현재 panes 상태에서 로컬 탭만 추려 슬림 레이아웃으로 직렬화. */
-function snapshot(): RestoredLayout {
+export function snapshot(): RestoredLayout {
   const s = usePanes.getState();
   const slimPane = (id: PaneId): RestoredLayout["panes"][PaneId] => {
     const p = s.panes[id];
     const activeId = p.tabs[p.activeTabIndex]?.id;
-    // 아카이브/휴지통 임시 루트는 재시작 후 존재하지 않으므로 제외.
-    const keep = p.tabs.filter(
-      (t) => t.archive === undefined && t.trashRoot === undefined,
-    );
+    // 휴지통 루트는 재시작 후 의미가 없어 제외. 아카이브 탭은 임시 추출 경로가
+    // 사라지므로 **원래 폴더(exitTo)** 로 저장한다 — 예전엔 통째로 버려서 아카이브를
+    // 보던 핀 탭이 재시작마다 사라졌다.
+    const keep = p.tabs.filter((t) => t.trashRoot === undefined);
     const idx = keep.findIndex((t) => t.id === activeId);
     return {
       activeTabIndex: idx >= 0 ? idx : 0,
       tabs: keep.map((t) => {
-        const src = t.location.source;
+        const location = t.archive ? t.archive.exitTo : t.location;
+        const src = location.source;
         const host =
           src.kind === "ssh"
             ? (useConnections.getState().active[src.connection_id]?.alias ??
               aliasFromConnectionId(src.connection_id))
             : undefined;
         return {
-          path: String(t.location.path),
+          path: String(location.path),
           ...(host ? { host } : {}),
           sortKey: t.sortKey,
           sortOrder: t.sortOrder,
           showHidden: t.showHidden,
           viewMode: t.viewMode,
+          // 핀일 때만 기록 — 필드 추가만이라 KEY(v1) 유지, 구버전 앱은 무시한다.
+          ...(t.pinned ? { pinned: true } : {}),
         };
       }),
     };
@@ -58,15 +68,71 @@ function saveSession(): void {
   }
 }
 
-/** 부팅 시 저장된 레이아웃 로드 (없거나 손상 시 null). */
+const SORT_KEYS: readonly SortKey[] = ["name", "size", "mtime", "kind", "ext"];
+const VIEW_MODES: readonly ViewMode[] = ["details", "grid", "tiles"];
+
+type SlimTab = RestoredLayout["panes"][PaneId]["tabs"][number];
+
+const isObj = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null;
+
+/** 저장된 탭 하나를 검증·정규화. 경로가 없으면 버린다(null). */
+function parseTab(v: unknown): SlimTab | null {
+  if (!isObj(v) || typeof v.path !== "string" || v.path === "") return null;
+  const sortKey = SORT_KEYS.find((k) => k === v.sortKey) ?? "mtime";
+  return {
+    path: v.path,
+    ...(typeof v.host === "string" && v.host !== "" ? { host: v.host } : {}),
+    sortKey,
+    sortOrder:
+      v.sortOrder === "asc" || v.sortOrder === "desc"
+        ? v.sortOrder
+        : defaultOrderFor(sortKey),
+    showHidden: v.showHidden === true,
+    viewMode: VIEW_MODES.find((m) => m === v.viewMode) ?? "details",
+    ...(v.pinned === true ? { pinned: true } : {}),
+  };
+}
+
+function parsePane(v: unknown): RestoredLayout["panes"][PaneId] | null {
+  if (!isObj(v) || !Array.isArray(v.tabs)) return null;
+  const idx = v.activeTabIndex;
+  const wanted = typeof idx === "number" && Number.isInteger(idx) ? idx : 0;
+  // 잘못된 탭을 버리면 뒤 탭이 당겨진다 — 저장된 활성 탭은 **원래 위치**로 찾아
+  // 새 인덱스를 다시 계산한다(그 탭이 버려졌으면 0).
+  const tabs: SlimTab[] = [];
+  let activeTabIndex = 0;
+  v.tabs.forEach((raw: unknown, i: number) => {
+    const t = parseTab(raw);
+    if (!t) return;
+    if (i === wanted) activeTabIndex = tabs.length;
+    tabs.push(t);
+  });
+  return { tabs, activeTabIndex };
+}
+
+/**
+ * 부팅 시 저장된 레이아웃 로드 (없거나 손상 시 null).
+ *
+ * 저장 데이터는 신뢰하지 않는다 — 손으로 고쳤거나 구버전/다른 버전이 쓴 값일 수
+ * 있다. 예전엔 패널 존재만 보고 통과시켜 `tabs` 가 배열이 아니면 복원이 throw 해
+ * 부팅이 중간에 멈췄고(세션 저장도 시작되지 않아 손상 데이터가 영원히 남음),
+ * 활성 인덱스가 빠지면 NaN 이 됐다. 탭 단위로 검증해 잘못된 탭만 버린다.
+ */
 export function loadSession(): RestoredLayout | null {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return null;
-    const v = JSON.parse(raw) as RestoredLayout;
-    // 최소 형태 검증 — 손상 시 무시하고 기본 부팅.
-    if (!v || !v.panes || !v.panes.left || !v.panes.right) return null;
-    return v;
+    const v: unknown = JSON.parse(raw);
+    if (!isObj(v) || !isObj(v.panes)) return null;
+    const left = parsePane(v.panes.left);
+    const right = parsePane(v.panes.right);
+    if (!left || !right) return null;
+    if (left.tabs.length === 0 && right.tabs.length === 0) return null;
+    return {
+      activePane: v.activePane === "right" ? "right" : "left",
+      panes: { left, right },
+    };
   } catch {
     return null;
   }

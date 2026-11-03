@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { usePanes } from "./panes";
+import { usePanes, applyTabDefaults } from "./panes";
+import { clearClosedTabs } from "./closedTabs";
 import type { Location } from "@/types/bindings";
 
 const loc = (path: string): Location => ({ source: { kind: "local" }, path });
@@ -17,7 +18,7 @@ function seedFour() {
     panes: {
       ...st.panes,
       left: {
-        tabs: [{ ...cur, location: loc("/a") }],
+        tabs: [{ ...cur, location: loc("/a"), pinned: false }],
         activeTabIndex: 0,
       },
     },
@@ -77,5 +78,330 @@ describe("panes — 탭 닫기", () => {
     usePanes.getState().closeTab("left", 0);
     expect(paths()).toEqual(["/a"]);
     expect(activeIdx()).toBe(0);
+  });
+});
+
+describe("panes — 늦게 도착한 목록은 요청한 탭에만", () => {
+  beforeEach(seedFour);
+  const tabAt = (i: number) => usePanes.getState().panes.left.tabs[i]!;
+
+  it("요청한 탭이 닫혔으면 응답을 버린다 (남은 탭 경로 불변)", () => {
+    usePanes.getState().selectTab("left", 0);
+    const reqTab = tabAt(0).id; // /a 에서 /a/child 로 이동 요청
+    usePanes.getState().closeOtherTabs("left", 1); // /b 만 남음, 여전히 index 0
+    usePanes
+      .getState()
+      .setEntries("left", loc("/a/child"), [], { tabId: reqTab });
+    expect(paths()).toEqual(["/b"]);
+  });
+
+  it("요청한 탭이 비활성이 됐어도 그 탭에 적용한다", () => {
+    usePanes.getState().selectTab("left", 1);
+    const reqTab = tabAt(1).id;
+    usePanes.getState().selectTab("left", 3);
+    usePanes.getState().setEntries("left", loc("/b/x"), [], { tabId: reqTab });
+    expect(paths()).toEqual(["/a", "/b/x", "/c", "/d"]);
+    expect(activeIdx()).toBe(3);
+  });
+
+  it("setLoading 도 tabId 로 대상 탭을 고른다", () => {
+    const reqTab = tabAt(0).id;
+    usePanes.getState().setLoading("left", true, reqTab);
+    expect(tabAt(0).loading).toBe(true);
+    expect(tabAt(3).loading).toBe(false);
+  });
+});
+
+describe("panes — 새 탭 위치", () => {
+  beforeEach(seedFour);
+
+  it("after 를 주면 그 탭 바로 오른쪽에 생기고 활성이 된다", () => {
+    usePanes.getState().openTab("left", loc("/a/sub"), { after: 0 });
+    expect(paths()).toEqual(["/a", "/a/sub", "/b", "/c", "/d"]);
+    expect(activeIdx()).toBe(1);
+  });
+
+  it("after 없으면 맨 끝 (Ctrl+T)", () => {
+    usePanes.getState().openTab("left");
+    expect(paths()).toEqual(["/a", "/b", "/c", "/d", "/d"]);
+    expect(activeIdx()).toBe(4);
+  });
+});
+
+describe("panes — 같은 경로, 다른 소스", () => {
+  beforeEach(seedFour);
+
+  it("로컬 /a 에서 원격 /a 로 가면 이동으로 보고 히스토리에 쌓는다", () => {
+    usePanes.getState().selectTab("left", 0);
+    const remote: Location = {
+      source: {
+        kind: "ssh",
+        connection_id: "prod:u1",
+        host_ip: "10.0.0.1",
+        user: "me",
+      },
+      path: "/a",
+    };
+    usePanes.getState().setEntries("left", remote, []);
+    const t = usePanes.getState().panes.left.tabs[0]!;
+    expect(t.location.source.kind).toBe("ssh");
+    expect(t.history.stack.length).toBe(2);
+    expect(t.history.index).toBe(1);
+  });
+});
+
+describe("panes — 핀 탭", () => {
+  beforeEach(seedFour);
+  const pins = () => usePanes.getState().panes.left.tabs.map((t) => t.pinned);
+  const activePath = () =>
+    String(usePanes.getState().panes.left.tabs[activeIdx()]!.location.path);
+
+  it("핀하면 핀 구간 끝으로 가고 활성 탭은 그대로", () => {
+    usePanes.getState().togglePinTab("left", 2); // /c
+    expect(paths()).toEqual(["/c", "/a", "/b", "/d"]);
+    expect(pins()).toEqual([true, false, false, false]);
+    expect(activePath()).toBe("/d");
+    usePanes.getState().togglePinTab("left", 3); // /d
+    expect(paths()).toEqual(["/c", "/d", "/a", "/b"]);
+    expect(activePath()).toBe("/d");
+  });
+
+  it("해제하면 일반 구간 맨 앞으로", () => {
+    usePanes.getState().togglePinTab("left", 2); // [c*, a, b, d]
+    usePanes.getState().togglePinTab("left", 3); // [c*, d*, a, b]
+    usePanes.getState().togglePinTab("left", 0); // c 해제 → [d*, c, a, b]
+    expect(paths()).toEqual(["/d", "/c", "/a", "/b"]);
+    expect(pins()).toEqual([true, false, false, false]);
+  });
+
+  it("핀 탭은 closeTab 으로 닫히지 않는다 (X·가운데 클릭·Ctrl+W 공통)", () => {
+    usePanes.getState().togglePinTab("left", 0);
+    expect(usePanes.getState().closeTab("left", 0)).toBe(false);
+    expect(paths()).toEqual(["/a", "/b", "/c", "/d"]);
+    expect(usePanes.getState().closeTab("left", 1)).toBe(true);
+    expect(paths()).toEqual(["/a", "/c", "/d"]);
+  });
+
+  it("다른 탭 모두 닫기 — 지목한 탭과 핀이 남고 지목한 탭이 활성", () => {
+    usePanes.getState().togglePinTab("left", 0); // a*
+    usePanes.getState().closeOtherTabs("left", 2); // /c
+    expect(paths()).toEqual(["/a", "/c"]);
+    expect(activePath()).toBe("/c");
+  });
+
+  it("오른쪽 탭 모두 닫기 — 핀은 오른쪽이어도 남는다", () => {
+    usePanes.getState().togglePinTab("left", 1); // [b*, a, c, d]
+    usePanes.getState().closeTabsToRight("left", 0); // b 오른쪽 일반 탭 전부
+    expect(paths()).toEqual(["/b"]);
+    expect(activePath()).toBe("/b");
+  });
+
+  it("모두 닫기 — 핀이 있으면 핀만 남고 마지막 핀이 활성", () => {
+    usePanes.getState().togglePinTab("left", 0); // a*
+    usePanes.getState().togglePinTab("left", 1); // b*
+    usePanes.getState().closeAllTabs("left"); // 활성 /d 는 일반 탭
+    expect(paths()).toEqual(["/a", "/b"]);
+    expect(activePath()).toBe("/b");
+  });
+
+  it("모두 닫기 — 활성이 핀이면 그 핀이 활성으로 남는다", () => {
+    usePanes.getState().togglePinTab("left", 0);
+    usePanes.getState().togglePinTab("left", 1);
+    usePanes.getState().selectTab("left", 0);
+    usePanes.getState().closeAllTabs("left");
+    expect(paths()).toEqual(["/a", "/b"]);
+    expect(activePath()).toBe("/a");
+  });
+
+  it("새 탭은 핀 구간 안에 들어가지 않는다", () => {
+    usePanes.getState().togglePinTab("left", 0);
+    usePanes.getState().togglePinTab("left", 1); // [a*, b*, c, d]
+    usePanes.getState().openTab("left", loc("/x"), { after: 0 });
+    expect(paths()).toEqual(["/a", "/b", "/x", "/c", "/d"]);
+    expect(pins()).toEqual([true, true, false, false, false]);
+  });
+
+  it("핀 탭을 반대 패널로 옮기면 그쪽 핀 구간 끝에 핀인 채로 들어간다", () => {
+    usePanes.getState().togglePinTab("left", 0); // a* 활성 아님
+    usePanes.getState().selectTab("left", 0);
+    usePanes.getState().setActivePane("left");
+    const right = () => usePanes.getState().panes.right;
+    const before = right().tabs.length;
+    usePanes.getState().moveActiveTabToOther();
+    expect(right().tabs.length).toBe(before + 1);
+    expect(right().tabs[0]!.pinned).toBe(true);
+    expect(String(right().tabs[0]!.location.path)).toBe("/a");
+    expect(right().activeTabIndex).toBe(0);
+    // 원상복구 — 다른 테스트가 오른쪽 패널을 쓰지 않도록.
+    usePanes.getState().moveActiveTabToOther();
+  });
+});
+
+describe("panes — 탭 복제", () => {
+  beforeEach(seedFour);
+
+  it("원본 바로 오른쪽에 정렬·보기·히스토리를 그대로 복제하고 활성화", () => {
+    usePanes.getState().selectTab("left", 1);
+    usePanes.getState().setSort("left", "size", "asc");
+    usePanes.getState().setViewMode("left", "grid");
+    usePanes.getState().setEntries("left", loc("/b/x"), []);
+    usePanes.getState().duplicateTab("left", 1);
+    const left = usePanes.getState().panes.left;
+    expect(paths()).toEqual(["/a", "/b/x", "/b/x", "/c", "/d"]);
+    expect(left.activeTabIndex).toBe(2);
+    const dup = left.tabs[2]!;
+    expect(dup.id).not.toBe(left.tabs[1]!.id);
+    expect(dup.sortKey).toBe("size");
+    expect(dup.viewMode).toBe("grid");
+    expect(dup.history.stack.map((l) => String(l.path))).toEqual([
+      "/b",
+      "/b/x",
+    ]);
+  });
+
+  it("핀 탭을 복제하면 일반 탭으로 핀 구간 바로 뒤에", () => {
+    usePanes.getState().togglePinTab("left", 0);
+    usePanes.getState().togglePinTab("left", 1); // [a*, b*, c, d]
+    usePanes.getState().duplicateTab("left", 0);
+    expect(paths()).toEqual(["/a", "/b", "/a", "/c", "/d"]);
+    expect(usePanes.getState().panes.left.tabs[2]!.pinned).toBe(false);
+  });
+
+  it("아카이브 안에서 새 탭(Ctrl+T)은 아카이브 문맥을 가져간다", () => {
+    const ctx = { label: "x.zip", root: "/tmp/x", exitTo: loc("/d") };
+    usePanes.getState().setArchiveContext("left", ctx);
+    usePanes.getState().openTab("left");
+    const left = usePanes.getState().panes.left;
+    expect(left.tabs[left.activeTabIndex]!.archive).toEqual(ctx);
+  });
+});
+
+describe("panes — 순서 변경", () => {
+  beforeEach(seedFour);
+  const ids = () => usePanes.getState().panes.left.tabs.map((t) => t.id);
+
+  it("드래그 순서를 적용하고 활성 탭은 id 로 따라간다", () => {
+    const [a, b, c, d] = ids();
+    usePanes.getState().reorderTabs("left", [d!, a!, b!, c!]);
+    expect(paths()).toEqual(["/d", "/a", "/b", "/c"]);
+    expect(activeIdx()).toBe(0); // 활성 /d
+  });
+
+  it("일반 탭을 핀 앞에 떨궈도 핀 구간 바로 뒤로 간다", () => {
+    usePanes.getState().togglePinTab("left", 0); // [a*, b, c, d]
+    const [a, b, c, d] = ids();
+    usePanes.getState().reorderTabs("left", [d!, a!, b!, c!]);
+    expect(paths()).toEqual(["/a", "/d", "/b", "/c"]);
+  });
+
+  it("키보드 이동은 이웃과 자리를 바꾸고 핀 경계는 넘지 않는다", () => {
+    usePanes.getState().moveTab("left", 3, -1);
+    expect(paths()).toEqual(["/a", "/b", "/d", "/c"]);
+    expect(activeIdx()).toBe(2);
+    usePanes.getState().togglePinTab("left", 0); // [a*, b, d, c]
+    usePanes.getState().moveTab("left", 1, -1); // b 는 핀 앞으로 못 감
+    expect(paths()).toEqual(["/a", "/b", "/d", "/c"]);
+    usePanes.getState().moveTab("left", 3, 1); // 끝 → no-op
+    expect(paths()).toEqual(["/a", "/b", "/d", "/c"]);
+  });
+});
+
+describe("panes — 닫은 탭 다시 열기", () => {
+  beforeEach(() => {
+    seedFour();
+    clearClosedTabs();
+  });
+
+  it("닫은 탭을 원래 자리에 다시 열고 활성화한다", () => {
+    usePanes.getState().setSort("left", "size", "asc"); // 활성 /d
+    usePanes.getState().closeTab("left", 1); // /b
+    usePanes.getState().closeTab("left", 2); // /d (활성)
+    expect(paths()).toEqual(["/a", "/c"]);
+    expect(usePanes.getState().reopenClosedTab()).toBe(true);
+    expect(paths()).toEqual(["/a", "/c", "/d"]);
+    expect(activeIdx()).toBe(2);
+    expect(usePanes.getState().panes.left.tabs[2]!.sortKey).toBe("size");
+    usePanes.getState().reopenClosedTab();
+    expect(paths()).toEqual(["/a", "/b", "/c", "/d"]);
+    expect(usePanes.getState().reopenClosedTab()).toBe(false);
+  });
+
+  it("일괄 닫기도 한 장씩 제자리로 되돌린다", () => {
+    usePanes.getState().closeTabsToRight("left", 1); // /c /d 닫힘
+    usePanes.getState().reopenClosedTab();
+    usePanes.getState().reopenClosedTab();
+    expect(paths()).toEqual(["/a", "/b", "/c", "/d"]);
+  });
+
+  it("다른 패널에서 눌러도 원래 패널에 열린다", () => {
+    usePanes.getState().closeTab("left", 0);
+    usePanes.getState().setActivePane("right");
+    usePanes.getState().reopenClosedTab();
+    expect(usePanes.getState().activePane).toBe("left");
+    expect(paths()[0]).toBe("/a");
+  });
+});
+
+describe("applyTabDefaults", () => {
+  beforeEach(seedFour);
+
+  it("existing:false 면 열린 탭의 정렬·보기를 건드리지 않는다 (세션 복원 직후)", () => {
+    usePanes.getState().setViewMode("left", "grid");
+    applyTabDefaults(
+      { sortKey: "name", viewMode: "details", showHidden: false },
+      { existing: false },
+    );
+    const left = usePanes.getState().panes.left;
+    expect(left.tabs[left.activeTabIndex]!.viewMode).toBe("grid");
+    // 새 탭에는 기본값
+    usePanes.getState().openTab("left");
+    const now = usePanes.getState().panes.left;
+    expect(now.tabs[now.activeTabIndex]!.viewMode).toBe("details");
+    expect(now.tabs[now.activeTabIndex]!.sortKey).toBe("name");
+  });
+
+  it("기본은 열린 탭에도 적용 (설정 화면)", () => {
+    usePanes.getState().setViewMode("left", "grid");
+    applyTabDefaults({
+      sortKey: "mtime",
+      viewMode: "tiles",
+      showHidden: false,
+    });
+    const left = usePanes.getState().panes.left;
+    expect(left.tabs.every((t) => t.viewMode === "tiles")).toBe(true);
+  });
+});
+
+describe("panes — 긴 작업의 문맥은 시작한 탭에", () => {
+  beforeEach(seedFour);
+  const ctx = { label: "x.zip", root: "/tmp/x", exitTo: loc("/a") };
+
+  it("setArchiveContext/setTrashRoot 에 tabId 를 주면 비활성 탭에도 그 탭에만 붙는다", () => {
+    const first = usePanes.getState().panes.left.tabs[0]!.id;
+    usePanes.getState().setArchiveContext("left", ctx, first);
+    usePanes.getState().setTrashRoot("left", "/trash", first);
+    const tabs = usePanes.getState().panes.left.tabs;
+    expect(tabs[0]!.archive).toEqual(ctx);
+    expect(tabs[0]!.trashRoot).toBe("/trash");
+    expect(tabs[3]!.archive).toBeUndefined();
+    expect(tabs[3]!.trashRoot).toBeUndefined();
+  });
+
+  it("닫힌 탭 id 면 아무 탭도 바뀌지 않는다", () => {
+    usePanes.getState().setArchiveContext("left", ctx, "gone");
+    expect(usePanes.getState().panes.left.tabs.every((t) => !t.archive)).toBe(
+      true,
+    );
+  });
+
+  it("아카이브 속 폴더를 새 탭으로 열면(Ctrl+↑) 아카이브 문맥을 유지한다", () => {
+    usePanes.getState().setArchiveContext("left", ctx);
+    usePanes.getState().openTab("left", loc("/tmp/x/sub"), { after: 3 });
+    const left = usePanes.getState().panes.left;
+    expect(left.tabs[left.activeTabIndex]!.archive).toEqual(ctx);
+    // 아카이브 밖 위치면 문맥 없음
+    usePanes.getState().openTab("left", loc("/elsewhere"));
+    const now = usePanes.getState().panes.left;
+    expect(now.tabs[now.activeTabIndex]!.archive).toBeUndefined();
   });
 });

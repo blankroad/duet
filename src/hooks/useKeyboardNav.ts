@@ -163,6 +163,16 @@ export function useKeyboardNav(
       // grid 뷰에서 ↑↓ 는 한 행(=컬럼 수)만큼, ←→ 는 1칸. 그 외 뷰는 단일 컬럼.
       const rowStep = tab.viewMode === "grid" ? Math.max(1, tab.gridCols) : 1;
 
+      // Ctrl/⌘/Alt + 이동 키·Tab 은 명령 몫이다(Ctrl+↑ 새 탭에서 열기, Ctrl+Tab 다음
+      // 탭, Ctrl+Shift+PageUp 탭 이동, Alt+← 뒤로 …). 여기서 먼저 처리하면 명령이
+      // 바뀐 상태를 읽었다 — "커서 위 폴더"가 새 탭으로 열리고, Ctrl+Tab 은 탭 대신
+      // 패널을 바꿨다.
+      if (
+        (e.ctrlKey || e.metaKey || e.altKey) &&
+        /^(Arrow|Home$|End$|Page|Tab$)/.test(e.key)
+      )
+        return;
+
       switch (e.key) {
         // Esc — 되돌리기 계열. preventDefault 하지 않는다(놓친 오버레이가 있어도 살게).
         case "Escape": {
