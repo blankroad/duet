@@ -48,6 +48,8 @@ describe("SyncDialog", () => {
     expect(cta().disabled).toBe(true);
     fireEvent.click(cta());
     expect(onConfirm).not.toHaveBeenCalled();
+    // 계산 중 Enter 는 창을 닫지 않는다 — 포커스가 버튼([취소])에 있지 않다.
+    expect(document.activeElement?.tagName).not.toBe("BUTTON");
     await act(async () => {
       resolvePreview({ status: "ok", data: preview });
       await Promise.resolve();

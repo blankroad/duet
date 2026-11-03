@@ -34,15 +34,19 @@ export function SyncDialog({ src, dst, onClose, onConfirm }: SyncDialogProps) {
   const [error, setError] = useState<string | null>(null);
   const [trash, setTrash] = useState<TrashUsage | null>(null);
   const ctaRef = useRef<HTMLButtonElement>(null);
-  const cancelRef = useRef<HTMLButtonElement>(null);
+  // 계산 중 포커스 자리 — 버튼이 아니라서 Enter 가 아무것도 하지 않는다(예전엔 [취소]에
+  // 있어 ↵ 힌트를 보고 Enter 를 누르면 창이 닫혔다).
+  const computingRef = useRef<HTMLDivElement>(null);
   // dry-run 을 보여 주려는 창 — 계산 전에는 실행할 수 없다(무엇이 바뀌는지 모른 채
   // 확정하던 문제). 미리보기 실패 + 삭제 전파(prune)도 막는다: 몇 개가 지워질지 모른다.
   const ready = preview != null;
   const blocked = (!ready && !error) || (error != null && prune);
 
-  // 계산 중엔 [취소] 에 포커스, 끝나면 사용자가 포커스를 옮기지 않았을 때 주 버튼으로.
+  // 계산 중엔 계산 표시에 포커스, 끝나면 사용자가 컨트롤로 옮기지 않았을 때 주 버튼으로.
   useEffect(() => {
-    if (ready && document.activeElement === cancelRef.current)
+    if (!ready) return;
+    const a = document.activeElement;
+    if (!a || !a.matches("button, input, select, textarea, a[href]"))
       ctaRef.current?.focus();
   }, [ready]);
 
@@ -84,10 +88,10 @@ export function SyncDialog({ src, dst, onClose, onConfirm }: SyncDialogProps) {
       description={t("dialog.sync.desc")}
       icon={FolderSync}
       onClose={onClose}
-      initialFocus={ready ? ctaRef : cancelRef}
+      initialFocus={ready ? ctaRef : computingRef}
       footer={
         <>
-          <DialogButton ref={cancelRef} hint="esc" onClick={onClose}>
+          <DialogButton hint="esc" onClick={onClose}>
             {t("common.cancel")}
           </DialogButton>
           <DialogButton
@@ -111,7 +115,11 @@ export function SyncDialog({ src, dst, onClose, onConfirm }: SyncDialogProps) {
           message={t("dialog.sync.previewFailed", { err: error })}
         />
       ) : preview == null ? (
-        <div className="flex items-center gap-2 text-meta text-fg-muted">
+        <div
+          ref={computingRef}
+          tabIndex={-1}
+          className="flex items-center gap-2 text-meta text-fg-muted focus:outline-none"
+        >
           <Loader2 size={13} className="animate-spin" />{" "}
           {t("dialog.sync.computing")}
         </div>
