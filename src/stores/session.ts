@@ -96,12 +96,19 @@ function parseTab(v: unknown): SlimTab | null {
 
 function parsePane(v: unknown): RestoredLayout["panes"][PaneId] | null {
   if (!isObj(v) || !Array.isArray(v.tabs)) return null;
-  const tabs = v.tabs.map(parseTab).filter((t): t is SlimTab => t !== null);
   const idx = v.activeTabIndex;
-  return {
-    tabs,
-    activeTabIndex: typeof idx === "number" && Number.isInteger(idx) ? idx : 0,
-  };
+  const wanted = typeof idx === "number" && Number.isInteger(idx) ? idx : 0;
+  // 잘못된 탭을 버리면 뒤 탭이 당겨진다 — 저장된 활성 탭은 **원래 위치**로 찾아
+  // 새 인덱스를 다시 계산한다(그 탭이 버려졌으면 0).
+  const tabs: SlimTab[] = [];
+  let activeTabIndex = 0;
+  v.tabs.forEach((raw: unknown, i: number) => {
+    const t = parseTab(raw);
+    if (!t) return;
+    if (i === wanted) activeTabIndex = tabs.length;
+    tabs.push(t);
+  });
+  return { tabs, activeTabIndex };
 }
 
 /**

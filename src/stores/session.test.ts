@@ -312,3 +312,26 @@ describe("session — 손상 데이터", () => {
     expect(loadSession()?.panes.left.tabs[0]?.pinned).toBe(true);
   });
 });
+
+describe("session — 손상 탭 앞에 있는 활성 탭", () => {
+  beforeEach(() => mem.clear());
+  it("버려진 탭만큼 당겨져도 원래 활성 탭을 유지한다", () => {
+    localStorage.setItem(
+      "duet.session.v1",
+      JSON.stringify({
+        activePane: "left",
+        panes: {
+          left: {
+            activeTabIndex: 1,
+            tabs: [null, { path: "/wanted" }, { path: "/other" }],
+          },
+          right: { activeTabIndex: 0, tabs: [] },
+        },
+      }),
+    );
+    const v = loadSession()!;
+    expect(v.panes.left.tabs[v.panes.left.activeTabIndex]!.path).toBe(
+      "/wanted",
+    );
+  });
+});
