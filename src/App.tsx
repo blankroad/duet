@@ -916,7 +916,27 @@ function App() {
       closeActiveTab: () => {
         const id = usePanes.getState().activePane;
         const p = usePanes.getState().panes[id];
-        usePanes.getState().closeTab(id, p.activeTabIndex);
+        // 고정 탭은 store 가 닫지 않는다 — 무반응 대신 이유를 알린다.
+        if (
+          !usePanes.getState().closeTab(id, p.activeTabIndex) &&
+          p.tabs[p.activeTabIndex]?.pinned
+        )
+          showToast(i18n.t("tabs.pinnedCannotClose"), "info");
+      },
+      togglePinTab: () => {
+        const st = usePanes.getState();
+        st.togglePinTab(st.activePane, st.panes[st.activePane].activeTabIndex);
+      },
+      reopenClosedTab: () => {
+        usePanes.getState().reopenClosedTab();
+      },
+      moveTabLeft: () => {
+        const st = usePanes.getState();
+        st.moveTab(st.activePane, st.panes[st.activePane].activeTabIndex, -1);
+      },
+      moveTabRight: () => {
+        const st = usePanes.getState();
+        st.moveTab(st.activePane, st.panes[st.activePane].activeTabIndex, 1);
       },
       nextTab: () => {
         const id = usePanes.getState().activePane;

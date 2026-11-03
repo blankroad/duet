@@ -1,16 +1,20 @@
-import { useEffect, useRef } from "react";
-import { X, Plus } from "lucide-react";
+import { Fragment, useEffect, useRef } from "react";
+import { Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { usePanes, type PaneId } from "@/stores/panes";
-import { useContextMenu, type MenuEntry } from "@/stores/contextMenu";
-import { basename } from "@/lib/paths";
-import i18n from "@/i18n";
-import clsx from "clsx";
+import { useReorderable } from "@/hooks/useReorderable";
+import { useKeyHint } from "@/lib/keyHint";
+import { useToast } from "@/stores/toast";
+import { TabItem } from "./TabItem";
+import { openTabMenu } from "./tabMenu";
 
 /**
- * 패널 상단 탭 바. 탭 1개일 때는 렌더 X (새 탭은 PathBar 의 + 로).
+ * 패널 상단 탭 바. 탭 1개일 때는 렌더 X (새 탭은 PathBar 의 + 로) — 단 그 한
+ * 장이 고정 탭이면 보인다(고정 상태와 해제 버튼이 보여야 하므로).
  *
- * 우클릭 = 탭 정리 메뉴, 가운데 클릭 = 그 탭 닫기 (브라우저 관례).
+ * - 고정(핀) 탭은 왼쪽에 모이고 일반 탭과 얇은 구분선으로 나뉜다.
+ * - 끌어서 순서 변경 (핀 경계는 store 가 지킨다), 세로 휠도 가로 스크롤.
+ * - 우클릭 = 탭 메뉴, 가운데 클릭 = 그 탭 닫기 (브라우저 관례, 핀 제외).
  */
 export function TabBar({ id }: { id: PaneId }) {
   const { t: tr } = useTranslation();
@@ -19,11 +23,23 @@ export function TabBar({ id }: { id: PaneId }) {
   const openTab = usePanes((s) => s.openTab);
   const closeTab = usePanes((s) => s.closeTab);
   const selectTab = usePanes((s) => s.selectTab);
+  const togglePinTab = usePanes((s) => s.togglePinTab);
+  const reorderTabs = usePanes((s) => s.reorderTabs);
+  const kNewTab = useKeyHint("tab.new");
+  const group = `tabs-${id}`;
+  const { dragKey, insertBeforeKey, onItemMouseDown } = useReorderable({
+    group,
+    axis: "x",
+    keys: tabs.map((t) => t.id),
+    onCommit: (ids) => reorderTabs(id, ids),
+  });
 
   const stripRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const strip = stripRef.current;
-    const tab = strip?.children[activeIndex] as HTMLElement | undefined;
+    const tab = strip?.querySelector<HTMLElement>(
+      `[data-tab-index="${activeIndex}"]`,
+    );
     if (!strip || !tab) return;
     // 창/보조 패널 크기가 바뀌어도 활성 탭을 노출한다.
     const reveal = () => {
@@ -41,77 +57,60 @@ export function TabBar({ id }: { id: PaneId }) {
     return () => observer.disconnect();
   }, [activeIndex, tabs.length]);
 
-  if (tabs.length <= 1) return null;
+  if (tabs.length === 0 || (tabs.length === 1 && !tabs[0]!.pinned)) return null;
+
+  const close = (i: number) => {
+    // 핀 탭은 store 가 거부한다 — 가운데 클릭이 "무반응"으로 보이지 않게 안내.
+    if (!closeTab(id, i) && tabs[i]?.pinned)
+      useToast.getState().show(tr("tabs.pinnedCannotClose"), "info");
+  };
+  const lastPinned = tabs.reduce((k, t, i) => (t.pinned ? i : k), -1);
 
   return (
     <div className="flex h-7 shrink-0 items-stretch border-b border-border bg-subtle text-meta">
       <div
         ref={stripRef}
+        role="tablist"
+        aria-label={tr("tabs.list")}
+        // 넘친 탭은 스크롤바 없이 가로 스크롤 — 세로 휠만 있는 마우스로도 닿게.
+        onWheel={(e) => {
+          const strip = stripRef.current;
+          if (strip && Math.abs(e.deltaY) > Math.abs(e.deltaX))
+            strip.scrollLeft += e.deltaY;
+        }}
         className="relative flex min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
-        {tabs.map((t, i) => {
-          const active = i === activeIndex;
-          const label = labelOf(t.location.path);
-          // 원격 탭은 호스트를 앞에 — 로컬 /var/log 탭과 원격 /var/log 탭이
-          // 이름만으로는 구분되지 않았다.
-          const host =
-            t.location.source.kind === "ssh"
-              ? (t.location.source.connection_id.split(":")[0] ?? "")
-              : null;
-          return (
-            <div
-              key={t.id}
-              onClick={() => selectTab(id, i)}
-              // 가운데 클릭으로 닫기 — auxclick 이 마우스 가운데 버튼의 표준 경로.
-              onAuxClick={(e) => {
-                if (e.button === 1) {
-                  e.preventDefault();
-                  closeTab(id, i);
-                }
-              }}
+        {tabs.map((t, i) => (
+          <Fragment key={t.id}>
+            {dragKey && insertBeforeKey === t.id && <DropLine />}
+            <TabItem
+              tab={t}
+              index={i}
+              active={i === activeIndex}
+              reorderGroup={group}
+              dragging={dragKey === t.id}
+              onSelect={() => selectTab(id, i)}
+              onClose={() => close(i)}
+              onTogglePin={() => togglePinTab(id, i)}
               onContextMenu={(e) => openTabMenu(e, id, i)}
-              title={t.location.path}
-              className={clsx(
-                "group flex min-w-0 max-w-[min(14rem,100%)] shrink-0 cursor-default items-center gap-1 border-l-2 pl-2 pr-0.5 hover:bg-border",
-                active
-                  ? "border-l-accent bg-base text-fg"
-                  : "border-l-transparent text-fg-muted",
-              )}
-            >
-              <span className="flex min-w-0 items-baseline gap-1">
-                {host && (
-                  <span className="max-w-[7rem] truncate text-fg-muted/70">
-                    {host}:
-                  </span>
-                )}
-                <span className="truncate">{label}</span>
-              </span>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  closeTab(id, i);
-                }}
-                className={clsx(
-                  "flex h-6 w-6 shrink-0 items-center justify-center rounded hover:bg-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent",
-                  active
-                    ? "opacity-100"
-                    : "opacity-0 focus:opacity-100 group-hover:opacity-100",
-                )}
-                aria-label={tr("tabs.closeTab")}
-              >
-                <X size={11} />
-              </button>
-            </div>
-          );
-        })}
+              onDragStart={(e) => onItemMouseDown(e, t.id)}
+            />
+            {i === lastPinned && i < tabs.length - 1 && (
+              <div
+                aria-hidden
+                className="my-1.5 w-px shrink-0 bg-fg-muted/40"
+              />
+            )}
+          </Fragment>
+        ))}
+        {dragKey && insertBeforeKey === null && <DropLine />}
       </div>
       <button
         type="button"
         onClick={() => openTab(id)}
         className="flex w-7 shrink-0 items-center justify-center text-fg-muted hover:bg-border hover:text-fg"
         aria-label={tr("tabs.newTab")}
-        title={tr("tabs.newTab")}
+        title={tr("pathbar.newTabTitle", { key: kNewTab })}
       >
         <Plus size={12} />
       </button>
@@ -119,62 +118,7 @@ export function TabBar({ id }: { id: PaneId }) {
   );
 }
 
-/**
- * 탭 우클릭 메뉴 — 닫기 계열 + 새 탭/복제.
- *
- * "모두 닫기" 는 패널이 탭을 최소 1개 유지해야 하므로 **활성 탭만** 남긴다. 그래서
- * 활성 탭이 아닌 탭에서 눌렀을 때 "다른 탭 모두 닫기"(누른 탭을 남김)와 결과가 다르다.
- */
-function openTabMenu(e: React.MouseEvent, id: PaneId, index: number): void {
-  e.preventDefault();
-  e.stopPropagation();
-  const s = usePanes.getState();
-  const p = s.panes[id];
-  const only = p.tabs.length <= 1;
-  const isLast = index >= p.tabs.length - 1;
-  const location = p.tabs[index]?.location;
-  const items: MenuEntry[] = [
-    {
-      id: "close",
-      label: i18n.t("tabs.closeThis"),
-      commandId: "tab.close",
-      disabled: only,
-      onSelect: () => s.closeTab(id, index),
-    },
-    {
-      id: "close-others",
-      label: i18n.t("tabs.closeOthers"),
-      disabled: only,
-      onSelect: () => s.closeOtherTabs(id, index),
-    },
-    {
-      id: "close-right",
-      label: i18n.t("tabs.closeRight"),
-      disabled: isLast,
-      onSelect: () => s.closeTabsToRight(id, index),
-    },
-    {
-      id: "close-all",
-      label: i18n.t("tabs.closeAll"),
-      disabled: only,
-      onSelect: () => s.closeAllTabs(id),
-    },
-    { kind: "separator" },
-    {
-      id: "duplicate",
-      label: i18n.t("tabs.duplicate"),
-      onSelect: () => location && s.openTab(id, location),
-    },
-    {
-      id: "new-tab",
-      label: i18n.t("tabs.newTab"),
-      commandId: "tab.new",
-      onSelect: () => s.openTab(id),
-    },
-  ];
-  useContextMenu.getState().openAt(e.clientX, e.clientY, items);
-}
-
-function labelOf(path: string): string {
-  return basename(path, "/");
+/** 드래그 중 삽입 위치 표시 — 런처/사이드바 재정렬과 같은 모양. */
+function DropLine() {
+  return <div className="my-1 w-0.5 shrink-0 rounded bg-accent" />;
 }
