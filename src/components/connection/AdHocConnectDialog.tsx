@@ -12,12 +12,12 @@ import { useConnections } from "@/stores/connections";
 import { saveHost } from "@/stores/savedHosts";
 import { useVault, vaultHas, vaultSet } from "@/stores/vault";
 import type { PaneId } from "@/stores/panes";
-import { formatErr } from "@/lib/error";
 import { MasterPasswordDialog } from "@/components/dialogs/MasterPasswordDialog";
 import { HostKeyPrompt } from "./HostKeyPrompt";
 import { DialogShell } from "@/components/dialogs/DialogShell";
 import { DialogButton } from "@/components/dialogs/DialogButton";
 import { DialogInput } from "@/components/dialogs/DialogInput";
+import { ConnectErrorBox } from "./ConnectErrorBox";
 
 /**
  * `~/.ssh/config` 에 없는 host 에 직접 입력으로 연결.
@@ -403,15 +403,10 @@ export function AdHocConnectDialog({
         </div>
 
         {phase.kind === "error" && (
-          <div className="rounded-panel border border-danger/30 bg-danger/10 px-3 py-2 text-meta">
-            <div className="font-medium text-danger">{phase.error.kind}</div>
-            <div className="text-fg-muted">{formatErr(phase.error)}</div>
-            {phase.error.kind === "AuthFailed" && (
-              <div className="mt-1 text-fg-muted">
-                {t("dialog.adhoc.authFailedHint")}
-              </div>
-            )}
-          </div>
+          <ConnectErrorBox
+            error={phase.error}
+            authHint={t("dialog.adhoc.authFailedHint")}
+          />
         )}
         {phase.kind === "host-key" && (
           <HostKeyPrompt

@@ -295,7 +295,17 @@
       "authFailedHint": "Key/agent + (if entered) password all failed. Check the password and retry.",
       "connecting": "Connecting…",
       "connect": "Connect",
-      "desc": "Open a new SSH connection to {{alias}} and attach it to a pane."
+      "desc": "Open a new SSH connection to {{alias}} and attach it to a pane.",
+      "errorTitle": {
+        "default": "Couldn't connect",
+        "AuthFailed": "Authentication failed",
+        "ConnectionFailed": "Can't reach the server",
+        "HostKeyUnverified": "Host key not verified",
+        "Ssh": "SSH error",
+        "Io": "Check the input",
+        "NotFound": "Not found",
+        "PermissionDenied": "Permission denied"
+      }
     },
     "adhoc": {
       "title": "Connect to host…",

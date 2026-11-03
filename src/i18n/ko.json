@@ -292,7 +292,17 @@
       "authFailedHint": "키/에이전트 + (입력했다면) 비밀번호 모두 실패했습니다. 비밀번호를 확인하고 다시 시도하세요.",
       "connecting": "연결 중…",
       "connect": "연결",
-      "desc": "{{alias}} 에 새 SSH 연결을 열고 패널에 연결."
+      "desc": "{{alias}} 에 새 SSH 연결을 열고 패널에 연결.",
+      "errorTitle": {
+        "default": "연결하지 못했습니다",
+        "AuthFailed": "인증 실패",
+        "ConnectionFailed": "서버에 연결할 수 없습니다",
+        "HostKeyUnverified": "호스트 키를 확인하지 못했습니다",
+        "Ssh": "SSH 오류",
+        "Io": "입력을 확인하세요",
+        "NotFound": "찾을 수 없습니다",
+        "PermissionDenied": "권한이 없습니다"
+      }
     },
     "adhoc": {
       "title": "호스트에 연결…",

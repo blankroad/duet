@@ -9,6 +9,7 @@ import { HostKeyPrompt } from "./HostKeyPrompt";
 import { DialogShell } from "@/components/dialogs/DialogShell";
 import { DialogButton } from "@/components/dialogs/DialogButton";
 import { DialogInput } from "@/components/dialogs/DialogInput";
+import { ConnectErrorBox } from "./ConnectErrorBox";
 
 /**
  * 새 SSH 연결 다이얼로그.
@@ -166,7 +167,12 @@ export function ConnectionDialog({
         />
       </div>
 
-      {phase.kind === "error" && <ErrorBox error={phase.error} />}
+      {phase.kind === "error" && (
+        <ConnectErrorBox
+          error={phase.error}
+          authHint={t("dialog.connection.authFailedHint")}
+        />
+      )}
       {phase.kind === "host-key" && (
         <HostKeyPrompt
           info={phase.info}
@@ -225,27 +231,4 @@ function PaneRadio({
       {label}
     </button>
   );
-}
-
-function ErrorBox({ error }: { error: DuetError }) {
-  const { t } = useTranslation();
-  const message = formatError(error);
-  const isAuth = error.kind === "AuthFailed";
-  return (
-    <div className="mt-3 rounded border border-danger/50 bg-danger/10 p-2 text-meta">
-      <div className="font-medium text-danger">{error.kind}</div>
-      <div className="text-fg-muted">{message}</div>
-      {isAuth && (
-        <div className="mt-1 text-fg-muted">
-          {t("dialog.connection.authFailedHint")}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function formatError(error: DuetError): string {
-  return "message" in error && typeof error.message === "string"
-    ? error.message
-    : error.kind;
 }
