@@ -13,6 +13,8 @@ import { useToast } from "@/stores/toast";
 import type { Entry } from "@/types/bindings";
 import i18n from "@/i18n";
 import { useKeyboardNav } from "@/hooks/useKeyboardNav";
+import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
+import { useCommands } from "@/stores/commands";
 
 const file = (name: string) =>
   ({
@@ -121,4 +123,45 @@ it("버튼에 포커스가 있을 때 Enter·Space·Tab 은 전역 목록 키로
   expect(usePanes.getState().activePane).toBe("left");
   fireEvent.keyDown(apply, { key: "Escape" });
   expect(screen.queryByRole("textbox")).toBeNull();
+});
+
+it("수식키 조합은 바 안에서도 전역 명령으로 간다 (Ctrl+→, Shift+Space), Shift+Tab 은 막는다", async () => {
+  const openInOther = vi.fn();
+  const calcSize = vi.fn();
+  useCommands.getState().setBuiltins([
+    {
+      id: "pane.openInOther",
+      label: "o",
+      category: "Navigation",
+      defaultKey: "Ctrl+Right",
+      action: openInOther,
+    },
+    {
+      id: "file.calcSize",
+      label: "c",
+      category: "File",
+      defaultKey: "Shift+Space",
+      action: calcSize,
+    },
+  ]);
+  function WithShortcuts() {
+    useGlobalShortcuts();
+    useKeyboardNav(onActivate, vi.fn(), onQuickLook);
+    return <SelectPatternBar id="left" />;
+  }
+  usePanes.getState().setActivePane("left");
+  usePanes.getState().setSelected("left", []);
+  render(<WithShortcuts />);
+  await openBar();
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "*.ts" } });
+  const apply = screen.getByRole("button", { name: "적용" });
+  apply.focus();
+  fireEvent.keyDown(apply, { key: "ArrowRight", ctrlKey: true });
+  expect(openInOther).toHaveBeenCalledOnce();
+  // 전역 명령이 처리하며 기본 동작(버튼 클릭)을 막는다 → 패턴이 적용되지 않는다.
+  expect(fireEvent.keyDown(apply, { key: " ", shiftKey: true })).toBe(false);
+  expect(calcSize).toHaveBeenCalledOnce();
+  expect(fireEvent.keyDown(apply, { key: "Tab", shiftKey: true })).toBe(true);
+  expect(usePanes.getState().activePane).toBe("left");
+  useCommands.getState().setBuiltins([]);
 });

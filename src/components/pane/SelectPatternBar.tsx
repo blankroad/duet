@@ -6,7 +6,7 @@ import { useUI } from "@/stores/ui";
 import { useToast } from "@/stores/toast";
 
 /**
- * 바 안의 버튼에 포커스가 있을 때 전역 목록 키(useKeyboardNav — Enter 열기, Space 미리보기,
+ * 바 안의 버튼에 포커스가 있을 때 (수식키 없는) 전역 목록 키(useKeyboardNav — Enter 열기, Space 미리보기,
  * Tab 패널 전환, Backspace 위로, 방향키)로 새지 않게 막는 키. 버튼 기본 동작(Enter/Space 클릭,
  * Tab 포커스 이동)은 그대로 둔다. 입력창의 키는 전역 핸들러가 원래 무시한다.
  */
@@ -22,6 +22,15 @@ const BAR_OWNED_KEYS = new Set([
   "Home",
   "End",
 ]);
+
+/**
+ * 수식키 조합(Ctrl+→ 반대 패널 열기, Shift+Space 크기 계산 등)은 전역 명령 몫이라 막지 않는다.
+ * 예외: Shift+Tab 은 바 안 역방향 포커스 이동이라 전역(패널 전환)으로 보내지 않는다.
+ */
+function barOwns(e: React.KeyboardEvent): boolean {
+  if (e.ctrlKey || e.metaKey || e.altKey) return false;
+  return !e.shiftKey || e.key === "Tab";
+}
 
 const BAR_BUTTON =
   "flex h-6 shrink-0 items-center justify-center gap-1 rounded text-fg-muted hover:bg-border hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent";
@@ -90,7 +99,7 @@ export function SelectPatternBar({ id }: { id: PaneId }) {
           e.preventDefault();
           e.stopPropagation();
           setOpen(false);
-        } else if (BAR_OWNED_KEYS.has(e.key)) {
+        } else if (BAR_OWNED_KEYS.has(e.key) && barOwns(e)) {
           e.stopPropagation();
         }
       }}
