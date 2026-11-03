@@ -134,3 +134,10 @@ it("보기 바로가기 버튼도 키보드 클릭 시 해당 패널을 먼저 �
   expect(usePanes.getState().activePane).toBe("right");
   expect(activeTab(usePanes.getState(), "right").viewMode).toBe("tiles");
 });
+it("좁은 폭용 보기 버튼 툴팁에 현재 정렬이 보인다", () => {
+  usePanes.getState().setSort("right", "size", "desc");
+  render(<PaneToolbar id="right" />);
+  expect(screen.getByRole("button", { name: "View" }).title).toBe(
+    "View — Sort: Size · Descending",
+  );
+});

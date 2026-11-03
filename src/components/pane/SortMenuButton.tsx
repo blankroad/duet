@@ -67,19 +67,32 @@ export function sortMenuEntries(id: PaneId, t: TFunction): MenuEntry[] {
  * 툴바 정렬 버튼 — 그리드/타일처럼 열 머리글이 없는 보기에서도 현재 정렬
  * 기준·방향을 보여 주고, 클릭 한 번으로 정렬 메뉴를 연다.
  */
-export function SortMenuButton({ id }: { id: PaneId }) {
+/** 현재 정렬 요약 ("정렬: 수정일 · 내림차순") — 정렬 버튼이 접힌 좁은 폭의 `보기` 툴팁에도 쓴다. */
+export function useSortSummary(id: PaneId): {
+  summary: string;
+  keyLabel: string;
+  sortOrder: "asc" | "desc";
+} {
   const { t } = useTranslation();
   const sortKey = usePanes((s) => activeTab(s, id).sortKey);
   const sortOrder = usePanes((s) => activeTab(s, id).sortOrder);
   const keyLabel = sortLabel(t, sortKey);
-  const orderLabel = t(
-    sortOrder === "asc" ? "toolbar.sortAsc" : "toolbar.sortDesc",
-  );
+  const order = t(sortOrder === "asc" ? "toolbar.sortAsc" : "toolbar.sortDesc");
+  return {
+    summary: t("toolbar.sortTitle", { key: keyLabel, order }),
+    keyLabel,
+    sortOrder,
+  };
+}
+
+export function SortMenuButton({ id }: { id: PaneId }) {
+  const { t } = useTranslation();
+  const { summary, keyLabel, sortOrder } = useSortSummary(id);
   return (
     <ToolButton
       className="toolbar-sort"
-      label={t("toolbar.sortTitle", { key: keyLabel, order: orderLabel })}
-      ariaLabel={t("toolbar.sortTitle", { key: keyLabel, order: orderLabel })}
+      label={summary}
+      ariaLabel={summary}
       menu
       onClick={(event) => {
         const rect = event.currentTarget.getBoundingClientRect();

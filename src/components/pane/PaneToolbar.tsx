@@ -37,7 +37,11 @@ import {
 import { isVirtualTrash } from "@/lib/trashView";
 import { ToolButton } from "./ToolButton";
 import { FilterToolButton } from "./FilterToolButton";
-import { SortMenuButton, sortMenuEntries } from "./SortMenuButton";
+import {
+  SortMenuButton,
+  sortMenuEntries,
+  useSortSummary,
+} from "./SortMenuButton";
 import clsx from "clsx";
 
 interface PaneToolbarProps {
@@ -68,6 +72,7 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
   const toggleSyncBrowse = useUI((s) => s.toggleSyncBrowse);
   const open = useUIDialogs((s) => s.open);
   const showToast = useToast((s) => s.show);
+  const { summary: sortSummary } = useSortSummary(id);
 
   const runHere = (action: () => void) => {
     usePanes.getState().setActivePane(id);
@@ -224,7 +229,8 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
         onClick={openViewMenu}
         aria-haspopup="menu"
         aria-label={t("toolbar.viewOptions")}
-        title={t("toolbar.viewOptions")}
+        // 좁은 폭에선 정렬 버튼이 접히므로 현재 정렬을 여기 툴팁으로도 보인다.
+        title={`${t("toolbar.viewOptions")} — ${sortSummary}`}
       >
         {viewMode === "details" ? (
           <List size={15} />
