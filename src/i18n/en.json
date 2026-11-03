@@ -544,6 +544,9 @@
     "viewOptions": "View",
     "hiddenFiles": "Hidden files",
     "syncBrowse": "Synchronized browsing",
+    "filter": "Filter names in this folder ({{key}})",
+    "filterActive": "Filter: “{{text}}” ({{key}})",
+    "filterName": "Name filter",
     "newFile": "New file ({{key}})"
   },
   "shelf": {

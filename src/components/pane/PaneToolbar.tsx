@@ -35,6 +35,7 @@ import {
 
 import { isVirtualTrash } from "@/lib/trashView";
 import { ToolButton } from "./ToolButton";
+import { FilterToolButton } from "./FilterToolButton";
 import clsx from "clsx";
 
 interface PaneToolbarProps {
@@ -150,6 +151,8 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
       </ToolButton>
 
       <div className="flex-1" />
+
+      <FilterToolButton id={id} />
 
       <div className="toolbar-view-buttons items-center gap-0.5">
         <ViewButton

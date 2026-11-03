@@ -541,6 +541,9 @@
     "viewOptions": "보기",
     "hiddenFiles": "숨김 파일",
     "syncBrowse": "동기화 브라우징",
+    "filter": "이 폴더에서 이름 필터 ({{key}})",
+    "filterActive": "필터: “{{text}}” ({{key}})",
+    "filterName": "이름 필터",
     "newFile": "새 파일 ({{key}})"
   },
   "shelf": {

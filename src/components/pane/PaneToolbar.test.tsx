@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { PaneToolbar } from "./PaneToolbar";
 import { ContextMenu } from "@/components/ContextMenu";
 import { usePanes, activeTab } from "@/stores/panes";
@@ -82,4 +88,20 @@ it("숨김 파일 토글은 반응형 보기 묶음 밖에서 1클릭으로 바�
   expect(btn.getAttribute("aria-pressed")).toBe(String(!before));
   expect(usePanes.getState().activePane).toBe("right");
   expect(activeTab(usePanes.getState(), "left").showHidden).toBe(false);
+});
+it("필터 버튼은 해당 패널의 빠른 필터를 열고, 걸린 필터를 눌림으로 보인다", () => {
+  render(<PaneToolbar id="right" />);
+  const btn = screen.getByRole("button", { name: "Name filter" });
+  expect(btn.getAttribute("aria-pressed")).toBe("false");
+  fireEvent.click(btn);
+  expect(usePanes.getState().activePane).toBe("right");
+  expect(activeTab(usePanes.getState(), "right").filterFocused).toBe(true);
+  expect(activeTab(usePanes.getState(), "left").filterFocused).toBe(false);
+  act(() => usePanes.getState().setFilter("right", "log"));
+  expect(btn.getAttribute("aria-pressed")).toBe("true");
+  expect(btn.getAttribute("title")).toMatch(/log/);
+  act(() => {
+    usePanes.getState().setFilter("right", "");
+    usePanes.getState().setFilterFocused("right", false);
+  });
 });
