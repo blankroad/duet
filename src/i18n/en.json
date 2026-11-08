@@ -1264,5 +1264,13 @@
     "dragAll": "Drag all out",
     "clear": "Clear all",
     "remove": "Remove"
+  },
+  "notices": {
+    "openUnread_one": "{{count}} new notification — click to view",
+    "openUnread_other": "{{count}} new notifications — click to view",
+    "openRead": "Show recent notifications",
+    "title": "Recent notifications",
+    "clear": "Clear all",
+    "detail": "Details"
   }
 }

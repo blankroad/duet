@@ -1304,5 +1304,12 @@
     "dragAll": "전부 드래그",
     "clear": "모두 비우기",
     "remove": "제거"
+  },
+  "notices": {
+    "openUnread_other": "새 알림 {{count}}개 — 눌러서 보기",
+    "openRead": "최근 알림 보기",
+    "title": "최근 알림",
+    "clear": "모두 지우기",
+    "detail": "자세히"
   }
 }

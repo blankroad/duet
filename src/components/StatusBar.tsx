@@ -26,10 +26,11 @@ import {
   countLabel,
 } from "@/lib/fileInfo";
 import { StateDot } from "@/components/Sidebar";
+import { NoticeBadge } from "@/components/NoticeBadge";
 
 /**
  * StatusBar — 3 구역: 왼쪽=보이는 항목 집계 + 가려진 항목 + 선택, 가운데=커서 항목 상세,
- * 오른쪽=활성 패널(L/R)·소스·연결 상태.
+ * 오른쪽=활성 패널(L/R)·소스·연결 상태, 맨 끝=알림 배지(사라진 오류·경고 다시 보기).
  *
  * "12 files, 3 folders · 1.1 GB · 숨김 4개    report.pdf — PDF · 4.2 MB    ● prod  L"
  *
@@ -225,6 +226,7 @@ export function StatusBar() {
           </span>
         )}
       </span>
+      <NoticeBadge />
     </footer>
   );
 }

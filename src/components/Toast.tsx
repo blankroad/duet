@@ -1,4 +1,4 @@
-import { CheckCircle2, AlertCircle, X } from "lucide-react";
+import { CheckCircle2, AlertCircle, AlertTriangle, X } from "lucide-react";
 import clsx from "clsx";
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
@@ -6,8 +6,9 @@ import { useTranslation } from "react-i18next";
 import { useToast, type ToastItem } from "@/stores/toast";
 
 /**
- * 토스트 스택 — 하단 중앙, 최신이 아래. 각 항목은 X 로 즉시 dismiss 가능.
- * error 는 danger 색 + 아이콘, success 는 accent 체크 아이콘으로 구분.
+ * 토스트 스택 — 하단 중앙, 최신이 아래. 모두 자동으로 사라지고 X 로 바로 닫을 수도 있다.
+ * error 는 danger, warning 은 warning 색 + 아이콘, success 는 accent 체크 아이콘으로 구분.
+ * 오류·경고는 사라진 뒤에도 상태바 알림 배지(NoticeBadge)에서 다시 볼 수 있다.
  *
  * body 포털 + z-[70] — 대화상자 오버레이(z-50, 겹침 z-60) 위에 뜬다. 예전엔 같은 z 의
  * 오버레이 밑에 깔려 대화상자 안 작업의 실패 토스트가 어둡게 가려졌고, X 를 누르면
@@ -59,13 +60,24 @@ function ToastCard({ toast }: { toast: ToastItem }) {
     <div
       className={clsx(
         "pointer-events-auto flex w-full shrink-0 items-start gap-2 rounded-panel border bg-base px-3 py-2 text-base text-fg shadow-raised",
-        toast.kind === "error" ? "border-danger" : "border-border",
+        toast.kind === "error"
+          ? "border-danger"
+          : toast.kind === "warning"
+            ? "border-warning"
+            : "border-border",
       )}
     >
       {toast.kind === "success" && (
         <CheckCircle2
           size={14}
           className="mt-0.5 shrink-0 text-accent"
+          aria-hidden
+        />
+      )}
+      {toast.kind === "warning" && (
+        <AlertTriangle
+          size={14}
+          className="mt-0.5 shrink-0 text-warning"
           aria-hidden
         />
       )}
