@@ -239,3 +239,29 @@ mod tests {
         assert!(store.upsert(bad).await.is_err());
     }
 }
+
+/// remote review (lead) — 저장 파일이 반쯤 쓰인 채 남으면 다음 실행에서 load 가 실패한다.
+/// `write_to_disk` 는 임시 파일+rename 이 아니라 제자리 `tokio::fs::write` 라, 쓰는 도중
+/// 앱 종료·전원 차단이면 잘린 JSON 이 남는다. 그 상태의 load 는 Err 이고, `lib.rs` 의
+/// `.expect("saved hosts load")` 가 앱 시작 자체를 panic 시킨다(창이 안 뜬다).
+#[cfg(test)]
+mod review_remote_lead {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    #[ignore = "remote-19 repro: truncated saved-hosts.json blocks app start"]
+    async fn truncated_file_still_loads() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("saved-hosts.json");
+        // 정상 저장본의 앞부분만 남은 상태(쓰는 도중 중단).
+        tokio::fs::write(
+            &path,
+            "[\n  {\n    \"alias\": \"nas\",\n    \"host\": \"10.",
+        )
+        .await
+        .unwrap();
+        // 기대: 손상 파일을 옆으로 치우고 빈 목록으로라도 열린다 — 앱 시작을 막지 않는다.
+        assert!(SavedHostsStore::load_from(&path).await.is_ok());
+    }
+}

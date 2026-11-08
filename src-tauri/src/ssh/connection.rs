@@ -1053,3 +1053,151 @@ mod tests {
         assert_eq!(ip.to_string(), "0.0.0.0");
     }
 }
+
+#[cfg(test)]
+mod review_remote_sol {
+    use super::*;
+    use russh::keys::{key::KeyPair, PublicKeyBase64};
+
+    #[test]
+    fn line_mapping_matches_russh_crlf_blank_and_unterminated() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("known_hosts");
+        let old = KeyPair::generate_ed25519().clone_public_key().unwrap();
+        let new = KeyPair::generate_ed25519().clone_public_key().unwrap();
+        for ending in ["\r\n", "\n", ""] {
+            let content = format!(
+                "# heading\r\n\r\nother ssh-ed25519 {}\r\n# comment\r\n[app]:2222 ssh-ed25519 {}{}",
+                old.public_key_base64(),
+                old.public_key_base64(),
+                ending
+            );
+            std::fs::write(&path, &content).unwrap();
+            match classify_known_host("app", 2222, &new, Some(&path)) {
+                KnownHostDecision::Reject {
+                    changed: true,
+                    line: Some(line),
+                } => {
+                    assert_eq!(line, 3);
+                    assert_eq!(physical_line_index(&content, line), Some(4));
+                }
+                result => panic!("wrong classification: {result:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn hashed_hosts_are_checked_and_markers_are_not_matched() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("known_hosts");
+        // Public fixture from the pinned russh-keys unit test; no real host access.
+        let b64 = "AAAAC3NzaC1lZDI1NTE5AAAAILIG2T/B0l0gaqj3puu510tu9N1OkQ4znY3LYuEm5zCF";
+        let key = russh::keys::parse_public_key_base64(b64).unwrap();
+        std::fs::write(
+            &path,
+            format!(
+                "|1|O33ESRMWPVkMYIwJ1Uw+n877jTo=|nuuC5vEqXlEZ/8BXQR7m619W6Ak= ssh-ed25519 {b64}\n"
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            classify_known_host("example.com", 22, &key, Some(&path)),
+            KnownHostDecision::Accept
+        );
+        std::fs::write(
+            &path,
+            format!("@cert-authority example.com ssh-ed25519 {b64}\n"),
+        )
+        .unwrap();
+        assert_eq!(
+            classify_known_host("example.com", 22, &key, Some(&path)),
+            KnownHostDecision::Reject {
+                changed: false,
+                line: None
+            }
+        );
+    }
+
+    #[test]
+    #[cfg(unix)] // This test isolates home through a subprocess HOME override.
+    fn replacement_preserves_other_lines_and_exact_backup() {
+        const CHILD: &str = "DUET_REVIEW_SOL_KH_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let dir = tempfile::tempdir().unwrap();
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "ssh::connection::review_remote_sol::replacement_preserves_other_lines_and_exact_backup", "--nocapture"])
+                .env(CHILD, "1").env("HOME", dir.path()).status().unwrap();
+            assert!(status.success());
+            return;
+        }
+        let path = default_known_hosts_path().unwrap();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let old = KeyPair::generate_ed25519().clone_public_key().unwrap();
+        let new = KeyPair::generate_ed25519().clone_public_key().unwrap();
+        let content = format!(
+            "# heading\r\n\r\nother ssh-ed25519 {}\r\n# retained\r\n[app]:2222 ssh-ed25519 {}",
+            old.public_key_base64(),
+            old.public_key_base64()
+        );
+        std::fs::write(&path, &content).unwrap();
+        let backup = replace_changed_known_host(3, "app", 2222, &new).unwrap();
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), content);
+        assert_eq!(
+            classify_known_host("app", 2222, &new, Some(&path)),
+            KnownHostDecision::Accept
+        );
+        assert_eq!(
+            classify_known_host("other", 22, &old, Some(&path)),
+            KnownHostDecision::Accept
+        );
+        assert!(std::fs::read_to_string(&path)
+            .unwrap()
+            .starts_with("# heading\r\n\r\nother "));
+    }
+
+    #[tokio::test]
+    #[cfg(unix)] // Windows profile lookup must not touch a real user trust store.
+    #[ignore = "remote-02 repro: learn applies to every hop"]
+    async fn tofu_approval_must_not_accept_an_unseen_second_host() {
+        const CHILD: &str = "DUET_REVIEW_SOL_VERIFIER_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let dir = tempfile::tempdir().unwrap();
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "ssh::connection::review_remote_sol::tofu_approval_must_not_accept_an_unseen_second_host", "--ignored", "--nocapture"])
+                .env(CHILD, "1").env("HOME", dir.path()).status().unwrap();
+            assert!(status.success());
+            return;
+        }
+        let jump_key = KeyPair::generate_ed25519().clone_public_key().unwrap();
+        let target_key = KeyPair::generate_ed25519().clone_public_key().unwrap();
+        let strict = HostKeyPolicy::new(false, false);
+        let mut jump = HostKeyVerifier::new(
+            "jump.invalid",
+            2222,
+            strict.learn,
+            strict.replace_changed,
+            strict.report,
+        );
+        assert!(!jump.check_server_key(&jump_key).await.unwrap());
+        // The same policy is passed to connect_direct and every nested_handshake.
+        let approved = HostKeyPolicy::new(true, false);
+        let mut jump = HostKeyVerifier::new(
+            "jump.invalid",
+            2222,
+            approved.learn,
+            approved.replace_changed,
+            approved.report.clone(),
+        );
+        assert!(jump.check_server_key(&jump_key).await.unwrap());
+        let mut target = HostKeyVerifier::new(
+            "target.invalid",
+            22,
+            approved.learn,
+            approved.replace_changed,
+            approved.report.clone(),
+        );
+        let accepted = target.check_server_key(&target_key).await.unwrap();
+        eprintln!("unseen target accepted={accepted}");
+        assert!(!accepted, "only jump fingerprint was shown to the user");
+    }
+}
