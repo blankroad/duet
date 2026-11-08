@@ -1185,6 +1185,17 @@ async fn compress_remote(
     run_host_command(pool, connection_id, &cmd, prog).await
 }
 
+// review/archive 점검 라운드 재현 테스트 (2026-11-08) — 사람별 파일로 분리.
+#[cfg(test)]
+#[path = "archive_review_lead.rs"]
+mod review_archive_lead;
+#[cfg(test)]
+#[path = "archive_review_opus.rs"]
+mod review_archive_opus;
+#[cfg(test)]
+#[path = "archive_review_sol.rs"]
+mod review_archive_sol;
+
 #[cfg(test)]
 mod tests {
     use super::*;
