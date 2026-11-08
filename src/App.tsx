@@ -149,7 +149,7 @@ import { useShellWarm } from "@/hooks/useShellWarm";
 import { useIndexProgressEvents } from "@/hooks/useIndexProgressEvents";
 import i18n from "@/i18n";
 import { Trans } from "react-i18next";
-import { formatErr } from "@/lib/error";
+import { explainError, formatErr } from "@/lib/error";
 import {
   aliasFromConnectionId,
   findSavedHostForAlias,
@@ -556,12 +556,11 @@ function App() {
               });
               return;
             }
+            const why = explainError(r.error);
             showToast(
-              i18n.t("toast.cannotOpen", {
-                name: entry.name,
-                err: formatErr(r.error),
-              }),
+              i18n.t("toast.cannotOpen", { name: entry.name, err: why.text }),
               "error",
+              { detail: why.detail },
             );
             return;
           }

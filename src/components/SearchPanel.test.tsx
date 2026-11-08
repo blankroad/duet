@@ -13,6 +13,8 @@ import { SearchPanel } from "./SearchPanel";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
+  // 오류 문구(lib/error)가 i18n 을 import 하므로 i18next 플러그인 형태가 필요하다.
+  initReactI18next: { type: "3rdParty", init: () => {} },
 }));
 vi.mock("@/types/bindings", () => ({
   commands: {

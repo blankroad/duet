@@ -22,7 +22,7 @@ import { useAppSettings, initialConflictPolicy } from "@/stores/settings";
 import { rememberElevatable } from "@/lib/elevatePending";
 import i18n from "@/i18n";
 import { childLocation, sameLocation, sourceKey } from "@/lib/entryDnd";
-import { formatErr } from "@/lib/error";
+import { explainError, formatErr } from "@/lib/error";
 import { isVirtualTrash } from "@/lib/trashView";
 import { rememberExtract } from "@/lib/extractPending";
 import { basename } from "@/lib/paths";
@@ -642,19 +642,19 @@ export async function triggerExtract(showToast: ToastFn): Promise<void> {
   }
   const plan = await commands.fsExtractPlan(targets[0]!);
   if (plan.status === "error") {
-    showToast(
-      i18n.t("toast.extractFailed", { err: formatErr(plan.error) }),
-      "error",
-    );
+    const why = explainError(plan.error);
+    showToast(i18n.t("toast.extractFailed", { err: why.text }), "error", {
+      detail: why.detail,
+    });
     return;
   }
   // 1차 시도는 암호 없이 — 암호 zip 이면 task 가 NeedPassword 로 실패한다.
   const exec = await commands.fsExtractExecute(plan.data, null);
   if (exec.status === "error") {
-    showToast(
-      i18n.t("toast.extractFailed", { err: formatErr(exec.error) }),
-      "error",
-    );
+    const why = explainError(exec.error);
+    showToast(i18n.t("toast.extractFailed", { err: why.text }), "error", {
+      detail: why.detail,
+    });
     return;
   }
   rememberExtract(exec.data, { plan: plan.data, attempted: false });

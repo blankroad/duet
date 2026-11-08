@@ -872,7 +872,8 @@
     "bookmarkedOnHost": "Bookmarked on {{host}}: {{name}}",
     "bookmarkFailed": "Could not add the bookmark",
     "alreadyBookmarked": "“{{name}}” is already bookmarked",
-    "editSelectFile": "Put the cursor on a file to edit"
+    "editSelectFile": "Put the cursor on a file to edit",
+    "taskFailedOp": "{{op}} failed — {{msg}}"
   },
   "sidebar": {
     "tasks": "Tasks",
@@ -961,6 +962,14 @@
       "compress": "Compressing…",
       "sync": "Syncing…",
       "delete": "Deleting…"
+    },
+    "op": {
+      "copy": "Copy",
+      "move": "Move",
+      "extract": "Extract",
+      "compress": "Compress",
+      "sync": "Sync",
+      "delete": "Delete"
     }
   },
   "statusbar": {
@@ -1264,6 +1273,47 @@
     "dragAll": "Drag all out",
     "clear": "Clear all",
     "remove": "Remove"
+  },
+  "errors": {
+    "reason": {
+      "needPassword": "A password is required, or the one entered is wrong.",
+      "authFailed": "Could not sign in. Check the user name, password or key.",
+      "cancelled": "Cancelled.",
+      "crossDevice": "The items are on different drives, so they can't be moved directly.",
+      "hostKey": "The server's host key could not be verified.",
+      "notPermitted": "This operation is not allowed by your settings (for example, permanent delete).",
+      "remoteMissingProgram": "The server doesn't have {{prog}}. Install it on the server, or copy the file to this PC first.",
+      "remoteFormat": "This archive format can't be extracted on the server. Copy it to this PC and extract it there.",
+      "unsafeArchive": "Stopped for safety: the archive tries to write outside the destination folder.",
+      "zipMethod": "This archive uses a compression method (such as LZMA or BZip2) that isn't supported. Use a tool like 7-Zip to extract it.",
+      "damagedArchive": "The archive is damaged, or its extension doesn't match its real format. Try downloading it again.",
+      "linkPrivilege": "Windows doesn't allow creating links without permission. Turn on Developer Mode in Windows Settings, or run as administrator.",
+      "invalidName": "The name can't be used on this OS (\\ / : * ? \" < > | or a trailing dot or space).",
+      "nameTooLong": "The path or name is too long. Try again in a shorter location.",
+      "diskFull": "The disk is full. Free up space and try again.",
+      "inUse": "Another program is using the file. Close it and try again.",
+      "readOnly": "This location is read-only.",
+      "accessDenied": "Permission denied. Check the access rights for this location.",
+      "notFound": "The file or folder can't be found. It may have been moved or deleted.",
+      "exists": "An item with the same name already exists.",
+      "network": "The network location can't be reached. Check your network connection.",
+      "unsupportedOp": "This drive doesn't support the operation. Try another drive.",
+      "connection": "Can't connect to the server"
+    },
+    "kind": {
+      "NotFound": "Not found",
+      "PermissionDenied": "Permission denied",
+      "ConnectionFailed": "Connection failed",
+      "AuthFailed": "Authentication failed",
+      "NotPermitted": "Operation not permitted",
+      "Cancelled": "Cancelled",
+      "NotSupported": "Not supported",
+      "NeedPassword": "Password required",
+      "Io": "I/O error",
+      "CrossDevice": "Items are on different drives",
+      "Ssh": "SSH error",
+      "HostKeyUnverified": "Host key not verified"
+    }
   },
   "notices": {
     "openUnread_one": "{{count}} new notification — click to view",

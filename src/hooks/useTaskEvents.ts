@@ -7,6 +7,7 @@ import { useToast } from "@/stores/toast";
 import { useUIDialogs, type DialogState } from "@/stores/ui-dialogs";
 import { takeElevatable, elevatableDestKind } from "@/lib/elevatePending";
 import { takeExtract } from "@/lib/extractPending";
+import { explainError } from "@/lib/error";
 
 const isWindows = platform() === "windows";
 
@@ -142,10 +143,24 @@ export function useTaskEvents() {
           // 보호 폴더 복사가 권한으로 실패했으면(Windows) 관리자 승격 재시도 다이얼로그.
           // 그 외엔 조용한 실패 방지용 토스트.
           const retry = takeElevatable(id);
+          // "압축 풀기 실패 — <쉬운 원인>". 원문(작업 제목 + 백엔드 오류)은 알림 기록의 "자세히".
+          const task = useTasks.getState().tasks.get(id);
+          const explained = explainError(payload.change.error);
           const failed = () =>
-            useToast
-              .getState()
-              .show(i18n.t("toast.taskFailed", { msg }), "error");
+            useToast.getState().show(
+              task
+                ? i18n.t("toast.taskFailedOp", {
+                    op: i18n.t(`tasks.op.${task.kind}`),
+                    msg: explained.text,
+                  })
+                : i18n.t("toast.taskFailed", { msg: explained.text }),
+              "error",
+              {
+                detail: [task?.title, explained.detail || msg]
+                  .filter(Boolean)
+                  .join("\n"),
+              },
+            );
           if (retry && PERM_DENIED.test(msg)) {
             if (elevatableDestKind(retry) === "ssh") {
               // 원격 보호 경로 → sudo 재시도.
