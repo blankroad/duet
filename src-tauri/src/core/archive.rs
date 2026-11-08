@@ -10,6 +10,7 @@
 
 use crate::core::copy_strategy::{shell_escape_path, shell_escape_str};
 use crate::core::ops::{self, OpCtx};
+use crate::core::tar_unpack::{self, UnpackReport};
 use crate::fs::{FileSystem, SshFs};
 use crate::services::connection_pool::ConnectionPool;
 use crate::services::journal::{BackupRestore, JournalEntry, OpKind, UndoAction};
@@ -228,7 +229,7 @@ pub async fn extract_execute(
     password: Option<String>,
     ctx: &OpCtx,
     cancel_token: CancellationToken,
-) -> Result<JournalEntry, DuetError> {
+) -> Result<(JournalEntry, UnpackReport), DuetError> {
     let archive_path = fs.join(&plan.archive_dir.path, &plan.archive_name);
 
     // dest 충돌 → backup 으로 mv (undo 시 복원).
@@ -256,7 +257,7 @@ pub async fn extract_execute(
     // 단일 파일 압축(.gz 등)은 폴더 없이 archive_dir 에 `<stem>` 파일로 바로 푼다
     // (예전엔 `log.txt/log.txt` 처럼 폴더가 한 겹 더 생겼다). 그 경로가 plan.dest_dir.
     let single = matches!(plan.format.layout(), Layout::Single(_));
-    let extracted: Result<(), DuetError> = async {
+    let extracted: Result<UnpackReport, DuetError> = async {
         if !single {
             fs.mkdir(&plan.dest_dir).await?;
         }
@@ -286,20 +287,24 @@ pub async fn extract_execute(
                     plan.format,
                     password.as_deref(),
                 )
-                .await
+                .await?;
+                Ok(UnpackReport::default())
             }
         }
     }
     .await;
-    if let Err(e) = extracted {
-        // 이 op 가 방금 만든 dest 만 제거 — Replace 백업 정리와 동일한 내부 rollback
-        // 경로(fs.remove). 롤백 자체의 실패는 원인 에러를 가리지 않도록 무시.
-        let _ = fs.remove(&plan.dest_dir).await;
-        for b in &backups {
-            let _ = fs.rename(&b.backup_path, &b.original_path).await;
+    let report = match extracted {
+        Ok(report) => report,
+        Err(e) => {
+            // 이 op 가 방금 만든 dest 만 제거 — Replace 백업 정리와 동일한 내부 rollback
+            // 경로(fs.remove). 롤백 자체의 실패는 원인 에러를 가리지 않도록 무시.
+            let _ = fs.remove(&plan.dest_dir).await;
+            for b in &backups {
+                let _ = fs.rename(&b.backup_path, &b.original_path).await;
+            }
+            return Err(e);
         }
-        return Err(e);
-    }
+    };
 
     // undo = 생성된 dest_dir 제거 + backup 복원 (UndoCopy 재사용).
     // 아카이브 추출은 파일 원본이 없어 redo 불가 — src 기록 생략.
@@ -320,7 +325,7 @@ pub async fn extract_execute(
             path: plan.dest_dir,
         },
     };
-    ctx.journal.push(op, undo).await
+    Ok((ctx.journal.push(op, undo).await?, report))
 }
 
 /// 로컬 아카이브 해제 — blocking IO 라 spawn_blocking. `password` 는 암호 zip 용(없으면 None).
@@ -329,7 +334,7 @@ async fn extract_local(
     dest: &Path,
     fmt: ArchiveFormat,
     password: Option<String>,
-) -> Result<(), DuetError> {
+) -> Result<UnpackReport, DuetError> {
     let archive = archive.to_path_buf();
     let dest = dest.to_path_buf();
     tokio::task::spawn_blocking(move || {
@@ -344,9 +349,10 @@ fn extract_local_blocking(
     dest: &Path,
     fmt: ArchiveFormat,
     password: Option<&str>,
-) -> Result<(), DuetError> {
+) -> Result<UnpackReport, DuetError> {
     let file =
         std::fs::File::open(archive).map_err(|e| DuetError::Io(format!("open archive: {e}")))?;
+    let mut report = UnpackReport::default();
     match fmt.layout() {
         Layout::Zip => {
             let mut zip =
@@ -363,11 +369,9 @@ fn extract_local_blocking(
                     .map_err(|e| DuetError::Io(format!("zip extract: {e}")))?;
             }
         }
-        Layout::Tar(codec) => {
-            let mut tar = tar::Archive::new(decode_reader(file, codec)?);
-            tar.unpack(dest)
-                .map_err(|e| DuetError::Io(format!("tar extract: {e}")))?;
-        }
+        // 항목 단위로 직접 푼다 — Windows 의 링크 권한·쓸 수 없는 이름·canonicalize 실패에도
+        // 전체가 실패하지 않게 (core::tar_unpack 참조).
+        Layout::Tar(codec) => report = tar_unpack::unpack(decode_reader(file, codec)?, dest)?,
         Layout::Single(codec) => {
             // 단일 파일 → dest/<압축 확장자 뗀 이름>.
             let out_name = archive
@@ -385,7 +389,7 @@ fn extract_local_blocking(
         Layout::SevenZ => extract_sevenz(archive, dest, password)?,
         Layout::Rar => extract_rar(archive, dest, password)?,
     }
-    Ok(())
+    Ok(report)
 }
 
 /// 코덱에 맞는 스트리밍 해제 reader (None = 무압축 tar). 멤버·스트림·프레임이 여러 개
@@ -759,7 +763,7 @@ pub async fn open_for_browse(
     archive: EntryRef,
     password: Option<String>,
     pool: &Arc<ConnectionPool>,
-) -> Result<Location, DuetError> {
+) -> Result<(Location, UnpackReport), DuetError> {
     let format = detect_format(&archive.name)
         .ok_or_else(|| DuetError::Io(format!("unsupported archive: {}", archive.name)))?;
     let archive_path = archive.location.path.join(&archive.name);
@@ -775,14 +779,20 @@ pub async fn open_for_browse(
             tokio::fs::create_dir_all(&dest)
                 .await
                 .map_err(|e| DuetError::Io(format!("create temp dir: {e}")))?;
-            if let Err(e) = extract_local(&archive_path, &dest, format, password).await {
-                let _ = tokio::fs::remove_dir_all(&token_dir).await;
-                return Err(e);
-            }
-            Ok(Location {
-                source: SourceId::Local,
-                path: dest,
-            })
+            let report = match extract_local(&archive_path, &dest, format, password).await {
+                Ok(report) => report,
+                Err(e) => {
+                    let _ = tokio::fs::remove_dir_all(&token_dir).await;
+                    return Err(e);
+                }
+            };
+            Ok((
+                Location {
+                    source: SourceId::Local,
+                    path: dest,
+                },
+                report,
+            ))
         }
         SourceId::Ssh { connection_id, .. } => {
             // 추출 전 zip-slip 검증 (extract_remote 와 동일 가드 — browse 도 호스트에 씀).
@@ -805,10 +815,13 @@ pub async fn open_for_browse(
                 Layout::Zip => run_unzip_command(pool, connection_id, &cmd).await?,
                 _ => run_host_command(pool, connection_id, &cmd, host_prog(format)).await?,
             }
-            Ok(Location {
-                source: archive.location.source.clone(),
-                path: dest,
-            })
+            Ok((
+                Location {
+                    source: archive.location.source.clone(),
+                    path: dest,
+                },
+                UnpackReport::default(),
+            ))
         }
     }
 }
@@ -1497,7 +1510,7 @@ mod tests {
             name,
         };
         let pool = crate::services::connection_pool::ConnectionPool::new();
-        let loc = open_for_browse(archive, None, &pool).await.unwrap();
+        let (loc, _) = open_for_browse(archive, None, &pool).await.unwrap();
 
         assert_eq!(loc.source, SourceId::Local);
         // 원본 이름 길이와 무관하게 짧은 임시 경로를 사용한다.

@@ -14,6 +14,7 @@ mod macos;
 
 pub mod entry_name;
 mod file_clipboard;
+pub mod links;
 
 #[cfg(windows)]
 pub mod shell_menu;

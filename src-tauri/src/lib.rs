@@ -172,6 +172,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::system::file_icon,
         ])
         .events(collect_events![
+            services::archive_events::ArchiveNoticeEvent,
             services::connection_events::ConnectionStateEvent,
             services::compare_events::CompareProgressEvent,
             services::fs_events::FsChangedEvent,

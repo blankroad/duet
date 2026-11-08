@@ -1,6 +1,7 @@
 //! 앱 서비스 — 비동기 작업 큐, 저널, 연결 풀, 설정.
 
 pub mod app_launchers;
+pub mod archive_events;
 pub mod bookmarks;
 pub mod compare_events;
 pub mod connection_events;

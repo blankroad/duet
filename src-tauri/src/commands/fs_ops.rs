@@ -12,6 +12,7 @@ use crate::core::ops::{
     SyncPlan,
 };
 use crate::fs::{FileSystem, LocalFs, SshFs};
+use crate::services::archive_events::ArchiveNoticeEvent;
 use crate::services::connection_pool::ConnectionPool;
 use crate::services::journal::{Journal, JournalEntry, JournalId};
 use crate::services::journal_events::JournalChangedEvent;
@@ -1493,6 +1494,18 @@ pub async fn fs_make_symlink(
 
 // === Archive: Browse / Extract / Compress ===
 
+/// 해제는 끝났지만 건너뛰거나 이름을 바꾼 항목이 있으면 프론트에 알린다(없으면 no-op).
+/// 알림 전송 실패는 해제 결과를 바꾸지 않는다.
+fn emit_archive_notice(
+    app: &tauri::AppHandle,
+    archive_name: &str,
+    report: &crate::core::tar_unpack::UnpackReport,
+) {
+    if let Some(ev) = ArchiveNoticeEvent::from_report(archive_name, report) {
+        let _ = ev.emit(app);
+    }
+}
+
 /// 아카이브를 임시 위치로 풀고 그 디렉토리 Location 반환 — 패널이 탐색기처럼 내부 열람.
 /// 로컬은 temp, 원격은 호스트사이드 추출(PC 경유 0). 비파괴라 journal 없음.
 #[tauri::command]
@@ -1502,8 +1515,11 @@ pub async fn fs_archive_open_for_browse(
     // 암호 zip browse 용 — NeedPassword 시 프론트가 암호를 받아 재호출 (§5).
     password: Option<String>,
     pool: tauri::State<'_, Arc<ConnectionPool>>,
+    app: tauri::AppHandle,
 ) -> Result<Location, DuetError> {
-    let loc = archive::open_for_browse(archive, password, pool.inner()).await?;
+    let archive_name = archive.name.clone();
+    let (loc, report) = archive::open_for_browse(archive, password, pool.inner()).await?;
+    emit_archive_notice(&app, &archive_name, &report);
     // 원격 browse 면 임시 루트(`~/.duet-tmp/browse-<token>` = stem 의 부모)를 연결에
     // 등록 — 연결 종료 시 reap (Phase 2). 등록 실패는 비치명적(reap 만 누락).
     if let SourceId::Ssh { connection_id, .. } = &loc.source {
@@ -1565,7 +1581,8 @@ pub async fn fs_extract_execute(
                         pool: Some(pool_inner.clone()),
                         app: Some(app_for_run.clone()),
                     };
-                    let entry = archive::extract_execute(
+                    let archive_name = plan_for_run.archive_name.clone();
+                    let (entry, report) = archive::extract_execute(
                         &*fs,
                         plan_for_run,
                         password_for_run,
@@ -1573,6 +1590,7 @@ pub async fn fs_extract_execute(
                         cancel_token,
                     )
                     .await?;
+                    emit_archive_notice(&app_for_run, &archive_name, &report);
                     Ok(emit_pushed(&app_for_run, entry))
                 })
             }),

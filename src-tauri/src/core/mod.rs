@@ -8,5 +8,6 @@ pub mod elevate;
 pub mod ops;
 pub mod search;
 pub mod sudo;
+pub mod tar_unpack;
 pub mod three_way;
 pub mod undo;
