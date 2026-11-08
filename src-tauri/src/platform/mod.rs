@@ -935,3 +935,52 @@ tmpfs /run tmpfs rw 0 0
         assert_eq!(linux_device_for_mount(mounts, Path::new("/nope")), None);
     }
 }
+
+#[cfg(all(test, windows))]
+mod review_shell_settings {
+    #[cfg(windows)]
+    fn parse_registered_argument(path: &str) -> String {
+        // Pure command-line decoding: no registry, filesystem, server or clipboard access.
+        use windows::core::PCWSTR;
+        use windows::Win32::Foundation::LocalFree;
+        use windows::Win32::Foundation::HLOCAL;
+        use windows::Win32::UI::Shell::CommandLineToArgvW;
+        let command: Vec<u16> = format!("\"C:\\duet.exe\" \"{path}\"")
+            .encode_utf16()
+            .chain([0])
+            .collect();
+        let mut count = 0;
+        // SAFETY: isolated test calls Windows argv parser with a NUL-terminated string;
+        // parser allocation is released after copying its second argument.
+        unsafe {
+            let argv = CommandLineToArgvW(PCWSTR(command.as_ptr()), &mut count);
+            assert!(!argv.is_null());
+            assert_eq!(count, 2);
+            let parsed = (*argv.add(1)).to_string().unwrap();
+            let _ = LocalFree(HLOCAL(argv as *mut _));
+            parsed
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn registered_argument_spaces_korean_and_unc_decode_without_server_access() {
+        for path in [
+            r"C:\a b",
+            r"C:\한글",
+            r"\\server\share\dir",
+            r"relative\dir",
+        ] {
+            assert_eq!(parse_registered_argument(path), path);
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "shell-settings-07 repro: registry trailing backslash quote"]
+    fn registered_drive_root_and_trailing_separator_roundtrip() {
+        for path in ["C:\\", "C:\\a b\\", "\\\\server\\share\\"] {
+            assert_eq!(parse_registered_argument(path), path);
+        }
+    }
+}

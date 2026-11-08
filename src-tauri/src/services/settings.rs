@@ -350,3 +350,80 @@ mod tests {
         assert!(!store.get().await.permanent_delete_enabled);
     }
 }
+
+/// shell-settings 점검 재현 테스트 — 저장 실패가 메모리에는 반영돼 다음 저장에 실려 나간다.
+#[cfg(test)]
+mod review_shell_settings {
+    use super::*;
+    use tempfile::tempdir;
+
+    /// 설정 폴더 자리에 파일을 둬 쓰기를 실패시킨다(디스크 가득 참·읽기 전용 폴더 대용).
+    fn blocked_path(root: &Path) -> (PathBuf, PathBuf) {
+        let blocker = root.join("cfg");
+        std::fs::write(&blocker, b"not a dir").unwrap();
+        (blocker.clone(), blocker.join("settings.toml"))
+    }
+
+    #[tokio::test]
+    #[ignore = "shell-settings-02 repro: 저장 실패한 설정이 메모리에 남아 다음 저장 때 적용됨"]
+    async fn failed_apply_does_not_leak_into_next_save() {
+        let dir = tempdir().unwrap();
+        let (blocker, path) = blocked_path(dir.path());
+        let store = SettingsStore::load_from(&path).await.unwrap();
+
+        // 1) 사용자가 영구 삭제를 켬 → 디스크 쓰기 실패 → UI 는 "저장 실패" 토스트 + 체크 해제 유지.
+        let r = store
+            .apply(SettingsPatch {
+                permanent_delete_enabled: Some(true),
+                ..Default::default()
+            })
+            .await;
+        assert!(r.is_err(), "write must fail in this setup");
+        // 실패했으니 백엔드 값도 그대로여야 한다.
+        assert!(
+            !store.get().await.permanent_delete_enabled,
+            "failed save is still applied in memory"
+        );
+
+        // 2) 원인이 풀린 뒤 다른 설정(테마)을 바꾸면…
+        std::fs::rename(&blocker, dir.path().join("moved-away")).unwrap();
+        let saved = store
+            .apply(SettingsPatch {
+                theme: Some("dark".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        // …실패했다고 알렸던 영구 삭제까지 함께 저장·동기화된다.
+        assert!(!saved.permanent_delete_enabled);
+    }
+
+    /// 위 시나리오의 2단계만 — 실패한 값이 다음 성공 저장의 반환값(프론트 sync 대상)에 실린다.
+    #[tokio::test]
+    #[ignore = "shell-settings-02 repro: 저장 실패한 영구 삭제가 다음 다른 설정 저장 때 켜짐"]
+    async fn failed_permanent_delete_is_persisted_by_next_unrelated_save() {
+        let dir = tempdir().unwrap();
+        let (blocker, path) = blocked_path(dir.path());
+        let store = SettingsStore::load_from(&path).await.unwrap();
+        let _ = store
+            .apply(SettingsPatch {
+                permanent_delete_enabled: Some(true),
+                ..Default::default()
+            })
+            .await
+            .unwrap_err();
+        std::fs::rename(&blocker, dir.path().join("moved-away")).unwrap();
+        let saved = store
+            .apply(SettingsPatch {
+                theme: Some("dark".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !saved.permanent_delete_enabled,
+            "theme save also persisted permanent_delete_enabled=true; disk:\n{on_disk}"
+        );
+    }
+}

@@ -860,3 +860,103 @@ pub async fn set_os_file_clipboard(items: Vec<EntryRef>) -> Result<(), DuetError
     let paths = local_paths_of(&items, "os clipboard")?;
     crate::platform::set_file_clipboard(&paths)
 }
+
+#[cfg(test)]
+mod review_shell_settings {
+    use super::*;
+
+    #[test]
+    fn spaces_korean_and_file_parent_resolve() {
+        let temp = tempfile::tempdir().unwrap();
+        let folder = temp.path().join("공백 있는 폴더 & ^ %");
+        std::fs::create_dir(&folder).unwrap();
+        let file = folder.join("보고서 1.txt");
+        std::fs::write(&file, b"test").unwrap();
+        assert_eq!(
+            resolve_open_path(folder.to_str().unwrap()),
+            Some(folder.to_str().unwrap().into())
+        );
+        assert_eq!(
+            resolve_open_path(file.to_str().unwrap()),
+            Some(folder.to_str().unwrap().into())
+        );
+        assert_eq!(
+            resolve_open_path(folder.join("없는 파일").to_str().unwrap()),
+            None
+        );
+    }
+
+    #[test]
+    fn relative_paths_remain_relative() {
+        // Fixture is inside this worktree so the test never changes process CWD.
+        let temp = tempfile::tempdir_in(".").unwrap();
+        let absolute = std::fs::canonicalize(temp.path()).unwrap();
+        let cwd = std::env::current_dir().unwrap();
+        let relative = absolute.strip_prefix(cwd).unwrap();
+        assert_eq!(
+            resolve_open_path(relative.to_str().unwrap()),
+            Some(relative.to_str().unwrap().into())
+        );
+    }
+
+    #[test]
+    fn already_parsed_argv_must_not_have_wrapping_quotes() {
+        let temp = tempfile::tempdir().unwrap();
+        let quoted = format!("\"{}\"", temp.path().display());
+        assert_eq!(resolve_open_path(&quoted), None);
+        assert_eq!(resolve_open_path("C:\\a b\""), None);
+        assert_eq!(resolve_open_path("C:\\a b\\\""), None);
+    }
+
+    #[test]
+    fn clipboard_mixed_remote_selection_is_rejected_before_os_access() {
+        let local = EntryRef {
+            location: Location {
+                source: SourceId::Local,
+                path: PathBuf::from("/tmp"),
+            },
+            name: "한글 & %.txt".into(),
+        };
+        let remote = EntryRef {
+            location: Location {
+                source: SourceId::Ssh {
+                    connection_id: ConnectionId("review-only".into()),
+                    host_ip: "127.0.0.1".parse().unwrap(),
+                    user: "review".into(),
+                },
+                path: PathBuf::from("/remote"),
+            },
+            name: "x".into(),
+        };
+        assert!(local_paths_of(&[local, remote], "clipboard").is_err());
+        assert!(local_paths_of(&[], "clipboard").unwrap().is_empty());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_drive_root_resolves() {
+        let root = format!(
+            "{}\\",
+            std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into())
+        );
+        assert_eq!(resolve_open_path(&root), Some(root));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "shell-settings-09 repro: remote places/volumes use native path join"]
+    fn remote_places_and_volumes_keep_posix_separators() {
+        assert_eq!(
+            PathBuf::from("/home/review").join("Documents").to_str(),
+            Some("/home/review/Documents")
+        );
+        assert_eq!(
+            PathBuf::from("/media").join("review").to_str(),
+            Some("/media/review")
+        );
+        assert_eq!(
+            PathBuf::from("/mnt").join("문서").to_str(),
+            Some("/mnt/문서")
+        );
+    }
+}

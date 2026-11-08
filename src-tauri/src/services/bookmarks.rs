@@ -264,3 +264,50 @@ mod tests {
         assert!(s.add("  ".into(), loc("/x")).await.is_err());
     }
 }
+
+/// shell-settings 점검 재현 테스트.
+#[cfg(test)]
+mod review_shell_settings {
+    use super::*;
+    use crate::types::SourceId;
+    use tempfile::tempdir;
+
+    fn loc(p: &str) -> Location {
+        Location {
+            source: SourceId::Local,
+            path: PathBuf::from(p),
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "shell-settings-02 repro: 추가 실패한 북마크가 메모리에 남음"]
+    async fn failed_add_is_not_kept_in_memory() {
+        let dir = tempdir().unwrap();
+        let blocker = dir.path().join("cfg");
+        std::fs::write(&blocker, b"x").unwrap();
+        let s = BookmarksStore::load_from(&blocker.join("bookmarks.json"))
+            .await
+            .unwrap();
+        assert!(s.add("proj".into(), loc("/p")).await.is_err());
+        // 프론트는 "북마크를 추가하지 못했습니다" 를 띄웠는데 목록엔 들어가 있다.
+        assert!(s.list().await.is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "shell-settings-20 repro: 재정렬 요청에 같은 id 가 두 번 오면 다른 북마크가 사라짐"]
+    async fn reorder_with_duplicate_ids_never_drops_items() {
+        let dir = tempdir().unwrap();
+        let s = BookmarksStore::load_from(&dir.path().join("b.json"))
+            .await
+            .unwrap();
+        s.add("A".into(), loc("/a")).await.unwrap();
+        let list = s.add("B".into(), loc("/b")).await.unwrap();
+        let (a, b) = (list[0].id.clone(), list[1].id.clone());
+        let after = s
+            .reorder(vec![a.clone(), a.clone(), b.clone()])
+            .await
+            .unwrap();
+        let ids: Vec<&str> = after.iter().map(|x| x.id.as_str()).collect();
+        assert!(ids.contains(&b.as_str()), "B was dropped: {ids:?}");
+    }
+}
