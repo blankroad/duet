@@ -32,6 +32,19 @@ commands → services → core → fs → platform
 - `std::fs::remove_*`, `tokio::fs::remove_*`, SSH `rm` 직접 호출 금지
 - 모든 삭제는 `core::ops::DeleteOp` trait 통해서만
 
+**앱 소유 임시 폴더 정리 (2026-11 예외, 사용자 승인):** 사용자 데이터가 아니라 앱이 작업용으로
+만든 임시 폴더는 휴지통·journal 없이 직접 지운다 (로컬 `remove_dir_all`, 원격 SSH `rm -rf`).
+대상은 아래 목록뿐이다.
+- 로컬 압축 내부 보기: `<temp>/duet-archive/<token>/`
+- 원격 압축 내부 보기: `~/.duet-tmp/browse-<token>/`
+- 원격 sudo 업로드 준비: `~/.duet-sudo/<uuid>/`
+
+조건:
+- 경로는 앱 코드가 고정 접두사 + 생성한 토큰으로 조립한 것만 쓴다. 사용자 입력이나 목록에서 온 경로는 안 된다.
+- 지우기 직전에 그 모양인지 검사한다 (예: `archive::is_safe_browse_root`).
+- 셸 인자는 `shell_escape_path` 로 인용한다.
+- 새 임시 위치를 추가하려면 이 목록을 먼저 고친다.
+
 ### 4. 모든 파괴적 작업은 undo 가능해야 함
 
 - 복사/이동/이름변경/삭제 모두 작업 로그(`~/.duet/journal.jsonl`)에 기록
@@ -136,7 +149,7 @@ webview(렌더러) 메모리·DOM 에 존재하는 노출면을 없앤다. `vaul
 
 ## 절대 하지 말 것
 
-- ❌ `rm -rf`, `std::fs::remove_dir_all`, SSH `rm -rf` 직접 호출
+- ❌ `rm -rf`, `std::fs::remove_dir_all`, SSH `rm -rf` 직접 호출 (예외: §3 "앱 소유 임시 폴더 정리" 목록만)
 - ❌ 사용자 홈 디렉토리에서 테스트 (`~`, `C:\Users\...`, `/home/$USER`)
 - ❌ 백엔드 코드 없이 프론트엔드에서 fs/SSH 호출 시도 (Tauri의 `@tauri-apps/api/fs` 같은 거)
 - ❌ 키바인딩 하드코딩 (모든 키는 설정 가능)
