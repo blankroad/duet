@@ -143,6 +143,7 @@ import { useFsChangedEvents } from "@/hooks/useFsChangedEvents";
 import { useOpenPathEvents } from "@/hooks/useOpenPathEvents";
 import { useOsFileDrop } from "@/hooks/useOsFileDrop";
 import { useJournalEvents } from "@/hooks/useJournalEvents";
+import { useArchiveNoticeEvents } from "@/hooks/useArchiveNoticeEvents";
 import { useKeymapEvents } from "@/hooks/useKeymapEvents";
 import { useTaskEvents } from "@/hooks/useTaskEvents";
 import { useShellWarm } from "@/hooks/useShellWarm";
@@ -883,6 +884,7 @@ function App() {
   useOpenPathEvents(navigate);
   useOsFileDrop();
   useJournalEvents();
+  useArchiveNoticeEvents();
   useKeymapEvents();
   useIndexProgressEvents();
 

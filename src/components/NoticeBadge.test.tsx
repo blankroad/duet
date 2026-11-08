@@ -10,6 +10,7 @@ import i18n from "@/i18n";
 import { NoticeBadge } from "./NoticeBadge";
 import { useNotices } from "@/stores/notices";
 import { useToast } from "@/stores/toast";
+import { describeArchiveNotice } from "@/hooks/useArchiveNoticeEvents";
 
 afterEach(() => {
   cleanup();
@@ -111,5 +112,23 @@ describe("NoticeBadge", () => {
     expect(screen.getByRole("dialog")).toBeTruthy();
     fireEvent.pointerDown(document.body);
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+describe("archive notice text", () => {
+  it("summarises skipped links and renamed names, listing them in detail", () => {
+    const { message, detail } = describeArchiveNotice({
+      archive_name: "src.tar.gz",
+      skipped_links: ["lib/a.so"],
+      skipped_links_count: 3,
+      renamed: ["logs/10:00.txt"],
+      renamed_count: 1,
+    });
+    expect(message).toContain("src.tar.gz");
+    expect(message).toContain("3 links");
+    expect(message).toContain("1 name");
+    expect(detail).toContain("lib/a.so");
+    expect(detail).toContain(i18n.t("notices.more", { count: 2 }));
+    expect(detail).toContain("logs/10:00.txt");
   });
 });

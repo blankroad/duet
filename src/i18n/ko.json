@@ -868,7 +868,10 @@
     "bookmarkFailed": "북마크를 추가하지 못했습니다",
     "alreadyBookmarked": "“{{name}}” 은 이미 북마크되어 있습니다",
     "editSelectFile": "편집할 파일에 커서를 두세요",
-    "taskFailedOp": "{{op}} 실패 — {{msg}}"
+    "taskFailedOp": "{{op}} 실패 — {{msg}}",
+    "archiveNotice": "{{name}}: {{details}}",
+    "archiveLinksSkipped_other": "링크 {{count}}개는 이 PC에서 만들 수 없어 건너뛰었습니다 (Windows는 개발자 모드를 켜면 만들 수 있습니다).",
+    "archiveRenamed_other": "이름 {{count}}개는 쓸 수 없는 글자(: ? 등)를 _ 로 바꿔 풀었습니다."
   },
   "sidebar": {
     "tasks": "작업",
@@ -1360,6 +1363,9 @@
     "openRead": "최근 알림 보기",
     "title": "최근 알림",
     "clear": "모두 지우기",
-    "detail": "자세히"
+    "detail": "자세히",
+    "skippedLinks": "건너뛴 링크:",
+    "renamed": "이름을 바꾼 항목 (원래 이름):",
+    "more_other": "… 외 {{count}}개"
   }
 }

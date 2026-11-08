@@ -873,7 +873,12 @@
     "bookmarkFailed": "Could not add the bookmark",
     "alreadyBookmarked": "“{{name}}” is already bookmarked",
     "editSelectFile": "Put the cursor on a file to edit",
-    "taskFailedOp": "{{op}} failed — {{msg}}"
+    "taskFailedOp": "{{op}} failed — {{msg}}",
+    "archiveNotice": "{{name}}: {{details}}",
+    "archiveLinksSkipped_one": "{{count}} link couldn't be created on this PC and was skipped (on Windows, turn on Developer Mode to allow links).",
+    "archiveLinksSkipped_other": "{{count}} links couldn't be created on this PC and were skipped (on Windows, turn on Developer Mode to allow links).",
+    "archiveRenamed_one": "{{count}} name had characters this OS can't use (: ? etc.) and was extracted with _ instead.",
+    "archiveRenamed_other": "{{count}} names had characters this OS can't use (: ? etc.) and were extracted with _ instead."
   },
   "sidebar": {
     "tasks": "Tasks",
@@ -1321,6 +1326,10 @@
     "openRead": "Show recent notifications",
     "title": "Recent notifications",
     "clear": "Clear all",
-    "detail": "Details"
+    "detail": "Details",
+    "skippedLinks": "Skipped links:",
+    "renamed": "Renamed items (original names):",
+    "more_one": "… and {{count}} more",
+    "more_other": "… and {{count}} more"
   }
 }
