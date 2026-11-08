@@ -2026,3 +2026,64 @@ mod preview_tests {
         assert_eq!(image_mime(Path::new("noext")), None);
     }
 }
+
+#[cfg(test)]
+mod review_browse {
+    //! browse 점검 재현 테스트 — 미리보기 텍스트 디코드(C-03).
+    use super::*;
+
+    fn text_of(p: &PreviewData) -> &str {
+        p.text.as_deref().unwrap_or("")
+    }
+
+    #[test]
+    #[ignore = "browse-06 repro"]
+    fn utf16le_text_is_shown_as_text() {
+        // "가a" UTF-16LE + BOM — 메모장 "유니코드" 저장 형식.
+        let bytes = [0xFF, 0xFE, 0x00, 0xAC, 0x61, 0x00];
+        let p = decode_text(&bytes, false, bytes.len() as u64);
+        assert!(
+            matches!(p.kind, PreviewKind::Text),
+            "UTF-16 텍스트가 Binary 로 판정됨"
+        );
+    }
+
+    #[test]
+    #[ignore = "browse-06 repro"]
+    fn cp949_text_is_shown_as_text() {
+        // "한글" CP949(EUC-KR) — Windows 한국어 메모장 ANSI 저장 형식.
+        let bytes = [0xC7, 0xD1, 0xB1, 0xDB, b'\n'];
+        let p = decode_text(&bytes, false, bytes.len() as u64);
+        assert!(
+            matches!(p.kind, PreviewKind::Text),
+            "CP949 텍스트가 Binary 로 판정됨"
+        );
+    }
+
+    #[test]
+    #[ignore = "browse-06 repro"]
+    fn non_utf8_tail_is_not_silently_dropped() {
+        // ASCII 머리 + CP949 본문: 머리만 보이고 잘렸다는 표시(truncated)도 없다.
+        let mut bytes = b"title: report\n".to_vec();
+        bytes.extend_from_slice(&[0xC7, 0xD1, 0xB1, 0xDB]);
+        let total = bytes.len() as u64;
+        let p = decode_text(&bytes, false, total);
+        assert!(matches!(p.kind, PreviewKind::Text));
+        let shown = text_of(&p).len() as u64;
+        assert!(
+            shown == total || p.truncated,
+            "본문 {}B 중 {}B 만 보이는데 truncated=false",
+            total,
+            shown
+        );
+    }
+
+    #[test]
+    fn utf8_head_cut_mid_char_is_safe() {
+        // cap 에서 멀티바이트 중간이 잘린 경우: 유효 prefix 만, truncated 유지.
+        let s = "가나다".as_bytes();
+        let p = decode_text(&s[..4], true, 9);
+        assert_eq!(text_of(&p), "가");
+        assert!(p.truncated);
+    }
+}

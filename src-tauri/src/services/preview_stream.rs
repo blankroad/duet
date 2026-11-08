@@ -263,3 +263,36 @@ mod tests {
         assert_eq!(content_range_end(100, 1), Some(100));
     }
 }
+
+#[cfg(test)]
+mod review_browse {
+    //! browse 점검 재현 — 열린 Range(`bytes=0-`) 응답 크기(C-03).
+    //! `try_handle` 은 AppHandle 이 필요해 직접 못 부른다. 아래는 그 함수의 Range 분기
+    //! 산술(위 `try_handle` 의 `end`/`want` 계산)을 그대로 따라 한 뒤 실제 `LocalFs::read_range`
+    //! 로 읽는다 — Chromium(WebView2) `<video>` 는 첫 요청을 `bytes=0-` 로 보낸다.
+    use super::*;
+
+    #[tokio::test]
+    #[ignore = "browse-01 repro"]
+    async fn open_ended_range_is_capped() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("movie.mp4");
+        // 64 MB 희소 파일 (디스크는 거의 안 씀).
+        let f = std::fs::File::create(&p).unwrap();
+        f.set_len(64 * 1024 * 1024).unwrap();
+        drop(f);
+        let total = std::fs::metadata(&p).unwrap().len();
+
+        let (start, end_opt) = parse_range("bytes=0-").unwrap();
+        let last = total.saturating_sub(1);
+        let end = end_opt.unwrap_or(last).min(last);
+        let want = (end.saturating_sub(start) + 1) as usize;
+        let bytes = LocalFs::new().read_range(&p, start, want).await.unwrap();
+        // 기대: 한 응답은 상한(MAX_FULL = 16MB 등) 이하로 잘라 206 으로 돌려준다.
+        assert!(
+            bytes.len() <= MAX_FULL,
+            "bytes=0- 한 번에 {} MB 를 메모리로 읽음 (파일 전체)",
+            bytes.len() / (1024 * 1024)
+        );
+    }
+}

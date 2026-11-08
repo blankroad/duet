@@ -417,3 +417,39 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod review_browse {
+    use super::*;
+    use crate::fs::LocalFs;
+
+    #[tokio::test]
+    #[ignore = "browse-02 repro (F-sol-08)"]
+    async fn changed_remote_must_not_be_silently_overwritten_by_stale_edit() {
+        let fixture = tempfile::tempdir().unwrap();
+        let remote = fixture.path().join("remote.txt");
+        let fs = LocalFs::new();
+        tokio::fs::write(&remote, b"initial").await.unwrap();
+        let mut session = EditSession::default();
+        let temp = session
+            .prepare(&fs, &remote, &fixture.path().join("edits"))
+            .await
+            .unwrap();
+        tokio::fs::write(&remote, b"another user's update")
+            .await
+            .unwrap();
+        tokio::fs::write(&temp, b"my stale local update")
+            .await
+            .unwrap();
+        // spawn_edit_watch calls this same helper after detecting a local mtime change.
+        let result = upload(&fs, &remote, &temp).await;
+        assert!(
+            result.is_err(),
+            "conflicting remote write unexpectedly succeeded"
+        );
+        assert_eq!(
+            tokio::fs::read(remote).await.unwrap(),
+            b"another user's update"
+        );
+    }
+}

@@ -233,3 +233,23 @@ mod tests {
         assert_eq!(&jpeg[0..2], &[0xff, 0xd8]); // JPEG SOI
     }
 }
+
+#[cfg(test)]
+mod review_browse {
+    use super::*;
+
+    #[test]
+    fn empty_and_corrupt_images_fall_back() {
+        assert!(generate(&[]).is_none());
+        assert!(generate(b"\x89PNG\r\n\x1a\ninvalid").is_none());
+        assert!(generate(b"\xff\xd8truncated jpeg").is_none());
+    }
+
+    #[test]
+    fn cache_identity_distinguishes_sources_and_changed_metadata() {
+        let key = cache_key("/local/abc", 1, 20);
+        assert_ne!(key, cache_key("/local/abc", 2, 20));
+        assert_ne!(key, cache_key("/local/abc", 1, 21));
+        assert_ne!(key, cache_key("/ssh/conn/abc", 1, 20));
+    }
+}
