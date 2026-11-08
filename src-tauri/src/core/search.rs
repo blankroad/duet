@@ -814,3 +814,59 @@ mod tests {
         assert_eq!(hits.len(), 0);
     }
 }
+
+#[cfg(test)]
+mod review_sync_compare {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn remote_content_command_keeps_special_queries_literal() {
+        let dir = tempfile::tempdir().unwrap();
+        let patterns = [
+            "it's",
+            "\"quote\"",
+            "$(printf INJECTED)",
+            "*",
+            "[abc]",
+            "-option",
+            "한글",
+        ];
+        for (i, pattern) in patterns.iter().enumerate() {
+            std::fs::write(dir.path().join(format!("hit{i}")), pattern.as_bytes()).unwrap();
+        }
+        let quoted = crate::core::copy_strategy::shell_escape_path(dir.path()).unwrap();
+        for (i, pattern) in patterns.iter().enumerate() {
+            let cmd = build_remote_content_cmd(&quoted, pattern, true, true, 100);
+            let out = std::process::Command::new("/bin/sh")
+                .arg("-c")
+                .arg(cmd)
+                .output()
+                .unwrap();
+            assert!(out.status.success());
+            let stdout = String::from_utf8(out.stdout).unwrap();
+            assert_eq!(
+                stdout.trim(),
+                dir.path().join(format!("hit{i}")).to_str().unwrap()
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "sync-compare repro: F-sol-12 newline filename splits into two search hits"]
+    fn remote_newline_filename_is_one_search_hit() {
+        let id = crate::types::ConnectionId("review".into());
+        let hits = parse_find_output(
+            "/fixture/line\nbreak.txt\n",
+            &id,
+            "127.0.0.1".parse().unwrap(),
+            "u",
+        );
+        assert_eq!(
+            hits.len(),
+            1,
+            "a newline filename must not become two invented paths"
+        );
+        assert_eq!(hits[0].name, "line\nbreak.txt");
+    }
+}

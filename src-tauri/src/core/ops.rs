@@ -6716,3 +6716,110 @@ mod review_fileops_opus_r2 {
         assert!(!escaped, "rename moved the file out of its folder");
     }
 }
+
+
+/// sync-compare 점검 라운드(2026-11-08) 재현 테스트 — lead. 제품 코드 변경 없음.
+// chmod 로 읽기 실패를 만드는 unix 전용 재현.
+#[cfg(all(test, unix))]
+mod review_sync_compare_lead {
+    use super::*;
+    use crate::fs::LocalFs;
+    use std::os::unix::fs::PermissionsExt;
+    use tempfile::TempDir;
+
+    async fn mk_ctx(dir: &std::path::Path) -> OpCtx {
+        let settings = crate::services::settings::SettingsStore::load_from(&dir.join("s.toml"))
+            .await
+            .unwrap();
+        let journal = crate::services::journal::Journal::load_from(&dir.join("j.jsonl"))
+            .await
+            .unwrap();
+        OpCtx {
+            settings,
+            journal,
+            pool: None,
+            app: None,
+        }
+    }
+
+    fn loc(p: &std::path::Path) -> Location {
+        Location {
+            source: SourceId::Local,
+            path: p.to_path_buf(),
+        }
+    }
+
+    /// src 에 읽을 수 없는 파일이 하나 있으면 sync 가 중간에 실패한다. 이때
+    /// (1) 덮어쓰려던 dst 원본이 제자리에 남아 있어야 하고
+    /// (2) 이미 반영된 부분(새 파일·덮어쓴 파일)이 journal 에 남아 Ctrl+Z 할 수 있어야 한다(§4).
+    async fn run_failing_sync() -> (
+        TempDir,
+        std::path::PathBuf,
+        Result<JournalEntry, DuetError>,
+        OpCtx,
+    ) {
+        let dir = TempDir::new().unwrap();
+        let src = dir.path().join("src");
+        let dst = dir.path().join("dst");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&dst).unwrap();
+        std::fs::write(src.join("a_new.txt"), b"fresh").unwrap();
+        std::fs::write(src.join("b_changed.txt"), b"NEW-content").unwrap();
+        std::fs::write(dst.join("b_changed.txt"), b"old").unwrap();
+        // c: dst 에 사용자 원본(old-c), src 쪽은 크기가 달라 덮어쓰기 대상이지만 읽기 불가.
+        std::fs::write(src.join("c_locked.txt"), b"locked-new-content").unwrap();
+        std::fs::write(dst.join("c_locked.txt"), b"old-c").unwrap();
+        std::fs::set_permissions(
+            src.join("c_locked.txt"),
+            std::fs::Permissions::from_mode(0o000),
+        )
+        .unwrap();
+
+        let fs = LocalFs::new();
+        let ctx = mk_ctx(dir.path()).await;
+        let plan = sync_plan(&fs, &fs, loc(&src), loc(&dst)).await.unwrap();
+        let r = sync_execute(
+            &fs,
+            &fs,
+            plan,
+            &ctx,
+            tokio_util::sync::CancellationToken::new(),
+            None,
+        )
+        .await;
+        // 정리 가능하도록 권한 복구.
+        std::fs::set_permissions(
+            src.join("c_locked.txt"),
+            std::fs::Permissions::from_mode(0o644),
+        )
+        .unwrap();
+        (dir, dst, r, ctx)
+    }
+
+    #[tokio::test]
+    #[ignore = "sync-compare repro: sync 중간 실패 시 dst 원본이 .bak 로 옮겨진 채 제자리에서 사라짐"]
+    async fn review_sync_failure_keeps_dst_original_in_place() {
+        let (_dir, dst, r, _ctx) = run_failing_sync().await;
+        assert!(r.is_err(), "unreadable src file must fail the sync");
+        let names: Vec<String> = std::fs::read_dir(&dst)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            dst.join("c_locked.txt").exists(),
+            "dst original vanished from its place after failed sync; dst now = {names:?}"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "sync-compare repro: sync 중간 실패/취소 시 이미 반영한 변경이 journal 에 안 남아 undo 불가"]
+    async fn review_sync_failure_journals_partial_progress() {
+        let (_dir, _dst, r, ctx) = run_failing_sync().await;
+        assert!(r.is_err());
+        let hist = ctx.journal.history(10).await;
+        assert!(
+            !hist.is_empty(),
+            "partial sync (new a_new.txt / overwritten b_changed.txt) left no journal entry → Ctrl+Z impossible"
+        );
+    }
+}

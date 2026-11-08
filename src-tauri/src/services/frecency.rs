@@ -290,3 +290,68 @@ mod tests {
         assert!(matches!(hits[0].location.source, SourceId::Local));
     }
 }
+
+#[cfg(test)]
+mod review_sync_compare_opus_frecency {
+    //! sync-compare 점검 (C-25) — 점퍼 질의 매칭 재현 테스트 (제품 코드 무변경).
+    use super::*;
+    use tempfile::tempdir;
+
+    fn loc(p: &str) -> Location {
+        Location {
+            source: SourceId::Local,
+            path: PathBuf::from(p),
+        }
+    }
+
+    #[tokio::test]
+    async fn nfc_query_matches_nfc_korean_path() {
+        let dir = tempdir().unwrap();
+        let s = FrecencyStore::load_from(&dir.path().join("f.json"))
+            .await
+            .unwrap();
+        s.record(loc("/data/문서/보고서"), None, 1000)
+            .await
+            .unwrap();
+        assert_eq!(s.query("보고", 10, 2000).await.len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "sync-compare repro: NFD 로 저장된 한글 경로(macOS 유래)는 NFC 질의로 안 잡힘"]
+    async fn nfc_query_matches_nfd_korean_path() {
+        let dir = tempdir().unwrap();
+        let s = FrecencyStore::load_from(&dir.path().join("f.json"))
+            .await
+            .unwrap();
+        // "문서" NFD (자모 분해) — U+1106 U+116E U+11AB U+1109 U+1165
+        let nfd = "/data/\u{1106}\u{116E}\u{11AB}\u{1109}\u{1165}";
+        s.record(loc(nfd), None, 1000).await.unwrap();
+        assert_eq!(s.query("문서", 10, 2000).await.len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "sync-compare repro: 여러 단어 질의(zoxide 식 'proj src')는 한 덩어리 부분문자열이라 0건"]
+    async fn multi_keyword_query() {
+        let dir = tempdir().unwrap();
+        let s = FrecencyStore::load_from(&dir.path().join("f.json"))
+            .await
+            .unwrap();
+        s.record(loc("/home/u/proj/app/src"), None, 1000)
+            .await
+            .unwrap();
+        assert_eq!(s.query("proj src", 10, 2000).await.len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "sync-compare repro: Windows 경로(역슬래시)는 '/' 섞인 질의로 안 잡힘"]
+    async fn slash_query_matches_windows_path() {
+        let dir = tempdir().unwrap();
+        let s = FrecencyStore::load_from(&dir.path().join("f.json"))
+            .await
+            .unwrap();
+        s.record(loc(r"C:\Users\u\proj\src"), None, 1000)
+            .await
+            .unwrap();
+        assert_eq!(s.query("proj/src", 10, 2000).await.len(), 1);
+    }
+}

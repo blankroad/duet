@@ -2087,3 +2087,69 @@ mod review_browse {
         assert!(p.truncated);
     }
 }
+
+
+#[cfg(test)]
+mod review_sync_compare_opus_preview {
+    //! sync-compare 점검 (C-09) — 비교 미리보기 디코딩 재현 테스트 (제품 코드 무변경).
+    use super::decode_text;
+    use crate::types::PreviewKind;
+
+    /// "제목: 보고서\n" 다음에 CP949 "한글" + 나머지 줄.
+    fn cp949_after_ascii() -> Vec<u8> {
+        let mut b = b"title: report\n".to_vec();
+        b.extend_from_slice(&[0xC7, 0xD1, 0xB1, 0xDB]); // CP949 "한글"
+        b.extend_from_slice(b"\nline3 after korean\nline4\n");
+        b
+    }
+
+    #[test]
+    #[ignore = "sync-compare repro: CP949 텍스트가 첫 비-UTF8 바이트에서 조용히 잘리고 truncated=false"]
+    fn cp949_text_is_not_silently_cut() {
+        let bytes = cp949_after_ascii();
+        let d = decode_text(&bytes, false, bytes.len() as u64);
+        // 기대: 뒤 내용을 버렸다면 최소한 truncated 로 알려야 한다 (또는 Binary/인코딩 안내).
+        let text = d.text.clone().unwrap_or_default();
+        let shows_all = text.contains("line3 after korean");
+        assert!(
+            d.kind != PreviewKind::Text || d.truncated || shows_all,
+            "kind={:?} truncated={} text={:?}",
+            d.kind,
+            d.truncated,
+            text
+        );
+    }
+
+    #[test]
+    fn cp949_text_current_behavior_prefix_only() {
+        // 현재 동작 기록: 앞 ASCII 줄만 Text 로, truncated=false.
+        let bytes = cp949_after_ascii();
+        let d = decode_text(&bytes, false, bytes.len() as u64);
+        assert_eq!(d.kind, PreviewKind::Text);
+        assert_eq!(d.text.as_deref(), Some("title: report\n"));
+        assert!(!d.truncated);
+    }
+
+    #[test]
+    fn cp949_starting_with_korean_is_binary() {
+        // 첫 바이트부터 비-UTF8 → valid_len 0 → Binary ("binary" 로 표시).
+        let d = decode_text(&[0xC7, 0xD1, 0xB1, 0xDB, b'\n'], false, 5);
+        assert_eq!(d.kind, PreviewKind::Binary);
+    }
+
+    #[test]
+    fn utf16le_with_bom_is_binary() {
+        // "ab\n" UTF-16LE + BOM — NUL 바이트 때문에 Binary.
+        let bytes = [0xFF, 0xFE, b'a', 0, b'b', 0, b'\n', 0];
+        let d = decode_text(&bytes, false, bytes.len() as u64);
+        assert_eq!(d.kind, PreviewKind::Binary);
+    }
+
+    #[test]
+    fn utf8_with_bom_keeps_bom_char() {
+        // UTF-8 BOM 은 그대로 U+FEFF 로 남는다 → BOM 유무만 다른 파일은 1번째 줄이 다르게 보임.
+        let d = decode_text(b"\xEF\xBB\xBFabc\n", false, 7);
+        assert_eq!(d.kind, PreviewKind::Text);
+        assert!(d.text.unwrap().starts_with('\u{FEFF}'));
+    }
+}

@@ -834,3 +834,43 @@ mod tests {
         assert_eq!(hits.len(), 2);
     }
 }
+
+#[cfg(test)]
+mod review_sync_compare {
+    use super::*;
+
+    #[tokio::test]
+    #[ignore = "sync-compare repro: F-sol-06 folder reindex leaves search-visible global index stale"]
+    async fn global_results_reflect_folder_reindex() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("old_needle"), b"x").unwrap();
+        let idx = FileIndex::new(cache.path().into());
+        idx.build_global_from_roots(vec![dir.path().into()], |_| {})
+            .await
+            .unwrap();
+        std::fs::write(dir.path().join("new_needle"), b"x").unwrap();
+        // index_reindex/index_ensure call build_local, while index_search still prefers global.
+        idx.build_local(dir.path()).await.unwrap();
+        let folder = idx
+            .query(
+                &SourceId::Local,
+                dir.path(),
+                "new_needle",
+                &SearchOpts::default(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(folder.len(), 1);
+        let global = idx
+            .query_global_local("new_needle", &SearchOpts::default())
+            .await
+            .unwrap();
+        assert_eq!(
+            global.len(),
+            1,
+            "the search-visible index must reflect a completed reindex"
+        );
+    }
+}
