@@ -175,3 +175,34 @@ mod tests {
         );
     }
 }
+
+/// fileops 점검 라운드(2026-11-08) 재현 테스트 — lead.
+#[cfg(test)]
+mod review_fileops_lead {
+    use super::*;
+    use std::net::{IpAddr, Ipv4Addr};
+
+    fn ssh(ip: IpAddr, conn_id: &str) -> SourceId {
+        SourceId::Ssh {
+            connection_id: crate::types::ConnectionId(conn_id.into()),
+            host_ip: ip,
+            user: "u".into(),
+        }
+    }
+
+    /// 포트 포워딩/Vagrant/도커처럼 **서로 다른 서버**가 같은 IP(127.0.0.1)의 다른 포트로
+    /// 붙는 경우, 두 연결은 같은 호스트가 아니다. 지금은 IP 만 비교해 SshSameHost 로 판정 →
+    /// 서버측 `cp/rsync` 가 **src 서버 안에서** dst 경로로 복사한다(엉뚱한 기계에 기록).
+    #[test]
+    #[ignore = "fileops-05 repro"]
+    fn loopback_ip_on_different_connections_is_not_same_host() {
+        let lo = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let a = ssh(lo, "conn-vm1-port2222");
+        let b = ssh(lo, "conn-vm2-port2200");
+        assert_ne!(
+            decide(&a, &b),
+            CopyStrategy::SshSameHost,
+            "서로 다른 포트의 두 서버(같은 127.0.0.1)를 같은 호스트로 판정"
+        );
+    }
+}

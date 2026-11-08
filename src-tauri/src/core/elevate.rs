@@ -427,3 +427,69 @@ mod tests {
         assert!(tmp.path().join("out (1).txt").exists());
     }
 }
+
+/// fileops 점검 라운드(2026-11-08) 재현 테스트 — lead.
+#[cfg(test)]
+mod review_fileops_lead {
+    use super::*;
+
+    /// 폴더 교체(Overwrite)는 CLAUDE.md §4 폴더 예외상 되돌릴 수 있어야 한다 —
+    /// 승격 경로는 성공 시 백업 폴더를 영구 삭제해 기존 폴더에만 있던 파일이 사라진다.
+    #[test]
+    #[ignore = "fileops-10 repro"]
+    fn elevated_folder_overwrite_keeps_backup_for_undo() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src").join("d");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("new.txt"), b"NEW").unwrap();
+        let dst = tmp.path().join("dst").join("d");
+        std::fs::create_dir_all(&dst).unwrap();
+        std::fs::write(dst.join("only-old.txt"), b"OLD").unwrap();
+
+        copy_one(&src, &dst, ElevatedConflict::Overwrite).unwrap();
+
+        // 기존에만 있던 파일이 어딘가(백업)에 남아 있어야 한다.
+        let survivors: Vec<_> = std::fs::read_dir(dst.parent().unwrap())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().join("only-old.txt").exists())
+            .collect();
+        assert!(
+            !survivors.is_empty(),
+            "폴더 교체 후 기존 폴더의 only-old.txt 가 영구 삭제됨 (백업 미보존)"
+        );
+    }
+
+    /// 폴더 덮어쓰기 중 복사가 실패하면 원본이 제자리로 돌아와야 한다(§4 실패 안전).
+    /// 부분 복사된 dst 폴더가 남아 있으면 rename(bak→dst) 롤백이 실패하는데 그 실패를 삼킨다.
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "fileops-09 repro"]
+    fn elevated_folder_overwrite_failure_rolls_back_original() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src").join("d");
+        // 하위 폴더 `sub` 는 복사 시작 시 먼저 만들어지므로(create_dir_all) 실패 순서와
+        // 무관하게 dst 에 부분 복사본이 남는다.
+        std::fs::create_dir_all(src.join("sub")).unwrap();
+        std::fs::write(src.join("sub").join("a-ok.txt"), b"ok").unwrap();
+        let locked = src.join("sub").join("z-locked.txt");
+        std::fs::write(&locked, b"secret").unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let dst = tmp.path().join("dst").join("d");
+        std::fs::create_dir_all(&dst).unwrap();
+        std::fs::write(dst.join("only-old.txt"), b"OLD").unwrap();
+
+        let r = copy_one(&src, &dst, ElevatedConflict::Overwrite);
+        // 정리: tempdir 가 지울 수 있게 권한 복구.
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o600)).unwrap();
+        if r.is_ok() {
+            // root 로 돌면 0o000 도 읽힌다 — 재현 불가 환경.
+            return;
+        }
+        assert!(
+            dst.join("only-old.txt").exists(),
+            "복사 실패 후 원본 폴더가 제자리로 롤백되지 않음 (부분 복사본이 남고 원본은 .duet-elevbak 로 숨음)"
+        );
+    }
+}

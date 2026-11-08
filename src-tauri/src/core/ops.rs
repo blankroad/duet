@@ -5607,3 +5607,1112 @@ mod tests {
         assert!(dir.path().join("검증 폴더").is_dir());
     }
 }
+
+
+#[cfg(test)]
+mod review_fileops_sol {
+    use super::*;
+    use crate::fs::LocalFs;
+    use crate::types::{Entry, EntryKind, EntryMeta};
+    use std::io::Write;
+    use std::path::Path;
+    use std::pin::Pin;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::task::{Context, Poll};
+    use tokio::io::{AsyncRead, AsyncWrite};
+    use tokio_util::sync::CancellationToken;
+
+    fn loc(p: &Path) -> Location {
+        Location {
+            source: SourceId::Local,
+            path: p.to_path_buf(),
+        }
+    }
+    fn target(p: &Path, name: &str) -> EntryRef {
+        EntryRef {
+            location: loc(p),
+            name: name.into(),
+        }
+    }
+    async fn ctx(p: &Path) -> OpCtx {
+        OpCtx {
+            journal: Journal::load_from(&p.join("review-journal.jsonl"))
+                .await
+                .unwrap(),
+            settings: SettingsStore::load_from(&p.join("review-settings.toml"))
+                .await
+                .unwrap(),
+            pool: None,
+            app: None,
+        }
+    }
+    fn setup() -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let t = tempfile::tempdir().unwrap();
+        let s = t.path().join("src");
+        let d = t.path().join("dst");
+        std::fs::create_dir(&s).unwrap();
+        std::fs::create_dir(&d).unwrap();
+        (t, s, d)
+    }
+    async fn cp(
+        sf: &dyn FileSystem,
+        df: &dyn FileSystem,
+        s: &Path,
+        name: &str,
+        d: &Path,
+        policy: ConflictPolicy,
+        c: &OpCtx,
+        cancel: CancellationToken,
+    ) -> Result<JournalEntry, DuetError> {
+        let plan = copy_plan(sf, df, vec![target(s, name)], loc(d)).await?;
+        copy_execute(sf, df, plan, policy, c, cancel, None).await
+    }
+    async fn mv(
+        sf: &dyn FileSystem,
+        df: &dyn FileSystem,
+        s: &Path,
+        name: &str,
+        d: &Path,
+        c: &OpCtx,
+    ) -> Result<JournalEntry, DuetError> {
+        let plan = move_plan(sf, df, vec![target(s, name)], loc(d)).await?;
+        move_execute(
+            sf,
+            df,
+            plan,
+            ConflictPolicy::Replace,
+            c,
+            CancellationToken::new(),
+            None,
+        )
+        .await
+    }
+
+    /// All mutations remain in a TempDir. Native copying sees real paths; trash never uses OS APIs.
+    struct FaultFs {
+        root: PathBuf,
+        cross_from: Option<PathBuf>,
+        fail_trash: bool,
+        stream: bool,
+        write_limit: Option<usize>,
+        cancel_on_write: Option<CancellationToken>,
+        cancel_only: Option<PathBuf>,
+        fail_list_at: Option<PathBuf>,
+        fail_renames: Vec<usize>,
+        renames: AtomicUsize,
+    }
+    impl FaultFs {
+        fn new(root: &Path) -> Self {
+            Self {
+                root: root.into(),
+                cross_from: None,
+                fail_trash: false,
+                stream: false,
+                write_limit: None,
+                cancel_on_write: None,
+                cancel_only: None,
+                fail_list_at: None,
+                fail_renames: vec![],
+                renames: AtomicUsize::new(0),
+            }
+        }
+    }
+    struct Writer {
+        file: std::fs::File,
+        left: Option<usize>,
+        cancel: Option<CancellationToken>,
+    }
+    impl AsyncWrite for Writer {
+        fn poll_write(
+            mut self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+            bytes: &[u8],
+        ) -> Poll<std::io::Result<usize>> {
+            let len = self.left.unwrap_or(bytes.len()).min(bytes.len());
+            if len == 0 {
+                return Poll::Ready(Err(std::io::Error::from_raw_os_error(28)));
+            }
+            let result = self.file.write(&bytes[..len]);
+            if let Ok(n) = result {
+                if let Some(left) = self.left.as_mut() {
+                    *left -= n;
+                }
+                if let Some(cancel) = &self.cancel {
+                    cancel.cancel();
+                }
+            }
+            Poll::Ready(result)
+        }
+        fn poll_flush(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            Poll::Ready(self.file.flush())
+        }
+        fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            self.poll_flush(cx)
+        }
+    }
+    #[async_trait::async_trait]
+    impl FileSystem for FaultFs {
+        fn source_id(&self) -> SourceId {
+            SourceId::Local
+        }
+        fn validate_new_name(&self, name: &str) -> Result<(), DuetError> {
+            LocalFs.validate_new_name(name)
+        }
+        async fn list(&self, path: &Path) -> Result<Vec<Entry>, DuetError> {
+            if self.fail_list_at.as_deref() == Some(path) {
+                return Err(DuetError::PermissionDenied("injected list failure".into()));
+            }
+            let mut entries = LocalFs.list(path).await?;
+            entries.sort_by(|a, b| a.name.cmp(&b.name));
+            Ok(entries)
+        }
+        async fn metadata(&self, path: &Path) -> Result<EntryMeta, DuetError> {
+            let mut m = LocalFs.metadata(path).await?;
+            if self.stream && m.kind == EntryKind::File {
+                m.size = Some(65 * 1024 * 1024);
+            }
+            Ok(m)
+        }
+        async fn dir_size(&self, path: &Path) -> Result<u64, DuetError> {
+            LocalFs.dir_size(path).await
+        }
+        async fn rename(&self, from: &Path, to: &Path) -> Result<(), DuetError> {
+            let n = self.renames.fetch_add(1, Ordering::SeqCst) + 1;
+            if self
+                .cross_from
+                .as_ref()
+                .is_some_and(|s| from.starts_with(s))
+            {
+                return Err(DuetError::CrossDevice("injected volume boundary".into()));
+            }
+            if self.fail_renames.contains(&n) {
+                return Err(DuetError::PermissionDenied(format!("injected rename #{n}")));
+            }
+            LocalFs.rename(from, to).await
+        }
+        async fn mkdir(&self, path: &Path) -> Result<(), DuetError> {
+            LocalFs.mkdir(path).await
+        }
+        async fn trash(&self, path: &Path, _: &str) -> Result<TrashLocation, DuetError> {
+            if self.fail_trash {
+                return Err(DuetError::NotSupported("injected no recycle bin".into()));
+            }
+            let dest = self.root.join(format!(
+                "trashed-{}",
+                path.file_name().unwrap().to_string_lossy()
+            ));
+            LocalFs.rename(path, &dest).await?;
+            Ok(TrashLocation::Local {
+                trash_id: dest.to_string_lossy().into_owned(),
+            })
+        }
+        async fn remove(&self, path: &Path) -> Result<(), DuetError> {
+            LocalFs.remove(path).await
+        }
+        async fn restore_from_trash(&self, _: &TrashLocation, _: &Path) -> Result<(), DuetError> {
+            panic!("review fixture never uses OS trash")
+        }
+        async fn read_full(&self, path: &Path) -> Result<Vec<u8>, DuetError> {
+            LocalFs.read_full(path).await
+        }
+        async fn write_full(&self, path: &Path, bytes: &[u8]) -> Result<(), DuetError> {
+            LocalFs.write_full(path, bytes).await
+        }
+        async fn open_read(
+            &self,
+            path: &Path,
+            offset: u64,
+        ) -> Result<Pin<Box<dyn AsyncRead + Send>>, DuetError> {
+            LocalFs.open_read(path, offset).await
+        }
+        async fn open_write(
+            &self,
+            path: &Path,
+            offset: u64,
+        ) -> Result<Pin<Box<dyn AsyncWrite + Send>>, DuetError> {
+            if self.write_limit.is_none() && self.cancel_on_write.is_none() {
+                return LocalFs.open_write(path, offset).await;
+            }
+            assert_eq!(offset, 0, "fault writer is fresh-only");
+            Ok(Box::pin(Writer {
+                file: std::fs::File::create(path)?,
+                left: self.write_limit,
+                cancel: self
+                    .cancel_on_write
+                    .clone()
+                    .filter(|_| self.cancel_only.as_deref().is_none_or(|p| p == path)),
+            }))
+        }
+    }
+
+    #[tokio::test]
+    async fn c01_policies_and_folder_replace_undo() {
+        let (t, s, d) = setup();
+        let c = ctx(t.path()).await;
+        std::fs::write(s.join("a.txt"), b"NEW").unwrap();
+        std::fs::write(d.join("a.txt"), b"OLD").unwrap();
+        for policy in [
+            ConflictPolicy::Skip,
+            ConflictPolicy::KeepBoth,
+            ConflictPolicy::Replace,
+        ] {
+            let e = cp(
+                &LocalFs,
+                &LocalFs,
+                &s,
+                "a.txt",
+                &d,
+                policy,
+                &c,
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+            let UndoAction::UndoCopy {
+                copied,
+                backups_to_restore,
+                ..
+            } = e.undo
+            else {
+                panic!()
+            };
+            assert!(backups_to_restore.is_empty());
+            assert_eq!(
+                copied.len(),
+                if policy == ConflictPolicy::Skip { 0 } else { 1 }
+            );
+            assert_eq!(
+                std::fs::read(d.join("a.txt")).unwrap(),
+                if policy == ConflictPolicy::Replace {
+                    b"NEW"
+                } else {
+                    b"OLD"
+                }
+            );
+        }
+        assert_eq!(std::fs::read(d.join("a (1).txt")).unwrap(), b"NEW");
+        assert_eq!(std::fs::read_dir(&d).unwrap().count(), 2);
+        std::fs::create_dir(s.join("folder")).unwrap();
+        std::fs::create_dir(d.join("folder")).unwrap();
+        std::fs::write(s.join("folder/new"), b"NEW").unwrap();
+        std::fs::write(d.join("folder/only-old"), b"OLD").unwrap();
+        let e = cp(
+            &LocalFs,
+            &LocalFs,
+            &s,
+            "folder",
+            &d,
+            ConflictPolicy::Replace,
+            &c,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        let out = crate::core::undo::execute_undo(
+            &e,
+            &crate::services::connection_pool::ConnectionPool::new(),
+        )
+        .await;
+        assert!(
+            matches!(out.kind, crate::core::undo::UndoKind::Ok),
+            "{out:?}"
+        );
+        assert_eq!(std::fs::read(d.join("folder/only-old")).unwrap(), b"OLD");
+        assert!(!d.join("folder/new").exists());
+    }
+
+    async fn descendant_copy(dst_inside: &str) {
+        let t = tempfile::tempdir().unwrap();
+        let s = t.path().join("a");
+        let d = if dst_inside.is_empty() {
+            s.clone()
+        } else {
+            s.join(dst_inside)
+        };
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(s.join("file"), b"payload").unwrap();
+        let c = ctx(t.path()).await;
+        let plan = copy_plan(&LocalFs, &LocalFs, vec![target(t.path(), "a")], loc(&d)).await;
+        assert!(plan.is_ok(), "repro currently reaches execution");
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            copy_execute(
+                &LocalFs,
+                &LocalFs,
+                plan.unwrap(),
+                ConflictPolicy::Skip,
+                &c,
+                CancellationToken::new(),
+                None,
+            ),
+        )
+        .await;
+        let mut cursor = d.join("a");
+        let mut depth = 0;
+        while cursor.is_dir() && depth < 500 {
+            depth += 1;
+            cursor = if dst_inside.is_empty() {
+                cursor.join("a")
+            } else {
+                cursor.join(dst_inside).join("a")
+            };
+        }
+        let hist = c.journal.history(100).await;
+        eprintln!(
+            "C02 dst={dst_inside:?} result={result:?} nested_depth={depth} journal_entries={}",
+            hist.len()
+        );
+        assert_eq!(std::fs::read(s.join("file")).unwrap(), b"payload");
+        assert_eq!(
+            depth, 0,
+            "unsafe self-descendant copy must be rejected before mkdir"
+        );
+    }
+    #[tokio::test]
+    #[ignore = "fileops-04 repro"]
+    async fn c02_reject_copy_into_child() {
+        descendant_copy("sub").await;
+    }
+    #[tokio::test]
+    #[ignore = "fileops-04 repro"]
+    async fn c02_reject_copy_into_itself() {
+        descendant_copy("").await;
+    }
+
+    #[tokio::test]
+    async fn c02_self_file_policies_preserve_original() {
+        for policy in [
+            ConflictPolicy::Skip,
+            ConflictPolicy::KeepBoth,
+            ConflictPolicy::Replace,
+        ] {
+            let t = tempfile::tempdir().unwrap();
+            let c = ctx(t.path()).await;
+            std::fs::write(t.path().join("a"), b"safe").unwrap();
+            let r = cp(
+                &LocalFs,
+                &LocalFs,
+                t.path(),
+                "a",
+                t.path(),
+                policy,
+                &c,
+                CancellationToken::new(),
+            )
+            .await;
+            eprintln!("C02 self-file policy={policy:?}: {r:?}");
+            assert_eq!(std::fs::read(t.path().join("a")).unwrap(), b"safe");
+            if policy == ConflictPolicy::Replace {
+                assert!(r.is_err());
+                assert!(c.journal.history(10).await.is_empty());
+            }
+            if policy == ConflictPolicy::KeepBoth {
+                assert_eq!(std::fs::read(t.path().join("a (1)")).unwrap(), b"safe");
+            }
+        }
+    }
+    #[tokio::test]
+    async fn c02_move_into_child_preserves_source() {
+        let t = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(t.path().join("a/sub")).unwrap();
+        std::fs::write(t.path().join("a/file"), b"safe").unwrap();
+        let c = ctx(t.path()).await;
+        let r = mv(
+            &LocalFs,
+            &LocalFs,
+            t.path(),
+            "a",
+            &t.path().join("a/sub"),
+            &c,
+        )
+        .await;
+        eprintln!("C02 move-descendant: {r:?}");
+        assert!(r.is_err());
+        assert_eq!(std::fs::read(t.path().join("a/file")).unwrap(), b"safe");
+        assert!(c.journal.history(10).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn c03_cross_device_success_and_same_fs_partial_failure() {
+        let (t, s, d) = setup();
+        let c = ctx(t.path()).await;
+        std::fs::write(s.join("a"), b"safe").unwrap();
+        let mut sf = FaultFs::new(t.path());
+        sf.cross_from = Some(s.clone());
+        let e = mv(&sf, &LocalFs, &s, "a", &d, &c).await.unwrap();
+        assert!(!s.join("a").exists());
+        assert_eq!(std::fs::read(d.join("a")).unwrap(), b"safe");
+        assert_eq!(std::fs::read(t.path().join("trashed-a")).unwrap(), b"safe");
+        assert!(matches!(e.undo, UndoAction::UndoMove {ref moved, ..} if moved.len()==1));
+        for n in ["x", "z"] {
+            std::fs::write(s.join(n), n.as_bytes()).unwrap();
+        }
+        let items = ["x", "missing", "z"]
+            .iter()
+            .map(|n| target(&s, n))
+            .collect();
+        let p = move_plan(&LocalFs, &LocalFs, items, loc(&d)).await.unwrap();
+        assert!(move_execute(
+            &LocalFs,
+            &LocalFs,
+            p,
+            ConflictPolicy::Replace,
+            &c,
+            CancellationToken::new(),
+            None
+        )
+        .await
+        .is_err());
+        let h = c.journal.history(10).await;
+        assert!(matches!(&h[0].undo, UndoAction::UndoMove {moved, ..} if moved.len()==2));
+        assert!(d.join("x").exists() && d.join("z").exists());
+    }
+    #[tokio::test]
+    #[ignore = "fileops-17 repro"]
+    async fn c03_trash_failure_must_not_leave_unjournaled_copy() {
+        let (t, s, d) = setup();
+        let c = ctx(t.path()).await;
+        std::fs::write(s.join("a"), b"NEW").unwrap();
+        let mut sf = FaultFs::new(t.path());
+        sf.cross_from = Some(s.clone());
+        sf.fail_trash = true;
+        let r = mv(&sf, &LocalFs, &s, "a", &d, &c).await;
+        let h = c.journal.history(10).await;
+        eprintln!(
+            "C03 trash-fail: {r:?}; src={} dst={} journal={h:?}",
+            s.join("a").exists(),
+            d.join("a").exists()
+        );
+        assert!(r.is_err());
+        assert_eq!(std::fs::read(s.join("a")).unwrap(), b"NEW");
+        assert!(
+            !d.join("a").exists() || !h.is_empty(),
+            "completed destination must be rolled back or undoable"
+        );
+    }
+    #[tokio::test]
+    async fn c03_replace_file_trash_failure_rolls_back() {
+        let (t, s, d) = setup();
+        let c = ctx(t.path()).await;
+        std::fs::write(s.join("a"), b"NEW").unwrap();
+        std::fs::write(d.join("a"), b"OLD").unwrap();
+        let mut sf = FaultFs::new(t.path());
+        sf.cross_from = Some(s.clone());
+        sf.fail_trash = true;
+        assert!(mv(&sf, &LocalFs, &s, "a", &d, &c).await.is_err());
+        assert_eq!(std::fs::read(s.join("a")).unwrap(), b"NEW");
+        assert_eq!(std::fs::read(d.join("a")).unwrap(), b"OLD");
+        assert_eq!(std::fs::read_dir(&d).unwrap().count(), 1);
+    }
+    #[tokio::test]
+    #[ignore = "fileops-09 repro"]
+    async fn c03_replace_folder_trash_failure_restores_target() {
+        let (t, s, d) = setup();
+        let c = ctx(t.path()).await;
+        std::fs::create_dir(s.join("a")).unwrap();
+        std::fs::create_dir(d.join("a")).unwrap();
+        std::fs::write(s.join("a/new"), b"NEW").unwrap();
+        std::fs::write(d.join("a/old"), b"OLD").unwrap();
+        let mut sf = FaultFs::new(t.path());
+        sf.cross_from = Some(s.clone());
+        sf.fail_trash = true;
+        let r = mv(&sf, &LocalFs, &s, "a", &d, &c).await;
+        eprintln!(
+            "C03 folder-trash-fail={r:?}, history={:?}",
+            c.journal.history(10).await
+        );
+        assert!(r.is_err());
+        assert!(
+            d.join("a/old").exists(),
+            "old folder must be restored to its original name on failure"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "fileops-18 repro"]
+    async fn c04_cancel_partial_file_is_tracked_or_cleaned() {
+        let (t, s, d) = setup();
+        let c = ctx(t.path()).await;
+        std::fs::write(s.join("a"), vec![7u8; 8 * 1024 * 1024]).unwrap();
+        let token = CancellationToken::new();
+        let mut sf = FaultFs::new(t.path());
+        sf.stream = true;
+        let mut df = FaultFs::new(t.path());
+        df.cancel_on_write = Some(token.clone());
+        let r = cp(&sf, &df, &s, "a", &d, ConflictPolicy::Replace, &c, token).await;
+        let part = d.join("a.duet-part");
+        let h = c.journal.history(10).await;
+        eprintln!(
+            "C04 cancel={r:?}, part_bytes={:?}, journal={h:?}",
+            std::fs::metadata(&part).map(|m| m.len())
+        );
+        assert!(matches!(r, Err(DuetError::Cancelled)));
+        assert!(!d.join("a").exists());
+        assert!(
+            !part.exists() || !h.is_empty(),
+            "cancelled file leaves untracked .duet-part"
+        );
+    }
+    #[tokio::test]
+    async fn c04_fresh_copy_truncates_stale_part() {
+        let (t, s, d) = setup();
+        let c = ctx(t.path()).await;
+        std::fs::write(s.join("a"), b"new").unwrap();
+        std::fs::write(d.join("a.duet-part"), b"stale part with a long suffix").unwrap();
+        cp(
+            &LocalFs,
+            &LocalFs,
+            &s,
+            "a",
+            &d,
+            ConflictPolicy::Replace,
+            &c,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(std::fs::read(d.join("a")).unwrap(), b"new");
+        assert!(!d.join("a.duet-part").exists());
+    }
+    #[tokio::test]
+    #[ignore = "fileops-18 repro"]
+    async fn c04_write_failure_restores_old_file_but_leaves_part() {
+        let (t, s, d) = setup();
+        let c = ctx(t.path()).await;
+        std::fs::write(s.join("a"), vec![1u8; 128 * 1024]).unwrap();
+        std::fs::write(d.join("a"), b"OLD").unwrap();
+        let mut sf = FaultFs::new(t.path());
+        sf.stream = true;
+        let mut df = FaultFs::new(t.path());
+        df.write_limit = Some(65536);
+        let r = cp(
+            &sf,
+            &df,
+            &s,
+            "a",
+            &d,
+            ConflictPolicy::Replace,
+            &c,
+            CancellationToken::new(),
+        )
+        .await;
+        eprintln!(
+            "C04 write failure={r:?}; part={:?}",
+            std::fs::metadata(d.join("a.duet-part")).map(|m| m.len())
+        );
+        assert!(r.is_err());
+        assert_eq!(std::fs::read(d.join("a")).unwrap(), b"OLD");
+        assert!(
+            !d.join("a.duet-part").exists(),
+            "failed write leaves 64KiB orphan beside restored original"
+        );
+    }
+    #[tokio::test]
+    async fn c04_folder_failure_restores_old_folder() {
+        let (t, s, d) = setup();
+        let c = ctx(t.path()).await;
+        std::fs::create_dir(s.join("a")).unwrap();
+        std::fs::create_dir(d.join("a")).unwrap();
+        std::fs::write(d.join("a/old"), b"OLD").unwrap();
+        let mut sf = FaultFs::new(t.path());
+        sf.fail_list_at = Some(s.join("a"));
+        let r = cp(
+            &sf,
+            &LocalFs,
+            &s,
+            "a",
+            &d,
+            ConflictPolicy::Replace,
+            &c,
+            CancellationToken::new(),
+        )
+        .await;
+        eprintln!("C04 list-fail={r:?}");
+        assert!(r.is_err());
+        assert_eq!(std::fs::read(d.join("a/old")).unwrap(), b"OLD");
+    }
+
+    #[tokio::test]
+    #[ignore = "fileops-08 repro"]
+    async fn c06_case_only_rename() {
+        let t = tempfile::tempdir().unwrap();
+        let c = ctx(t.path()).await;
+        std::fs::write(t.path().join("a.txt"), b"safe").unwrap();
+        if !t.path().join("A.txt").exists() {
+            eprintln!("SKIP case-only repro: case-sensitive volume");
+            return;
+        }
+        let r = rename(&LocalFs, target(t.path(), "a.txt"), "A.txt".into(), &c).await;
+        eprintln!("C06 case-only={r:?}");
+        assert!(r.is_ok(), "case-only rename rejected as target exists");
+    }
+    #[tokio::test]
+    #[ignore = "fileops-19 repro"]
+    async fn c06_rename_must_use_filesystem_name_validation() {
+        let t = tempfile::tempdir().unwrap();
+        let c = ctx(t.path()).await;
+        std::fs::write(t.path().join("a"), b"safe").unwrap();
+        let name = "nested\\name";
+        assert!(LocalFs.validate_new_name(name).is_err());
+        let r = rename(&LocalFs, target(t.path(), "a"), name.into(), &c).await;
+        eprintln!("C06 invalid-name accepted={r:?}");
+        assert!(r.is_err(), "rename bypasses the FileSystem name validator");
+    }
+    #[tokio::test]
+    #[ignore = "fileops-26 repro"]
+    async fn c04_preexisting_part_named_user_file_must_survive() {
+        let (t, s, d) = setup();
+        let c = ctx(t.path()).await;
+        std::fs::write(s.join("a"), b"new").unwrap();
+        std::fs::write(d.join("a.duet-part"), b"user-owned-data").unwrap();
+        let p = copy_plan(&LocalFs, &LocalFs, vec![target(&s, "a")], loc(&d))
+            .await
+            .unwrap();
+        assert!(
+            p.conflicts.is_empty(),
+            "unrelated .duet-part file is absent from conflict warning"
+        );
+        copy_execute(
+            &LocalFs,
+            &LocalFs,
+            p,
+            ConflictPolicy::Skip,
+            &c,
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+        let survivor = std::fs::read(d.join("a.duet-part"));
+        eprintln!("C04 preexisting user .duet-part={survivor:?}");
+        assert_eq!(
+            survivor.unwrap_or_default(),
+            b"user-owned-data",
+            "temporary copy path silently clobbers unrelated user data even under Skip"
+        );
+    }
+    #[tokio::test]
+    #[ignore = "fileops-08 repro"]
+    async fn c07_case_only_batch_rename() {
+        let t = tempfile::tempdir().unwrap();
+        std::fs::write(t.path().join("photo.JPG"), b"safe").unwrap();
+        if !t.path().join("photo.jpg").exists() {
+            eprintln!("SKIP batch-case repro: case-sensitive volume");
+            return;
+        }
+        let rule = RenameRule {
+            case: Some(CaseOp::Lower),
+            target_ext: true,
+            ..Default::default()
+        };
+        let p = batch_rename_preview(&LocalFs, vec![target(t.path(), "photo.JPG")], rule)
+            .await
+            .unwrap();
+        eprintln!("C07 case-only preview={p:?}");
+        assert!(
+            !p.has_collision,
+            "own file is marked as collision on case-insensitive volume"
+        );
+    }
+    #[tokio::test]
+    #[ignore = "fileops-19 repro"]
+    async fn c07_batch_preview_must_validate_names() {
+        let t = tempfile::tempdir().unwrap();
+        std::fs::write(t.path().join("a"), b"safe").unwrap();
+        let rule = RenameRule {
+            base: Some("invalid\0name".into()),
+            ..Default::default()
+        };
+        let p = batch_rename_preview(&LocalFs, vec![target(t.path(), "a")], rule)
+            .await
+            .unwrap();
+        eprintln!("C07 invalid-name preview={p:?}");
+        assert!(
+            p.has_collision,
+            "NUL cannot be a filename, but preview enables Apply"
+        );
+    }
+    #[tokio::test]
+    async fn c07_selected_old_name_overlap_is_blocked() {
+        let t = tempfile::tempdir().unwrap();
+        for name in ["A", "AA"] {
+            std::fs::write(t.path().join(name), name.as_bytes()).unwrap();
+        }
+        let rule = RenameRule {
+            find: "A".into(),
+            replace: "AA".into(),
+            ..Default::default()
+        };
+        let p = batch_rename_preview(
+            &LocalFs,
+            vec![target(t.path(), "A"), target(t.path(), "AA")],
+            rule,
+        )
+        .await
+        .unwrap();
+        assert!(p.has_collision);
+        assert!(p.items[0].collision);
+        assert_eq!(p.items[0].new_name, "AA");
+        assert_eq!(p.items[1].new_name, "AAA");
+    }
+    #[tokio::test]
+    async fn c07_batch_failure_rolls_back_in_reverse() {
+        let t = tempfile::tempdir().unwrap();
+        let c = ctx(t.path()).await;
+        for n in ["a", "b", "c"] {
+            std::fs::write(t.path().join(n), n.as_bytes()).unwrap();
+        }
+        let mut fs = FaultFs::new(t.path());
+        fs.fail_renames = vec![3];
+        let rule = RenameRule {
+            prefix: "p_".into(),
+            ..Default::default()
+        };
+        let r = batch_rename_execute(
+            &fs,
+            ["a", "b", "c"]
+                .iter()
+                .map(|n| target(t.path(), n))
+                .collect(),
+            rule,
+            &c,
+        )
+        .await;
+        assert!(r.is_err());
+        assert_eq!(fs.renames.load(Ordering::SeqCst), 5);
+        for n in ["a", "b", "c"] {
+            assert_eq!(std::fs::read(t.path().join(n)).unwrap(), n.as_bytes());
+            assert!(!t.path().join(format!("p_{n}")).exists());
+        }
+        assert!(c.journal.history(10).await.is_empty());
+    }
+    #[tokio::test]
+    #[ignore = "fileops-27 repro"]
+    async fn c07_batch_rollback_failure_must_be_journaled() {
+        let t = tempfile::tempdir().unwrap();
+        let c = ctx(t.path()).await;
+        for n in ["a", "b", "c"] {
+            std::fs::write(t.path().join(n), n.as_bytes()).unwrap();
+        }
+        let mut fs = FaultFs::new(t.path());
+        fs.fail_renames = vec![3, 4];
+        let rule = RenameRule {
+            prefix: "p_".into(),
+            ..Default::default()
+        };
+        let r = batch_rename_execute(
+            &fs,
+            ["a", "b", "c"]
+                .iter()
+                .map(|n| target(t.path(), n))
+                .collect(),
+            rule,
+            &c,
+        )
+        .await;
+        let h = c.journal.history(10).await;
+        eprintln!(
+            "C07 rollback-failure={r:?}; a={} b={} p_b={} journal={h:?}",
+            t.path().join("a").exists(),
+            t.path().join("b").exists(),
+            t.path().join("p_b").exists()
+        );
+        assert!(r.is_err());
+        assert!(
+            t.path().join("b").exists() || !h.is_empty(),
+            "partially renamed file has no undo record after ignored rollback error"
+        );
+    }
+    #[tokio::test]
+    async fn c02_self_folder_policies_preserve_original() {
+        for policy in [
+            ConflictPolicy::Skip,
+            ConflictPolicy::KeepBoth,
+            ConflictPolicy::Replace,
+        ] {
+            let t = tempfile::tempdir().unwrap();
+            let c = ctx(t.path()).await;
+            std::fs::create_dir(t.path().join("a")).unwrap();
+            std::fs::write(t.path().join("a/file"), b"safe").unwrap();
+            let r = cp(
+                &LocalFs,
+                &LocalFs,
+                t.path(),
+                "a",
+                t.path(),
+                policy,
+                &c,
+                CancellationToken::new(),
+            )
+            .await;
+            assert_eq!(std::fs::read(t.path().join("a/file")).unwrap(), b"safe");
+            if policy == ConflictPolicy::KeepBoth {
+                assert_eq!(std::fs::read(t.path().join("a (1)/file")).unwrap(), b"safe");
+            }
+            if policy == ConflictPolicy::Replace {
+                assert!(r.is_err());
+                assert!(c.journal.history(10).await.is_empty());
+            }
+        }
+    }
+    #[tokio::test]
+    async fn c04_cancel_journals_completed_top_level_and_undo() {
+        let (t, s, d) = setup();
+        let c = ctx(t.path()).await;
+        std::fs::write(s.join("a"), b"first").unwrap();
+        std::fs::write(s.join("b"), vec![8u8; 8 * 1024 * 1024]).unwrap();
+        let token = CancellationToken::new();
+        let mut sf = FaultFs::new(t.path());
+        sf.stream = true;
+        let mut df = FaultFs::new(t.path());
+        df.cancel_on_write = Some(token.clone());
+        df.cancel_only = Some(d.join("b.duet-part"));
+        let p = copy_plan(&sf, &df, vec![target(&s, "a"), target(&s, "b")], loc(&d))
+            .await
+            .unwrap();
+        let r = copy_execute(&sf, &df, p, ConflictPolicy::Skip, &c, token, None).await;
+        assert!(matches!(r, Err(DuetError::Cancelled)));
+        let h = c.journal.history(10).await;
+        assert_eq!(h.len(), 1);
+        assert!(matches!(&h[0].undo,UndoAction::UndoCopy{copied,..} if copied==&vec![d.join("a")]));
+        let out = crate::core::undo::execute_undo(
+            &h[0],
+            &crate::services::connection_pool::ConnectionPool::new(),
+        )
+        .await;
+        assert!(matches!(out.kind, crate::core::undo::UndoKind::Ok));
+        assert!(!d.join("a").exists());
+        assert!(d.join("b.duet-part").exists());
+        assert_eq!(std::fs::read(s.join("a")).unwrap(), b"first");
+    }
+    #[tokio::test]
+    #[ignore = "fileops-09 repro"]
+    async fn c04_partial_folder_failure_restores_old_folder() {
+        let (t, s, d) = setup();
+        let c = ctx(t.path()).await;
+        std::fs::create_dir_all(s.join("a/zz-block")).unwrap();
+        std::fs::create_dir_all(d.join("a")).unwrap();
+        std::fs::write(s.join("a/00-file"), b"new").unwrap();
+        std::fs::write(d.join("a/old"), b"old").unwrap();
+        let mut sf = FaultFs::new(t.path());
+        sf.fail_list_at = Some(s.join("a/zz-block"));
+        let r = cp(
+            &sf,
+            &LocalFs,
+            &s,
+            "a",
+            &d,
+            ConflictPolicy::Replace,
+            &c,
+            CancellationToken::new(),
+        )
+        .await;
+        eprintln!(
+            "C04 partial-folder failure={r:?}; journal={:?}",
+            c.journal.history(10).await
+        );
+        assert!(r.is_err());
+        assert!(
+            d.join("a/old").exists(),
+            "nonempty partial copy prevents rollback to the original name"
+        );
+    }
+}
+
+/// fileops 점검 R2(2026-11-08, opus) — sol/lead 발견 교차 검증용 재현.
+/// 모든 파일은 tempdir 안. OS 휴지통·SSH 사용 안 함.
+#[cfg(test)]
+mod review_fileops_opus_r2 {
+    use super::*;
+    use crate::fs::LocalFs;
+    use tokio_util::sync::CancellationToken;
+
+    async fn mk_ctx(p: &std::path::Path) -> OpCtx {
+        OpCtx {
+            journal: Journal::load_from(&p.join("r2-journal.jsonl")).await.unwrap(),
+            settings: SettingsStore::load_from(&p.join("r2-settings.toml"))
+                .await
+                .unwrap(),
+            pool: None,
+            app: None,
+        }
+    }
+    fn eref(p: &std::path::Path, name: &str) -> EntryRef {
+        EntryRef {
+            location: Location {
+                source: SourceId::Local,
+                path: p.to_path_buf(),
+            },
+            name: name.into(),
+        }
+    }
+    fn tree_bytes(p: &std::path::Path) -> (u64, u64) {
+        let mut files = 0u64;
+        let mut bytes = 0u64;
+        let mut stack = vec![p.to_path_buf()];
+        while let Some(d) = stack.pop() {
+            let Ok(rd) = std::fs::read_dir(&d) else {
+                continue;
+            };
+            for e in rd.flatten() {
+                let Ok(m) = e.metadata() else { continue };
+                if m.is_dir() {
+                    stack.push(e.path());
+                } else {
+                    files += 1;
+                    bytes += m.len();
+                }
+            }
+        }
+        (files, bytes)
+    }
+
+    /// NTFS 처럼 목록을 이름순으로 돌려주는 LocalFs 래퍼 (Windows 디렉터리 열거 순서 모사).
+    struct NameOrderFs;
+    #[async_trait::async_trait]
+    impl FileSystem for NameOrderFs {
+        fn source_id(&self) -> SourceId {
+            SourceId::Local
+        }
+        async fn list(&self, p: &std::path::Path) -> Result<Vec<crate::types::Entry>, DuetError> {
+            let mut v = LocalFs.list(p).await?;
+            v.sort_by_key(|e| e.name.to_lowercase());
+            Ok(v)
+        }
+        async fn metadata(&self, p: &std::path::Path) -> Result<crate::types::EntryMeta, DuetError> {
+            LocalFs.metadata(p).await
+        }
+        async fn rename(&self, a: &std::path::Path, b: &std::path::Path) -> Result<(), DuetError> {
+            LocalFs.rename(a, b).await
+        }
+        async fn mkdir(&self, p: &std::path::Path) -> Result<(), DuetError> {
+            LocalFs.mkdir(p).await
+        }
+        async fn trash(&self, _: &std::path::Path, _: &str) -> Result<TrashLocation, DuetError> {
+            Err(DuetError::NotSupported("review fixture: no trash".into()))
+        }
+        async fn remove(&self, _: &std::path::Path) -> Result<(), DuetError> {
+            Err(DuetError::NotSupported("review fixture: no remove".into()))
+        }
+        async fn restore_from_trash(
+            &self,
+            _: &TrashLocation,
+            _: &std::path::Path,
+        ) -> Result<(), DuetError> {
+            Err(DuetError::NotSupported("review fixture".into()))
+        }
+        async fn read_full(&self, p: &std::path::Path) -> Result<Vec<u8>, DuetError> {
+            LocalFs.read_full(p).await
+        }
+        async fn write_full(&self, p: &std::path::Path, b: &[u8]) -> Result<(), DuetError> {
+            LocalFs.write_full(p, b).await
+        }
+        async fn open_read(
+            &self,
+            p: &std::path::Path,
+            o: u64,
+        ) -> Result<std::pin::Pin<Box<dyn tokio::io::AsyncRead + Send>>, DuetError> {
+            LocalFs.open_read(p, o).await
+        }
+        async fn open_write(
+            &self,
+            p: &std::path::Path,
+            o: u64,
+        ) -> Result<std::pin::Pin<Box<dyn tokio::io::AsyncWrite + Send>>, DuetError> {
+            LocalFs.open_write(p, o).await
+        }
+    }
+
+    /// fileops-04 (NTFS 이름순 열거): 폴더 `a`(파일 3개 768 KiB + 하위 `zz-sub`)를 `a/zz-sub`
+    /// 로 복사하면, 이름순으로 하위 폴더보다 앞에 오는 항목이 단계마다 복제된다.
+    #[tokio::test]
+    #[ignore = "fileops-04 repro"]
+    async fn r2_copy_into_child_amplifies_with_name_order_listing() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx(t.path()).await;
+        let a = t.path().join("a");
+        std::fs::create_dir_all(a.join("zz-sub")).unwrap();
+        for n in ["aa1.bin", "aa2.bin", "data.bin"] {
+            std::fs::write(a.join(n), vec![1u8; 256 * 1024]).unwrap();
+        }
+        let (_, before) = tree_bytes(&a);
+        let fs = NameOrderFs;
+        let dst = Location {
+            source: SourceId::Local,
+            path: a.join("zz-sub"),
+        };
+        let r = tokio::time::timeout(std::time::Duration::from_secs(120), async {
+            let plan = copy_plan(&fs, &fs, vec![eref(t.path(), "a")], dst).await?;
+            copy_execute(
+                &fs,
+                &fs,
+                plan,
+                ConflictPolicy::Skip,
+                &ctx,
+                CancellationToken::new(),
+                None,
+            )
+            .await
+        })
+        .await;
+        let (files, after) = tree_bytes(&a);
+        let journal = ctx.journal.history(10).await.len();
+        eprintln!(
+            "R2 fileops-04 name-order: result={:?} files={files} bytes_before={before} \
+             bytes_after={after} amplification=x{} journal={journal}",
+            r.as_ref().map(|x| x.as_ref().map(|_| ()).map_err(|e| e.to_string())),
+            after / before.max(1)
+        );
+        assert!(
+            after <= before * 2,
+            "copy into own child wrote x{} the source size with journal={journal}",
+            after / before.max(1)
+        );
+    }
+
+    /// fileops-19: 일괄 이름 바꾸기 미리보기가 경로 구분자(`\`)가 든 새 이름을 "적용 가능"으로
+    /// 표시한다. macOS/Linux 에선 `\` 가 이름 문자지만, Windows 에선 `fs.join` 이 경로로 해석한다
+    /// (아래 cfg(windows) 테스트). 미리보기는 OS 와 무관하게 FS validator 로 막아야 한다.
+    #[tokio::test]
+    #[ignore = "fileops-19 repro"]
+    async fn r2_batch_preview_flags_backslash_names() {
+        let t = tempfile::tempdir().unwrap();
+        std::fs::write(t.path().join("a.txt"), b"a").unwrap();
+        let rule = RenameRule {
+            prefix: "..\\".into(),
+            ..Default::default()
+        };
+        let plan = batch_rename_preview(&LocalFs::new(), vec![eref(t.path(), "a.txt")], rule)
+            .await
+            .unwrap();
+        eprintln!("R2 fileops-19 preview: {:?}", plan.items);
+        assert!(
+            plan.has_collision,
+            "new name {:?} with a path separator is offered as applicable",
+            plan.items[0].new_name
+        );
+    }
+
+    /// fileops-19 (Windows 전용 — 이 머신에선 컴파일만): 이름 `..\escaped.txt` 로 바꾸면
+    /// 파일이 폴더 밖(상위)으로 옮겨진다. `Path::join` 은 Windows 에서 `\` 를 구분자로 본다.
+    #[cfg(windows)]
+    #[tokio::test]
+    #[ignore = "fileops-19 repro"]
+    async fn r2_windows_rename_with_backslash_stays_in_folder() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx(t.path()).await;
+        let inner = t.path().join("inner");
+        std::fs::create_dir(&inner).unwrap();
+        std::fs::write(inner.join("a.txt"), b"a").unwrap();
+        let r = rename(
+            &LocalFs::new(),
+            eref(&inner, "a.txt"),
+            "..\\escaped.txt".into(),
+            &ctx,
+        )
+        .await;
+        let escaped = t.path().join("escaped.txt").exists();
+        eprintln!("R2 fileops-19 windows: r={r:?} escaped={escaped}");
+        assert!(!escaped, "rename moved the file out of its folder");
+    }
+}

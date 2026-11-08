@@ -329,3 +329,133 @@ mod tests {
         ));
     }
 }
+
+/// fileops 점검 라운드(2026-11-08) 재현 테스트 — lead.
+/// 생성된 스크립트를 sudo 없이 로컬 `/bin/sh` 로 tempdir 안에서 실행해 의미를 확인한다.
+#[cfg(all(test, unix))]
+mod review_fileops_lead {
+    use super::*;
+
+    fn run_sh(script: &str) -> std::process::ExitStatus {
+        std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(script)
+            .status()
+            .unwrap()
+    }
+
+    /// KeepBoth 는 "충돌 시에만" 새 이름 — 충돌이 없으면 원래 이름이어야 한다(relay 경로와 동일).
+    /// 확인 대화상자는 비충돌 항목도 같은 정책 그룹에 합류시켜 보낸다(App.tsx onTransferPerFile).
+    #[test]
+    #[ignore = "fileops-13 repro"]
+    fn sudo_keepboth_without_conflict_keeps_original_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("stage").join("tool");
+        std::fs::create_dir_all(src.parent().unwrap()).unwrap();
+        std::fs::write(&src, b"bin").unwrap();
+        let dst = tmp.path().join("bin").join("tool");
+        let s = build_script(
+            ElevatedOp::Copy,
+            &[(src.clone(), Some(dst.clone()))],
+            ConflictPolicy::KeepBoth,
+        )
+        .unwrap();
+        assert!(run_sh(&s).success());
+        assert!(
+            dst.exists(),
+            "충돌이 없는데 'tool (1)' 로 복사됨 — 원래 이름 'tool' 이 없음"
+        );
+    }
+
+    /// 폴더 교체(Replace)는 §4 폴더 예외상 되돌릴 수 있어야 한다 — sudo 경로는 `rm -rf` 로 백업을 지운다.
+    #[test]
+    #[ignore = "fileops-10 repro"]
+    fn sudo_folder_replace_keeps_backup() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("stage").join("d");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("new.txt"), b"NEW").unwrap();
+        let dst = tmp.path().join("etc").join("d");
+        std::fs::create_dir_all(&dst).unwrap();
+        std::fs::write(dst.join("only-old.txt"), b"OLD").unwrap();
+        let s = build_script(
+            ElevatedOp::Copy,
+            &[(src.clone(), Some(dst.clone()))],
+            ConflictPolicy::Replace,
+        )
+        .unwrap();
+        assert!(run_sh(&s).success());
+        let kept = std::fs::read_dir(dst.parent().unwrap())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .any(|e| e.path().join("only-old.txt").exists());
+        assert!(kept, "sudo 폴더 교체 후 기존 폴더 내용이 영구 삭제됨");
+    }
+}
+
+#[cfg(all(test, unix))]
+mod review_fileops_sol_r2 {
+    use super::*;
+
+    #[test]
+    fn skip_conflict_has_zero_exit_without_copying_new_content() {
+        let t = tempfile::tempdir().unwrap();
+        let source = t.path().join("staged");
+        let target = t.path().join("destination");
+        std::fs::write(&source, b"NEW").unwrap();
+        std::fs::write(&target, b"OLD").unwrap();
+        let script = build_script(
+            ElevatedOp::Copy,
+            &[(source.clone(), Some(target.clone()))],
+            ConflictPolicy::Skip,
+        )
+        .unwrap();
+        let out = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(&script)
+            .output()
+            .unwrap();
+        eprintln!(
+            "skip-conflict exit={:?}, source={:?}, destination={:?}",
+            out.status.code(),
+            std::fs::read(&source),
+            std::fs::read(&target)
+        );
+        assert!(out.status.success());
+        assert_eq!(std::fs::read(source).unwrap(), b"NEW");
+        assert_eq!(std::fs::read(target).unwrap(), b"OLD");
+    }
+
+    #[test]
+    fn partial_script_failure_has_nonzero_exit_even_after_first_copy_succeeds() {
+        let t = tempfile::tempdir().unwrap();
+        let source = t.path().join("staged");
+        let target = t.path().join("destination");
+        std::fs::write(&source, b"NEW").unwrap();
+        let missing = t.path().join("missing-source");
+        let second = t.path().join("second-target");
+        let script = build_script(
+            ElevatedOp::Copy,
+            &[
+                (source.clone(), Some(target.clone())),
+                (missing, Some(second.clone())),
+            ],
+            ConflictPolicy::Skip,
+        )
+        .unwrap();
+        let out = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(&script)
+            .output()
+            .unwrap();
+        eprintln!(
+            "partial-script exit={:?}, stderr={}",
+            out.status.code(),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(!out.status.success());
+        assert_eq!(std::fs::read(source).unwrap(), b"NEW");
+        assert_eq!(std::fs::read(target).unwrap(), b"NEW");
+        assert!(!second.exists());
+    }
+}

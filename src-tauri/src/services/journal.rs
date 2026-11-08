@@ -619,3 +619,196 @@ mod tests {
         assert_eq!(j.inner.lock().await.len(), TAIL_LOAD_LIMIT);
     }
 }
+
+/// fileops 점검(2026-11-08, opus) 재현 — journal.jsonl 손상 시 앱 시작 불가.
+/// `lib.rs` 는 `Journal::load_default().await.expect("journal load")` 라서 load 실패 = 패닉.
+#[cfg(test)]
+mod review_fileops_opus {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn op() -> OpKind {
+        OpKind::PermanentDelete {
+            count: 1,
+            location: Location {
+                source: SourceId::Local,
+                path: PathBuf::from("/tmp"),
+            },
+        }
+    }
+
+    /// 마지막 줄이 잘린 journal(쓰는 도중 강제 종료·전원 차단) — 앞의 정상 기록은 살리고
+    /// 로드돼야 한다. 지금은 Err → 시작 시 panic.
+    #[tokio::test]
+    #[ignore = "fileops-01 repro"]
+    async fn truncated_last_line_must_not_fail_load() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("journal.jsonl");
+        {
+            let j = Journal::load_from(&path).await.unwrap();
+            j.push(op(), UndoAction::Irreversible).await.unwrap();
+            j.push(op(), UndoAction::Irreversible).await.unwrap();
+        }
+        // 세 번째 기록이 쓰이다 끊긴 상태.
+        let mut text = tokio::fs::read_to_string(&path).await.unwrap();
+        text.push_str("{\"type\":\"Push\",\"id\":\"0192");
+        tokio::fs::write(&path, text).await.unwrap();
+
+        let r = Journal::load_from(&path).await;
+        assert!(
+            r.is_ok(),
+            "journal with a torn last line fails to load: {:?} — app startup panics",
+            r.err()
+        );
+        assert_eq!(r.unwrap().history(10).await.len(), 2);
+    }
+
+    /// 새 버전이 쓴 모르는 op 종류(다운그레이드) 한 줄 때문에 전체 로드가 실패하면 안 된다.
+    #[tokio::test]
+    #[ignore = "fileops-01 repro"]
+    async fn unknown_record_kind_must_not_fail_load() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("journal.jsonl");
+        {
+            let j = Journal::load_from(&path).await.unwrap();
+            j.push(op(), UndoAction::Irreversible).await.unwrap();
+        }
+        let mut text = tokio::fs::read_to_string(&path).await.unwrap();
+        text.push_str("{\"type\":\"SomethingNew\",\"id\":\"x\"}\n");
+        tokio::fs::write(&path, text).await.unwrap();
+        let r = Journal::load_from(&path).await;
+        assert!(r.is_ok(), "unknown record kind fails load: {:?}", r.err());
+    }
+
+    /// `append` 는 잠금 없이 줄 본문과 `\n` 을 **따로** write 한다. 동시에 끝난 작업
+    /// 둘(호스트별 worker 는 병렬)이 push 하면 줄이 섞일 수 있다 → 다음 시작 때 load 실패.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    #[ignore = "fileops-01 repro"]
+    async fn concurrent_pushes_keep_every_line_parseable() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("journal.jsonl");
+        let j = Journal::load_from(&path).await.unwrap();
+        let mut hs = Vec::new();
+        for _ in 0..400 {
+            let j = j.clone();
+            hs.push(tokio::spawn(async move {
+                j.push(op(), UndoAction::Irreversible).await.unwrap();
+            }));
+        }
+        for h in hs {
+            h.await.unwrap();
+        }
+        let text = tokio::fs::read_to_string(&path).await.unwrap();
+        let bad: Vec<(usize, &str)> = text
+            .lines()
+            .enumerate()
+            .filter(|(_, l)| serde_json::from_str::<JsonlRecord>(l).is_err())
+            .collect();
+        assert!(
+            bad.is_empty(),
+            "{} torn/merged lines after concurrent pushes, e.g. line {}: {:.120}",
+            bad.len(),
+            bad.first().map(|b| b.0 + 1).unwrap_or(0),
+            bad.first().map(|b| b.1).unwrap_or("")
+        );
+        assert!(Journal::load_from(&path).await.is_ok());
+    }
+
+    /// 현실적인 경우 — 작업 **두 개**가 거의 동시에 끝남(로컬 worker + 원격 worker).
+    /// 200회 반복해 한 번이라도 줄이 섞이면 다음 시작이 패닉한다.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "fileops-01 repro"]
+    async fn two_concurrent_pushes_keep_journal_loadable() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("journal.jsonl");
+        let j = Journal::load_from(&path).await.unwrap();
+        let mut torn_at = None;
+        for round in 0..200 {
+            let (a, b) = (j.clone(), j.clone());
+            let ha = tokio::spawn(async move { a.push(op(), UndoAction::Irreversible).await });
+            let hb = tokio::spawn(async move { b.push(op(), UndoAction::Irreversible).await });
+            ha.await.unwrap().unwrap();
+            hb.await.unwrap().unwrap();
+            if Journal::load_from(&path).await.is_err() {
+                torn_at = Some(round);
+                break;
+            }
+        }
+        assert!(
+            torn_at.is_none(),
+            "journal became unloadable after round {:?} of 2 concurrent pushes",
+            torn_at
+        );
+    }
+}
+
+#[cfg(test)]
+mod review_fileops_sol_r2 {
+    use super::*;
+    use crate::core::undo::{execute_redo, execute_undo};
+    use crate::services::connection_pool::ConnectionPool;
+
+    fn batch_entry(root: &Path, current: PathBuf, original: PathBuf) -> JournalEntry {
+        JournalEntry {
+            id: JournalId::new(),
+            timestamp: Utc::now(),
+            op: OpKind::BatchRename {
+                count: 1,
+                location: Location {
+                    source: SourceId::Local,
+                    path: root.to_path_buf(),
+                },
+            },
+            undo: UndoAction::UndoBatchRename {
+                source: SourceId::Local,
+                pairs: vec![RenamePair { current, original }],
+            },
+            undone: false,
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "fileops-03 repro"]
+    async fn batch_undo_preserves_file_recreated_at_original_name() {
+        let t = tempfile::tempdir().unwrap();
+        let original = t.path().join("a");
+        let current = t.path().join("renamed-a");
+        tokio::fs::write(&current, b"old batch content")
+            .await
+            .unwrap();
+        tokio::fs::write(&original, b"new independent work")
+            .await
+            .unwrap();
+        let entry = batch_entry(t.path(), current, original.clone());
+        let outcome = execute_undo(&entry, &ConnectionPool::new()).await;
+        let bytes = tokio::fs::read(&original).await.unwrap();
+        eprintln!("batch undo outcome={outcome:?}; original={bytes:?}");
+        assert_eq!(
+            bytes, b"new independent work",
+            "batch undo overwrote recreated original"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "fileops-03 repro"]
+    async fn batch_redo_preserves_file_recreated_at_current_name() {
+        let t = tempfile::tempdir().unwrap();
+        let original = t.path().join("a");
+        let current = t.path().join("renamed-a");
+        tokio::fs::write(&original, b"old batch content")
+            .await
+            .unwrap();
+        tokio::fs::write(&current, b"new independent work")
+            .await
+            .unwrap();
+        let mut entry = batch_entry(t.path(), current.clone(), original);
+        entry.undone = true;
+        let outcome = execute_redo(&entry, &ConnectionPool::new()).await;
+        let bytes = tokio::fs::read(&current).await.unwrap();
+        eprintln!("batch redo outcome={outcome:?}; current={bytes:?}");
+        assert_eq!(
+            bytes, b"new independent work",
+            "batch redo overwrote a new target despite single-rename redo guard"
+        );
+    }
+}

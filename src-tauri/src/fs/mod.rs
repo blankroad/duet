@@ -767,3 +767,120 @@ mod tests {
             .any(|c| c.starts_with("remove")));
     }
 }
+
+/// fileops 점검 R3(2026-11-08, opus) — relay 재개(resume=true) 경로 실행 확인.
+/// 모든 파일은 tempdir 안. `resume=true` 면 로컬끼리도 네이티브 복사를 건너뛰고
+/// `stream_copy_file` 로 간다(`copy_tree` 의 `!resume &&` 조건) — 크기 래퍼 불필요.
+#[cfg(test)]
+mod review_fileops_opus_r3 {
+    use super::{copy_relay_streaming, LocalFs};
+    use tokio_util::sync::CancellationToken;
+
+    const N: usize = 3 * 1024 * 1024;
+
+    async fn resume_copy(
+        src: &std::path::Path,
+        dst: &std::path::Path,
+    ) -> Result<(), crate::types::DuetError> {
+        let fs = LocalFs::new();
+        copy_relay_streaming(
+            &fs,
+            src,
+            &fs,
+            dst,
+            true,
+            &CancellationToken::new(),
+            &|_| {},
+            &|_| {},
+        )
+        .await
+    }
+
+    /// fileops-34: 첫 시도가 남긴 `.duet-part`(옛 원본 앞 절반) + 그사이 같은 길이로 바뀐 원본
+    /// → 재개가 "성공"하며 옛 앞부분 + 새 뒷부분이 섞인 파일을 최종 이름으로 확정하는가.
+    #[tokio::test]
+    #[ignore = "fileops-34 repro"]
+    async fn r3_resume_after_source_changed_same_length_mixes_content() {
+        let t = tempfile::tempdir().unwrap();
+        let src = t.path().join("src.log");
+        let dst = t.path().join("dst.log");
+        // 첫 시도: 원본 A… 의 앞 절반만 part 에 기록된 상태.
+        std::fs::write(t.path().join("dst.log.duet-part"), vec![b'A'; N / 2]).unwrap();
+        // 그사이 원본이 같은 길이의 B… 로 갱신.
+        std::fs::write(&src, vec![b'B'; N]).unwrap();
+
+        let r = resume_copy(&src, &dst).await;
+        let out = std::fs::read(&dst).unwrap_or_default();
+        let a = out.iter().filter(|&&b| b == b'A').count();
+        let b = out.iter().filter(|&&b| b == b'B').count();
+        eprintln!(
+            "R3 fileops-34 same-len: result={r:?} len={} A_bytes={a} B_bytes={b} part_left={}",
+            out.len(),
+            t.path().join("dst.log.duet-part").exists()
+        );
+        assert!(r.is_ok());
+        assert_eq!(a, 0, "final file mixes old prefix (A) with new suffix (B)");
+    }
+
+    /// fileops-34 변형: 원본이 part 보다 **짧아진** 경우 — 재개는 EOF 에서 곧바로 끝나
+    /// 옛 part(현재 원본과 무관한 내용·길이)를 최종 파일로 확정하는가.
+    #[tokio::test]
+    #[ignore = "fileops-34 repro"]
+    async fn r3_resume_after_source_shrank_finalizes_stale_part() {
+        let t = tempfile::tempdir().unwrap();
+        let src = t.path().join("src.log");
+        let dst = t.path().join("dst.log");
+        std::fs::write(t.path().join("dst.log.duet-part"), vec![b'A'; N]).unwrap();
+        std::fs::write(&src, vec![b'B'; N / 4]).unwrap();
+
+        let r = resume_copy(&src, &dst).await;
+        let out = std::fs::read(&dst).unwrap_or_default();
+        eprintln!(
+            "R3 fileops-34 shrank: result={r:?} dst_len={} src_len={} first_byte={:?}",
+            out.len(),
+            N / 4,
+            out.first().map(|b| *b as char)
+        );
+        assert!(r.is_ok());
+        assert_eq!(out, vec![b'B'; N / 4], "stale part finalized instead of the source");
+    }
+
+    /// (기준) 원본이 그대로면 재개는 올바른 결과를 만든다 — 메커니즘 자체는 동작.
+    #[tokio::test]
+    async fn r3_resume_with_unchanged_source_is_correct() {
+        let t = tempfile::tempdir().unwrap();
+        let src = t.path().join("src.bin");
+        let dst = t.path().join("dst.bin");
+        let data: Vec<u8> = (0..N).map(|i| (i % 251) as u8).collect();
+        std::fs::write(&src, &data).unwrap();
+        std::fs::write(t.path().join("dst.bin.duet-part"), &data[..N / 2]).unwrap();
+        resume_copy(&src, &dst).await.unwrap();
+        assert_eq!(std::fs::read(&dst).unwrap(), data);
+    }
+
+    /// fileops-35: 폴더 복사가 첫 시도에서 dst 폴더(+ 일부 파일)를 만든 뒤 재시도(resume=true)
+    /// → `copy_tree` 가 무조건 `mkdir(dst)?` 부터 해서 실패하는가. 실패면 남은 파일을 못 받는다.
+    #[tokio::test]
+    #[ignore = "fileops-35 repro"]
+    async fn r3_folder_resume_fails_on_existing_dst_dir() {
+        let t = tempfile::tempdir().unwrap();
+        let src = t.path().join("proj");
+        let dst = t.path().join("out").join("proj");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("a.txt"), b"a").unwrap();
+        std::fs::write(src.join("b.txt"), b"b").unwrap();
+        // 첫 시도의 흔적: dst 폴더와 a.txt 는 끝났고 b.txt 는 반쯤.
+        std::fs::create_dir_all(&dst).unwrap();
+        std::fs::write(dst.join("a.txt"), b"a").unwrap();
+        std::fs::write(dst.join("b.txt.duet-part"), b"").unwrap();
+
+        let r = resume_copy(&src, &dst).await;
+        let explained = r.as_ref().err().map(|e| e.to_string());
+        eprintln!(
+            "R3 fileops-35: result={r:?} display={explained:?} b_done={}",
+            dst.join("b.txt").exists()
+        );
+        assert!(r.is_ok(), "folder resume fails at mkdir of the existing destination");
+        assert!(dst.join("b.txt").exists());
+    }
+}

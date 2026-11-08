@@ -1316,3 +1316,402 @@ mod tests {
         assert!(target.exists());
     }
 }
+
+/// fileops 점검(2026-11-08, opus) 재현 테스트 — undo 가 사용자 데이터를 잃게 하는 경로.
+/// 모든 파일은 tempdir 안. 휴지통(LocalFs::trash)은 부르지 않는다.
+#[cfg(test)]
+mod review_fileops_opus {
+    use super::*;
+    use crate::core::ops::{self, ConflictPolicy, OpCtx};
+    use crate::types::EntryRef;
+    use tempfile::TempDir;
+    use tokio_util::sync::CancellationToken;
+
+    async fn mk_ctx() -> (OpCtx, TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let settings =
+            crate::services::settings::SettingsStore::load_from(&dir.path().join("s.toml"))
+                .await
+                .unwrap();
+        let journal = crate::services::journal::Journal::load_from(&dir.path().join("j.jsonl"))
+            .await
+            .unwrap();
+        (
+            OpCtx {
+                settings,
+                journal,
+                pool: None,
+                app: None,
+            },
+            dir,
+        )
+    }
+
+    fn eref(parent: &std::path::Path, name: &str) -> EntryRef {
+        EntryRef {
+            location: Location {
+                source: SourceId::Local,
+                path: parent.to_path_buf(),
+            },
+            name: name.into(),
+        }
+    }
+
+    fn loc(p: &std::path::Path) -> Location {
+        Location {
+            source: SourceId::Local,
+            path: p.to_path_buf(),
+        }
+    }
+
+    /// F-opus: 이름 바꾸기 후 원래 이름으로 새 파일이 생기면, Ctrl+Z 가 그 새 파일을
+    /// 경고 없이 덮어쓴다(POSIX rename = 교체). redo 쪽은 같은 상황을 Skipped 로 막는다.
+    #[tokio::test]
+    #[ignore = "fileops-03 repro"]
+    async fn undo_rename_must_not_overwrite_file_recreated_at_original_name() {
+        let (ctx, _keep) = mk_ctx().await;
+        let dir = TempDir::new().unwrap();
+        tokio::fs::write(dir.path().join("a.txt"), b"v1").await.unwrap();
+        let entry = ops::rename(&LocalFs::new(), eref(dir.path(), "a.txt"), "b.txt".into(), &ctx)
+            .await
+            .unwrap();
+        // 사용자가 그사이 같은 이름으로 새 작업 파일을 만든다.
+        tokio::fs::write(dir.path().join("a.txt"), b"new work")
+            .await
+            .unwrap();
+
+        let pool = ConnectionPool::new();
+        let outcome = execute_undo(&entry, &pool).await;
+
+        let a = tokio::fs::read(dir.path().join("a.txt")).await.unwrap();
+        assert_eq!(
+            a,
+            b"new work",
+            "undo overwrote the new a.txt (outcome={:?}, msg={:?})",
+            outcome.kind,
+            outcome.message
+        );
+    }
+
+    /// F-opus: 이동 후 원래 자리에 같은 이름 파일이 새로 생기면, Ctrl+Z 가 덮어쓴다.
+    #[tokio::test]
+    #[ignore = "fileops-03 repro"]
+    async fn undo_move_must_not_overwrite_file_recreated_at_source() {
+        let (ctx, _keep) = mk_ctx().await;
+        let dir = TempDir::new().unwrap();
+        let src = dir.path().join("src");
+        let dst = dir.path().join("dst");
+        tokio::fs::create_dir(&src).await.unwrap();
+        tokio::fs::create_dir(&dst).await.unwrap();
+        tokio::fs::write(src.join("x.txt"), b"moved").await.unwrap();
+        let fs = LocalFs::new();
+        let plan = ops::move_plan(&fs, &fs, vec![eref(&src, "x.txt")], loc(&dst))
+            .await
+            .unwrap();
+        let entry = ops::move_execute(
+            &fs,
+            &fs,
+            plan,
+            ConflictPolicy::Skip,
+            &ctx,
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+        tokio::fs::write(src.join("x.txt"), b"new work").await.unwrap();
+
+        let pool = ConnectionPool::new();
+        let outcome = execute_undo(&entry, &pool).await;
+
+        let x = tokio::fs::read(src.join("x.txt")).await.unwrap();
+        assert_eq!(
+            x,
+            b"new work",
+            "undo overwrote the new src/x.txt (outcome={:?}, msg={:?})",
+            outcome.kind,
+            outcome.message
+        );
+    }
+
+    /// F-opus: 폴더 복사 후 사본 폴더 안에서 작업한 파일이, 복사 Ctrl+Z 로 **영구 삭제**된다
+    /// (UndoCopy 는 `fs.remove` = remove_dir_all, 휴지통 아님 — CLAUDE.md §3).
+    #[tokio::test]
+    #[ignore = "fileops-02 repro"]
+    async fn undo_copy_must_not_permanently_delete_work_added_inside_copied_folder() {
+        let (ctx, _keep) = mk_ctx().await;
+        let dir = TempDir::new().unwrap();
+        let src = dir.path().join("src");
+        let dst = dir.path().join("dst");
+        tokio::fs::create_dir_all(src.join("proj")).await.unwrap();
+        tokio::fs::create_dir(&dst).await.unwrap();
+        tokio::fs::write(src.join("proj").join("a.txt"), b"a").await.unwrap();
+        let fs = LocalFs::new();
+        let plan = ops::copy_plan(&fs, &fs, vec![eref(&src, "proj")], loc(&dst))
+            .await
+            .unwrap();
+        let entry = ops::copy_execute(
+            &fs,
+            &fs,
+            plan,
+            ConflictPolicy::Skip,
+            &ctx,
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+        // 사용자가 사본 폴더 안에서 새 작업을 한다(journal 에 안 남는 일반 편집).
+        let notes = dst.join("proj").join("notes.txt");
+        tokio::fs::write(&notes, b"hours of work").await.unwrap();
+
+        let pool = ConnectionPool::new();
+        let outcome = execute_undo(&entry, &pool).await;
+
+        assert!(
+            notes.exists(),
+            "undo copy permanently deleted user work inside the copied folder \
+             (outcome={:?}, msg={:?})",
+            outcome.kind,
+            outcome.message
+        );
+    }
+
+    /// F-opus: 파일을 Replace 로 덮어쓴 복사를 Ctrl+Z 하면, 옛 버전은 (설계상) 이미 없고
+    /// 새 버전까지 지워져 받는 위치에 아무것도 안 남는데 결과는 Ok(성공 토스트)로 보고된다.
+    #[tokio::test]
+    #[ignore = "fileops-21 repro"]
+    async fn undo_copy_after_file_replace_reports_ok_but_leaves_nothing() {
+        let (ctx, _keep) = mk_ctx().await;
+        let dir = TempDir::new().unwrap();
+        let src = dir.path().join("src");
+        let dst = dir.path().join("dst");
+        tokio::fs::create_dir(&src).await.unwrap();
+        tokio::fs::create_dir(&dst).await.unwrap();
+        tokio::fs::write(src.join("r.txt"), b"new").await.unwrap();
+        tokio::fs::write(dst.join("r.txt"), b"old").await.unwrap();
+        let fs = LocalFs::new();
+        let plan = ops::copy_plan(&fs, &fs, vec![eref(&src, "r.txt")], loc(&dst))
+            .await
+            .unwrap();
+        assert_eq!(plan.conflicts.len(), 1);
+        let entry = ops::copy_execute(
+            &fs,
+            &fs,
+            plan,
+            ConflictPolicy::Replace,
+            &ctx,
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+
+        let pool = ConnectionPool::new();
+        let outcome = execute_undo(&entry, &pool).await;
+
+        let left = dst.join("r.txt").exists();
+        assert!(
+            left || !matches!(outcome.kind, UndoKind::Ok),
+            "undo reported Ok but dst/r.txt is gone entirely (old version was \
+             permanently replaced, new version now deleted)"
+        );
+    }
+
+    /// F-opus: 여러 항목 이동의 undo 중 한 항목이 사라졌으면, 앞 항목은 이미 되돌린 뒤
+    /// "undo skipped" 로 보고하고 entry 는 undone 처리 안 됨 → 다음 Ctrl+Z 도 같은 entry 에서
+    /// 영원히 Skipped (그 이전 작업들은 Ctrl+Z 로 닿을 수 없다).
+    #[tokio::test]
+    #[ignore = "fileops-22 repro"]
+    async fn undo_move_partial_skip_must_not_half_apply_and_report_skipped() {
+        let (ctx, _keep) = mk_ctx().await;
+        let dir = TempDir::new().unwrap();
+        let src = dir.path().join("src");
+        let dst = dir.path().join("dst");
+        tokio::fs::create_dir(&src).await.unwrap();
+        tokio::fs::create_dir(&dst).await.unwrap();
+        tokio::fs::write(src.join("a.txt"), b"a").await.unwrap();
+        tokio::fs::write(src.join("b.txt"), b"b").await.unwrap();
+        let fs = LocalFs::new();
+        let plan = ops::move_plan(
+            &fs,
+            &fs,
+            vec![eref(&src, "a.txt"), eref(&src, "b.txt")],
+            loc(&dst),
+        )
+        .await
+        .unwrap();
+        let entry = ops::move_execute(
+            &fs,
+            &fs,
+            plan,
+            ConflictPolicy::Skip,
+            &ctx,
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+        // 사용자가 옮겨진 b.txt 를 다른 곳으로 치움 (여기선 다른 폴더로 rename).
+        tokio::fs::rename(dst.join("b.txt"), dir.path().join("b-elsewhere.txt"))
+            .await
+            .unwrap();
+
+        let pool = ConnectionPool::new();
+        let first = execute_undo(&entry, &pool).await;
+        let a_back = src.join("a.txt").exists();
+        // 두 번째 Ctrl+Z (journal 은 Skipped 를 undone 처리하지 않으므로 같은 entry).
+        let second = execute_undo(&entry, &pool).await;
+
+        eprintln!(
+            "first={:?} {:?} a_back={a_back} second={:?} {:?}",
+            first.kind, first.message, second.kind, second.message
+        );
+        assert!(
+            !(a_back && matches!(first.kind, UndoKind::Skipped)),
+            "undo moved a.txt back but reported the whole undo as skipped"
+        );
+    }
+
+    /// F-opus: macOS 로컬 휴지통 삭제의 undo 는 NotSupported → UndoKind::Error.
+    /// `undo_last` 는 Error 를 undone 처리하지 않으므로(commands/undo.rs) 이후 Ctrl+Z 는
+    /// 영원히 이 entry 에서 같은 오류 — 그 이전 작업들은 되돌릴 수 없게 된다.
+    /// (LocalFs::restore_many 는 macOS 에서 아무것도 건드리지 않고 거부만 한다 — 안전.)
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    #[ignore = "fileops-07 repro"]
+    async fn macos_trash_undo_is_error_and_would_block_the_undo_stack() {
+        let pool = ConnectionPool::new();
+        let entry = JournalEntry {
+            id: crate::services::journal::JournalId::new(),
+            timestamp: chrono::Utc::now(),
+            op: crate::services::journal::OpKind::Trash {
+                count: 1,
+                location: loc(std::path::Path::new("/tmp/never-touched")),
+            },
+            undo: UndoAction::RestoreFromTrash {
+                source: SourceId::Local,
+                items: vec![crate::services::journal::TrashItem {
+                    trash_path: String::new(),
+                    original_path: PathBuf::from("/tmp/never-touched/x.txt"),
+                }],
+            },
+            undone: false,
+        };
+        let outcome = execute_undo(&entry, &pool).await;
+        eprintln!("macOS trash undo -> {:?} {:?}", outcome.kind, outcome.message);
+        // 기대: 되돌릴 수 없으면 Irreversible/Skipped 로 종결돼 다음 Ctrl+Z 가 이전 작업으로
+        // 넘어가야 한다. Error 는 entry 를 그대로 남긴다.
+        assert!(
+            !matches!(outcome.kind, UndoKind::Error),
+            "macOS trash undo returns Error -> entry never marked undone -> undo stack stuck: {:?}",
+            outcome.message
+        );
+    }
+}
+
+#[cfg(test)]
+mod review_fileops_sol_r3 {
+    use super::*;
+    use crate::services::journal::{BackupRestore, Journal, OpKind};
+
+    struct Fixture {
+        _temp: tempfile::TempDir,
+        journal: Arc<Journal>,
+        entry: JournalEntry,
+        originals: [PathBuf; 2],
+        backups: [PathBuf; 2],
+    }
+
+    async fn fixture(occupied: bool) -> Fixture {
+        let temp = tempfile::tempdir().unwrap();
+        let dst = temp.path().join("dst");
+        tokio::fs::create_dir(&dst).await.unwrap();
+        let originals = [dst.join("first"), dst.join("second")];
+        let backups = [dst.join("first.bak"), dst.join("second.bak")];
+        for (index, backup) in backups.iter().enumerate() {
+            tokio::fs::create_dir(backup).await.unwrap();
+            tokio::fs::write(backup.join("old.txt"), format!("original-{index}"))
+                .await
+                .unwrap();
+        }
+        if occupied {
+            tokio::fs::create_dir(&originals[0]).await.unwrap();
+            tokio::fs::write(originals[0].join("partial.txt"), b"partial new copy")
+                .await
+                .unwrap();
+        }
+        let journal = Journal::load_from(&temp.path().join("journal.jsonl"))
+            .await
+            .unwrap();
+        let entry = journal
+            .push(
+                OpKind::Copy {
+                    count: 0,
+                    src: Location {
+                        source: SourceId::Local,
+                        path: temp.path().join("src"),
+                    },
+                    dst: Location {
+                        source: SourceId::Local,
+                        path: dst,
+                    },
+                },
+                UndoAction::UndoCopy {
+                    target_source: SourceId::Local,
+                    copied: vec![],
+                    backups_to_restore: (0..2)
+                        .map(|i| BackupRestore {
+                            backup_path: backups[i].clone(),
+                            original_path: originals[i].clone(),
+                        })
+                        .collect(),
+                    src_source: Some(SourceId::Local),
+                    copied_from: vec![],
+                },
+            )
+            .await
+            .unwrap();
+        Fixture {
+            _temp: temp,
+            journal,
+            entry,
+            originals,
+            backups,
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "fileops-15 repro"]
+    async fn partial_first_folder_must_not_block_second_backup_restore() {
+        let f = fixture(true).await;
+        let outcome = execute_undo(&f.entry, &ConnectionPool::new()).await;
+        let next = f.journal.peek_undoable().await.unwrap().unwrap();
+        eprintln!(
+            "R3 occupied-first outcome={outcome:?}; first_partial={} first_backup={} second_restored={} second_backup={} same_undo_entry={} undone={}",
+            f.originals[0].join("partial.txt").exists(), f.backups[0].join("old.txt").exists(),
+            f.originals[1].join("old.txt").exists(), f.backups[1].join("old.txt").exists(),
+            next.id == f.entry.id, next.undone,
+        );
+        assert!(
+            f.originals[1].join("old.txt").exists(),
+            "first occupied partial folder prevents restoring the independent second backup; outcome={outcome:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn both_backups_restore_when_original_locations_are_free() {
+        let f = fixture(false).await;
+        let outcome = execute_undo(&f.entry, &ConnectionPool::new()).await;
+        assert!(matches!(outcome.kind, UndoKind::Ok), "{outcome:?}");
+        for i in 0..2 {
+            assert_eq!(
+                tokio::fs::read(f.originals[i].join("old.txt"))
+                    .await
+                    .unwrap(),
+                format!("original-{i}").as_bytes()
+            );
+            assert!(!f.backups[i].exists());
+        }
+    }
+}
