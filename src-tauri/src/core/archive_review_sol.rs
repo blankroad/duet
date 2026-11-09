@@ -1064,7 +1064,6 @@ fn sol2_remote_backslash_multiple_arguments() {
 }
 
 #[tokio::test]
-#[ignore = "archive-05 현재 결함을 관찰(통과=결함 있음) — 수정 시 기대값 반전"]
 async fn sol2_repack_join_independent_sentinel_and_zip_update() {
     let d = tempfile::tempdir().unwrap();
     let browse = d.path().join("browse");
@@ -1076,7 +1075,7 @@ async fn sol2_repack_join_independent_sentinel_and_zip_update() {
     let expected = fs.join(&original.location.path, &original.name);
     let plan = repack_plan(&fs, sol2_loc(&browse), original).await.unwrap();
     eprintln!("repack dest={:?}; fs.join={expected:?}", plan.dest_path);
-    assert_ne!(plan.dest_path, expected);
+    assert_eq!(plan.dest_path, expected);
     // Host-side Info-ZIP update preserves an entry absent from the new browse folder.
     std::fs::write(browse.join("removed"), b"old").unwrap();
     let p = d.path().join("update.zip");

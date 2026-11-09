@@ -68,7 +68,6 @@ fn lead_remote_command_keeps_backslash_in_names() {
 /// 충돌(=백업)을 못 보고, 호스트 명령은 `\`→`/` 로 고쳐 원본을 **백업 없이** 덮어쓴다.
 /// 여기서는 join 을 바꾼 TestFs 로 "fs.join 을 쓰지 않음" 을 보인다.
 #[tokio::test]
-#[ignore = "archive-05 repro"]
 async fn lead_repack_plan_uses_fs_join() {
     let root = tempfile::tempdir().unwrap();
     let browse = root.path().join("browse");

@@ -716,7 +716,11 @@ pub async fn open_for_browse(
 ) -> Result<(Location, UnpackReport), DuetError> {
     let format = detect_format(&archive.name)
         .ok_or_else(|| DuetError::Io(format!("unsupported archive: {}", archive.name)))?;
-    let archive_path = archive.location.path.join(&archive.name);
+    let archive_path = crate::fs::posix_path::join_for(
+        &archive.location.source,
+        &archive.location.path,
+        &archive.name,
+    );
     let token = uuid::Uuid::new_v4().to_string();
 
     match &archive.location.source {
@@ -1027,7 +1031,7 @@ pub async fn repack_plan(
         return Err(DuetError::Io("nothing to repack (folder is empty)".into()));
     }
     let item_names: Vec<String> = entries.into_iter().map(|e| e.name).collect();
-    let dest_path = original_archive.location.path.join(&original_archive.name);
+    let dest_path = fs.join(&original_archive.location.path, &original_archive.name);
     let conflict = fs.metadata(&dest_path).await.is_ok();
     Ok(CompressPlan {
         source: browse_root.source.clone(),
