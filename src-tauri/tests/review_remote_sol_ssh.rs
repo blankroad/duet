@@ -11,7 +11,7 @@ use std::path::Path;
 use tokio_util::sync::CancellationToken;
 
 #[tokio::test]
-#[ignore = "remote-01 repro: backslash name overwrites unrelated file (docker sshd)"]
+#[ignore = "docker sshd 필요 — remote-01 회귀"]
 async fn same_host_copy_must_preserve_backslash_name() {
     if ssh_common::skip_if_disabled() {
         return;

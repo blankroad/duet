@@ -39,7 +39,7 @@ async fn root(sess: &ssh_common::Session, topic: &str) -> PathBuf {
 }
 
 #[tokio::test]
-#[ignore = "remote-01 repro: sync prune targets a different folder (docker sshd :2225)"]
+#[ignore = "docker sshd 필요 — remote-01 회귀 (docker sshd :2225)"]
 async fn sync_prune_must_not_remove_unrelated_folder_contents() {
     if !fixture_enabled() {
         return;

@@ -755,7 +755,7 @@ async fn c21_search_korean_space_hidden_root_backslash() {
 /// 같은 호스트 복사 — 이름에 `\` 가 든 파일. `shell_escape_path` 가 `\`→`/` 로 바꿔
 /// 다른 파일(`a/b.txt`)이 복사되는지 확인.
 #[tokio::test]
-#[ignore = "remote-01 repro: same-host copy of backslash name copies another file (docker sshd)"]
+#[ignore = "docker sshd 필요 — remote-01 회귀 (전용 컨테이너)"]
 async fn c19_same_host_copy_backslash_name_copies_wrong_file() {
     if ssh_common::skip_if_disabled() {
         return;
@@ -897,7 +897,7 @@ async fn c19_same_host_different_user_runs_as_source_user() {
 /// 위 결함의 파급: 받는 폴더에 **다른** 파일 `b.txt` 가 이미 있으면, 충돌 검사는 `a\b.txt`
 /// 로 해서 "충돌 없음" → rsync 가 `b.txt` 를 백업 없이 덮어쓴다 (Skip 정책인데도).
 #[tokio::test]
-#[ignore = "remote-01 repro: backslash name overwrites unrelated file under Skip (docker sshd)"]
+#[ignore = "docker sshd 필요 — remote-01 회귀 (전용 컨테이너)"]
 async fn c19_same_host_copy_backslash_name_overwrites_unrelated_file() {
     if ssh_common::skip_if_disabled() {
         return;
