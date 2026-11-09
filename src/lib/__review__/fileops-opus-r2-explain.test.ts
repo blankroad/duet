@@ -26,13 +26,13 @@ describe("fileops-09 폴더 Replace 롤백 실패 — 백업 위치가 토스트
       "(rollback failed: permission denied: Access is denied. (os error 5))",
   );
 
-  it.fails("fileops-09: macOS: 토스트 본문에 백업 경로가 있다", () => {
+  it("fileops-09: macOS: 토스트 본문에 백업 경로가 있다", () => {
     const r = explainError(mac, "unix");
     expect(r.detail).toContain("a.bak.");
     expect(r.text, r.text).toContain("a.bak.");
   });
 
-  it.fails("fileops-09: Windows: 토스트 본문에 백업 경로가 있다", () => {
+  it("fileops-09: Windows: 토스트 본문에 백업 경로가 있다", () => {
     const r = explainError(win, "windows");
     expect(r.detail).toContain("a.bak.");
     expect(r.text, r.text).toContain("a.bak.");

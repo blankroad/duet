@@ -385,3 +385,19 @@ describe("explainError — sync between different hosts (SC-15)", () => {
     expect(r.text).not.toMatch(/local↔local/);
   });
 });
+
+describe("explainError — backup kept after a failed folder replace (fileops-09)", () => {
+  it("names the first cause and the full backup path, not the backup as target", () => {
+    const message =
+      "1 item(s) failed — a: io: copy failed (permission denied: injected list failure); " +
+      "original preserved at backup /w/dst/a.bak.20261108-101500 " +
+      "(rollback failed: io: Directory not empty (os error 66))";
+    const r = explainError({ kind: "Io", message }, "macos");
+    expect(r.text).toBe(
+      `${i18n.t("errors.reason.accessDenied")} ${i18n.t("errors.backupKept", {
+        path: "/w/dst/a.bak.20261108-101500",
+      })}`,
+    );
+    expect(r.detail).toBe(message);
+  });
+});

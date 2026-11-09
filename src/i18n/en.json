@@ -1298,6 +1298,7 @@
   },
   "errors": {
     "withName": "“{{name}}” — {{text}}",
+    "backupKept": "The original is kept at backup {{path}}.",
     "reason": {
       "needPassword": "A password is required, or the one entered is wrong.",
       "authFailed": "Could not sign in. Check the user name, password or key.",

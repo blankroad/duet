@@ -350,12 +350,19 @@ function targetName(hits: PathHit[]): string | undefined {
     : undefined;
 }
 
-/** 원인 문장 앞에 대상 이름을 붙인다 — 이미 들어 있으면 그대로. */
+/**
+ * 원인 문장에 대상 이름(앞)과 백업 위치(뒤)를 붙인다 — 이미 들어 있으면 그대로.
+ * 백업 위치는 롤백 실패 시 원본이 남은 곳이라 전체 경로가 필요하다.
+ */
 function withTarget(text: string, paths: PathHit[]): string {
+  let out = text;
   const name = targetName(paths);
-  return name && !text.includes(name)
-    ? i18n.t("errors.withName", { name, text })
-    : text;
+  if (name && !out.includes(name))
+    out = i18n.t("errors.withName", { name, text: out });
+  const backup = paths.find((h) => h.backup)?.path;
+  if (backup && !out.includes(backup))
+    out = `${out} ${i18n.t("errors.backupKept", { path: backup })}`;
+  return out;
 }
 
 function pickReason(
@@ -407,7 +414,12 @@ export function explainError(
   const detail = raw.trim();
   const cleaned = cleanMessage(raw);
   const paths = findPaths(raw, kind);
-  const picked = pickReason(kind, maskPaths(raw, paths), os);
+  const masked = maskPaths(raw, paths);
+  // 롤백 실패("…; original preserved at backup … (rollback failed: …)")는 앞쪽이 원래 원인.
+  const cut = masked.search(/;?\s*original preserved at backup/i);
+  const picked =
+    (cut > 0 ? pickReason(kind, masked.slice(0, cut), os) : undefined) ??
+    pickReason(kind, masked, os);
   if (picked) {
     const text = i18n.t(`errors.reason.${picked.reason}`, picked.vars ?? {});
     if (!APPEND_DETAIL.has(picked.reason) || !cleaned)
