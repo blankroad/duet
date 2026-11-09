@@ -132,11 +132,11 @@ for (const [direction, trigger, mock] of [
   describe(`${direction} outcome toasts`, () => {
     it.each([
       ["ok", null, "success"],
-      ["partial", "changed", "info"],
-      ["stale", "occupied", "info"],
+      ["partial", "changed", "warning"],
+      ["stale", "occupied", "warning"],
       ["error", "unreachable", "error"],
       ["skipped", "redo_unsupported", "info"],
-      ["irreversible", null, "info"],
+      ["irreversible", null, "warning"],
     ] as [UndoOutcome["kind"], UndoReason | null, ToastKind][])(
       "fileops-25: %s describes the operation in both languages",
       async (kind, reason, severity) => {
@@ -180,11 +180,23 @@ for (const [direction, trigger, mock] of [
             expect(message).toContain("changed.txt");
             expect(message).not.toContain("C:\\work");
           }
-          if (kind === "error")
+          if (["error", "partial", "stale", "irreversible"].includes(kind))
             expect(show.mock.calls[0]![2]).toEqual({
               detail: "raw backend detail",
             });
         }
+      },
+    );
+
+    it.each(["partial", "stale", "irreversible"] as const)(
+      "%s without a backend note remains info",
+      async (kind) => {
+        const data = { ...outcome(kind, "changed"), message: null };
+        mock.mockResolvedValue({ status: "ok", data });
+        const show = vi.fn();
+        await trigger(show);
+        expect(show.mock.calls[0]![1]).toBe("info");
+        expect(show.mock.calls[0]![2]).toEqual({ detail: undefined });
       },
     );
 

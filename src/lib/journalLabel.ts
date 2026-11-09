@@ -62,7 +62,7 @@ export function opLabel(op: OpKind, t: TFunction): string {
   }
 }
 
-/** 구조화된 undo/redo 결과를 사용자 문구로 표시하고 원문은 오류 상세로만 보존한다. */
+/** 구조화된 undo/redo 결과를 사용자 문구로 표시하고 백엔드 메모는 상세로 보존한다. */
 export function undoToast(
   outcome: UndoOutcome,
   direction: "undo" | "redo",
@@ -102,6 +102,9 @@ export function undoToast(
       message = t(`undo.${direction}.error`, { op, reason });
       break;
   }
+  const hasWarningNote =
+    Boolean(outcome.message) &&
+    ["partial", "stale", "irreversible"].includes(outcome.kind);
   return {
     message,
     kind:
@@ -109,8 +112,10 @@ export function undoToast(
         ? "success"
         : outcome.kind === "error"
           ? "error"
-          : "info",
-    ...(outcome.kind === "error" && outcome.message
+          : hasWarningNote
+            ? "warning"
+            : "info",
+    ...((outcome.kind === "error" || hasWarningNote) && outcome.message
       ? { detail: outcome.message }
       : {}),
   };
