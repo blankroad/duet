@@ -28,7 +28,8 @@ export function errorToastText(
 ): { message: string; detail: string } {
   const why = explainError(e);
   const path = opts.path?.trim() || undefined;
-  const name = path ? basename(path, path) : undefined;
+  // 원문이 실제로 실패한 항목을 이미 말하면(why.target) 그 이름만 — 호출부 대상을 또 붙이지 않는다.
+  const name = path && !why.target ? basename(path, path) : undefined;
   const err =
     name && !why.text.includes(name)
       ? i18n.t("errors.withName", { name, text: why.text })

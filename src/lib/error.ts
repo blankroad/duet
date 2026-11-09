@@ -29,6 +29,11 @@ export interface ExplainedError {
   text: string;
   /** 백엔드 원문 — 문제 보고·자세히 보기용. 없으면 빈 문자열. */
   detail: string;
+  /**
+   * 원문에서 찾은 실패 대상 이름(basename) — 실제로 실패한 항목. 있으면 호출부가 아는
+   * 대상(예: 선택한 상위 폴더)의 이름을 문장에 또 붙이지 않는다(`errorToastText`).
+   */
+  target?: string;
 }
 
 /** 원인 키 → `errors.reason.<key>` 문구. */
@@ -491,6 +496,9 @@ export function explainError(
   const detail = raw.trim();
   const cleaned = cleanMessage(raw);
   const paths = findPaths(raw, kind);
+  const target = targetName(paths);
+  const done = (text: string): ExplainedError =>
+    target ? { text, detail, target } : { text, detail };
   const masked = maskPaths(raw, paths);
   // 롤백 실패("…; original preserved at backup … (rollback failed: …)")는 앞쪽이 원래 원인.
   const cut = masked.search(/;?\s*original preserved at backup/i);
@@ -503,10 +511,10 @@ export function explainError(
   if (picked) {
     const text = i18n.t(`errors.reason.${picked.reason}`, picked.vars ?? {});
     if (!APPEND_DETAIL.has(picked.reason) || !cleaned)
-      return { text: withTarget(text, paths), detail };
+      return done(withTarget(text, paths));
     // 이미 설명한 오류를 다시 감싼 경우(대화상자가 formatErr 결과를 message 로 넘김) 그대로.
-    if (cleaned.startsWith(text)) return { text: cleaned, detail };
-    return { text: `${text} — ${cleaned}`, detail };
+    if (cleaned.startsWith(text)) return done(cleaned);
+    return done(`${text} — ${cleaned}`);
   }
   // 원인을 모르면 종류 라벨 + 원문 — 정보를 숨기지 않는다.
   const label = kind
@@ -518,9 +526,9 @@ export function explainError(
     const text = shown.toLowerCase().startsWith(label.toLowerCase())
       ? shown
       : `${label} — ${shown}`;
-    return { text, detail };
+    return done(text);
   }
-  return { text: label ?? (shown || String(e)), detail };
+  return done(label ?? (shown || String(e)));
 }
 
 /**

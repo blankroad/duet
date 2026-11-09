@@ -66,6 +66,22 @@ describe("showError — G-16 오류 토스트가 대상과 원문을 잃지 않�
     expect(useToast.getState().toasts).toHaveLength(0);
   });
 
+  it("Q1: names only the failed item from the original, not the given path too", () => {
+    const e = {
+      kind: "PermissionDenied",
+      message: "permission denied: /dst/child.txt (os error 13)",
+    };
+    const { message, detail } = errorToastText("toast.copyFailed", e, {
+      path: "parent",
+    });
+    expect(message).toContain("“child.txt”");
+    expect(message).not.toContain("“parent”");
+    // detail 의 path 접두 규칙은 그대로.
+    expect(detail).toBe(
+      "parent: permission denied: /dst/child.txt (os error 13)",
+    );
+  });
+
   it("omits the detail option when there is no original text", () => {
     const fn = vi.fn();
     showError("toast.deleteFailed", { kind: "Cancelled" }, { toast: fn });
