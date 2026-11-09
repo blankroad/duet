@@ -2011,8 +2011,14 @@ async fn merge_relay(
         let rel = std::path::Path::new(rel);
         let res = match status {
             CompareStatus::LeftOnly => {
-                let s = remote_join(&left.path, rel);
-                let d = remote_join(&right.path, rel);
+                let s = remote_join(
+                    &left.path,
+                    crate::core::compare::resolve_side_rel(left_fs, &left.path, rel).await,
+                );
+                let d = remote_join(
+                    &right.path,
+                    crate::core::compare::resolve_side_rel(right_fs, &right.path, rel).await,
+                );
                 // 추가 전용 불변식 강제: race 로 dst 가 생겼으면 덮어쓰지 않고 skip.
                 if right_fs.metadata(&d).await.is_ok() {
                     tracing::warn!("merge skip (dst exists): {}", d.display());
@@ -2032,8 +2038,14 @@ async fn merge_relay(
                 }
             }
             CompareStatus::RightOnly => {
-                let s = remote_join(&right.path, rel);
-                let d = remote_join(&left.path, rel);
+                let s = remote_join(
+                    &right.path,
+                    crate::core::compare::resolve_side_rel(right_fs, &right.path, rel).await,
+                );
+                let d = remote_join(
+                    &left.path,
+                    crate::core::compare::resolve_side_rel(left_fs, &left.path, rel).await,
+                );
                 if left_fs.metadata(&d).await.is_ok() {
                     tracing::warn!("merge skip (dst exists): {}", d.display());
                     Ok(())
@@ -2376,16 +2388,28 @@ async fn apply_one_relay(
     let (src_fs, src_path, dst_fs, dst_path, dst_is_left) = match direction {
         ApplyDirection::ToRight => (
             left_fs,
-            remote_join(&left.path, rel),
+            remote_join(
+                &left.path,
+                crate::core::compare::resolve_side_rel(left_fs, &left.path, rel).await,
+            ),
             right_fs,
-            remote_join(&right.path, rel),
+            remote_join(
+                &right.path,
+                crate::core::compare::resolve_side_rel(right_fs, &right.path, rel).await,
+            ),
             false,
         ),
         ApplyDirection::ToLeft => (
             right_fs,
-            remote_join(&right.path, rel),
+            remote_join(
+                &right.path,
+                crate::core::compare::resolve_side_rel(right_fs, &right.path, rel).await,
+            ),
             left_fs,
-            remote_join(&left.path, rel),
+            remote_join(
+                &left.path,
+                crate::core::compare::resolve_side_rel(left_fs, &left.path, rel).await,
+            ),
             true,
         ),
         ApplyDirection::Skip => return Ok(()),
