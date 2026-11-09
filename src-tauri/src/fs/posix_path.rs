@@ -21,6 +21,7 @@ pub fn parent(path: &Path) -> Option<PathBuf> {
 
 /// Last `/`-separated name, ignoring trailing slashes. Root, empty and non-UTF8
 /// paths have no name. Backslashes and drive-looking text are preserved.
+/// This is lexical: `"/a/.."` returns `".."` without resolving it.
 pub fn file_name(path: &Path) -> Option<&str> {
     let path = path.to_str()?.trim_end_matches('/');
     if path.is_empty() {
