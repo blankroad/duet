@@ -507,18 +507,16 @@ async fn load_file(path: &Path, limit: usize) -> Result<LoadedJournal, DuetError
         Err(e) => return Err(DuetError::from(e)),
     };
     let mut needs_newline = bytes.last().is_some_and(|b| *b != b'\n');
-    let text = String::from_utf8_lossy(&bytes);
-    let lossy = matches!(text, std::borrow::Cow::Owned(_));
-    let scan = scan_lines(&text);
+    let scan = scan_lines(&bytes);
     let entries = replay(&scan, limit);
 
     let mut notice = None;
     if scan.dropped > 0 || scan.split > 0 {
-        // 버리는 내용이 있으면(또는 원문 바이트가 바뀌면) 원본 사본부터. 사본을 못 남기면
+        // 버리는 내용이 있으면 원본 사본부터. 사본을 못 남기면
         // 원본을 다시 쓰지 않는다 — 깨진 줄은 다음 로드 때도 건너뛰니 동작엔 문제없다.
         let mut backup = None;
         let mut can_rewrite = true;
-        if scan.dropped > 0 || lossy {
+        if scan.dropped > 0 {
             match persist::backup_copy(path).await {
                 Ok(b) => backup = Some(b),
                 Err(e) => {
@@ -563,9 +561,16 @@ async fn load_file(path: &Path, limit: usize) -> Result<LoadedJournal, DuetError
 
 /// 줄마다: 아는 기록 → 재생 대상, 모르는 JSON 객체 → 보존만, 그 밖 → 버림(개수 셈).
 /// 한 줄에 기록이 붙어 있으면(`{…}{…}`) 나눠서 살린다.
-fn scan_lines(text: &str) -> Scan {
+///
+/// UTF-8 검사는 줄 단위로 엄격하게 한다 — 파일 전체를 lossy 변환하면 기록 안 경로의
+/// 잘못된 바이트가 U+FFFD 로 바뀐 채 "정상" 기록으로 재생돼 엉뚱한 경로로 undo 할 수 있다.
+fn scan_lines(bytes: &[u8]) -> Scan {
     let mut scan = Scan::default();
-    for (i, line) in text.lines().enumerate() {
+    for (i, raw) in bytes.split(|b| *b == b'\n').enumerate() {
+        let Ok(line) = std::str::from_utf8(raw) else {
+            scan.drop_piece(i, "not valid UTF-8");
+            continue;
+        };
         let line = line.trim();
         if line.is_empty() {
             continue;
@@ -932,6 +937,41 @@ mod load_recovery {
             panic!("expected one skipped line");
         };
         assert_eq!(std::fs::read(backup.unwrap()).unwrap(), bytes);
+    }
+
+    /// 기록 안(JSON 문자열)의 잘못된 바이트 — lossy 변환하면 경로가 U+FFFD 로 바뀐
+    /// "정상" 기록이 돼 엉뚱한 경로로 undo 할 수 있다. 그 줄은 깨진 줄로 버려야 한다.
+    #[tokio::test]
+    async fn invalid_utf8_inside_a_record_drops_only_that_line() {
+        let d = tempdir().unwrap();
+        let (path, lines) = journal_with(d.path(), 3).await;
+        assert!(lines[1].contains("/tmp"), "{}", lines[1]);
+        let mut bytes = format!("{}\n", lines[0]).into_bytes();
+        let (head, tail) = lines[1].split_once("/tmp").unwrap();
+        bytes.extend_from_slice(head.as_bytes());
+        bytes.extend_from_slice(b"/tm\xffp");
+        bytes.extend_from_slice(tail.as_bytes());
+        bytes.push(b'\n');
+        bytes.extend_from_slice(format!("{}\n", lines[2]).as_bytes());
+        std::fs::write(&path, &bytes).unwrap();
+
+        let j = Journal::load_from(&path).await.unwrap();
+        let ids: Vec<String> = j
+            .history(10)
+            .await
+            .iter()
+            .rev()
+            .map(|e| serde_json::to_string(&e.id).unwrap())
+            .collect();
+        assert_eq!(ids.len(), 2, "only the damaged record is dropped");
+        assert!(lines[0].contains(&ids[0]) && lines[2].contains(&ids[1]));
+        let Some(StartupNoticeKind::SkippedLines { count: 1, backup }) =
+            j.load_notice().map(|n| n.action)
+        else {
+            panic!("expected one skipped line");
+        };
+        assert_eq!(std::fs::read(backup.unwrap()).unwrap(), bytes);
+        assert_eq!(all_lines_parse(&path), 2);
     }
 
     #[tokio::test]
