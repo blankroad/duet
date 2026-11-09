@@ -135,6 +135,13 @@ async fn ctx(path: &Path) -> OpCtx {
         app: None,
     }
 }
+fn item(fs: &ProbeFs) -> EntryRef {
+    EntryRef {
+        location: fs.loc("/src"),
+        name: "file".into(),
+    }
+}
+
 #[tokio::test]
 async fn remote17_keep_both_candidate_uses_destination_join() {
     let fs = ProbeFs::new("dst", 22);
@@ -255,6 +262,155 @@ async fn relay_merge_uses_each_filesystem() {
     assert!(out.is_err());
     assert!(left.saw(Path::new("/L/__fs/a")));
     assert!(right.saw(Path::new("/R/__fs/a")));
+}
+#[tokio::test]
+async fn endpoints_route_planning_and_read_only_operations_to_relay() {
+    let mut left = ProbeFs::new("left", 22);
+    left.exists = true;
+    let mut right = ProbeFs::new("right", 23);
+    right.exists = true;
+    let p = copy_plan(&left, &right, vec![item(&left)], right.loc("/dst"))
+        .await
+        .unwrap();
+    assert_eq!(p.strategy, CopyStrategy::Relay);
+    let p = move_plan(&left, &right, vec![item(&left)], right.loc("/dst"))
+        .await
+        .unwrap();
+    assert_eq!(p.strategy, CopyStrategy::Relay);
+    assert!(matches!(
+        sync_plan(&left, &right, left.loc("/src"), right.loc("/dst")).await,
+        Err(DuetError::NotSupported(_))
+    ));
+    assert!(
+        sync_preview(&left, &left.loc("/src"), &right, &right.loc("/dst"), None)
+            .await
+            .is_ok()
+    );
+    assert!(verify_compare(
+        &left,
+        &left.loc("/src"),
+        &right,
+        &right.loc("/dst"),
+        Vec::new(),
+        None
+    )
+    .await
+    .is_ok());
+}
+#[tokio::test]
+async fn endpoints_route_merge_and_apply_to_relay() {
+    let mut left = ProbeFs::new("left", 22);
+    left.exists = true;
+    let mut right = ProbeFs::new("right", 23);
+    right.exists = true;
+    let t = tempfile::tempdir().unwrap();
+    let c = ctx(t.path()).await;
+    assert!(merge_bidir(
+        &left,
+        left.loc("/src"),
+        &right,
+        right.loc("/dst"),
+        false,
+        &c,
+        CancellationToken::new(),
+        None
+    )
+    .await
+    .is_ok());
+    assert!(apply_compare(
+        &left,
+        left.loc("/src"),
+        &right,
+        right.loc("/dst"),
+        Vec::new(),
+        &c,
+        CancellationToken::new(),
+        None
+    )
+    .await
+    .is_ok());
+}
+#[tokio::test]
+async fn endpoint_changes_reject_same_host_execute_before_io() {
+    let left = ProbeFs::new("left", 22);
+    let right = ProbeFs::new("right", 23);
+    let t = tempfile::tempdir().unwrap();
+    let c = ctx(t.path()).await;
+    let cp = CopyPlan {
+        src_source: left.source.clone(),
+        dst: right.loc("/dst"),
+        items: vec![item(&left)],
+        conflicts: Vec::new(),
+        total_size_bytes: 0,
+        strategy: CopyStrategy::SshSameHost,
+    };
+    let mp = MovePlan {
+        src_source: left.source.clone(),
+        dst: right.loc("/dst"),
+        items: vec![item(&left)],
+        conflicts: Vec::new(),
+        total_size_bytes: 0,
+        strategy: CopyStrategy::SshSameHost,
+        is_same_fs: false,
+    };
+    let sp = SyncPlan {
+        src: left.loc("/src"),
+        dst: right.loc("/dst"),
+        strategy: CopyStrategy::SshSameHost,
+        prune: false,
+    };
+    for out in [
+        copy_execute(
+            &left,
+            &right,
+            cp,
+            ConflictPolicy::Skip,
+            &c,
+            CancellationToken::new(),
+            None,
+        )
+        .await,
+        move_execute(
+            &left,
+            &right,
+            mp,
+            ConflictPolicy::Skip,
+            &c,
+            CancellationToken::new(),
+            None,
+        )
+        .await,
+        sync_execute(&left, &right, sp, &c, CancellationToken::new(), None).await,
+    ] {
+        assert!(
+            matches!(out, Err(DuetError::Io(ref s)) if s.contains("server endpoints")),
+            "{out:?}"
+        );
+    }
+    assert!(left.seen.lock().unwrap().is_empty());
+    assert!(right.seen.lock().unwrap().is_empty());
+    assert!(c.journal.history(10).await.is_empty());
+}
+#[tokio::test]
+async fn endpoints_skip_same_host_rename_detection_for_distinct_servers() {
+    let mut left = ProbeFs::new("left", 22);
+    left.exists = true;
+    let mut right = ProbeFs::new("right", 23);
+    right.exists = true;
+    left.entries
+        .insert("/src".into(), vec![entry("old", EntryKind::File)]);
+    right
+        .entries
+        .insert("/dst".into(), vec![entry("new", EntryKind::File)]);
+    let mut p =
+        crate::core::compare::compare_dirs(&left, left.loc("/src"), &right, right.loc("/dst"))
+            .await
+            .unwrap();
+    assert!(detect_renames(&mut p, &left, &right, None)
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(p.moves.is_empty());
 }
 #[test]
 fn progress_remote_names_and_backup_parents_preserve_backslashes() {

@@ -3,7 +3,7 @@
 //! plan() 결과는 IPC 노출 — UI 다이얼로그가 사용자에게 보여줌.
 //! execute() 는 백엔드에서 settings/journal 갱신.
 
-use crate::core::copy_strategy::{decide as decide_strategy, CopyStrategy};
+use crate::core::copy_strategy::{decide_fs, CopyStrategy};
 use crate::fs::{posix_path, FileSystem};
 use crate::services::journal::{
     BackupRestore, ChmodItem, Journal, JournalEntry, MoveItem, OpKind, RedoCopyPair, RenamePair,
@@ -444,7 +444,7 @@ async fn plan_transfer(
             .unwrap_or(0);
     }
 
-    let strategy = decide_strategy(&src_source, &dst.source);
+    let strategy = decide_fs(src_fs, &src_source, dst_fs, &dst.source);
     Ok(CopyPlan {
         src_source,
         dst,
@@ -468,6 +468,24 @@ async fn ensure_items_not_into_dst(
         .map(|it| src_fs.join(&it.location.path, &it.name))
         .collect();
     crate::core::path_guard::ensure_not_into_itself(src_source, &paths, dst).await
+}
+
+/// Refuse stale/forged host-side plans before any I/O; the caller must plan again.
+fn ensure_current_same_host(
+    planned: &CopyStrategy,
+    src_fs: &dyn FileSystem,
+    src: &SourceId,
+    dst_fs: &dyn FileSystem,
+    dst: &SourceId,
+) -> Result<(), DuetError> {
+    if planned == &CopyStrategy::SshSameHost
+        && decide_fs(src_fs, src, dst_fs, dst) != CopyStrategy::SshSameHost
+    {
+        return Err(DuetError::Io(
+            "same-host plan no longer matches server endpoints; create a new plan".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// 항목별 실패들을 **하나의** 에러로 묶는다.
@@ -513,6 +531,13 @@ pub async fn copy_execute(
     cancel_token: tokio_util::sync::CancellationToken,
     progress: Option<crate::services::task_queue::ProgressEmitter>,
 ) -> Result<JournalEntry, DuetError> {
+    ensure_current_same_host(
+        &plan.strategy,
+        src_fs,
+        &plan.src_source,
+        dst_fs,
+        &plan.dst.source,
+    )?;
     ensure_items_not_into_dst(src_fs, &plan.src_source, &plan.items, &plan.dst).await?;
     match plan.strategy {
         CopyStrategy::LocalToLocal | CopyStrategy::Relay => {
@@ -837,6 +862,13 @@ pub async fn move_execute(
     cancel_token: tokio_util::sync::CancellationToken,
     progress: Option<crate::services::task_queue::ProgressEmitter>,
 ) -> Result<JournalEntry, DuetError> {
+    ensure_current_same_host(
+        &plan.strategy,
+        src_fs,
+        &plan.src_source,
+        dst_fs,
+        &plan.dst.source,
+    )?;
     if plan.items.is_empty() {
         return Err(DuetError::Io("plan has no items".into()));
     }
@@ -1151,7 +1183,7 @@ pub async fn sync_plan(
     {
         return Err(DuetError::Io("sync: both sides must be directories".into()));
     }
-    let strategy = decide_strategy(&src.source, &dst.source);
+    let strategy = decide_fs(src_fs, &src.source, dst_fs, &dst.source);
     if !matches!(
         strategy,
         CopyStrategy::LocalToLocal | CopyStrategy::SshSameHost
@@ -1198,6 +1230,13 @@ pub async fn sync_execute(
     cancel_token: tokio_util::sync::CancellationToken,
     progress: Option<crate::services::task_queue::ProgressEmitter>,
 ) -> Result<JournalEntry, DuetError> {
+    ensure_current_same_host(
+        &plan.strategy,
+        src_fs,
+        &plan.src.source,
+        dst_fs,
+        &plan.dst.source,
+    )?;
     crate::core::path_guard::ensure_roots_unrelated(&plan.src, &plan.dst).await?;
     match plan.strategy {
         CopyStrategy::SshSameHost => {
@@ -1664,7 +1703,7 @@ pub async fn sync_preview(
     pool: Option<&Arc<crate::services::connection_pool::ConnectionPool>>,
 ) -> Result<SyncPreview, DuetError> {
     crate::core::path_guard::ensure_roots_unrelated(src, dst).await?;
-    match crate::core::copy_strategy::decide(&src.source, &dst.source) {
+    match decide_fs(src_fs, &src.source, dst_fs, &dst.source) {
         crate::core::copy_strategy::CopyStrategy::SshSameHost => {
             let pool = pool
                 .ok_or_else(|| DuetError::Io("pool required for same-host sync preview".into()))?;
@@ -1864,7 +1903,7 @@ pub async fn merge_bidir(
 
     // 전략 분기: same-host 면 host-side 직접 복사(본인 PC 경유 0, §9). 그 외(로컬·relay)는
     // in-Rust copy_relay. 둘 다 추가 전용이라 UndoBidirMerge(생성분 제거)로 완전 복원.
-    match crate::core::copy_strategy::decide(&left.source, &right.source) {
+    match decide_fs(left_fs, &left.source, right_fs, &right.source) {
         crate::core::copy_strategy::CopyStrategy::SshSameHost => {
             merge_same_host(left, right, work, ctx, cancel_token, progress).await
         }
@@ -2447,7 +2486,7 @@ pub async fn apply_compare(
         .filter(|d| !matches!(d.direction, ApplyDirection::Skip))
         .map(|d| (d.direction, d.rel))
         .collect();
-    match crate::core::copy_strategy::decide(&left.source, &right.source) {
+    match decide_fs(left_fs, &left.source, right_fs, &right.source) {
         crate::core::copy_strategy::CopyStrategy::SshSameHost => {
             apply_same_host(left, right, work, ctx, cancel_token, progress).await
         }
@@ -2888,7 +2927,7 @@ pub async fn apply_three_way(
         ));
     }
     let same_host = matches!(
-        crate::core::copy_strategy::decide(&left.source, &right.source),
+        decide_fs(left_fs, &left.source, right_fs, &right.source),
         crate::core::copy_strategy::CopyStrategy::SshSameHost
     );
     let conns = match (&left.source, &right.source) {
@@ -3008,7 +3047,7 @@ pub async fn verify_compare(
     rels: Vec<String>,
     pool: Option<&Arc<crate::services::connection_pool::ConnectionPool>>,
 ) -> Result<Vec<VerifyResult>, DuetError> {
-    match crate::core::copy_strategy::decide(&left.source, &right.source) {
+    match decide_fs(left_fs, &left.source, right_fs, &right.source) {
         crate::core::copy_strategy::CopyStrategy::SshSameHost => {
             let pool =
                 pool.ok_or_else(|| DuetError::Io("pool required for same-host verify".into()))?;
@@ -3175,7 +3214,7 @@ pub async fn detect_renames(
     use crate::core::compare::{CompareStatus, MoveInfo};
     use std::collections::{HashMap, HashSet};
 
-    let strategy = crate::core::copy_strategy::decide(&plan.left.source, &plan.right.source);
+    let strategy = decide_fs(left_fs, &plan.left.source, right_fs, &plan.right.source);
     let same_host = matches!(
         strategy,
         crate::core::copy_strategy::CopyStrategy::SshSameHost
