@@ -7,7 +7,8 @@
 //! - 파일·링크·기타: lstat(링크를 따라가지 않음)의 종류·크기·수정시각.
 //! - 폴더: 하위 트리를 재귀로 훑어 `(상대경로, 종류, 크기, 수정시각)` 줄을 정렬한 뒤 sha256.
 //!   폴더 자신과 하위 폴더의 수정시각은 넣지 않는다(Finder 가 `.DS_Store` 를 만들기만 해도
-//!   바뀌기 때문). `.DS_Store`·`Thumbs.db`·`desktop.ini` 는 OS 가 만드는 부산물이라 제외.
+//!   바뀌기 때문). `.DS_Store`·`Thumbs.db`·`desktop.ini` **파일**은 OS 부산물이라 제외
+//!   (같은 이름의 폴더는 추적). 하위 항목의 크기·시각을 모르면 폴더 전체가 확인 불가.
 //!   하위 폴더 링크는 따라가지 않는다(링크 자체를 한 줄로 기록).
 
 use crate::fs::FileSystem;
@@ -31,7 +32,16 @@ pub async fn stamp(fs: &dyn FileSystem, path: &Path) -> Result<ItemStamp, DuetEr
         });
     }
     let mut lines = Vec::new();
-    collect_tree(fs, path, Path::new(""), &mut lines).await?;
+    // 하위 항목 하나라도 크기·시각을 알 수 없으면 폴더 전체를 "확인 불가"(tree None)로 —
+    // 모르는 값끼리 같다고 보면 그 항목의 편집을 놓친다.
+    if !collect_tree(fs, path, Path::new(""), &mut lines).await? {
+        return Ok(ItemStamp {
+            kind: EntryKind::Dir,
+            size: None,
+            modified_ms: None,
+            tree: None,
+        });
+    }
     lines.sort();
     let mut hasher = Sha256::new();
     for line in &lines {
@@ -114,36 +124,42 @@ pub fn same(recorded: &ItemStamp, now: &ItemStamp) -> bool {
 }
 
 /// 폴더 `dir`(상대경로 `rel`) 아래를 재귀로 훑어 digest 줄을 모은다.
+/// 반환 `false` = 어떤 하위 항목의 필수 값(파일: 크기·시각, 링크·기타: 시각)이 없어 확인 불가.
 async fn collect_tree(
     fs: &dyn FileSystem,
     dir: &Path,
     rel: &Path,
     lines: &mut Vec<String>,
-) -> Result<(), DuetError> {
+) -> Result<bool, DuetError> {
     for e in fs.list(dir).await? {
-        if OS_LITTER.contains(&e.name.as_str()) {
-            continue;
-        }
         let child = fs.join(dir, &e.name);
-        let child_rel = rel.join(&e.name);
-        let shown = child_rel.to_string_lossy();
         // `list` 는 링크를 따라가 대상의 종류·시각을 줄 수 있다(LocalFs) — lstat 로 다시 본다.
         let m = fs.symlink_metadata(&child).await?;
+        // OS 부산물은 **파일**일 때만 뺀다 — 같은 이름의 폴더는 사용자 작업일 수 있다.
+        if m.kind == EntryKind::File && OS_LITTER.contains(&e.name.as_str()) {
+            continue;
+        }
+        let child_rel = rel.join(&e.name);
+        let shown = child_rel.to_string_lossy();
         match m.kind {
             EntryKind::Dir => {
                 // 폴더 존재만 기록(수정시각 제외) 후 안으로.
                 lines.push(format!("{shown}\tdir"));
-                Box::pin(collect_tree(fs, &child, &child_rel, lines)).await?;
+                if !Box::pin(collect_tree(fs, &child, &child_rel, lines)).await? {
+                    return Ok(false);
+                }
             }
-            kind => lines.push(format!(
-                "{shown}\t{kind:?}\t{}\t{}",
-                m.size.map_or_else(|| "-".to_string(), |s| s.to_string()),
-                m.modified_ms
-                    .map_or_else(|| "-".to_string(), |t| t.to_string()),
-            )),
+            kind => {
+                let size_ok = kind != EntryKind::File || m.size.is_some();
+                let (Some(mtime), true) = (m.modified_ms, size_ok) else {
+                    return Ok(false);
+                };
+                let size = m.size.map_or_else(|| "none".to_string(), |s| s.to_string());
+                lines.push(format!("{shown}\t{kind:?}\t{size}\t{mtime}"));
+            }
         }
     }
-    Ok(())
+    Ok(true)
 }
 
 #[cfg(test)]
@@ -308,5 +324,97 @@ mod tests {
         fill_applied(&LocalFs, &mut b).await;
         assert!(b[0].applied.is_some());
         assert!(b[1].applied.is_none());
+    }
+
+    /// 이름이 `hide` 인 항목의 크기·시각을 주지 않는 fs (SFTP 선택 속성 흉내).
+    struct HideMetaFs {
+        hide: &'static str,
+    }
+
+    #[async_trait::async_trait]
+    impl FileSystem for HideMetaFs {
+        fn source_id(&self) -> crate::types::SourceId {
+            crate::types::SourceId::Local
+        }
+        async fn list(&self, p: &Path) -> Result<Vec<crate::types::Entry>, DuetError> {
+            LocalFs.list(p).await
+        }
+        async fn metadata(&self, p: &Path) -> Result<crate::types::EntryMeta, DuetError> {
+            let mut m = LocalFs.metadata(p).await?;
+            if p.file_name().is_some_and(|n| n == self.hide) {
+                m.size = None;
+                m.modified_ms = None;
+            }
+            Ok(m)
+        }
+        async fn rename(&self, _: &Path, _: &Path) -> Result<(), DuetError> {
+            Err(DuetError::NotSupported("fixture".into()))
+        }
+        async fn mkdir(&self, _: &Path) -> Result<(), DuetError> {
+            Err(DuetError::NotSupported("fixture".into()))
+        }
+        async fn trash(&self, _: &Path, _: &str) -> Result<crate::types::TrashLocation, DuetError> {
+            Err(DuetError::NotSupported("fixture".into()))
+        }
+        async fn remove(&self, _: &Path) -> Result<(), DuetError> {
+            Err(DuetError::NotSupported("fixture".into()))
+        }
+        async fn restore_from_trash(
+            &self,
+            _: &crate::types::TrashLocation,
+            _: &Path,
+        ) -> Result<(), DuetError> {
+            Err(DuetError::NotSupported("fixture".into()))
+        }
+        async fn read_full(&self, _: &Path) -> Result<Vec<u8>, DuetError> {
+            Err(DuetError::NotSupported("fixture".into()))
+        }
+        async fn write_full(&self, _: &Path, _: &[u8]) -> Result<(), DuetError> {
+            Err(DuetError::NotSupported("fixture".into()))
+        }
+        async fn open_read(
+            &self,
+            _: &Path,
+            _: u64,
+        ) -> Result<std::pin::Pin<Box<dyn tokio::io::AsyncRead + Send>>, DuetError> {
+            Err(DuetError::NotSupported("fixture".into()))
+        }
+        async fn open_write(
+            &self,
+            _: &Path,
+            _: u64,
+        ) -> Result<std::pin::Pin<Box<dyn tokio::io::AsyncWrite + Send>>, DuetError> {
+            Err(DuetError::NotSupported("fixture".into()))
+        }
+    }
+
+    /// R2-sol-01: 하위 파일의 크기·시각을 알 수 없으면 폴더도 "확인 불가" — 편집을 놓치지 않는다.
+    #[tokio::test]
+    async fn folder_with_unknown_child_metadata_is_unverifiable() {
+        let t = tempdir().unwrap();
+        let d = t.path().join("d");
+        std::fs::create_dir(&d).unwrap();
+        write_at(&d.join("unknown"), b"one", 1_700_000_000_000);
+        let fs = HideMetaFs { hide: "unknown" };
+        let before = stamp(&fs, &d).await.unwrap();
+        std::fs::write(d.join("unknown"), b"edited and longer").unwrap();
+        let after = stamp(&fs, &d).await.unwrap();
+        assert!(
+            !same(&before, &after),
+            "an unverifiable child must not match"
+        );
+        assert!(before.tree.is_none(), "folder digest must be withheld");
+    }
+
+    /// R2-sol-02: OS 부산물 이름이라도 **폴더**면 일반 폴더로 추적한다.
+    #[tokio::test]
+    async fn litter_named_folder_counts_as_user_work() {
+        let t = tempdir().unwrap();
+        let d = t.path().join("d");
+        std::fs::create_dir(&d).unwrap();
+        let before = stamp(&LocalFs, &d).await.unwrap();
+        std::fs::create_dir(d.join("desktop.ini")).unwrap();
+        std::fs::write(d.join("desktop.ini/notes.txt"), b"mine").unwrap();
+        assert!(!same(&before, &stamp(&LocalFs, &d).await.unwrap()));
     }
 }
