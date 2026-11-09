@@ -1,8 +1,7 @@
 import { create } from "zustand";
 import { commands } from "@/types/bindings";
 import type { AppItem } from "@/types/bindings";
-import { useToast } from "@/stores/toast";
-import { formatErr } from "@/lib/error";
+import { showError } from "@/lib/errorToast";
 
 interface State {
   items: AppItem[];
@@ -23,7 +22,7 @@ const apply = (
   r: { status: "ok"; data: AppItem[] } | { status: "error"; error: unknown },
 ) => {
   if (r.status === "ok") useAppLaunchers.getState().setAll(r.data);
-  else useToast.getState().show(`App launcher: ${formatErr(r.error)}`, "error");
+  else showError("toast.appLauncherFailed", r.error);
 };
 
 export async function bootstrapAppLaunchers(): Promise<void> {
@@ -95,6 +94,5 @@ export async function launchApp(
   args: string[] = [],
 ): Promise<void> {
   const r = await commands.appLaunch(path, args);
-  if (r.status === "error")
-    useToast.getState().show(`Launch failed: ${formatErr(r.error)}`, "error");
+  if (r.status === "error") showError("toast.launchFailed", r.error, { path });
 }

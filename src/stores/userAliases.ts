@@ -1,8 +1,6 @@
-import i18n from "@/i18n";
 import { create } from "zustand";
 import { commands } from "@/types/bindings";
-import { useToast } from "@/stores/toast";
-import { formatErr } from "@/lib/error";
+import { showError } from "@/lib/errorToast";
 import type { AliasKind, UserAlias } from "@/types/bindings";
 
 interface State {
@@ -29,17 +27,12 @@ export async function addUserAlias(
     useUserAliases.getState().setAll(r.data);
     return true;
   }
-  useToast
-    .getState()
-    .show(
-      i18n.t("settings.aliases.addFailed", { err: formatErr(r.error) }),
-      "error",
-    );
+  showError("settings.aliases.addFailed", r.error);
   return false;
 }
 
 export async function removeUserAlias(id: string): Promise<void> {
   const r = await commands.userAliasesRemove(id);
   if (r.status === "ok") useUserAliases.getState().setAll(r.data);
-  else useToast.getState().show(`Remove alias: ${formatErr(r.error)}`, "error");
+  else showError("toast.removeAliasFailed", r.error);
 }

@@ -774,6 +774,17 @@
     "editorPlaceholder": "e.g. /Applications/VS Code.app"
   },
   "toast": {
+    "appLauncherFailed": "App launcher update failed: {{err}}",
+    "launchFailed": "Launch failed: {{err}}",
+    "removeAliasFailed": "Remove alias failed: {{err}}",
+    "setNicknameFailed": "Set host nickname failed: {{err}}",
+    "groupUpdateFailed": "Group update failed: {{err}}",
+    "unbindKeyFailed": "Unbind key failed: {{err}}",
+    "resetKeymapFailed": "Reset keymap failed: {{err}}",
+    "setTagsFailed": "Set tags failed: {{err}}",
+    "dropTrayFailed": "Drop tray failed: {{err}}",
+    "dragOutFailed": "Drag out failed: {{err}}",
+    "dirSizeFailed": "Calculate folder size failed: {{err}}",
     "renameSelectOne": "Rename: select exactly one item",
     "batchRenameSelectOne": "Batch rename: select at least one item",
     "undone": "Undone ({{kind}})",

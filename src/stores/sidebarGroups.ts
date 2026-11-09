@@ -1,8 +1,7 @@
 import { create } from "zustand";
 import { commands } from "@/types/bindings";
 import type { HostGroup } from "@/types/bindings";
-import { useToast } from "@/stores/toast";
-import { formatErr } from "@/lib/error";
+import { showError } from "@/lib/errorToast";
 
 /**
  * Saved hosts 그룹(폴더) 오버레이 — backend `host-groups.json` 영속.
@@ -33,9 +32,7 @@ async function persist(next: HostGroup[]): Promise<void> {
     useHostGroups.getState().setGroups(r.data);
   } else {
     useHostGroups.getState().setGroups(prev);
-    useToast
-      .getState()
-      .show(`Group update failed: ${formatErr(r.error)}`, "error");
+    showError("toast.groupUpdateFailed", r.error);
   }
 }
 

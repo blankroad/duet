@@ -1,7 +1,6 @@
 import { create } from "zustand";
 import { commands } from "@/types/bindings";
-import { useToast } from "@/stores/toast";
-import { formatErr } from "@/lib/error";
+import { showError } from "@/lib/errorToast";
 
 /** alias → 사용자 지정 표시명. 백엔드 host-nicknames.json 미러. */
 export type NickMap = Partial<Record<string, string>>;
@@ -28,5 +27,5 @@ export async function setHostNickname(
 ): Promise<void> {
   const r = await commands.hostNicknameSet(alias, nickname);
   if (r.status === "ok") useHostNicknames.getState().setAll(r.data);
-  else useToast.getState().show(`Set nickname: ${formatErr(r.error)}`, "error");
+  else showError("toast.setNicknameFailed", r.error);
 }

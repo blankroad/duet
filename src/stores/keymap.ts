@@ -1,8 +1,6 @@
-import i18n from "@/i18n";
 import { create } from "zustand";
 import { commands } from "@/types/bindings";
-import { useToast } from "@/stores/toast";
-import { formatErr } from "@/lib/error";
+import { showError } from "@/lib/errorToast";
 import type { KeymapBinding } from "@/types/bindings";
 
 interface State {
@@ -88,23 +86,18 @@ export async function setKeymap(
     useKeymap.getState().setAll(r.data);
     return true;
   }
-  useToast
-    .getState()
-    .show(
-      i18n.t("settings.keymap.bindFailed", { err: formatErr(r.error) }),
-      "error",
-    );
+  showError("settings.keymap.bindFailed", r.error);
   return false;
 }
 
 export async function unsetKeymap(key: string): Promise<void> {
   const r = await commands.keymapUnset(key);
   if (r.status === "ok") useKeymap.getState().setAll(r.data);
-  else useToast.getState().show(`Unbind key: ${formatErr(r.error)}`, "error");
+  else showError("toast.unbindKeyFailed", r.error);
 }
 
 export async function resetKeymap(): Promise<void> {
   const r = await commands.keymapReset();
   if (r.status === "ok") useKeymap.getState().setAll(r.data);
-  else useToast.getState().show(`Reset keymap: ${formatErr(r.error)}`, "error");
+  else showError("toast.resetKeymapFailed", r.error);
 }

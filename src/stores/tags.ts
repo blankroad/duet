@@ -1,9 +1,8 @@
 import { create } from "zustand";
 import { commands } from "@/types/bindings";
-import { useToast } from "@/stores/toast";
 import { promptText } from "@/stores/promptDialog";
 import i18n from "@/i18n";
-import { formatErr } from "@/lib/error";
+import { showError } from "@/lib/errorToast";
 
 /** key → 태그 목록. 백엔드 tags.json 미러. key = `host:<alias>` / `bm:<id>` / `fav:<id>`. */
 export type TagMap = Partial<Record<string, string[]>>;
@@ -27,7 +26,7 @@ export async function bootstrapTags(): Promise<void> {
 export async function setTags(key: string, tags: string[]): Promise<void> {
   const r = await commands.tagSet(key, tags);
   if (r.status === "ok") useTags.getState().setAll(r.data);
-  else useToast.getState().show(`Set tags: ${formatErr(r.error)}`, "error");
+  else showError("toast.setTagsFailed", r.error);
 }
 
 /** 키의 태그 목록(없으면 빈 배열). */
