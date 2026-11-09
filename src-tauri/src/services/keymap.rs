@@ -68,15 +68,21 @@ impl KeymapStore {
         self.inner.read().await.clone()
     }
 
-    /// 외부 source (file watcher) 가 호출 — 지금 값과 다르면 통째로 교체하고 `true`.
-    /// 비교와 교체를 한 잠금 안에서 한다. 앱 자신의 저장이 일으킨 변경 알림은 같은 값이라 `false`.
-    pub async fn replace_if_changed(&self, bindings: Vec<KeymapBinding>) -> bool {
+    /// watcher 가 호출 — 쓰기 잠금 안에서 파일을 다시 읽어, 지금 값과 다르면 교체하고
+    /// `Some(새 값)`. 같으면 `None`(앱 자신의 저장이 일으킨 변경 알림 등). 읽기 실패면 `Err`,
+    /// 메모리는 그대로.
+    ///
+    /// `set`/`unset`/`reset` 도 같은 잠금을 쥔 채 저장하므로 여기서 읽는 파일은 늘 마지막
+    /// 저장본이다. 잠금 밖에서 읽으면 늦게 끝난 옛 읽기가 최신 값을 되돌릴 수 있다
+    /// (shell-settings-18, sol-2 리뷰).
+    pub async fn reload_from_disk(&self) -> Result<Option<Vec<KeymapBinding>>, DuetError> {
         let mut v = self.inner.write().await;
-        if same_bindings(&v, &bindings) {
-            return false;
+        let fresh = read_file(&self.path).await?;
+        if same_bindings(&v, &fresh) {
+            return Ok(None);
         }
-        *v = bindings;
-        true
+        *v = fresh.clone();
+        Ok(Some(fresh))
     }
 
     pub async fn set(
@@ -239,15 +245,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn replace_if_changed_applies_external_clear_from_start() {
+    async fn reload_applies_external_clear_from_start() {
         // shell-settings-18: 시작 후 첫 외부 편집이 "전부 비우기" 여도 반영돼야 한다.
         let dir = tempdir().unwrap();
         let path = dir.path().join("k.toml");
         std::fs::write(&path, "[bindings]\n\"Ctrl+T\" = \"tab.new\"\n").unwrap();
         let s = KeymapStore::load_from(&path).await.unwrap();
-        assert!(s.replace_if_changed(Vec::new()).await);
+        std::fs::write(&path, "").unwrap();
+        assert_eq!(s.reload_from_disk().await.unwrap(), Some(Vec::new()));
         assert!(s.list().await.is_empty());
-        assert!(!s.replace_if_changed(Vec::new()).await);
+        assert_eq!(s.reload_from_disk().await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn reload_failure_keeps_memory_and_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("k.toml");
+        let s = KeymapStore::load_from(&path).await.unwrap();
+        let before = s.set("Ctrl+T".into(), "tab.new".into()).await.unwrap();
+        std::fs::write(&path, "[bindings\n").unwrap();
+        assert!(s.reload_from_disk().await.is_err());
+        assert_eq!(s.list().await, before);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "[bindings\n");
     }
 
     #[tokio::test]
@@ -257,9 +276,8 @@ mod tests {
         let s = KeymapStore::load_from(&path).await.unwrap();
         s.set("Ctrl+W".into(), "tab.close".into()).await.unwrap();
         s.set("Ctrl+A".into(), "select.all".into()).await.unwrap();
-        // watcher 가 다시 읽은 값(키 순)은 메모리(추가 순)와 같은 설정이다.
-        let reread = read_file(&path).await.unwrap();
-        assert!(!s.replace_if_changed(reread).await);
+        // 다시 읽은 값(키 순)은 메모리(추가 순)와 같은 설정이다.
+        assert_eq!(s.reload_from_disk().await.unwrap(), None);
     }
 
     #[tokio::test]
@@ -291,6 +309,29 @@ mod tests {
         };
         assert_eq!(std::fs::read_to_string(backup).unwrap(), text);
         assert!(notice.detail.contains("keymap parse"));
+    }
+
+    /// shell-settings-18(sol-2 지적): watcher 의 재읽기가 앱 저장과 겹쳐도, 늦게 끝난 옛
+    /// 읽기가 최신 값을 되돌리면 안 된다 — 끝나고 나면 메모리 == 파일.
+    #[tokio::test]
+    async fn reload_interleaved_with_set_never_applies_a_stale_read() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("k.toml");
+        let s = KeymapStore::load_from(&path).await.unwrap();
+        s.set("Ctrl+T".into(), "tab.new".into()).await.unwrap();
+        for i in 0..40 {
+            let (reloaded, saved) = tokio::join!(
+                s.reload_from_disk(),
+                s.set(format!("Ctrl+{i}"), "tab.close".into())
+            );
+            reloaded.unwrap();
+            saved.unwrap();
+            let on_disk = read_file(&path).await.unwrap();
+            assert!(
+                same_bindings(&s.list().await, &on_disk),
+                "round {i}: memory diverged from keymap.toml"
+            );
+        }
     }
 
     #[tokio::test]

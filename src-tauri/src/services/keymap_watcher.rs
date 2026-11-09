@@ -4,14 +4,14 @@
 //! (앱 자신의 저장도 파일 변경 알림을 일으킨다). 다시 읽다 실패하면(문법 오류 등) 이전 키를
 //! 그대로 쓰고 `KeymapLoadFailedEvent` 로 알린다 — 같은 오류가 이어지면 한 번만(shell-settings-12).
 
-use crate::services::keymap::{read_file, KeymapStore};
+use crate::services::keymap::KeymapStore;
 use crate::services::keymap_events::{KeymapChangedEvent, KeymapLoadFailedEvent};
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::Mutex;
 use tauri::AppHandle;
 use tauri_specta::Event as _;
+use tokio::sync::Mutex;
 
 /// notify watcher 인스턴스 — drop 되면 watcher 종료.
 pub struct KeymapWatcher {
@@ -48,8 +48,9 @@ pub fn start(app: AppHandle, store: Arc<KeymapStore>) -> Result<KeymapWatcher, S
 
     let app_for_cb = app.clone();
     let store_for_cb = store.clone();
-    let path_for_cb = path.clone();
     let target_for_cb = target_filename.clone();
+    // 마지막으로 알린 재읽기 오류. 이 잠금을 다시 읽기~emit 동안 쥐어 watcher 작업들을
+    // 한 줄로 세운다 — 변경 이벤트가 읽은 순서와 다르게 나가지 않게.
     let last_error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
     let mut watcher = RecommendedWatcher::new(
@@ -70,35 +71,26 @@ pub fn start(app: AppHandle, store: Arc<KeymapStore>) -> Result<KeymapWatcher, S
 
             let store = store_for_cb.clone();
             let app = app_for_cb.clone();
-            let path = path_for_cb.clone();
             let last_error = last_error.clone();
             tauri::async_runtime::spawn(async move {
-                let read = read_file(&path).await;
-                // Guard is scoped so it is dropped before any `.await`.
-                let report = {
-                    let mut guard = last_error.lock().unwrap_or_else(|p| p.into_inner());
-                    let msg = read.as_ref().err().map(|e| e.to_string());
-                    if should_report_error(&mut guard, msg.as_deref()) {
-                        msg
-                    } else {
-                        None
-                    }
-                };
+                let mut last_error = last_error.lock().await;
+                // 읽기·비교·교체는 store 잠금 안에서 한 번에(늦은 옛 읽기가 최신 값을 못 되돌림).
+                // 비교 기준은 store 현재 값 — 시작 직후 첫 외부 편집이 "전부 비우기" 여도
+                // 반영된다(shell-settings-18; 예전엔 빈 Vec 으로 시작한 별도 기록과 비교).
+                let read = store.reload_from_disk().await;
+                let msg = read.as_ref().err().map(|e| e.to_string());
+                let report = should_report_error(&mut last_error, msg.as_deref());
                 let new_bindings = match read {
-                    Ok(b) => b,
+                    Ok(Some(b)) => b,
+                    Ok(None) => return,
                     Err(e) => {
                         tracing::warn!("keymap re-read failed, keeping previous keys: {e}");
-                        if let Some(message) = report {
+                        if let (true, Some(message)) = (report, msg) {
                             let _ = KeymapLoadFailedEvent { message }.emit(&app);
                         }
                         return;
                     }
                 };
-                // 비교 기준은 store 현재 값 — 시작 직후 첫 외부 편집이 "전부 비우기" 여도
-                // 반영된다(shell-settings-18; 예전엔 빈 Vec 으로 시작한 별도 기록과 비교).
-                if !store.replace_if_changed(new_bindings.clone()).await {
-                    return;
-                }
                 let _ = KeymapChangedEvent {
                     bindings: new_bindings,
                 }
