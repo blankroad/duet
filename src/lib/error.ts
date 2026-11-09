@@ -53,6 +53,11 @@ type Reason =
   | "networkLogon"
   | "virus"
   | "cloudFile"
+  | "connRefused"
+  | "connTimeout"
+  | "connUnreachable"
+  | "connDns"
+  | "connReset"
   | "network"
   | "unsupportedOp"
   | "connection";
@@ -99,12 +104,22 @@ const OS_CODES: Record<HostOs, Record<number, Reason>> = {
     1231: "network",
     1314: "linkPrivilege", // ERROR_PRIVILEGE_NOT_HELD
     1326: "networkLogon", // ERROR_LOGON_FAILURE (네트워크 공유 로그인)
+    10051: "connUnreachable", // WSAENETUNREACH
+    10054: "connReset", // WSAECONNRESET
+    10060: "connTimeout", // WSAETIMEDOUT
+    10061: "connRefused", // WSAECONNREFUSED
+    10065: "connUnreachable", // WSAEHOSTUNREACH
   },
   unix: UNIX_CODES,
   macos: {
     ...UNIX_CODES,
     45: "unsupportedOp", // ENOTSUP
+    51: "connUnreachable", // ENETUNREACH
+    54: "connReset", // ECONNRESET
+    60: "connTimeout", // ETIMEDOUT
+    61: "connRefused", // ECONNREFUSED
     63: "nameTooLong", // ENAMETOOLONG
+    65: "connUnreachable", // EHOSTUNREACH
     66: "notEmpty", // ENOTEMPTY
     69: "diskFull", // EDQUOT
   },
@@ -113,6 +128,11 @@ const OS_CODES: Record<HostOs, Record<number, Reason>> = {
     36: "nameTooLong", // ENAMETOOLONG
     39: "notEmpty", // ENOTEMPTY
     95: "unsupportedOp", // EOPNOTSUPP
+    101: "connUnreachable", // ENETUNREACH
+    104: "connReset", // ECONNRESET
+    110: "connTimeout", // ETIMEDOUT
+    111: "connRefused", // ECONNREFUSED
+    113: "connUnreachable", // EHOSTUNREACH
     122: "diskFull", // EDQUOT
   },
 };
@@ -145,6 +165,24 @@ const PATTERNS: Array<[RegExp, Reason]> = [
   [/contains a virus/i, "virus"],
   [/cloud file provider|cloud operation/i, "cloudFile"],
   [/operation not supported/i, "unsupportedOp"],
+];
+
+/**
+ * 연결 원인 문구 — 번호보다 먼저 본다. 연결 오류의 번호는 원격·중계 쪽 것일 수 있어
+ * 이 PC 의 표와 다를 수 있다(문구가 더 믿을 만하다).
+ */
+const CONNECTION_PATTERNS: Array<[RegExp, Reason]> = [
+  [/connection refused|actively refused/i, "connRefused"],
+  [/timed out|did not properly respond/i, "connTimeout"],
+  [
+    /no route to host|network is unreachable|unreachable (host|network)/i,
+    "connUnreachable",
+  ],
+  [
+    /failed to lookup address|nodename nor servname|name or service not known|no such host is known|temporary failure in name resolution/i,
+    "connDns",
+  ],
+  [/connection reset|broken pipe|forcibly closed/i, "connReset"],
 ];
 
 /** kind 만으로 원인이 정해지는 것. */
@@ -201,6 +239,8 @@ function pickReason(
   if (prog) return { reason: "remoteMissingProgram", prog };
   // 압축·안전 관련 문구는 번호보다 구체적이다(손상된 gzip 도 io 오류 번호가 없다).
   for (const [re, reason] of PATTERNS.slice(0, 4))
+    if (re.test(message)) return { reason };
+  for (const [re, reason] of CONNECTION_PATTERNS)
     if (re.test(message)) return { reason };
   // 원격 명령(Ssh)의 "(os error N)" 은 서버 OS 의 번호 — 이 PC 표로 읽지 않는다.
   const code = kind === "Ssh" ? undefined : osCode(message);

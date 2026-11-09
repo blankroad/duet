@@ -83,8 +83,11 @@ describe("explainError — plain-language errors", () => {
   });
 
   it("connection failures keep the cause and are not doubled", () => {
-    const once = formatErr({ kind: "ConnectionFailed", message: "timed out" });
-    expect(once).toBe("Can't connect to the server — timed out");
+    const once = formatErr({
+      kind: "ConnectionFailed",
+      message: "handshake aborted",
+    });
+    expect(once).toBe("Can't connect to the server — handshake aborted");
     expect(formatErr({ kind: "ConnectionFailed", message: once })).toBe(once);
   });
 
@@ -183,5 +186,49 @@ describe("explainError — Windows-only causes", () => {
         "windows",
       ).text,
     ).toBe(plain("cloudFile"));
+  });
+});
+
+describe("explainError — connection causes (remote-26)", () => {
+  const conn = (message: string) => ({ kind: "ConnectionFailed", message });
+  const plain = (reason: string) => i18n.t(`errors.reason.${reason}`);
+
+  it("explains refused, timed out, unreachable, DNS and reset", () => {
+    const cases: Array<[string, string]> = [
+      ["10.0.0.1:22 — Connection refused (os error 61)", "connRefused"],
+      [
+        "h:22 — No connection could be made because the target machine actively refused it. (os error 10061)",
+        "connRefused",
+      ],
+      ["h:22 — Operation timed out (os error 60)", "connTimeout"],
+      ["h:22 — No route to host (os error 113)", "connUnreachable"],
+      ["h:22 — Network is unreachable (os error 51)", "connUnreachable"],
+      [
+        "nohost:22 — failed to lookup address information: nodename nor servname provided, or not known",
+        "connDns",
+      ],
+      [
+        "nohost:22 — failed to lookup address information: Name or service not known",
+        "connDns",
+      ],
+      ["h:22 — No such host is known. (os error 11001)", "connDns"],
+      ["ssh handshake: Connection reset by peer (os error 54)", "connReset"],
+      ["ssh handshake: Broken pipe (os error 32)", "connReset"],
+    ];
+    for (const [message, reason] of cases) {
+      // 서버·OS 가 달라도 문구가 우선 — 이 PC 가 Windows 여도 같은 원인.
+      const r = explainError(conn(message), "windows");
+      expect(r.text, message).toBe(plain(reason));
+      expect(r.detail).toBe(message);
+    }
+  });
+
+  it("uses the number when the text is missing", () => {
+    expect(explainError(conn("h:22 — (os error 111)"), "linux").text).toBe(
+      plain("connRefused"),
+    );
+    expect(explainError(conn("h:22 — (os error 10060)"), "windows").text).toBe(
+      plain("connTimeout"),
+    );
   });
 });
