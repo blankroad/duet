@@ -111,14 +111,19 @@ pub fn unpack<R: Read>(reader: R, dest: &Path) -> Result<UnpackReport, DuetError
 /// 파일시스템의 `A.txt`/`a.txt`, Windows 치환 뒤 같아진 `a:b`/`a_b` 등. 이때 덮지 않고
 /// `이름 (2).ext`(폴더는 `이름 (2)`)로 둘 다 남긴다. 같은 이름이 다시 나오면(tar 갱신 append)
 /// 예전처럼 덮어쓴다. 폴더끼리 겹치면 합친다(잃는 것이 없다). 대소문자 구분 파일시스템에선
-/// 충돌이 생기지 않아 동작이 같다.
+/// 충돌이 생기지 않아 동작이 같다. 옮긴 폴더 안 항목은 따라 옮기고, 중첩해서 옮긴 폴더
+/// (`A/`→`A (2)`, `A/B/`→`A (2)/B (2)`)도 합성해 따라간다.
+///
+/// 한계: 폴더 **항목 없이** 자식으로만 생기는 상위 폴더는 감시하지 않는다 — 파일 `a` 뒤에
+/// 폴더 항목 없이 `A/child` 가 오면(대소문자 무시 파일시스템) 상위 폴더를 만들 수 없어
+/// 해제가 예전처럼 오류로 끝난다(조용히 덮지는 않는다).
 #[derive(Default)]
 pub(crate) struct NameGuard {
     /// 이번 해제에서 만든 상대 경로 → 만든 항목의 이름 키(빈 문자열 = 상위 폴더로 자동 생성).
     made: HashMap<PathBuf, String>,
     /// 충돌로 옮긴 항목의 이름 키 → 실제 상대 경로.
     moved: HashMap<String, PathBuf>,
-    /// 충돌로 옮긴 폴더 (원래 상대 경로, 실제 상대 경로) — 그 안 항목도 따라 옮긴다.
+    /// 충돌로 옮긴 폴더 (원래 상대 경로 — 옮기기 전, 실제 상대 경로) — 그 안 항목도 따라 옮긴다.
     moved_dirs: Vec<(PathBuf, PathBuf)>,
 }
 
@@ -136,6 +141,7 @@ impl NameGuard {
         if let Some(prev) = self.moved.get(&key) {
             return (prev.clone(), false); // 옮겨 둔 항목이 다시 나옴 — 그 자리를 덮는다.
         }
+        let original = rel.clone();
         let rel = self.remap(rel);
         if self.made.get(&rel) == Some(&key) {
             return (rel, false); // 같은 이름 재등장.
@@ -149,7 +155,9 @@ impl NameGuard {
         if kept_both {
             self.moved.insert(key.clone(), actual.clone());
             if is_dir {
-                self.moved_dirs.push((rel, actual.clone()));
+                // 원래 경로로 기록한다 — 자식은 원래 경로로 들어오므로 가장 구체적인 매핑이
+                // 그대로 맞는다(바깥 폴더 매핑만 걸려 중첩 변경을 놓치지 않게).
+                self.moved_dirs.push((original, actual.clone()));
             }
         }
         for parent in actual.ancestors().skip(1) {
@@ -170,16 +178,21 @@ impl NameGuard {
         }
     }
 
-    /// 옮긴 폴더 아래 경로면 옮긴 자리로.
+    /// 옮긴 폴더 아래 경로면 옮긴 자리로. 원래 경로 기준으로 **가장 구체적인**(조각이 가장 많은)
+    /// 매핑을 쓴다 — 바깥·안쪽 폴더가 모두 옮겨졌으면 안쪽 매핑의 실제 경로가 이미 둘을 합친 것이다.
     fn remap(&self, rel: PathBuf) -> PathBuf {
-        for (from, to) in self.moved_dirs.iter().rev() {
-            if let Ok(rest) = rel.strip_prefix(from) {
-                if !rest.as_os_str().is_empty() {
-                    return to.join(rest);
-                }
-            }
+        let best = self
+            .moved_dirs
+            .iter()
+            .filter_map(|(from, to)| {
+                let rest = rel.strip_prefix(from).ok()?;
+                (!rest.as_os_str().is_empty()).then(|| (from.components().count(), to, rest))
+            })
+            .max_by_key(|(depth, ..)| *depth);
+        match best {
+            Some((_, to, rest)) => to.join(rest),
+            None => rel,
         }
-        rel
     }
 
     /// `rel` 옆의 비어 있는 `이름 (n).ext`(폴더는 `이름 (n)`), n = 2.. — 탐색기 KeepBoth 와 같은 모양.
@@ -1020,6 +1033,85 @@ mod tests {
             g.lookup(p("f").join("in.txt"), "f/in.txt"),
             p("f (2)").join("in.txt")
         );
+    }
+
+    /// 중첩 이동 합성(R2 리뷰 R3): `A/`→`A (2)`, `A/B/`→`A (2)/B (2)` 뒤 `A/B/child` 는
+    /// `A (2)/B (2)/child`. 겹치는 자리를 직접 만들어 어느 파일시스템에서나 결정적.
+    #[test]
+    fn name_guard_composes_nested_folder_moves() {
+        let dest = tempfile::tempdir().unwrap();
+        let d = dest.path();
+        let p = |s: &str| PathBuf::from(s);
+        let mut g = NameGuard::default();
+        std::fs::write(d.join("A"), b"foreign").unwrap();
+        assert_eq!(g.place(d, p("A"), "A/", true), (p("A (2)"), true));
+        std::fs::create_dir(d.join("A (2)")).unwrap();
+        std::fs::write(d.join("A (2)").join("B"), b"foreign").unwrap();
+        let ab = p("A").join("B");
+        assert_eq!(
+            g.place(d, ab.clone(), "A/B/", true),
+            (p("A (2)").join("B (2)"), true)
+        );
+        let want = p("A (2)").join("B (2)").join("child");
+        assert_eq!(
+            g.place(d, ab.join("child"), "A/B/child", false),
+            (want.clone(), false)
+        );
+        assert_eq!(g.lookup(ab.join("child"), "A/B/child"), want);
+        // 바깥 폴더만 옮겨진 형제는 바깥 매핑만.
+        assert_eq!(
+            g.place(d, p("A").join("x"), "A/x", false),
+            (p("A (2)").join("x"), false)
+        );
+        // 세 단계.
+        std::fs::create_dir(d.join("A (2)").join("B (2)")).unwrap();
+        std::fs::write(d.join("A (2)").join("B (2)").join("C"), b"foreign").unwrap();
+        let abc = ab.join("C");
+        let c2 = p("A (2)").join("B (2)").join("C (2)");
+        assert_eq!(g.place(d, abc.clone(), "A/B/C/", true), (c2.clone(), true));
+        assert_eq!(
+            g.place(d, abc.join("y"), "A/B/C/y", false),
+            (c2.join("y"), false)
+        );
+    }
+
+    /// 실제 tar(리뷰의 5단계 예 + 하드링크). 이 파일시스템이 대소문자를 무시하면 `A (2)/B (2)`
+    /// 로, 구분하면 그대로 풀린다 — 어느 쪽이든 성공·모든 내용·최종 경로를 단언한다.
+    #[test]
+    fn tar_nested_case_collisions_keep_every_entry() {
+        use tar::EntryType as T;
+        let tar = build(&[
+            ("a", T::Regular, b"one"),
+            ("A/", T::Directory, b""),
+            ("A/b", T::Regular, b"two"),
+            ("A/B/", T::Directory, b""),
+            ("A/B/child", T::Regular, b"three"),
+            ("A/B/link", T::Link, b"A/B/child"),
+        ]);
+        let dest = tempfile::tempdir().unwrap();
+        let d = dest.path();
+        // 같은 임시 폴더 아래 별도 폴더로 이 파일시스템의 대소문자 무시 여부를 본다.
+        let probe = tempfile::tempdir().unwrap();
+        std::fs::write(probe.path().join("probe"), b"").unwrap();
+        let folds_case = probe.path().join("PROBE").exists();
+        let r = unpack(&tar[..], d).unwrap();
+        let (top, inner) = if folds_case {
+            (d.join("A (2)"), d.join("A (2)").join("B (2)"))
+        } else {
+            (d.join("A"), d.join("A").join("B"))
+        };
+        assert_eq!(std::fs::read(d.join("a")).unwrap(), b"one");
+        assert_eq!(std::fs::read(top.join("b")).unwrap(), b"two");
+        assert_eq!(std::fs::read(inner.join("child")).unwrap(), b"three");
+        assert_eq!(std::fs::read(inner.join("link")).unwrap(), b"three");
+        if folds_case {
+            assert_eq!(names(d), ["A (2)", "a"]);
+            assert_eq!(names(&top), ["B (2)", "b"]);
+            assert_eq!(r.renamed, ["A/", "A/B/"]);
+        } else {
+            assert!(r.renamed.is_empty());
+        }
+        assert_eq!(names(&inner), ["child", "link"]);
     }
 
     #[test]

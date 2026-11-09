@@ -592,6 +592,39 @@ mod tests {
         assert_eq!(r.renamed, ["a:b.txt"]);
     }
 
+    /// 중첩 이동 합성을 Windows 치환 충돌로(대소문자 구분 FS 에서도 결정적, R2 리뷰 R3):
+    /// `a:b/` → `a_b (2)`, `a:b/c:d/` → `a_b (2)/c_d (2)`, 그 안 파일은 둘을 합친 자리로.
+    #[test]
+    fn nested_sanitize_collisions_compose() {
+        let d = tempfile::tempdir().unwrap();
+        let zp = d.path().join("n.zip");
+        let mut w = zip::ZipWriter::new(std::fs::File::create(&zp).unwrap());
+        let o = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        w.start_file("a_b", o).unwrap();
+        w.write_all(b"one").unwrap();
+        w.add_directory("a:b/", o).unwrap();
+        w.start_file("a:b/c_d", o).unwrap();
+        w.write_all(b"two").unwrap();
+        w.add_directory("a:b/c:d/", o).unwrap();
+        w.start_file("a:b/c:d/child", o).unwrap();
+        w.write_all(b"three").unwrap();
+        w.finish().unwrap();
+        let out = d.path().join("out");
+        std::fs::create_dir(&out).unwrap();
+        let r = unpack_zip_with(&zp, &out, None, windows).unwrap();
+        let top = out.join("a_b (2)");
+        assert_eq!(names(&out), ["a_b", "a_b (2)"]);
+        assert_eq!(names(&top), ["c_d", "c_d (2)"]);
+        assert_eq!(std::fs::read(out.join("a_b")).unwrap(), b"one");
+        assert_eq!(std::fs::read(top.join("c_d")).unwrap(), b"two");
+        assert_eq!(
+            std::fs::read(top.join("c_d (2)").join("child")).unwrap(),
+            b"three"
+        );
+        assert_eq!(r.renamed, ["a:b/", "a:b/c_d", "a:b/c:d/", "a:b/c:d/child"]);
+    }
+
     fn sevenz_with(path: &Path, files: &[(&str, &[u8])]) {
         let mut w = sevenz_rust2::ArchiveWriter::create(path).unwrap();
         for (name, data) in files {
