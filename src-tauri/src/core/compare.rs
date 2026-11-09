@@ -499,7 +499,8 @@ pub fn export_plan(plan: &ComparePlan, as_json: bool) -> Result<String, DuetErro
         return serde_json::to_string_pretty(plan)
             .map_err(|e| DuetError::Io(format!("export json: {e}")));
     }
-    let mut s = String::from("status,rel,kind,left_size,right_size,left_mtime_ms,right_mtime_ms\n");
+    let mut s =
+        String::from("\u{FEFF}status,rel,kind,left_size,right_size,left_mtime_ms,right_mtime_ms\n");
     let num = |v: Option<i64>| v.map(|x| x.to_string()).unwrap_or_default();
     let unum = |v: Option<u64>| v.map(|x| x.to_string()).unwrap_or_default();
     for e in &plan.entries {
@@ -543,12 +544,17 @@ fn kind_csv(k: EntryKind) -> &'static str {
     }
 }
 
-/// CSV 필드 escape — 쉼표/따옴표/개행 포함 시 따옴표로 감싸고 내부 " 는 "" 로.
+/// 수식 시작 문자를 먼저 중화한 뒤 쉼표/따옴표/개행을 CSV 규칙으로 escape한다.
 fn csv_field(v: &str) -> String {
-    if v.contains([',', '"', '\n', '\r']) {
-        format!("\"{}\"", v.replace('"', "\"\""))
+    let field = if v.starts_with(['=', '+', '-', '@', '\t', '\r']) {
+        format!("'{v}")
     } else {
         v.to_string()
+    };
+    if field.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", field.replace('"', "\"\""))
+    } else {
+        field
     }
 }
 
@@ -610,10 +616,31 @@ mod tests {
         let fs = LocalFs::new();
         let plan = compare_dirs(&fs, loc(&l), &fs, loc(&r)).await.unwrap();
         let csv = export_plan(&plan, false).unwrap();
-        assert!(csv.starts_with("status,rel,kind,left_size"));
+        assert!(csv.starts_with("\u{FEFF}status,rel,kind,left_size"));
         assert!(csv.contains("left_only,a.txt,file"));
         let json = export_plan(&plan, true).unwrap();
         assert!(json.contains("\"entries\""));
+        assert!(json.starts_with('{'));
+    }
+
+    #[test]
+    fn csv_field_neutralizes_formulas_before_quoting() {
+        for (input, expected) in [
+            ("=SUM(A1)", "'=SUM(A1)"),
+            ("+1", "'+1"),
+            ("-1", "'-1"),
+            ("@x", "'@x"),
+            ("\tcmd", "'\tcmd"),
+            ("\rcmd", "\"'\rcmd\""),
+            ("=SUM(A1,B1)", "\"'=SUM(A1,B1)\""),
+            ("normal.txt", "normal.txt"),
+            ("한글.txt", "한글.txt"),
+            ("", ""),
+            ("a,b", "\"a,b\""),
+            ("a\"b", "\"a\"\"b\""),
+        ] {
+            assert_eq!(csv_field(input), expected, "{input:?}");
+        }
     }
 
     #[tokio::test]

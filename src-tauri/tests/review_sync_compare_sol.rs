@@ -335,12 +335,11 @@ async fn csv_escapes_multiline_quote_comma_and_preserves_korean() {
     p.entries[0].rel = n.into();
     let csv = export_plan(&p, false).unwrap();
     assert!(csv.contains("\"한글,\"\"줄\n끝\""));
-    assert!(!csv.starts_with('\u{feff}'));
+    assert!(csv.starts_with('\u{feff}'));
     assert!(export_plan(&p, true).unwrap().contains("한글"));
 }
 
 #[tokio::test]
-#[ignore = "sync-compare repro: F-sol-10 CSV filename becomes a spreadsheet formula"]
 async fn csv_formula_names_are_neutralized() {
     let (_t, l, r) = trees();
     std::fs::write(l.join("=1+1"), b"x").unwrap();
