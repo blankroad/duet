@@ -254,10 +254,7 @@ fn checksum_command(path: &Path) -> String {
     let source = include_str!("../src/fs/ssh.rs");
     let line = source
         .lines()
-        .find(|l| {
-            l.trim_start()
-                .starts_with("format!(\"LC_ALL=C {gnu} -- {quoted}")
-        })
+        .find(|l| l.trim_start().starts_with("format!(\"if command -v {gnu}"))
         .unwrap()
         .trim();
     let template = line
@@ -314,7 +311,6 @@ fn sc47_escaped_checksum_names_produce_plain_digest() {
 }
 #[cfg(unix)]
 #[test]
-#[ignore = "sync-compare repro: SC-47 independently confirmed in sol-3"]
 fn sc47_fallback_preserves_non_missing_gnu_error() {
     use std::os::unix::fs::PermissionsExt;
     let t = tempdir().unwrap();
@@ -334,6 +330,7 @@ fn sc47_fallback_preserves_non_missing_gnu_error() {
         std::fs::write(&p, body).unwrap();
         std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
+    std::fs::write(t.path().join("file"), b"abc").unwrap();
     let out = std::process::Command::new("/bin/sh")
         .arg("-c")
         .arg(checksum_command(&t.path().join("file")))
@@ -341,8 +338,8 @@ fn sc47_fallback_preserves_non_missing_gnu_error() {
         .output()
         .unwrap();
     let err = String::from_utf8(out.stderr).unwrap();
-    assert_eq!(out.status.code(), Some(127));
-    assert!(err.contains("BSD_MISSING_TOOL"));
+    assert_eq!(out.status.code(), Some(13));
+    assert!(!err.contains("BSD_MISSING_TOOL"));
     assert!(
         err.contains("GNU_PERMISSION_DENIED"),
         "SC-47: original GNU error was discarded; stderr={err:?}"
@@ -351,24 +348,23 @@ fn sc47_fallback_preserves_non_missing_gnu_error() {
 
 #[cfg(all(unix, target_os = "macos"))]
 #[test]
-#[ignore = "sync-compare repro: SC-47 independently confirmed in sol-3"]
 fn sc47_gnu_and_shasum_escaped_names_produce_plain_digest() {
     let t = tempdir().unwrap();
     let bin = t.path().join("gnu-bin");
     std::fs::create_dir(&bin).unwrap();
     let gnu = Path::new("/opt/homebrew/bin/gsha256sum");
-    assert!(
-        gnu.exists(),
-        "this installed-tool probe requires the existing GNU binary"
-    );
-    std::os::unix::fs::symlink(gnu, bin.join("sha256sum")).unwrap();
-    let gnu_path =
-        std::env::join_paths([bin.as_path(), Path::new("/usr/bin"), Path::new("/bin")]).unwrap();
+    let mut tools = vec![("shasum fallback", std::ffi::OsString::from("/usr/bin:/bin"))];
+    if gnu.exists() {
+        std::os::unix::fs::symlink(gnu, bin.join("sha256sum")).unwrap();
+        let gnu_path =
+            std::env::join_paths([bin.as_path(), Path::new("/usr/bin"), Path::new("/bin")])
+                .unwrap();
+        tools.push(("GNU", gnu_path));
+    } else {
+        eprintln!("GNU probe unavailable; still checking the system shasum fallback");
+    }
     let mut outputs = Vec::new();
-    for (role, path) in [
-        ("GNU", gnu_path),
-        ("shasum fallback", "/usr/bin:/bin".into()),
-    ] {
+    for (role, path) in tools {
         for name in ["has\\slash", "line\nbreak"] {
             let p = t.path().join(name);
             std::fs::write(&p, b"abc").unwrap();

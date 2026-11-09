@@ -701,13 +701,14 @@ fn chown_cmd(quoted_spec: &str, quoted_path: &str, recursive: bool) -> String {
 }
 
 /// 원격 체크섬 명령 문자열 — GNU coreutils(shaNNNsum) 우선, 없으면 BSD/macOS 의
-/// perl `shasum` 폴백. `quoted` 는 posix_shell_quote 통과한 경로.
+/// perl `shasum` 폴백. stdin 으로 해시하여 파일명 이스케이프를 피한다.
+/// 실행 중 오류는 폴백으로 가리지 않는다. `quoted` 는 인용을 마친 경로.
 fn checksum_cmd(quoted: &str, algo: crate::types::ChecksumAlgo) -> String {
     let (gnu, bsd) = match algo {
         crate::types::ChecksumAlgo::Sha256 => ("sha256sum", "shasum -a 256"),
         crate::types::ChecksumAlgo::Sha512 => ("sha512sum", "shasum -a 512"),
     };
-    format!("LC_ALL=C {gnu} -- {quoted} 2>/dev/null || {bsd} -- {quoted}")
+    format!("if command -v {gnu} >/dev/null 2>&1; then LC_ALL=C {gnu} < {quoted}; else LC_ALL=C {bsd} < {quoted}; fi")
 }
 
 /// 원격 사용자의 home 디렉토리 절대경로. SFTP `canonicalize(".")` 결과.
@@ -872,8 +873,9 @@ mod tests {
         use crate::types::ChecksumAlgo;
         let q = super::posix_shell_quote("/srv/a b's.bin").unwrap();
         let cmd = super::checksum_cmd(&q, ChecksumAlgo::Sha256);
-        assert!(cmd.contains("sha256sum -- "));
-        assert!(cmd.contains("|| shasum -a 256 -- "));
+        assert!(cmd.contains("command -v sha256sum"));
+        assert!(cmd.contains("then LC_ALL=C sha256sum < "));
+        assert!(cmd.contains("else LC_ALL=C shasum -a 256 < "));
         // 인용된 경로가 두 곳 모두 그대로 들어감(따옴표 이스케이프 포함).
         assert_eq!(cmd.matches(q.as_str()).count(), 2);
         let cmd512 = super::checksum_cmd(&q, ChecksumAlgo::Sha512);
