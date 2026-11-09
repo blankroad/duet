@@ -132,6 +132,7 @@ describe("remote-opus C-11: 자동 재연결 실패 사유 표시", () => {
     const alert = screen.getByRole("alert");
     // 예전: 고정 사유 4개만 i18n 매핑, 나머지는 영어 원문이 그대로 노출됐다.
     expect(alert.textContent).not.toContain("os error 61");
+    expect(alert.textContent).not.toContain("tcp connect");
     expect(alert.querySelector("[title]")?.getAttribute("title")).toContain(
       "Connection refused (os error 61)",
     );

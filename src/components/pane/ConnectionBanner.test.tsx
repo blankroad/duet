@@ -4,6 +4,7 @@ import { ConnectionBanner } from "./ConnectionBanner";
 import { usePanes } from "@/stores/panes";
 import { useConnections } from "@/stores/connections";
 import type { Location } from "@/types/bindings";
+import i18n from "@/i18n";
 
 const m = vi.hoisted(() => ({ connectionClose: vi.fn() }));
 vi.mock("@/types/bindings", () => ({ commands: m }));
@@ -99,7 +100,7 @@ describe("ConnectionBanner alias", () => {
     expect(screen.queryAllByRole("button")).toHaveLength(0);
   });
 
-  it("translates known supervisor reasons and keeps unknown ones as-is", () => {
+  it("translates known supervisor reasons and explains other ones", () => {
     const at = (message: string) => {
       useConnections.setState({
         reconnecting: {},
@@ -122,6 +123,10 @@ describe("ConnectionBanner alias", () => {
     expect(at("auth failed on reconnect")).toContain(
       "banner.reason.authFailed",
     );
-    expect(at("connection refused")).toContain("connection refused");
+    // 원인을 아는 원문은 쉬운 문장으로(remote-26), 모르는 원문은 그대로 붙인다.
+    expect(at("connection refused")).toContain(
+      i18n.t("errors.reason.connRefused"),
+    );
+    expect(at("kex negotiation failed")).toContain("kex negotiation failed");
   });
 });

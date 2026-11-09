@@ -15,7 +15,21 @@ describe("ConnectErrorBox", () => {
     expect(screen.getByText("hint")).toBeTruthy();
   });
 
-  it("puts the backend detail under the title, without the kind label", () => {
+  it("puts an unrecognised backend detail under the title, without the kind label", () => {
+    render(
+      <ConnectErrorBox
+        error={{ kind: "ConnectionFailed", message: "kex negotiation failed" }}
+        authHint="hint"
+      />,
+    );
+    const box = screen.getByRole("alert");
+    expect(box.textContent).toContain("서버에 연결할 수 없습니다");
+    expect(box.textContent).toContain("kex negotiation failed");
+    expect(box.textContent).not.toContain("연결 실패");
+    expect(screen.queryByText("hint")).toBeNull();
+  });
+
+  it("explains a recognised cause in plain words under the title", () => {
     render(
       <ConnectErrorBox
         error={{ kind: "ConnectionFailed", message: "connection refused" }}
@@ -24,8 +38,8 @@ describe("ConnectErrorBox", () => {
     );
     const box = screen.getByRole("alert");
     expect(box.textContent).toContain("서버에 연결할 수 없습니다");
-    expect(box.textContent).toContain("connection refused");
-    expect(screen.queryByText("hint")).toBeNull();
+    expect(box.textContent).toContain(i18n.t("errors.reason.connRefused"));
+    expect(box.textContent).not.toContain("connection refused");
   });
 
   it("remote-26: shows a sentence instead of the OS error number, keeping the original in the tooltip", () => {
