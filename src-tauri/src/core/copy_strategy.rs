@@ -28,7 +28,7 @@ pub enum CopyStrategy {
 /// same-host 판정은 `host_ip` 동일 + **non-unspecified** 일 때만. `0.0.0.0`/`::`
 /// (ProxyJump nested 등에서 DNS 미해석 시 fallback, connection.rs `resolve_target_ip`)
 /// 는 서로 다른 백엔드여도 우연히 일치하므로 same-host 에서 제외 → 안전하게 Relay.
-/// (포트만 다른 동일-IP 컨테이너 구분은 SourceId 에 port 부재 — 후속 과제.)
+/// 실제 파일시스템이 있으면 endpoint(포트·점프 경로)까지 확인하는 `decide_fs`를 쓴다.
 pub fn decide(src: &SourceId, dst: &SourceId) -> CopyStrategy {
     match (src, dst) {
         (SourceId::Local, SourceId::Local) => CopyStrategy::LocalToLocal,
@@ -39,6 +39,26 @@ pub fn decide(src: &SourceId, dst: &SourceId) -> CopyStrategy {
         }
         _ => CopyStrategy::Relay,
     }
+}
+
+/// Decide using source IDs, rejecting same-host copy when both known backend
+/// endpoints differ. Unknown endpoints retain the source-only decision.
+pub fn decide_fs(
+    src_fs: &dyn crate::fs::FileSystem,
+    src: &SourceId,
+    dst_fs: &dyn crate::fs::FileSystem,
+    dst: &SourceId,
+) -> CopyStrategy {
+    let strategy = decide(src, dst);
+    if strategy == CopyStrategy::SshSameHost
+        && matches!(
+            (src_fs.endpoint(), dst_fs.endpoint()),
+            (Some(src), Some(dst)) if src != dst
+        )
+    {
+        return CopyStrategy::Relay;
+    }
+    strategy
 }
 
 /// POSIX shell single-quote escape — exec 명령 인자 안전화.
@@ -186,18 +206,68 @@ mod review_fileops_lead {
         }
     }
 
-    /// 포트 포워딩/Vagrant/도커처럼 **서로 다른 서버**가 같은 IP(127.0.0.1)의 다른 포트로
-    /// 붙는 경우, 두 연결은 같은 호스트가 아니다. 지금은 IP 만 비교해 SshSameHost 로 판정 →
-    /// 서버측 `cp/rsync` 가 **src 서버 안에서** dst 경로로 복사한다(엉뚱한 기계에 기록).
     #[test]
-    #[ignore = "fileops-05 repro"]
+    fn matching_endpoints_allow_different_users_and_unknown_preserves_behavior() {
+        let lo = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let a = ssh(lo, "a");
+        let mut b = ssh(lo, "b");
+        if let SourceId::Ssh { user, .. } = &mut b {
+            *user = "other".into();
+        }
+        let mut src_fs = crate::fs::testing::TestFs::new(Path::new("/fixture"));
+        let mut dst_fs = crate::fs::testing::TestFs::new(Path::new("/fixture"));
+        src_fs.endpoint = Some(crate::types::ServerEndpoint::new(lo, 2222, &[]));
+        dst_fs.endpoint = src_fs.endpoint.clone();
+        assert_eq!(
+            decide_fs(&src_fs, &a, &dst_fs, &b),
+            CopyStrategy::SshSameHost
+        );
+        dst_fs.endpoint = None;
+        assert_eq!(
+            decide_fs(&src_fs, &a, &dst_fs, &b),
+            CopyStrategy::SshSameHost
+        );
+        assert_eq!(
+            decide_fs(&dst_fs, &a, &src_fs, &b),
+            CopyStrategy::SshSameHost
+        );
+    }
+
+    #[test]
+    fn different_jump_routes_are_not_same_host() {
+        let lo = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let a = ssh(lo, "a");
+        let b = ssh(lo, "b");
+        let mut src_fs = crate::fs::testing::TestFs::new(Path::new("/fixture"));
+        let mut dst_fs = crate::fs::testing::TestFs::new(Path::new("/fixture"));
+        src_fs.endpoint = Some(crate::types::ServerEndpoint::new(
+            lo,
+            22,
+            &["jump-a".into()],
+        ));
+        dst_fs.endpoint = Some(crate::types::ServerEndpoint::new(
+            lo,
+            22,
+            &["jump-b".into()],
+        ));
+        assert_eq!(decide_fs(&src_fs, &a, &dst_fs, &b), CopyStrategy::Relay);
+    }
+
+    /// 포트 포워딩/Vagrant/도커처럼 **서로 다른 서버**가 같은 IP(127.0.0.1)의 다른 포트로
+    /// 붙는 경우, 두 endpoint 는 같은 호스트가 아니다. 포트 차이를 무시하면
+    /// 서버측 `cp/rsync` 가 src 서버 안에 기록하므로 Relay 로 분리해야 한다.
+    #[test]
     fn loopback_ip_on_different_connections_is_not_same_host() {
         let lo = IpAddr::V4(Ipv4Addr::LOCALHOST);
         let a = ssh(lo, "conn-vm1-port2222");
         let b = ssh(lo, "conn-vm2-port2200");
-        assert_ne!(
-            decide(&a, &b),
-            CopyStrategy::SshSameHost,
+        let mut src_fs = crate::fs::testing::TestFs::new(Path::new("/fixture"));
+        let mut dst_fs = crate::fs::testing::TestFs::new(Path::new("/fixture"));
+        src_fs.endpoint = Some(crate::types::ServerEndpoint::new(lo, 2222, &[]));
+        dst_fs.endpoint = Some(crate::types::ServerEndpoint::new(lo, 2200, &[]));
+        assert_eq!(
+            decide_fs(&src_fs, &a, &dst_fs, &b),
+            CopyStrategy::Relay,
             "서로 다른 포트의 두 서버(같은 127.0.0.1)를 같은 호스트로 판정"
         );
     }
