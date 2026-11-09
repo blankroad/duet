@@ -247,26 +247,36 @@ pub async fn compare_dirs_progress(
     })
 }
 
-/// 목록을 NFC 키로 묶는다. 한쪽에 정규화만 다른 이름이 둘 이상 있으면(정규화를 구분하는
-/// Linux·NTFS 에서 가능) 그 이름들은 합치지 않고 원본 이름을 키로 쓴다 — 서로 다른 파일을
-/// 한 행으로 뭉개지 않게.
-fn keyed_by_nfc(entries: Vec<Entry>) -> std::collections::BTreeMap<String, Entry> {
-    use std::collections::{BTreeMap, HashMap};
-    let mut count: HashMap<String, usize> = HashMap::new();
-    for e in &entries {
-        *count.entry(nfc_key(&e.name)).or_default() += 1;
+/// 여러 쪽(비교 2쪽, 3-way 3쪽) 목록을 NFC 키로 묶는다 — 같은 키 = 같은 이름(G-14/SC-17).
+///
+/// 어느 한쪽에라도 정규화만 다른 이름이 둘 이상 있으면(정규화를 구분하는 Linux·NTFS 에서
+/// 가능) 그 키는 **모든 쪽에서** 원본 이름을 키로 쓴다 — 서로 다른 파일을 한 행으로
+/// 뭉개지 않고, 반대쪽의 같은 바이트 이름과 정확히 짝지어지게.
+pub(crate) fn keyed_by_nfc<const N: usize>(
+    lists: [Vec<Entry>; N],
+) -> [std::collections::BTreeMap<String, Entry>; N] {
+    use std::collections::{HashMap, HashSet};
+    let mut ambiguous: HashSet<String> = HashSet::new();
+    for list in &lists {
+        let mut count: HashMap<String, usize> = HashMap::new();
+        for e in list {
+            *count.entry(nfc_key(&e.name)).or_default() += 1;
+        }
+        ambiguous.extend(count.into_iter().filter(|(_, n)| *n > 1).map(|(k, _)| k));
     }
-    let mut out = BTreeMap::new();
-    for e in entries {
-        let key = nfc_key(&e.name);
-        let key = if count.get(&key).copied().unwrap_or(0) > 1 {
-            e.name.clone()
-        } else {
-            key
-        };
-        out.insert(key, e);
-    }
-    out
+    lists.map(|list| {
+        list.into_iter()
+            .map(|e| {
+                let key = nfc_key(&e.name);
+                let key = if ambiguous.contains(&key) {
+                    e.name.clone()
+                } else {
+                    key
+                };
+                (key, e)
+            })
+            .collect()
+    })
 }
 
 /// 비교 행의 상대경로(`rel`, 한쪽 원본 이름 기준)를 `root` 쪽 **실제 이름**으로 바꾼다.
@@ -400,8 +410,7 @@ async fn compare_into(
     // 짝짓기 키는 NFC 정규화 이름(G-14/SC-17) — macOS 가 만든 NFD 한글 이름과 NFC 이름이
     // 한 행이 된다. 행 이름(rel)은 왼쪽 원본 이름(없으면 오른쪽)이고, 실제 파일 경로는 각 쪽
     // 원본 이름으로 만든다. 적용·병합은 `resolve_side_rel` 로 각 쪽 실제 이름을 되찾는다.
-    let left = keyed_by_nfc(left_entries);
-    let right = keyed_by_nfc(right_entries);
+    let [left, right] = keyed_by_nfc([left_entries, right_entries]);
 
     // 합집합(정렬 — BTreeMap 키 순회).
     let mut keys: Vec<&String> = left.keys().chain(right.keys()).collect();
@@ -1012,6 +1021,27 @@ mod tests {
         ];
         want.sort_by(|a, b| a.0.cmp(&b.0));
         assert_eq!(st, want);
+    }
+
+    /// R2-2: 모호한 키(한쪽에 NFC·NFD 둘 다)는 **양쪽 모두** 원본 이름으로 짝짓는다 —
+    /// 반대쪽이 NFD 하나뿐이어도 그 NFD 는 같은 바이트의 NFD 와 짝이 된다.
+    #[tokio::test]
+    async fn sc17_ambiguous_key_pairs_exact_names_on_both_sides() {
+        let l = mock(vec![(
+            "/L",
+            vec![
+                ent(&nfc("메모"), EntryKind::File, 10, 1),
+                ent(&nfd("메모"), EntryKind::File, 20, 1),
+            ],
+        )]);
+        let r = mock(vec![(
+            "/R",
+            vec![ent(&nfd("메모"), EntryKind::File, 20, 1)],
+        )]);
+        let plan = compare_dirs(&l, at("/L"), &r, at("/R")).await.unwrap();
+        let st = |rel: &str| plan.entries.iter().find(|e| e.rel == rel).map(|e| e.status);
+        assert_eq!(st(&nfd("메모")), Some(CompareStatus::Same));
+        assert_eq!(st(&nfc("메모")), Some(CompareStatus::LeftOnly));
     }
 
     #[tokio::test]

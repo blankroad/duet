@@ -176,26 +176,32 @@ async fn walk(
     out: &mut Vec<ThreeWayEntry>,
     truncated: &mut bool,
 ) -> Result<(), DuetError> {
-    use std::collections::BTreeMap;
-    let map = |v: Vec<Entry>| -> BTreeMap<String, Entry> {
-        v.into_iter().map(|e| (e.name.clone(), e)).collect()
-    };
-    let base = map(base_fs.list(bpath).await.unwrap_or_default());
-    let left = map(left_fs.list(lpath).await.unwrap_or_default());
-    let right = map(right_fs.list(rpath).await.unwrap_or_default());
+    // 이름 키는 비교와 같은 NFC 규칙(G-14/SC-17) — NFC/NFD 로만 다른 이름은 같은 항목.
+    // 적용(apply_one_relay·trash_rel)은 각 쪽 실제 이름을 resolve_side_rel 로 되찾으므로,
+    // 판정도 같은 규칙이어야 "새로 추가"로 본 것을 몰래 덮어쓰지 않는다.
+    let [base, left, right] = crate::core::compare::keyed_by_nfc([
+        base_fs.list(bpath).await.unwrap_or_default(),
+        left_fs.list(lpath).await.unwrap_or_default(),
+        right_fs.list(rpath).await.unwrap_or_default(),
+    ]);
 
-    let mut names: Vec<&String> = base.keys().chain(left.keys()).chain(right.keys()).collect();
-    names.sort();
-    names.dedup();
+    let mut keys: Vec<&String> = base.keys().chain(left.keys()).chain(right.keys()).collect();
+    keys.sort();
+    keys.dedup();
 
-    for name in names {
+    for key in keys {
         if out.len() >= MAX_ENTRIES {
             *truncated = true;
             return Ok(());
         }
-        let b = base.get(name);
-        let l = left.get(name);
-        let r = right.get(name);
+        let b = base.get(key);
+        let l = left.get(key);
+        let r = right.get(key);
+        // 행 이름은 왼쪽 → base → 오른쪽 순으로 있는 쪽의 원본 이름.
+        let name: &str = match l.or(b).or(r) {
+            Some(e) => &e.name,
+            None => continue,
+        };
         let rel_name = if rel.is_empty() {
             name.to_string()
         } else {
@@ -212,11 +218,11 @@ async fn walk(
                 base_fs,
                 // 각 fs 의 구분자 규칙(원격=POSIX)으로 결합 — PathBuf::join 은 Windows
                 // 클라이언트에서 `\` 를 섞어 SFTP list 가 깨진다(§7).
-                &base_fs.join(bpath, name),
+                &base_fs.join(bpath, b.map_or(name, |e| &e.name)),
                 left_fs,
-                &left_fs.join(lpath, name),
+                &left_fs.join(lpath, l.map_or(name, |e| &e.name)),
                 right_fs,
-                &right_fs.join(rpath, name),
+                &right_fs.join(rpath, r.map_or(name, |e| &e.name)),
                 &rel_name,
                 out,
                 truncated,
