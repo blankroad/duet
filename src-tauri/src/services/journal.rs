@@ -1183,7 +1183,6 @@ mod review_fileops_sol_r2 {
     }
 
     #[tokio::test]
-    #[ignore = "fileops-03 repro"]
     async fn batch_undo_preserves_file_recreated_at_original_name() {
         let t = tempfile::tempdir().unwrap();
         let original = t.path().join("a");
@@ -1205,7 +1204,6 @@ mod review_fileops_sol_r2 {
     }
 
     #[tokio::test]
-    #[ignore = "fileops-03 repro"]
     async fn batch_redo_preserves_file_recreated_at_current_name() {
         let t = tempfile::tempdir().unwrap();
         let original = t.path().join("a");

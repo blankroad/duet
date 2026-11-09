@@ -176,12 +176,107 @@ pub(crate) async fn rename_no_replace(
         Err(e) => return Err(e),
     }
     match fs.symlink_metadata(to).await {
-        Ok(_) => return Ok(Step::Skip(UndoReason::Occupied)),
-        Err(DuetError::NotFound(_)) => {}
+        Ok(_) if !case_only_alias(fs, from, to).await? => {
+            return Ok(Step::Skip(UndoReason::Occupied))
+        }
+        Ok(_) | Err(DuetError::NotFound(_)) => {}
         Err(e) => return Err(e),
     }
     fs.rename(from, to).await?;
     Ok(Step::Done)
+}
+
+/// `to` 가 `from` 자신을 대소문자만 다르게 부른 것인지 (대소문자 무시 볼륨의 `a.txt`↔`A.txt`).
+///
+/// 같은 폴더·대소문자만 다른 이름일 때 폴더 목록에 `to` 이름이 **정확히** 없으면 자기 자신이다
+/// (대소문자 구분 볼륨에서 둘 다 있으면 목록에 둘 다 보여 점유로 판정).
+async fn case_only_alias(fs: &dyn FileSystem, from: &Path, to: &Path) -> Result<bool, DuetError> {
+    let (Some(dir), Some(from_name), Some(to_name)) =
+        (from.parent(), from.file_name(), to.file_name())
+    else {
+        return Ok(false);
+    };
+    let (from_name, to_name) = (from_name.to_string_lossy(), to_name.to_string_lossy());
+    if to.parent() != Some(dir)
+        || from_name == to_name
+        || from_name.to_lowercase() != to_name.to_lowercase()
+    {
+        return Ok(false);
+    }
+    let entries = fs.list(dir).await?;
+    Ok(!entries.iter().any(|e| e.name == to_name))
+}
+
+/// 항목 하나를 `from` → `to` 로 옮긴다 (undo/redo 의 move 공용). 덮어쓰지 않는다.
+///
+/// 같은 source 면 no-replace rename. 드라이브가 달라 `CrossDevice` 거나 source 가 다르면
+/// 복사 후 남은 쪽을 **휴지통**으로(원래 move 폴백과 동일) — 복사가 끝난 뒤의 휴지통 실패는
+/// 데이터가 이미 `to` 에 있으므로 Done 으로 치고 남은 사본 위치를 `t` 의 메모로 알린다.
+async fn move_item(
+    t: &mut Tally,
+    from_fs: &dyn FileSystem,
+    from: &Path,
+    to_fs: &dyn FileSystem,
+    to: &Path,
+    same_source: bool,
+) -> Result<Step, DuetError> {
+    if same_source {
+        match rename_no_replace(from_fs, from, to).await {
+            Err(DuetError::CrossDevice(_)) => {}
+            other => return other,
+        }
+    }
+    match from_fs.symlink_metadata(from).await {
+        Ok(_) => {}
+        Err(DuetError::NotFound(_)) => return Ok(Step::Skip(UndoReason::Gone)),
+        Err(e) => return Err(e),
+    }
+    match to_fs.symlink_metadata(to).await {
+        Ok(_) => return Ok(Step::Skip(UndoReason::Occupied)),
+        Err(DuetError::NotFound(_)) => {}
+        Err(e) => return Err(e),
+    }
+    copy_relay(from_fs, from, to_fs, to).await?;
+    if let Err(e) = from_fs
+        .trash(from, &crate::services::trash::new_batch_id())
+        .await
+    {
+        t.note(format!(
+            "moved back, but the copy at {} could not be moved to trash: {e}",
+            from.display()
+        ));
+    }
+    Ok(Step::Done)
+}
+
+/// 백업을 원래 자리로 (덮어쓰지 않음). 백업이 이미 없으면 `None` — 복원할 것 없음.
+async fn restore_backup(
+    fs: &dyn FileSystem,
+    backup: &Path,
+    original: &Path,
+) -> Result<Option<Step>, DuetError> {
+    match fs.symlink_metadata(backup).await {
+        Ok(_) => rename_no_replace(fs, backup, original).await.map(Some),
+        Err(DuetError::NotFound(_)) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// move/rename 결과를 기록 — 건너뜀 사유에 맞는 경로를 남긴다(사라짐 → 출발지, 점유 → 도착지).
+fn record_move(
+    t: &mut Tally,
+    step: Step,
+    (from_source, from): (&SourceId, &Path),
+    (to_source, to): (&SourceId, &Path),
+) {
+    match step {
+        Step::Done => {
+            t.record(step, to_source, to);
+            t.refresh_parent(from_source, from);
+        }
+        Step::Skip(UndoReason::Gone) => t.record(step, from_source, from),
+        Step::Skip(_) => t.record(step, to_source, to),
+    }
 }
 
 /// Never permanently remove a file checked before a concurrent writer can change it.
@@ -375,52 +470,56 @@ pub async fn execute_undo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
             moved,
             backups_to_restore,
         } => {
-            let src_fs_r = fs_for(src_source, pool).await;
-            let dst_fs_r = fs_for(dst_source, pool).await;
-            let (src_fs, dst_fs) = match (src_fs_r, dst_fs_r) {
+            let (src_fs, dst_fs) = match (
+                fs_for(src_source, pool).await,
+                fs_for(dst_source, pool).await,
+            ) {
                 (Ok(a), Ok(b)) => (a, b),
-                _ => return unreachable(),
+                (Err(e), _) | (_, Err(e)) => return error("source unreachable", e),
             };
+            // 항목별로 되돌리고 결과를 모은다 — 하나가 사라졌다고 나머지를 버리지 않고(fileops-22),
+            // 원래 자리에 새 항목이 생겼으면 덮어쓰지 않는다(U-10).
+            let mut t = Tally::default();
             for m in moved {
-                if dst_fs.metadata(&m.dst_now).await.is_err() {
-                    return stale(UndoReason::Gone, &m.dst_now);
-                }
-                // 같은 source 면 rename 으로 되돌림(빠름). 단 로컬 C:↔D: 처럼 물리 드라이브가
-                // 달라 rename 이 cross-device 로 거부되면 copy+remove 로 폴백(cross-source 와
-                // 동일) — 안 그러면 undo 가 실패하고 원본이 휴지통에 갇힌다(§4 위반).
-                let renamed = if src_source == dst_source {
-                    match src_fs.rename(&m.dst_now, &m.src_original).await {
-                        Ok(()) => true,
-                        Err(DuetError::CrossDevice(_)) => false,
-                        Err(e) => return error("rename back", e),
-                    }
-                } else {
-                    false
+                let step = match move_item(
+                    &mut t,
+                    &*dst_fs,
+                    &m.dst_now,
+                    &*src_fs,
+                    &m.src_original,
+                    src_source == dst_source,
+                )
+                .await
+                {
+                    Ok(s) => s,
+                    Err(e) => return t.fail("move back", e),
                 };
-                if !renamed {
-                    if let Err(e) =
-                        copy_relay(&*dst_fs, &m.dst_now, &*src_fs, &m.src_original).await
-                    {
-                        return error("copy back", e);
-                    }
-                    let _ = dst_fs.remove(&m.dst_now).await;
-                }
+                record_move(
+                    &mut t,
+                    step,
+                    (dst_source, &m.dst_now),
+                    (src_source, &m.src_original),
+                );
             }
+            // 폴더 교체 이동의 백업 — 이동분이 빠져 자리가 비었을 때만 제자리로.
             for b in backups_to_restore {
-                if dst_fs.metadata(&b.backup_path).await.is_ok() {
-                    let _ = dst_fs.rename(&b.backup_path, &b.original_path).await;
+                match restore_backup(&*dst_fs, &b.backup_path, &b.original_path).await {
+                    Ok(Some(step)) => {
+                        if step != Step::Done {
+                            t.note(format!("backup kept at {}", b.backup_path.display()));
+                        }
+                        record_move(
+                            &mut t,
+                            step,
+                            (dst_source, &b.backup_path),
+                            (dst_source, &b.original_path),
+                        );
+                    }
+                    Ok(None) => {}
+                    Err(e) => return t.fail("restore backup", e),
                 }
             }
-            let mut refresh = std::collections::HashSet::<(SourceId, PathBuf)>::new();
-            for m in moved {
-                if let Some(p) = m.dst_now.parent() {
-                    refresh.insert((dst_source.clone(), p.to_path_buf()));
-                }
-                if let Some(p) = m.src_original.parent() {
-                    refresh.insert((src_source.clone(), p.to_path_buf()));
-                }
-            }
-            ok_multi(refresh)
+            t.finish()
         }
         UndoAction::UndoRename {
             source,
@@ -431,17 +530,12 @@ pub async fn execute_undo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
                 Ok(f) => f,
                 Err(e) => return error("source unreachable", e),
             };
-            if let Err(e) = fs.rename(current, original).await {
-                return error("rename back", e);
+            let mut t = Tally::default();
+            match rename_no_replace(&*fs, current, original).await {
+                Ok(step) => record_move(&mut t, step, (source, current), (source, original)),
+                Err(e) => return error("rename back", e),
             }
-            ok_with_locs(
-                source,
-                original
-                    .parent()
-                    .map(Path::to_path_buf)
-                    .into_iter()
-                    .collect(),
-            )
+            t.finish()
         }
         UndoAction::UndoBatchRename { source, pairs } => {
             let fs = match fs_for(source, pool).await {
@@ -449,20 +543,17 @@ pub async fn execute_undo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
                 Err(e) => return error("source unreachable", e),
             };
             // 역순으로 current → original 복원. forward 에서 new==old 겹침을 차단했으므로
-            // 순서 무관하게 충돌 없이 복원 가능.
-            let mut refresh = std::collections::HashSet::<PathBuf>::new();
+            // 순서 무관하게 복원 가능. 점유·사라짐은 그 항목만 건너뛴다(U-10).
+            let mut t = Tally::default();
             for p in pairs.iter().rev() {
-                if fs.metadata(&p.current).await.is_err() {
-                    return stale(UndoReason::Gone, &p.current);
-                }
-                if let Err(e) = fs.rename(&p.current, &p.original).await {
-                    return error("rename back", e);
-                }
-                if let Some(par) = p.original.parent() {
-                    refresh.insert(par.to_path_buf());
+                match rename_no_replace(&*fs, &p.current, &p.original).await {
+                    Ok(step) => {
+                        record_move(&mut t, step, (source, &p.current), (source, &p.original))
+                    }
+                    Err(e) => return t.fail("rename back", e),
                 }
             }
-            ok_with_locs(source, refresh)
+            t.finish()
         }
         UndoAction::UndoMkdir { source, path } => {
             let fs = match fs_for(source, pool).await {
@@ -714,40 +805,30 @@ pub async fn execute_redo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
                 Ok(f) => f,
                 Err(e) => return error("source unreachable", e),
             };
-            if fs.metadata(original).await.is_err() {
-                return stale(UndoReason::Gone, original);
+            let mut t = Tally::default();
+            match rename_no_replace(&*fs, original, current).await {
+                Ok(step) => record_move(&mut t, step, (source, original), (source, current)),
+                Err(e) => return error("rename forward", e),
             }
-            if fs.metadata(current).await.is_ok() {
-                return stale(UndoReason::Occupied, current);
-            }
-            if let Err(e) = fs.rename(original, current).await {
-                return error("rename forward", e);
-            }
-            let mut refresh = std::collections::HashSet::new();
-            if let Some(p) = current.parent() {
-                refresh.insert(p.to_path_buf());
-            }
-            ok_with_locs(source, refresh)
+            t.finish()
         }
         UndoAction::UndoBatchRename { source, pairs } => {
             let fs = match fs_for(source, pool).await {
                 Ok(f) => f,
                 Err(e) => return error("source unreachable", e),
             };
-            // forward 순서로 original → current 재적용 (undo 는 역순이었음).
-            let mut refresh = std::collections::HashSet::<PathBuf>::new();
+            // forward 순서로 original → current 재적용 (undo 는 역순이었음). 새 파일이 생긴
+            // 이름은 덮어쓰지 않고 그 항목만 건너뛴다(U-10).
+            let mut t = Tally::default();
             for p in pairs.iter() {
-                if fs.metadata(&p.original).await.is_err() {
-                    return stale(UndoReason::Gone, &p.original);
-                }
-                if let Err(e) = fs.rename(&p.original, &p.current).await {
-                    return error("rename forward", e);
-                }
-                if let Some(par) = p.current.parent() {
-                    refresh.insert(par.to_path_buf());
+                match rename_no_replace(&*fs, &p.original, &p.current).await {
+                    Ok(step) => {
+                        record_move(&mut t, step, (source, &p.original), (source, &p.current))
+                    }
+                    Err(e) => return t.fail("rename forward", e),
                 }
             }
-            ok_with_locs(source, refresh)
+            t.finish()
         }
         UndoAction::UndoMkdir { source, path } => {
             let fs = match fs_for(source, pool).await {
@@ -819,49 +900,37 @@ pub async fn execute_redo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
             if !backups_to_restore.is_empty() {
                 return unsupported();
             }
-            let src_fs_r = fs_for(src_source, pool).await;
-            let dst_fs_r = fs_for(dst_source, pool).await;
-            let (src_fs, dst_fs) = match (src_fs_r, dst_fs_r) {
+            let (src_fs, dst_fs) = match (
+                fs_for(src_source, pool).await,
+                fs_for(dst_source, pool).await,
+            ) {
                 (Ok(a), Ok(b)) => (a, b),
-                _ => return unreachable(),
+                (Err(e), _) | (_, Err(e)) => return error("source unreachable", e),
             };
+            // undo 와 대칭 — 항목별, 덮어쓰지 않음.
+            let mut t = Tally::default();
             for m in moved {
-                if src_fs.metadata(&m.src_original).await.is_err() {
-                    return stale(UndoReason::Gone, &m.src_original);
-                }
-                if dst_fs.metadata(&m.dst_now).await.is_ok() {
-                    return stale(UndoReason::Occupied, &m.dst_now);
-                }
-                // undo 와 대칭: 같은 source 면 rename, cross-device/cross-source 는
-                // copy_relay + remove 폴백.
-                let renamed = if src_source == dst_source {
-                    match src_fs.rename(&m.src_original, &m.dst_now).await {
-                        Ok(()) => true,
-                        Err(DuetError::CrossDevice(_)) => false,
-                        Err(e) => return error("move forward", e),
-                    }
-                } else {
-                    false
+                let step = match move_item(
+                    &mut t,
+                    &*src_fs,
+                    &m.src_original,
+                    &*dst_fs,
+                    &m.dst_now,
+                    src_source == dst_source,
+                )
+                .await
+                {
+                    Ok(s) => s,
+                    Err(e) => return t.fail("move forward", e),
                 };
-                if !renamed {
-                    if let Err(e) =
-                        copy_relay(&*src_fs, &m.src_original, &*dst_fs, &m.dst_now).await
-                    {
-                        return error("copy forward", e);
-                    }
-                    let _ = src_fs.remove(&m.src_original).await;
-                }
+                record_move(
+                    &mut t,
+                    step,
+                    (src_source, &m.src_original),
+                    (dst_source, &m.dst_now),
+                );
             }
-            let mut refresh = std::collections::HashSet::<(SourceId, PathBuf)>::new();
-            for m in moved {
-                if let Some(p) = m.dst_now.parent() {
-                    refresh.insert((dst_source.clone(), p.to_path_buf()));
-                }
-                if let Some(p) = m.src_original.parent() {
-                    refresh.insert((src_source.clone(), p.to_path_buf()));
-                }
-            }
-            ok_multi(refresh)
+            t.finish()
         }
         UndoAction::UndoCopy {
             target_source,
@@ -1504,7 +1573,6 @@ mod review_fileops_opus {
     /// F-opus: 이름 바꾸기 후 원래 이름으로 새 파일이 생기면, Ctrl+Z 가 그 새 파일을
     /// 경고 없이 덮어쓴다(POSIX rename = 교체). redo 쪽은 같은 상황을 Skipped 로 막는다.
     #[tokio::test]
-    #[ignore = "fileops-03 repro"]
     async fn undo_rename_must_not_overwrite_file_recreated_at_original_name() {
         let (ctx, _keep) = mk_ctx().await;
         let dir = TempDir::new().unwrap();
@@ -1537,7 +1605,6 @@ mod review_fileops_opus {
 
     /// F-opus: 이동 후 원래 자리에 같은 이름 파일이 새로 생기면, Ctrl+Z 가 덮어쓴다.
     #[tokio::test]
-    #[ignore = "fileops-03 repro"]
     async fn undo_move_must_not_overwrite_file_recreated_at_source() {
         let (ctx, _keep) = mk_ctx().await;
         let dir = TempDir::new().unwrap();
@@ -1666,7 +1733,6 @@ mod review_fileops_opus {
     /// "undo skipped" 로 보고하고 entry 는 undone 처리 안 됨 → 다음 Ctrl+Z 도 같은 entry 에서
     /// 영원히 Skipped (그 이전 작업들은 Ctrl+Z 로 닿을 수 없다).
     #[tokio::test]
-    #[ignore = "fileops-22 repro"]
     async fn undo_move_partial_skip_must_not_half_apply_and_report_skipped() {
         let (ctx, _keep) = mk_ctx().await;
         let dir = TempDir::new().unwrap();
@@ -1715,6 +1781,86 @@ mod review_fileops_opus {
             !(a_back && matches!(first.kind, UndoKind::Skipped)),
             "undo moved a.txt back but reported the whole undo as skipped"
         );
+        // 고친 뒤: 되돌린 만큼은 Partial 로 보고하고, 빠진 항목은 사유와 함께 남긴다.
+        assert!(a_back);
+        assert_eq!(first.kind, UndoKind::Partial);
+        assert_eq!(first.skipped.len(), 1);
+        assert_eq!(first.skipped[0].reason, UndoReason::Gone);
+        assert_eq!(first.skipped[0].path, dst.join("b.txt"));
+    }
+
+    /// U-10: 대소문자만 바꾼 이름 바꾸기의 undo 는 자기 자신을 "점유"로 오판하지 않는다.
+    #[tokio::test]
+    async fn undo_case_only_rename_is_not_blocked_by_itself() {
+        let dir = TempDir::new().unwrap();
+        let upper = dir.path().join("A.txt");
+        tokio::fs::write(&upper, b"x").await.unwrap();
+        if !dir.path().join("a.txt").exists() {
+            eprintln!("SKIP: case-sensitive volume");
+            return;
+        }
+        let entry = JournalEntry {
+            id: crate::services::journal::JournalId::new(),
+            timestamp: chrono::Utc::now(),
+            op: crate::services::journal::OpKind::Rename {
+                from: dir.path().join("a.txt"),
+                to: upper.clone(),
+                source: SourceId::Local,
+            },
+            undo: UndoAction::UndoRename {
+                source: SourceId::Local,
+                current: upper,
+                original: dir.path().join("a.txt"),
+            },
+            undone: false,
+            stale: false,
+        };
+        let out = execute_undo(&entry, &ConnectionPool::new()).await;
+        assert_eq!(out.kind, UndoKind::Ok, "{out:?}");
+        let names: Vec<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, vec!["a.txt".to_string()]);
+    }
+
+    /// U-10: 새 파일이 생긴 이름은 건너뛰되 나머지 batch 항목은 되돌린다.
+    #[tokio::test]
+    async fn batch_undo_skips_only_the_occupied_pair() {
+        let dir = TempDir::new().unwrap();
+        let d = dir.path();
+        for (n, c) in [("x2", "x"), ("y2", "y"), ("x", "new work")] {
+            tokio::fs::write(d.join(n), c).await.unwrap();
+        }
+        let entry = JournalEntry {
+            id: crate::services::journal::JournalId::new(),
+            timestamp: chrono::Utc::now(),
+            op: crate::services::journal::OpKind::BatchRename {
+                count: 2,
+                location: loc(d),
+            },
+            undo: UndoAction::UndoBatchRename {
+                source: SourceId::Local,
+                pairs: vec![
+                    crate::services::journal::RenamePair {
+                        current: d.join("x2"),
+                        original: d.join("x"),
+                    },
+                    crate::services::journal::RenamePair {
+                        current: d.join("y2"),
+                        original: d.join("y"),
+                    },
+                ],
+            },
+            undone: false,
+            stale: false,
+        };
+        let out = execute_undo(&entry, &ConnectionPool::new()).await;
+        assert_eq!(out.kind, UndoKind::Partial, "{out:?}");
+        assert_eq!(out.skipped[0].reason, UndoReason::Occupied);
+        assert_eq!(std::fs::read(d.join("x")).unwrap(), b"new work");
+        assert_eq!(std::fs::read(d.join("x2")).unwrap(), b"x");
+        assert_eq!(std::fs::read(d.join("y")).unwrap(), b"y");
     }
 
     /// F-opus: macOS 로컬 휴지통 삭제의 undo 는 NotSupported → UndoKind::Error.
