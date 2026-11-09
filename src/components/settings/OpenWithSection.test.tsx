@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import { commands } from "@/types/bindings";
 import { useToast } from "@/stores/toast";
+import { useNotices } from "@/stores/notices";
 import "@/i18n";
 import { OpenWithSection } from "./OpenWithSection";
 
@@ -19,6 +20,7 @@ vi.mock("@/types/bindings", () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   useToast.getState().clear();
+  useNotices.getState().clear();
   vi.mocked(commands.settingsGet).mockResolvedValue({
     status: "ok",
     data: {
@@ -56,6 +58,8 @@ describe("OpenWithSection 저장 실패", () => {
       await Promise.resolve();
     });
     expect(removes()).toHaveLength(2);
-    expect(useToast.getState().toasts.at(-1)?.message).toMatch(/disk full/);
+    // 원인은 쉬운 문장으로, 백엔드 원문은 알림 "자세히" 로(G-16).
+    expect(useToast.getState().toasts.at(-1)?.message).toMatch(/disk is full/);
+    expect(useNotices.getState().items[0]?.detail).toBe("disk full");
   });
 });
