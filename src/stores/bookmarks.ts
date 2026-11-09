@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { reorderInSlots } from "@/lib/reorderSlots";
 import { commands } from "@/types/bindings";
-import { formatErr } from "@/lib/error";
+import { showError } from "@/lib/errorToast";
 import { aliasFromConnectionId } from "@/lib/hostAlias";
 import type { Bookmark, Location } from "@/types/bindings";
 import { useHostFavorites, addHostFavorite } from "@/stores/hostFavorites";
@@ -80,22 +80,13 @@ export async function addBookmark(
 export async function renameBookmark(id: string, name: string): Promise<void> {
   const r = await commands.bookmarksRename(id, name);
   if (r.status === "ok") useBookmarks.getState().setAll(r.data);
-  else
-    useToast
-      .getState()
-      .show(i18n.t("toast.renameFailed", { err: formatErr(r.error) }), "error");
+  else showError("toast.renameFailed", r.error);
 }
 
 export async function removeBookmark(id: string): Promise<void> {
   const r = await commands.bookmarksRemove(id);
   if (r.status === "ok") useBookmarks.getState().setAll(r.data);
-  else
-    useToast
-      .getState()
-      .show(
-        i18n.t("toast.removeBookmarkFailed", { err: formatErr(r.error) }),
-        "error",
-      );
+  else showError("toast.removeBookmarkFailed", r.error);
 }
 
 /** 드래그 재정렬 — id 순서대로. 낙관적 갱신 후 백엔드 반환값으로 정합. */

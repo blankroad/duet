@@ -1,8 +1,6 @@
 import { create } from "zustand";
 import { commands } from "@/types/bindings";
-import { useToast } from "@/stores/toast";
-import { formatErr } from "@/lib/error";
-import i18n from "@/i18n";
+import { showError } from "@/lib/errorToast";
 import type { HostFavorite } from "@/types/bindings";
 
 interface State {
@@ -40,10 +38,7 @@ export async function renameHostFavorite(
 ): Promise<void> {
   const r = await commands.hostFavoritesRename(id, name);
   if (r.status === "ok") useHostFavorites.getState().setAll(r.data);
-  else
-    useToast
-      .getState()
-      .show(i18n.t("toast.renameFailed", { err: formatErr(r.error) }), "error");
+  else showError("toast.renameFailed", r.error);
 }
 
 /**
@@ -63,13 +58,7 @@ export function findHostFavoriteId(
 export async function removeHostFavorite(id: string): Promise<void> {
   const r = await commands.hostFavoritesRemove(id);
   if (r.status === "ok") useHostFavorites.getState().setAll(r.data);
-  else
-    useToast
-      .getState()
-      .show(
-        i18n.t("toast.removeFavoriteFailed", { err: formatErr(r.error) }),
-        "error",
-      );
+  else showError("toast.removeFavoriteFailed", r.error);
 }
 
 /**
