@@ -119,6 +119,11 @@ interface PanesState {
        * 다른 탭의 결과로 덮어써졌다. 생략하면 활성 탭(예전 동작).
        */
       tabId?: string;
+      /**
+       * 뒤로/앞으로 이동 확정 — `pushHistory: false` 와 함께, 히스토리 index 를 이 칸으로.
+       * 그 칸이 이 위치가 아니면(그사이 히스토리가 바뀜) 무시한다.
+       */
+      historyIndex?: number;
     },
   ) => void;
   setActivePane: (id: PaneId) => void;
@@ -162,9 +167,17 @@ interface PanesState {
   /** "크기 계산" 결과 기록 — 크기 컬럼에 폴더 재귀 크기 표시. 계산이 비동기라
    *  도착 시점에 탭이 바뀌었을 수 있어 tabId 로 대상 탭을 지정(없어졌으면 무시). */
   setDirSize: (id: PaneId, tabId: string, name: string, bytes: number) => void;
-  // NEW
-  back: (id: PaneId) => Location | null;
-  forward: (id: PaneId) => Location | null;
+  /**
+   * 뒤로(-1)/앞으로(+1) 갈 히스토리 칸을 **엿보기만** 한다 — index 는 옮기지 않는다.
+   * 이동이 성공하면 호출부가 `setEntries(..., { historyIndex })` 로 확정한다.
+   * 예전엔 먼저 index 를 옮겨, 이동이 실패하면 화면과 히스토리 위치가 어긋났다(browse-23).
+   * `from`: 아직 끝나지 않은 뒤로/앞으로가 향하는 칸 — 연타하면 거기서 한 칸 더 간다.
+   */
+  peekHistory: (
+    id: PaneId,
+    delta: -1 | 1,
+    from?: number,
+  ) => { location: Location; index: number; tabId: string } | null;
   /** 좌/우 패널 내용 통째 교환 (포커스 위치는 유지). */
   swapPanes: () => void;
   /** 활성 패널의 현재 탭을 반대 패널로 이동(포커스도 따라감). */
@@ -570,6 +583,10 @@ export const usePanes = create<PanesState>((set, get) => ({
         const trimmed =
           stack.length > 100 ? stack.slice(stack.length - 100) : stack;
         history = { stack: trimmed, index: trimmed.length - 1 };
+      } else if (opts?.historyIndex !== undefined) {
+        const at = history.stack[opts.historyIndex];
+        if (at && sameLocation(at, loc))
+          history = { ...history, index: opts.historyIndex };
       }
       // 아카이브/휴지통 루트 밖으로 이동하면 컨텍스트 해제 (내부 하위폴더면 유지).
       const archive =
@@ -963,39 +980,14 @@ export const usePanes = create<PanesState>((set, get) => ({
         })),
       },
     })),
-  back: (id) => {
+  peekHistory: (id, delta, from) => {
     const p = get().panes[id];
     const cur = p.tabs[p.activeTabIndex];
-    if (!cur || cur.history.index <= 0) return null;
-    const newIndex = cur.history.index - 1;
-    const loc = cur.history.stack[newIndex]!;
-    set((s) => ({
-      panes: {
-        ...s.panes,
-        [id]: withActiveTab(s.panes[id], (t) => ({
-          ...t,
-          history: { ...t.history, index: newIndex },
-        })),
-      },
-    }));
-    return loc;
-  },
-  forward: (id) => {
-    const p = get().panes[id];
-    const cur = p.tabs[p.activeTabIndex];
-    if (!cur || cur.history.index >= cur.history.stack.length - 1) return null;
-    const newIndex = cur.history.index + 1;
-    const loc = cur.history.stack[newIndex]!;
-    set((s) => ({
-      panes: {
-        ...s.panes,
-        [id]: withActiveTab(s.panes[id], (t) => ({
-          ...t,
-          history: { ...t.history, index: newIndex },
-        })),
-      },
-    }));
-    return loc;
+    if (!cur) return null;
+    const index = (from ?? cur.history.index) + delta;
+    const location = cur.history.stack[index];
+    if (!location) return null;
+    return { location, index, tabId: cur.id };
   },
   swapPanes: () =>
     set((s) => ({

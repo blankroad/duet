@@ -269,23 +269,42 @@ describe("C-11 탐색·히스토리·경쟁", () => {
     ]);
   });
 
-  it.fails(
-    "browse-23 (F-opus-03): 뒤로 가기가 실패해도 히스토리 위치가 먼저 옮겨져 현재 폴더와 어긋난다",
-    async () => {
-      await boot();
-      cursorTo("a");
-      enter();
-      await wait(80);
-      expect(String(tabL().location.path)).toBe("/home/a");
-      failing.add("/home"); // 그사이 /home 이 사라졌거나 권한이 바뀜
-      back();
-      await wait(80);
-      const t = tabL();
-      expect(String(t.location.path)).toBe("/home/a"); // 화면은 그대로
-      // 히스토리 위치는 지금 보이는 폴더(/home/a, index 1)를 가리켜야 한다
-      expect(t.history.index).toBe(1);
-    },
-  );
+  it("browse-23 (F-opus-03): 뒤로 가기가 실패해도 히스토리 위치가 먼저 옮겨져 현재 폴더와 어긋난다", async () => {
+    await boot();
+    cursorTo("a");
+    enter();
+    await wait(80);
+    expect(String(tabL().location.path)).toBe("/home/a");
+    failing.add("/home"); // 그사이 /home 이 사라졌거나 권한이 바뀜
+    back();
+    await wait(80);
+    const t = tabL();
+    expect(String(t.location.path)).toBe("/home/a"); // 화면은 그대로
+    // 히스토리 위치는 지금 보이는 폴더(/home/a, index 1)를 가리켜야 한다
+    expect(t.history.index).toBe(1);
+  });
+
+  it("browse-23: 느린 폴더로 뒤로 가는 중에 한 번 더 뒤로 가면 두 칸 간다", async () => {
+    await boot();
+    const local = (path: string) => ({
+      source: { kind: "local" as const },
+      path,
+    });
+    act(() => {
+      for (const p of ["/home/a", "/home/slow", "/home/b"])
+        usePanes.getState().setEntries("left", local(p), listing[p] as never, {
+          tabId: tabL().id,
+        });
+    });
+    expect(tabL().history.index).toBe(3);
+    back(); // → /home/slow (250ms)
+    await wait(20);
+    back(); // 아직 확정 전 — /home/slow 에서 한 칸 더 → /home/a
+    await wait(400);
+    const t = tabL();
+    expect(String(t.location.path)).toBe("/home/a");
+    expect(t.history.index).toBe(1);
+  });
 });
 
 describe("C-11 우클릭 '반대 패널에서 열기'", () => {

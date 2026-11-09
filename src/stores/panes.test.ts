@@ -444,32 +444,86 @@ describe("panes — history", () => {
     expect(t.history.stack.map((l) => l.path)).toEqual(["/", "/a"]);
   });
 
-  it("back returns previous location", () => {
+  it("peekHistory(-1) returns the previous location without moving the index", () => {
     usePanes
       .getState()
       .setEntries("left", { source: { kind: "local" }, path: "/a" }, []);
     usePanes
       .getState()
       .setEntries("left", { source: { kind: "local" }, path: "/b" }, []);
-    const prev = usePanes.getState().back("left");
-    expect(prev?.path).toBe("/a");
-    expect(activeTab(usePanes.getState(), "left").history.index).toBe(1);
+    const prev = usePanes.getState().peekHistory("left", -1);
+    expect(prev?.location.path).toBe("/a");
+    expect(prev?.index).toBe(1);
+    expect(prev?.tabId).toBe(activeTab(usePanes.getState(), "left").id);
+    // 엿보기만 — 이동이 성공해 setEntries 가 확정하기 전까지 index 는 그대로.
+    expect(activeTab(usePanes.getState(), "left").history.index).toBe(2);
   });
 
-  it("back at index 0 returns null", () => {
-    expect(usePanes.getState().back("left")).toBeNull();
+  it("peekHistory at either end returns null", () => {
+    expect(usePanes.getState().peekHistory("left", -1)).toBeNull();
+    expect(usePanes.getState().peekHistory("left", 1)).toBeNull();
   });
 
-  it("forward after back", () => {
+  it("peekHistory steps from a pending index", () => {
     usePanes
       .getState()
       .setEntries("left", { source: { kind: "local" }, path: "/a" }, []);
     usePanes
       .getState()
       .setEntries("left", { source: { kind: "local" }, path: "/b" }, []);
-    usePanes.getState().back("left");
-    const next = usePanes.getState().forward("left");
-    expect(next?.path).toBe("/b");
+    expect(usePanes.getState().peekHistory("left", -1, 1)?.location.path).toBe(
+      "/",
+    );
+    expect(usePanes.getState().peekHistory("left", 1, 1)?.location.path).toBe(
+      "/b",
+    );
+  });
+
+  it("setEntries historyIndex commits a back/forward step", () => {
+    const local = (path: string) => ({
+      source: { kind: "local" as const },
+      path,
+    });
+    usePanes.getState().setEntries("left", local("/a"), []);
+    usePanes.getState().setEntries("left", local("/b"), []);
+    usePanes.getState().setEntries("left", local("/a"), [], {
+      pushHistory: false,
+      historyIndex: 1,
+    });
+    let t = activeTab(usePanes.getState(), "left");
+    expect(t.history.index).toBe(1);
+    expect(t.history.stack.map((l) => l.path)).toEqual(["/", "/a", "/b"]);
+    usePanes.getState().setEntries("left", local("/b"), [], {
+      pushHistory: false,
+      historyIndex: 2,
+    });
+    t = activeTab(usePanes.getState(), "left");
+    expect(t.history.index).toBe(2);
+  });
+
+  it("setEntries ignores a historyIndex that no longer points at the location", () => {
+    const local = (path: string) => ({
+      source: { kind: "local" as const },
+      path,
+    });
+    usePanes.getState().setEntries("left", local("/a"), []);
+    usePanes.getState().setEntries("left", local("/b"), []);
+    // 같은 경로라도 다른 소스면 그 칸이 아니다 (원격/로컬 섞임 방지).
+    usePanes.getState().setEntries(
+      "left",
+      {
+        source: {
+          kind: "ssh",
+          connection_id: "h:1",
+          host_ip: "10.0.0.1",
+          user: "u",
+        },
+        path: "/a",
+      },
+      [],
+      { pushHistory: false, historyIndex: 1 },
+    );
+    expect(activeTab(usePanes.getState(), "left").history.index).toBe(2);
   });
 
   it("navigate after back truncates forward stack", () => {
@@ -479,7 +533,12 @@ describe("panes — history", () => {
     usePanes
       .getState()
       .setEntries("left", { source: { kind: "local" }, path: "/b" }, []);
-    usePanes.getState().back("left");
+    usePanes
+      .getState()
+      .setEntries("left", { source: { kind: "local" }, path: "/a" }, [], {
+        pushHistory: false,
+        historyIndex: 1,
+      });
     usePanes
       .getState()
       .setEntries("left", { source: { kind: "local" }, path: "/c" }, []);

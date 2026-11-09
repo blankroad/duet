@@ -147,7 +147,9 @@ describe("rebindHostTabs history", () => {
     const r = rebindHostTabs("nas", fresh);
     pruneDeadConnections("nas");
     expect(r).toEqual({ panes: [], tabs: 1 });
-    expect(usePanes.getState().back("left")?.source).toEqual(fresh);
+    expect(
+      usePanes.getState().peekHistory("left", -1)?.location.source,
+    ).toEqual(fresh);
   });
 
   it("keeps entries still referenced only from history", () => {

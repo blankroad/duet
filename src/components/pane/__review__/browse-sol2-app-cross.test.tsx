@@ -269,23 +269,20 @@ describe("C-11 탐색·히스토리·경쟁", () => {
     ]);
   });
 
-  it.fails(
-    "browse-23 (F-opus-03): 뒤로 가기가 실패해도 히스토리 위치가 먼저 옮겨져 현재 폴더와 어긋난다",
-    async () => {
-      await boot();
-      cursorTo("a");
-      enter();
-      await wait(80);
-      expect(String(tabL().location.path)).toBe("/home/a");
-      failing.add("/home"); // 그사이 /home 이 사라졌거나 권한이 바뀜
-      back();
-      await wait(80);
-      const t = tabL();
-      expect(String(t.location.path)).toBe("/home/a"); // 화면은 그대로
-      // 히스토리 위치는 지금 보이는 폴더(/home/a, index 1)를 가리켜야 한다
-      expect(t.history.index).toBe(1);
-    },
-  );
+  it("browse-23 (F-opus-03): 뒤로 가기가 실패해도 히스토리 위치가 먼저 옮겨져 현재 폴더와 어긋난다", async () => {
+    await boot();
+    cursorTo("a");
+    enter();
+    await wait(80);
+    expect(String(tabL().location.path)).toBe("/home/a");
+    failing.add("/home"); // 그사이 /home 이 사라졌거나 권한이 바뀜
+    back();
+    await wait(80);
+    const t = tabL();
+    expect(String(t.location.path)).toBe("/home/a"); // 화면은 그대로
+    // 히스토리 위치는 지금 보이는 폴더(/home/a, index 1)를 가리켜야 한다
+    expect(t.history.index).toBe(1);
+  });
 });
 
 describe("C-11 우클릭 '반대 패널에서 열기'", () => {
@@ -450,45 +447,42 @@ describe("C-10 세션 복원", () => {
 import { useBookmarks } from "@/stores/bookmarks";
 import { useNotices } from "@/stores/notices";
 
-it.fails(
-  "browse-05: sidebar remote bookmark keeps the same tab and Back must restore local source",
-  async () => {
-    await boot();
-    const previousId = tabL().id;
-    const previousCount = L().tabs.length;
-    const source = {
-      kind: "ssh" as const,
-      connection_id: "r2:u1",
-      host_ip: "10.0.0.8",
-      user: "review",
-    };
-    act(() => {
-      useConnections.getState().upsertActive({
-        id: source.connection_id,
-        alias: "r2",
-        host_ip: source.host_ip,
-        user: source.user,
-        state: { kind: "connected" },
-      });
-      useBookmarks.getState().setAll([
-        {
-          id: "r2-bm",
-          name: "R2 remote bookmark",
-          location: { source, path: "/srv" },
-        },
-      ]);
+it("browse-05: sidebar remote bookmark keeps the same tab and Back must restore local source", async () => {
+  await boot();
+  const previousId = tabL().id;
+  const previousCount = L().tabs.length;
+  const source = {
+    kind: "ssh" as const,
+    connection_id: "r2:u1",
+    host_ip: "10.0.0.8",
+    user: "review",
+  };
+  act(() => {
+    useConnections.getState().upsertActive({
+      id: source.connection_id,
+      alias: "r2",
+      host_ip: source.host_ip,
+      user: source.user,
+      state: { kind: "connected" },
     });
-    fireEvent.click(screen.getByText("R2 remote bookmark"));
-    await waitFor(() => expect(tabL().location.source.kind).toBe("ssh"));
-    expect(tabL().id).toBe(previousId);
-    expect(L().tabs.length).toBe(previousCount);
-    listCalls.length = 0;
-    back();
-    await wait(100);
-    expect(listCalls).toContain("local:/home");
-    expect(tabL().location.source.kind).toBe("local");
-  },
-);
+    useBookmarks.getState().setAll([
+      {
+        id: "r2-bm",
+        name: "R2 remote bookmark",
+        location: { source, path: "/srv" },
+      },
+    ]);
+  });
+  fireEvent.click(screen.getByText("R2 remote bookmark"));
+  await waitFor(() => expect(tabL().location.source.kind).toBe("ssh"));
+  expect(tabL().id).toBe(previousId);
+  expect(L().tabs.length).toBe(previousCount);
+  listCalls.length = 0;
+  back();
+  await wait(100);
+  expect(listCalls).toContain("local:/home");
+  expect(tabL().location.source.kind).toBe("local");
+});
 
 it.fails(
   "browse-30: directory failure preserves the backend original in notice detail",

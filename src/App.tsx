@@ -308,6 +308,8 @@ function App() {
         pushHistory?: boolean;
         tabId?: string;
         current?: () => boolean;
+        /** 뒤로/앞으로 — 성공하면 히스토리 index 를 이 칸으로 확정 (browse-23). */
+        historyIndex?: number;
       } = {},
     ): Promise<boolean> => {
       const tabId = opts.tabId ?? activeTab(usePanes.getState(), id).id;
@@ -324,6 +326,9 @@ function App() {
         usePanes.getState().setEntries(id, location, entries, {
           tabId,
           pushHistory: opts.pushHistory ?? true,
+          ...(opts.historyIndex !== undefined
+            ? { historyIndex: opts.historyIndex }
+            : {}),
         });
         // 그 탭이 닫혔으면 아무것도 적용되지 않았다.
         const p = usePanes.getState().panes[id];
@@ -645,20 +650,49 @@ function App() {
     return tab.location;
   }, []);
 
-  const onBack = useCallback(
-    (id: PaneId) => {
-      const loc = usePanes.getState().back(id);
-      if (loc) void navigate(id, loc.path, { pushHistory: false });
+  /**
+   * 탭별로 진행 중인 뒤로/앞으로가 향하는 히스토리 칸 — 느린 SSH 에서 연타하면
+   * 확정 전 칸에서 한 칸 더 간다. `current` 가 false 면 다른 이동이 끼어든 것.
+   */
+  const pendingHistory = useRef(
+    new Map<string, { index: number; current: () => boolean }>(),
+  );
+
+  /**
+   * 뒤로(-1)/앞으로(+1) — 히스토리의 **전체 Location**(소스 포함)으로 이동하고,
+   * 성공했을 때만 index 를 옮긴다 (browse-05·browse-23).
+   */
+  const stepHistory = useCallback(
+    (id: PaneId, delta: -1 | 1) => {
+      const s = usePanes.getState();
+      const pending = pendingHistory.current.get(activeTab(s, id).id);
+      const from = pending?.current() ? pending.index : undefined;
+      const step = s.peekHistory(id, delta, from);
+      if (!step) return;
+      const done = navigateTo(id, step.location, {
+        tabId: step.tabId,
+        pushHistory: false,
+        historyIndex: step.index,
+      });
+      // navigateTo 는 첫 await 전에 이 탭의 이동 세대를 올린다 — 그 세대를 엿본다.
+      const mine = { index: step.index, current: peekTabNav(step.tabId) };
+      pendingHistory.current.set(step.tabId, mine);
+      void done.finally(() => {
+        if (pendingHistory.current.get(step.tabId) === mine)
+          pendingHistory.current.delete(step.tabId);
+      });
     },
-    [navigate],
+    [navigateTo],
+  );
+
+  const onBack = useCallback(
+    (id: PaneId) => stepHistory(id, -1),
+    [stepHistory],
   );
 
   const onForward = useCallback(
-    (id: PaneId) => {
-      const loc = usePanes.getState().forward(id);
-      if (loc) void navigate(id, loc.path, { pushHistory: false });
-    },
-    [navigate],
+    (id: PaneId) => stepHistory(id, 1),
+    [stepHistory],
   );
 
   const onKeyboardActivate = useCallback(

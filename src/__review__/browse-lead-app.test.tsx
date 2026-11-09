@@ -188,42 +188,39 @@ async function boot() {
 }
 
 describe("browse-lead: 뒤로 가기가 다른 소스(로컬↔원격) 히스토리를 따라가는가", () => {
-  it.fails(
-    "browse-05: 로컬 → (같은 탭에서) 원격으로 이동 후 뒤로 가기는 로컬 폴더를 로컬에서 읽어야 한다",
-    async () => {
-      await boot();
-      const remote = {
-        kind: "ssh" as const,
-        connection_id: "srv:u1",
-        host_ip: "10.0.0.7",
-        user: "deploy",
-      };
-      // 사이드바 호스트/북마크 열기(navigateTo)가 하는 것과 같은 상태 변화:
-      // 같은 탭에 원격 목록을 히스토리에 쌓는다.
-      act(() =>
-        usePanes
-          .getState()
-          .setEntries("left", { source: remote, path: "/other" }, [], {
-            tabId: activeTab(usePanes.getState(), "left").id,
-            pushHistory: true,
-          }),
-      );
-      expect(activeTab(usePanes.getState(), "left").history.stack).toHaveLength(
-        2,
-      );
-      listSources.length = 0;
-      const backBtns = document.querySelectorAll(
-        `button[aria-label="${i18n.t("pathbar.back")}"]`,
-      );
-      act(() => {
-        fireEvent.click(backBtns[0]!);
-      });
-      await wait(80);
-      // 기대: 로컬 /home 을 로컬 소스로 다시 읽는다.
-      expect(listSources).toContainEqual(["local", "/home"]);
-      expect(activeTab(usePanes.getState(), "left").location.source.kind).toBe(
-        "local",
-      );
-    },
-  );
+  it("browse-05: 로컬 → (같은 탭에서) 원격으로 이동 후 뒤로 가기는 로컬 폴더를 로컬에서 읽어야 한다", async () => {
+    await boot();
+    const remote = {
+      kind: "ssh" as const,
+      connection_id: "srv:u1",
+      host_ip: "10.0.0.7",
+      user: "deploy",
+    };
+    // 사이드바 호스트/북마크 열기(navigateTo)가 하는 것과 같은 상태 변화:
+    // 같은 탭에 원격 목록을 히스토리에 쌓는다.
+    act(() =>
+      usePanes
+        .getState()
+        .setEntries("left", { source: remote, path: "/other" }, [], {
+          tabId: activeTab(usePanes.getState(), "left").id,
+          pushHistory: true,
+        }),
+    );
+    expect(activeTab(usePanes.getState(), "left").history.stack).toHaveLength(
+      2,
+    );
+    listSources.length = 0;
+    const backBtns = document.querySelectorAll(
+      `button[aria-label="${i18n.t("pathbar.back")}"]`,
+    );
+    act(() => {
+      fireEvent.click(backBtns[0]!);
+    });
+    await wait(80);
+    // 기대: 로컬 /home 을 로컬 소스로 다시 읽는다.
+    expect(listSources).toContainEqual(["local", "/home"]);
+    expect(activeTab(usePanes.getState(), "left").location.source.kind).toBe(
+      "local",
+    );
+  });
 });
