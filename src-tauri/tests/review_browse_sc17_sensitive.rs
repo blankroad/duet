@@ -303,3 +303,225 @@ async fn sc17_detect_rename_under_paired_dir() {
         .unwrap();
     assert_eq!(plan.moves.len(), 1, "{:?}", plan.entries);
 }
+
+/// R3 리뷰(sol-4) 재현 — 한 폴더에 정규화만 다른 두 이름이 함께 있는(정규화 구분 FS) 3-way.
+/// ASCII 백킹 이름으로 APFS 위에서 NFC·NFD 를 서로 다른 파일로 흉내 내고, 모의 SSH 소스로
+/// relay 경로를 탄다(실제 연결 없음). 앞 두 개는 통과(삭제 전파), 뒤 두 개는 남은 결함 R3-S4-1.
+mod r3_ambiguous_three_way {
+    use super::*;
+    use duet_lib::core::three_way::ThreeWayStatus;
+
+    struct EncodedFs {
+        root: PathBuf,
+    }
+    impl EncodedFs {
+        fn disk(&self, p: &Path) -> PathBuf {
+            let rel = p.strip_prefix(&self.root).expect("fixture boundary");
+            rel.components().fold(self.root.clone(), |out, c| {
+                let name = c.as_os_str().to_string_lossy();
+                out.join(name.replace('é', "__C__").replace("e\u{301}", "__D__"))
+            })
+        }
+        fn seed(&self, name: &str, body: &[u8]) {
+            let p = self.disk(&self.root.join(name));
+            std::fs::write(&p, body).unwrap();
+            let fixed =
+                std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+            std::fs::OpenOptions::new()
+                .append(true)
+                .open(p)
+                .unwrap()
+                .set_times(std::fs::FileTimes::new().set_modified(fixed))
+                .unwrap();
+        }
+        fn contents(&self) -> Vec<(String, Vec<u8>)> {
+            let mut out: Vec<_> = std::fs::read_dir(&self.root)
+                .unwrap()
+                .map(|e| {
+                    let e = e.unwrap();
+                    let name = e.file_name().to_string_lossy().into_owned();
+                    (
+                        name.replace("__C__", "é").replace("__D__", "e\u{301}"),
+                        std::fs::read(e.path()).unwrap(),
+                    )
+                })
+                .collect();
+            out.sort();
+            out
+        }
+    }
+
+    #[async_trait]
+    impl FileSystem for EncodedFs {
+        fn source_id(&self) -> SourceId {
+            SourceId::Ssh {
+                connection_id: duet_lib::types::ConnectionId(
+                    self.root
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned(),
+                ),
+                host_ip: std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+                user: "fixture".into(),
+            }
+        }
+        async fn list(&self, p: &Path) -> Result<Vec<Entry>, DuetError> {
+            let mut entries = LocalFs.list(&self.disk(p)).await?;
+            for e in &mut entries {
+                e.name = e.name.replace("__C__", "é").replace("__D__", "e\u{301}");
+            }
+            Ok(entries)
+        }
+        async fn metadata(&self, p: &Path) -> Result<EntryMeta, DuetError> {
+            LocalFs.metadata(&self.disk(p)).await
+        }
+        async fn rename(&self, f: &Path, t: &Path) -> Result<(), DuetError> {
+            LocalFs.rename(&self.disk(f), &self.disk(t)).await
+        }
+        async fn mkdir(&self, p: &Path) -> Result<(), DuetError> {
+            LocalFs.mkdir(&self.disk(p)).await
+        }
+        async fn create_new_file(&self, p: &Path) -> Result<(), DuetError> {
+            LocalFs.create_new_file(&self.disk(p)).await
+        }
+        async fn remove_empty_dir(&self, p: &Path) -> Result<(), DuetError> {
+            LocalFs.remove_empty_dir(&self.disk(p)).await
+        }
+        async fn trash(&self, p: &Path, _: &str) -> Result<TrashLocation, DuetError> {
+            let dir = self.root.parent().unwrap().join(format!(
+                "Recovered-{}",
+                self.root.file_name().unwrap().to_string_lossy()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            let target = dir.join(self.disk(p).file_name().unwrap());
+            LocalFs.rename(&self.disk(p), &target).await?;
+            Ok(TrashLocation::Local {
+                trash_id: target.to_string_lossy().into_owned(),
+            })
+        }
+        async fn remove(&self, _: &Path) -> Result<(), DuetError> {
+            panic!("permanent removal forbidden in fixture")
+        }
+        async fn restore_from_trash(&self, _: &TrashLocation, _: &Path) -> Result<(), DuetError> {
+            panic!("restore not used in fixture")
+        }
+        async fn read_full(&self, p: &Path) -> Result<Vec<u8>, DuetError> {
+            LocalFs.read_full(&self.disk(p)).await
+        }
+        async fn write_full(&self, p: &Path, b: &[u8]) -> Result<(), DuetError> {
+            LocalFs.write_full(&self.disk(p), b).await
+        }
+        async fn open_read(
+            &self,
+            p: &Path,
+            o: u64,
+        ) -> Result<Pin<Box<dyn tokio::io::AsyncRead + Send>>, DuetError> {
+            LocalFs.open_read(&self.disk(p), o).await
+        }
+        async fn open_write(
+            &self,
+            p: &Path,
+            o: u64,
+        ) -> Result<Pin<Box<dyn tokio::io::AsyncWrite + Send>>, DuetError> {
+            LocalFs.open_write(&self.disk(p), o).await
+        }
+    }
+
+    fn sides(t: &Path) -> [EncodedFs; 3] {
+        ["B", "L", "R"].map(|s| {
+            let root = t.join(s);
+            std::fs::create_dir_all(&root).unwrap();
+            EncodedFs { root }
+        })
+    }
+    fn location(f: &EncodedFs) -> Location {
+        Location {
+            source: f.source_id(),
+            path: f.root.clone(),
+        }
+    }
+    async fn plan(
+        b: &EncodedFs,
+        l: &EncodedFs,
+        r: &EncodedFs,
+    ) -> duet_lib::core::three_way::ThreeWayPlan {
+        compare_three_way(b, location(b), l, location(l), r, location(r))
+            .await
+            .unwrap()
+    }
+    async fn apply(b: &EncodedFs, l: &EncodedFs, r: &EncodedFs, t: &Path) {
+        apply_three_way(
+            b,
+            location(b),
+            l,
+            location(l),
+            r,
+            location(r),
+            &ctx(t).await,
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn base_nfd_left_deleted_right_nfc_propagates_real_name() {
+        let t = tempdir().unwrap();
+        let [b, l, r] = sides(t.path());
+        b.seed("e\u{301}.txt", b"same");
+        r.seed("é.txt", b"same");
+        let p = plan(&b, &l, &r).await;
+        assert_eq!(p.entries.len(), 1);
+        assert_eq!(p.entries[0].status, ThreeWayStatus::LeftDeleted);
+        apply(&b, &l, &r, t.path()).await;
+        assert!(r.contents().is_empty());
+        assert_eq!(b.contents()[0].1, b"same");
+    }
+
+    #[tokio::test]
+    async fn ambiguous_base_keeps_two_exact_deletions() {
+        let t = tempdir().unwrap();
+        let [b, l, r] = sides(t.path());
+        b.seed("é.txt", b"C");
+        b.seed("e\u{301}.txt", b"DD");
+        l.seed("é.txt", b"C");
+        r.seed("e\u{301}.txt", b"DD");
+        let p = plan(&b, &l, &r).await;
+        assert_eq!((p.auto, p.conflicts), (2, 0));
+        apply(&b, &l, &r, t.path()).await;
+        assert!(l.contents().is_empty());
+        assert!(r.contents().is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "R3-S4-1 repro: ambiguous-key addition overwrites the other normalization form"]
+    async fn ambiguous_left_addition_must_preserve_right_exact_partner() {
+        let t = tempdir().unwrap();
+        let [b, l, r] = sides(t.path());
+        l.seed("é.txt", b"NEW-NFC");
+        l.seed("e\u{301}.txt", b"KEEP-NFD");
+        r.seed("e\u{301}.txt", b"KEEP-NFD");
+        let p = plan(&b, &l, &r).await;
+        assert_eq!((p.auto, p.conflicts), (1, 0));
+        assert_eq!(p.entries[0].status, ThreeWayStatus::LeftAdded);
+        apply(&b, &l, &r, t.path()).await;
+        assert_eq!(r.contents(), l.contents());
+    }
+
+    #[tokio::test]
+    #[ignore = "R3-S4-1 repro: ambiguous-key addition overwrites the other normalization form"]
+    async fn ambiguous_right_addition_must_preserve_left_exact_partner() {
+        let t = tempdir().unwrap();
+        let [b, l, r] = sides(t.path());
+        r.seed("é.txt", b"NEW-NFC");
+        r.seed("e\u{301}.txt", b"KEEP-NFD");
+        l.seed("e\u{301}.txt", b"KEEP-NFD");
+        let p = plan(&b, &l, &r).await;
+        assert_eq!((p.auto, p.conflicts), (1, 0));
+        assert_eq!(p.entries[0].status, ThreeWayStatus::RightAdded);
+        apply(&b, &l, &r, t.path()).await;
+        assert_eq!(l.contents(), r.contents());
+    }
+}
