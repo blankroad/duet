@@ -3,8 +3,8 @@
 //! `decide(src, dst)` 로 strategy 분기 결정. UI/CopyPlan 에 포함되어
 //! 사용자에게 "어떤 경로로 복사할지" 미리 표시.
 //!
-//! `shell_escape_path` 는 SSH exec 명령 인자에 path 안전 임베딩
-//! (CLAUDE.md §7).
+//! `shell_escape_path` 는 SSH exec 명령 인자를 인용하며 경로 문자는 보존한다.
+//! 원격 경로 결합은 fs::posix_path / FileSystem::join 이 담당한다 (CLAUDE.md §7).
 
 use crate::types::{DuetError, SourceId};
 use serde::{Deserialize, Serialize};
@@ -54,16 +54,13 @@ pub fn shell_escape_path(p: &Path) -> Result<String, DuetError> {
     if s.contains('\0') {
         return Err(DuetError::Io("path contains NUL byte".into()));
     }
-    // §7: 원격 exec 경로는 항상 POSIX. Windows 클라이언트의 PathBuf 는 `\` 구분자를
-    // 쓰므로 `/` 로 정규화한다. 안 하면 원격 리눅스가 `\` 를 디렉토리 구분자가 아닌
-    // 파일명 문자로 취급해 경로가 깨진다 (목적지 폴더가 파일명 prefix 로 붙는 사고).
-    let s = s.replace('\\', "/");
+    // Remote paths are already POSIX; backslashes are literal filename characters.
     let escaped = s.replace('\'', "'\\''");
     Ok(format!("'{escaped}'"))
 }
 
-/// 쉘 single-quote escape — **경로가 아닌** 일반 문자열(암호 등)용. `shell_escape_path`
-/// 는 원격 경로라 `\`→`/` 정규화하지만, 암호엔 그러면 안 되므로 backslash 를 보존한다.
+/// 쉘 single-quote escape — 일반 문자열(암호 등)용. 경로와 마찬가지로
+/// backslash 를 포함한 원본 문자를 보존하고 NUL 은 거부한다.
 pub fn shell_escape_str(s: &str) -> Result<String, DuetError> {
     if s.contains('\0') {
         return Err(DuetError::Io("string contains NUL byte".into()));
@@ -166,12 +163,11 @@ mod tests {
     }
 
     #[test]
-    fn escape_normalizes_windows_separator() {
-        // §7 회귀: Windows 클라이언트의 PathBuf 가 끼워넣은 `\` 를 원격 POSIX `/` 로.
-        // (수정 전엔 `'/home/u/projects\app.zip'` 가 나와 원격에서 경로가 깨졌음.)
+    fn escape_preserves_backslash_in_remote_name() {
+        // POSIX 원격 파일명의 backslash 는 인용 뒤에도 그대로여야 한다.
         assert_eq!(
             shell_escape_path(Path::new("/home/u/projects\\app.zip")).unwrap(),
-            "'/home/u/projects/app.zip'"
+            "'/home/u/projects\\app.zip'"
         );
     }
 }

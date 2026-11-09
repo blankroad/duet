@@ -1050,17 +1050,16 @@ async fn sol2_self_selection_zip_and_targz() {
 }
 
 #[test]
-#[ignore = "archive-27 현재 결함을 관찰(통과=결함 있음) — 수정 시 기대값 반전"]
 fn sol2_remote_backslash_multiple_arguments() {
     let p = Path::new("/data/project\\draft/한글\\v2.tar.gz");
     let cmd =
         remote_extract_command(p, Path::new("/tmp/out\\one"), ArchiveFormat::TarGz, None).unwrap();
     eprintln!("backslash extract command={cmd}");
-    assert!(cmd.contains("/data/project/draft/한글/v2.tar.gz"));
-    assert!(!cmd.contains('\\'));
+    assert!(cmd.contains(r"/data/project\draft/한글\v2.tar.gz"));
+    assert!(cmd.contains(r"/tmp/out\one"));
     let mixed = shell_escape_path(Path::new("/home/u\\x.zip")).unwrap();
     eprintln!("mixed Windows repack destination exec={mixed}");
-    assert_eq!(mixed, "'/home/u/x.zip'");
+    assert_eq!(mixed, r"'/home/u\x.zip'");
 }
 
 #[tokio::test]

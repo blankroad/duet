@@ -57,7 +57,6 @@ fn lead_remote_commands_quote_awkward_names() {
 /// `/` 로 바꿔 버린다 — `a\b.zip` 같은 원격 파일은 풀기·목록이 다른 경로를 가리킨다.
 /// SFTP 쪽(`fs/ssh.rs` `remote_path_str`)은 `\` 를 보존하므로 두 경로가 어긋난다.
 #[test]
-#[ignore = "archive-27 repro"]
 fn lead_remote_command_keeps_backslash_in_names() {
     let cmd = remote_list_command(Path::new("/srv/a\\b.zip"), ArchiveFormat::Zip).unwrap();
     assert_eq!(cmd, r"unzip -Z1 '/srv/a\b.zip'");
