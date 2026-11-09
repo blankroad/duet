@@ -1,5 +1,6 @@
 import type { Location } from "@/types/bindings";
 import { childLocation, sameLocationDir } from "@/lib/entryDnd";
+import { isSameOrInside } from "@/lib/nesting";
 
 /**
  * 이 앱 목록에서 시작한 **OS 네이티브 드래그** 기록.
@@ -44,7 +45,7 @@ export function selfDropKind(
     return null;
   if (sameLocationDir(last.source, dst)) return "same";
   const src = last.source;
-  if (last.names.some((n) => sameLocationDir(childLocation(src, n), dst)))
+  if (last.names.some((n) => isSameOrInside(dst, childLocation(src, n))))
     return "self";
   return null;
 }

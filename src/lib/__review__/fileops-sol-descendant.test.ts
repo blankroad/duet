@@ -20,17 +20,19 @@ it("blocks clipboard paste directly into the source folder", async () => {
   await clipPaste(vi.fn(), vi.fn(), dst("/fixture/a"));
   expect(commands.fsCopyPlan).not.toHaveBeenCalled();
 });
-it.fails("fileops-04: clipboard paste into a descendant must stop before the backend", async () => {
+it("fileops-04: clipboard paste into a descendant must stop before the backend", async () => {
   vi.mocked(commands.fsCopyPlan).mockResolvedValue({
-    status: "error", error: { kind: "Io", message: "review sentinel" },
+    status: "error",
+    error: { kind: "Io", message: "review sentinel" },
   });
   useClipboard.getState().set([item], "copy");
   await clipPaste(vi.fn(), vi.fn(), dst("/fixture/a/b/c"));
   expect(commands.fsCopyPlan).not.toHaveBeenCalled();
 });
-it.fails("fileops-04: cut-paste into a descendant must stop before the backend", async () => {
+it("fileops-04: cut-paste into a descendant must stop before the backend", async () => {
   vi.mocked(commands.fsMovePlan).mockResolvedValue({
-    status: "error", error: { kind: "Io", message: "review sentinel" },
+    status: "error",
+    error: { kind: "Io", message: "review sentinel" },
   });
   useClipboard.getState().set([item], "move");
   await clipPaste(vi.fn(), vi.fn(), dst("/fixture/a/b/c"));

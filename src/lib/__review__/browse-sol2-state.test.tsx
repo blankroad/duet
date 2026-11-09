@@ -180,27 +180,21 @@ it.fails(
   },
 );
 
-it.fails(
-  "browse-14: a grandchild destination is rejected before copy planning",
-  async () => {
-    useClipboard
-      .getState()
-      .set([{ location: local("/sandbox"), name: "project" }], "copy");
-    await clipPaste(vi.fn(), vi.fn(), local("/sandbox/project/cache/deep"));
-    expect(mocks.copyPlan).not.toHaveBeenCalled();
-  },
-);
+it("browse-14: a grandchild destination is rejected before copy planning", async () => {
+  useClipboard
+    .getState()
+    .set([{ location: local("/sandbox"), name: "project" }], "copy");
+  await clipPaste(vi.fn(), vi.fn(), local("/sandbox/project/cache/deep"));
+  expect(mocks.copyPlan).not.toHaveBeenCalled();
+});
 
-it.fails(
-  "browse-14: equivalent Windows spelling is rejected for direct self paste",
-  async () => {
-    useClipboard
-      .getState()
-      .set([{ location: local("C:\\sandbox"), name: "project" }], "copy");
-    await clipPaste(vi.fn(), vi.fn(), local("C:/sandbox/project/"));
-    expect(mocks.copyPlan).not.toHaveBeenCalled();
-  },
-);
+it("browse-14: equivalent Windows spelling is rejected for direct self paste", async () => {
+  useClipboard
+    .getState()
+    .set([{ location: local("C:\\sandbox"), name: "project" }], "copy");
+  await clipPaste(vi.fn(), vi.fn(), local("C:/sandbox/project/"));
+  expect(mocks.copyPlan).not.toHaveBeenCalled();
+});
 
 it("browse-14: OS self-drop already normalizes equivalent Windows spelling", () => {
   rememberSelfDrag(["C:\\sandbox\\project"], local("C:\\sandbox"), ["project"]);
@@ -213,15 +207,12 @@ it("browse-14: OS self-drop already normalizes equivalent Windows spelling", () 
   );
 });
 
-it.fails(
-  "browse-14: OS self-drop blocks descendants as well as direct self",
-  () => {
-    rememberSelfDrag(["/sandbox/project"], local("/sandbox"), ["project"]);
-    expect(
-      selfDropKind(["/sandbox/project"], local("/sandbox/project/cache")),
-    ).toBe("self");
-  },
-);
+it("browse-14: OS self-drop blocks descendants as well as direct self", () => {
+  rememberSelfDrag(["/sandbox/project"], local("/sandbox"), ["project"]);
+  expect(
+    selfDropKind(["/sandbox/project"], local("/sandbox/project/cache")),
+  ).toBe("self");
+});
 
 it.fails(
   "browse-25: exclamation-negated class selects names outside its set",

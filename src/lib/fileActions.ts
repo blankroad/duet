@@ -24,6 +24,7 @@ import i18n from "@/i18n";
 import { childLocation, sameLocation, sourceKey } from "@/lib/entryDnd";
 import { explainError } from "@/lib/error";
 import { showError } from "@/lib/errorToast";
+import { isSameOrInside } from "@/lib/nesting";
 import { isVirtualTrash } from "@/lib/trashView";
 import { rememberExtract } from "@/lib/extractPending";
 import { basename } from "@/lib/paths";
@@ -254,10 +255,10 @@ export async function clipPaste(
     showToast(i18n.t("toast.alreadyInFolder"));
     return;
   }
-  // 폴더를 자기 자신 안으로 붙여넣기 — 드래그와 같은 규칙으로 막는다.
+  // 폴더를 자기 자신이나 그 하위 폴더 안으로 붙여넣기 — 드래그와 같은 규칙으로 막는다.
   if (
     clip.targets.some((t) =>
-      sameLocation(childLocation(t.location, t.name), dst),
+      isSameOrInside(dst, childLocation(t.location, t.name)),
     )
   ) {
     showToast(i18n.t("toast.pasteIntoSelf"), "error");

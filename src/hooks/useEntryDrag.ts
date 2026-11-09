@@ -9,6 +9,7 @@ import type { Entry, EntryRef } from "@/types/bindings";
 import { exceedsThreshold } from "@/lib/marquee";
 import { useDragState } from "@/stores/dragState";
 import { childLocation, sameLocation, dropDestination } from "@/lib/entryDnd";
+import { isSameOrInside } from "@/lib/nesting";
 import {
   resolveDropAt,
   resolveSidebarDropAt,
@@ -183,6 +184,14 @@ export function useEntryDrag(id: PaneId) {
           }
           if (sb.location) {
             if (sameLocation(source, sb.location)) return;
+            // 끄는 폴더 자신·하위에 있는 즐겨찾기로 놓기 — 자기 안으로 복사가 된다.
+            const sbLoc = sb.location;
+            if (
+              dragTargets.some((t) =>
+                isSameOrInside(sbLoc, childLocation(t.location, t.name)),
+              )
+            )
+              return;
             void planTransferTo(
               dragTargets,
               sb.location,
@@ -200,7 +209,7 @@ export function useEntryDrag(id: PaneId) {
         if (sameLocation(source, dst)) return;
         if (
           dragTargets.some((t) =>
-            sameLocation(childLocation(t.location, t.name), dst),
+            isSameOrInside(dst, childLocation(t.location, t.name)),
           )
         )
           return;
@@ -221,7 +230,7 @@ export function useEntryDrag(id: PaneId) {
         return (
           sameLocation(tab.location, dst) ||
           targets.some((t) =>
-            sameLocation(childLocation(t.location, t.name), dst),
+            isSameOrInside(dst, childLocation(t.location, t.name)),
           )
         );
       };
