@@ -10,6 +10,7 @@ import { useConnections } from "@/stores/connections";
 import { commands } from "@/types/bindings";
 import { aliasFromConnectionId } from "@/lib/hostAlias";
 import { useHostLabel } from "@/lib/hostLabel";
+import { explainError } from "@/lib/error";
 
 /**
  * SSH 패널 연결 상태 배너 — 끊긴 연결을 사이드바 점 색이 아니라 패널 안에서
@@ -25,7 +26,8 @@ import { useHostLabel } from "@/lib/hostLabel";
  */
 /**
  * 백엔드 자동 재연결 포기 사유(`connection_supervisor.rs` 의 고정 문구) → i18n 키.
- * 모르는 사유(네트워크 오류 원문 등)는 그대로 보인다.
+ * 모르는 사유(네트워크 오류 원문 등)는 explainError 로 쉬운 문장으로(remote-26) —
+ * 원문은 배너 툴팁에 남는다.
  */
 const SUPERVISOR_REASONS: Record<string, string> = {
   "auth failed on reconnect": "banner.reason.authFailed",
@@ -38,7 +40,9 @@ const SUPERVISOR_REASONS: Record<string, string> = {
 
 function reasonText(message: string, t: (key: string) => string): string {
   const key = SUPERVISOR_REASONS[message];
-  return key ? t(key) : message;
+  return key
+    ? t(key)
+    : explainError({ kind: "ConnectionFailed", message }).text;
 }
 
 export function ConnectionBanner({
@@ -119,7 +123,11 @@ export function ConnectionBanner({
       <Unplug size={12} className="shrink-0 text-danger" aria-hidden />
       <span
         className="min-w-0 flex-1 truncate text-fg"
-        title={`${headline} — ${label}\n${reason}`}
+        title={`${headline} — ${label}\n${reason}${
+          state.kind === "error" && state.message !== reason
+            ? `\n${state.message}`
+            : ""
+        }`}
       >
         {headline} — {label}
         <span className="text-fg-muted"> · {reason}</span>

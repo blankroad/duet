@@ -118,7 +118,7 @@ describe("remote-opus C-10: 재연결 뒤 예전 connection_id 잔존", () => {
 });
 
 describe("remote-opus C-11: 자동 재연결 실패 사유 표시", () => {
-  it("remote-26 관찰: supervisor 의 원문(네트워크 오류)은 번역 없이 그대로 배너에 보인다", () => {
+  it("remote-26: supervisor 의 원문(네트워크 오류)은 쉬운 문장으로 보이고 원문은 툴팁에만 남는다", () => {
     // connection_supervisor.rs 의 마지막 시도 실패: final_failure(..., &format!("{e}"))
     useConnections.setState({
       active: {
@@ -130,7 +130,10 @@ describe("remote-opus C-11: 자동 재연결 실패 사유 표시", () => {
     });
     render(<ConnectionBanner id="left" onReconnect={() => {}} />);
     const alert = screen.getByRole("alert");
-    // 관찰용: 고정 사유 4개만 i18n 매핑, 나머지는 영어 원문이 그대로 노출된다.
-    expect(alert.textContent).toContain("Connection refused (os error 61)");
+    // 예전: 고정 사유 4개만 i18n 매핑, 나머지는 영어 원문이 그대로 노출됐다.
+    expect(alert.textContent).not.toContain("os error 61");
+    expect(alert.querySelector("[title]")?.getAttribute("title")).toContain(
+      "Connection refused (os error 61)",
+    );
   });
 });
