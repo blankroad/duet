@@ -4,7 +4,7 @@
 //! execute() 는 백엔드에서 settings/journal 갱신.
 
 use crate::core::copy_strategy::{decide as decide_strategy, CopyStrategy};
-use crate::fs::FileSystem;
+use crate::fs::{posix_path, FileSystem};
 use crate::services::journal::{
     BackupRestore, ChmodItem, Journal, JournalEntry, MoveItem, OpKind, RedoCopyPair, RenamePair,
     TrashItem, UndoAction,
@@ -13,7 +13,7 @@ use crate::services::settings::SettingsStore;
 use crate::types::{DeleteMode, DuetError, EntryRef, Location, SourceId, TrashLocation};
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// op 실행 컨텍스트. 명시적 의존성 주입.
@@ -115,6 +115,21 @@ async fn dedup_dst_name(dst_fs: &dyn FileSystem, dir: &std::path::Path, name: &s
         dir,
         &crate::fs::suffixed_name(stem, &format!(" ({}){ext}", backup_name(""))),
     )
+}
+
+/// A path belongs to its source filesystem, even on a Windows client.
+fn file_name_for<'a>(source: &SourceId, path: &'a Path) -> Option<&'a std::ffi::OsStr> {
+    match source {
+        SourceId::Local => path.file_name(),
+        SourceId::Ssh { .. } => posix_path::file_name(path).map(std::ffi::OsStr::new),
+    }
+}
+
+fn parent_for(source: &SourceId, path: &Path) -> Option<PathBuf> {
+    match source {
+        SourceId::Local => path.parent().map(Path::to_path_buf),
+        SourceId::Ssh { .. } => posix_path::parent(path),
+    }
 }
 
 /// `name` → `name.bak.<ts>`. timestamp 충돌 시 .<n> suffix 는 호출자가 retry.
@@ -1165,7 +1180,7 @@ async fn count_files(fs: &dyn FileSystem, dir: &std::path::Path) -> u64 {
         match e.kind {
             crate::types::EntryKind::File => total += 1,
             crate::types::EntryKind::Dir => {
-                total += Box::pin(count_files(fs, &dir.join(&e.name))).await;
+                total += Box::pin(count_files(fs, &fs.join(dir, &e.name))).await;
             }
             _ => {}
         }
@@ -1627,7 +1642,7 @@ fn rel_join(rel: &str, name: &str) -> String {
     if rel.is_empty() {
         name.to_string()
     } else {
-        format!("{rel}/{name}") // 표시용 상대경로(실경로는 remote_join, §7)
+        format!("{rel}/{name}") // 표시용 상대경로(실경로는 각 fs.join, 원격 전용은 remote_join; §7)
     }
 }
 
@@ -1683,8 +1698,8 @@ async fn preview_copy_walk(
             return Ok(());
         }
         let rel_name = rel_join(rel, &e.name);
-        let s = src_dir.join(&e.name);
-        let d = dst_dir.join(&e.name);
+        let s = src_fs.join(src_dir, &e.name);
+        let d = dst_fs.join(dst_dir, &e.name);
         match e.kind {
             crate::types::EntryKind::Dir => {
                 Box::pin(preview_copy_walk(src_fs, &s, dst_fs, &d, &rel_name, out)).await?;
@@ -1719,8 +1734,8 @@ async fn preview_prune_walk(
             return Ok(());
         }
         let rel_name = rel_join(rel, &e.name);
-        let sp = src_dir.join(&e.name);
-        let dp = dst_dir.join(&e.name);
+        let sp = src_fs.join(src_dir, &e.name);
+        let dp = dst_fs.join(dst_dir, &e.name);
         match src_fs.metadata(&sp).await {
             Ok(_) => {
                 if e.kind == crate::types::EntryKind::Dir {
@@ -2077,13 +2092,17 @@ async fn merge_relay(
         let rel = std::path::Path::new(rel);
         let res = match status {
             CompareStatus::LeftOnly => {
-                let s = remote_join(
+                let s = left_fs.join(
                     &left.path,
-                    crate::core::compare::resolve_side_rel(left_fs, &left.path, rel).await,
+                    &crate::core::compare::resolve_side_rel(left_fs, &left.path, rel)
+                        .await
+                        .to_string_lossy(),
                 );
-                let d = remote_join(
+                let d = right_fs.join(
                     &right.path,
-                    crate::core::compare::resolve_side_rel(right_fs, &right.path, rel).await,
+                    &crate::core::compare::resolve_side_rel(right_fs, &right.path, rel)
+                        .await
+                        .to_string_lossy(),
                 );
                 // 추가 전용 불변식 강제: race 로 dst 가 생겼으면 덮어쓰지 않고 skip.
                 if right_fs.metadata(&d).await.is_ok() {
@@ -2104,13 +2123,17 @@ async fn merge_relay(
                 }
             }
             CompareStatus::RightOnly => {
-                let s = remote_join(
+                let s = right_fs.join(
                     &right.path,
-                    crate::core::compare::resolve_side_rel(right_fs, &right.path, rel).await,
+                    &crate::core::compare::resolve_side_rel(right_fs, &right.path, rel)
+                        .await
+                        .to_string_lossy(),
                 );
-                let d = remote_join(
+                let d = left_fs.join(
                     &left.path,
-                    crate::core::compare::resolve_side_rel(left_fs, &left.path, rel).await,
+                    &crate::core::compare::resolve_side_rel(left_fs, &left.path, rel)
+                        .await
+                        .to_string_lossy(),
                 );
                 if left_fs.metadata(&d).await.is_ok() {
                     tracing::warn!("merge skip (dst exists): {}", d.display());
@@ -2540,27 +2563,35 @@ async fn apply_one_relay(
     let (src_fs, src_path, dst_fs, dst_path, dst_is_left) = match direction {
         ApplyDirection::ToRight => (
             left_fs,
-            remote_join(
+            left_fs.join(
                 &left.path,
-                crate::core::compare::resolve_side_rel(left_fs, &left.path, rel).await,
+                &crate::core::compare::resolve_side_rel(left_fs, &left.path, rel)
+                    .await
+                    .to_string_lossy(),
             ),
             right_fs,
-            remote_join(
+            right_fs.join(
                 &right.path,
-                crate::core::compare::resolve_side_rel(right_fs, &right.path, rel).await,
+                &crate::core::compare::resolve_side_rel(right_fs, &right.path, rel)
+                    .await
+                    .to_string_lossy(),
             ),
             false,
         ),
         ApplyDirection::ToLeft => (
             right_fs,
-            remote_join(
+            right_fs.join(
                 &right.path,
-                crate::core::compare::resolve_side_rel(right_fs, &right.path, rel).await,
+                &crate::core::compare::resolve_side_rel(right_fs, &right.path, rel)
+                    .await
+                    .to_string_lossy(),
             ),
             left_fs,
-            remote_join(
+            left_fs.join(
                 &left.path,
-                crate::core::compare::resolve_side_rel(left_fs, &left.path, rel).await,
+                &crate::core::compare::resolve_side_rel(left_fs, &left.path, rel)
+                    .await
+                    .to_string_lossy(),
             ),
             true,
         ),
@@ -2568,14 +2599,17 @@ async fn apply_one_relay(
     };
     let mut created = false;
     if dst_fs.metadata(&dst_path).await.is_ok() {
-        let parent = dst_path
-            .parent()
+        let dst_source = if dst_is_left {
+            &left.source
+        } else {
+            &right.source
+        };
+        let parent = parent_for(dst_source, &dst_path)
             .ok_or_else(|| DuetError::Io("dst has no parent".into()))?;
-        let name = dst_path
-            .file_name()
+        let name = file_name_for(dst_source, &dst_path)
             .and_then(|s| s.to_str())
             .ok_or_else(|| DuetError::Io("dst has no name".into()))?;
-        let backup = pick_backup_path(dst_fs, parent, name).await?;
+        let backup = pick_backup_path(dst_fs, &parent, name).await?;
         dst_fs.rename(&dst_path, &backup).await?;
         let br = BackupRestore {
             backup_path: backup,
@@ -2804,9 +2838,11 @@ async fn trash_rel(
     batch: &str,
     out: &mut Vec<TrashItem>,
 ) -> Result<(), DuetError> {
-    let p = remote_join(
+    let p = fs.join(
         &root.path,
-        crate::core::compare::resolve_side_rel(fs, &root.path, rel).await,
+        &crate::core::compare::resolve_side_rel(fs, &root.path, rel)
+            .await
+            .to_string_lossy(),
     );
     let loc = fs.trash(&p, batch).await?;
     let trash_path = match &loc {
@@ -2997,13 +3033,17 @@ async fn verify_relay(
     let mut out = Vec::with_capacity(rels.len());
     for rel in rels {
         let rel_path = std::path::Path::new(&rel);
-        let lp = remote_join(
+        let lp = left_fs.join(
             &left.path,
-            crate::core::compare::resolve_side_rel(left_fs, &left.path, rel_path).await,
+            &crate::core::compare::resolve_side_rel(left_fs, &left.path, rel_path)
+                .await
+                .to_string_lossy(),
         );
-        let rp = remote_join(
+        let rp = right_fs.join(
             &right.path,
-            crate::core::compare::resolve_side_rel(right_fs, &right.path, rel_path).await,
+            &crate::core::compare::resolve_side_rel(right_fs, &right.path, rel_path)
+                .await
+                .to_string_lossy(),
         );
         let equal = match (left_fs.metadata(&lp).await, right_fs.metadata(&rp).await) {
             (Ok(lm), Ok(rm)) => {
@@ -3251,7 +3291,10 @@ async fn compute_sigs(
                     std::path::Path::new(rel),
                 )
                 .await;
-                match fs.read_full(&remote_join(&root.path, rel_path)).await {
+                match fs
+                    .read_full(&fs.join(&root.path, &rel_path.to_string_lossy()))
+                    .await
+                {
                     Ok(bytes) => {
                         use std::hash::{Hash, Hasher};
                         let mut h = std::collections::hash_map::DefaultHasher::new();

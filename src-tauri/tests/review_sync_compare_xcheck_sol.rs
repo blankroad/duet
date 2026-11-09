@@ -64,12 +64,20 @@ struct FixtureFs {
     cancel_at_rename: Option<(PathBuf, CancellationToken)>,
     round_seconds: bool,
     record_only: bool,
+    join_marker: bool,
     seen: Mutex<Vec<PathBuf>>,
 }
 #[async_trait]
 impl FileSystem for FixtureFs {
     fn source_id(&self) -> SourceId {
         SourceId::Local
+    }
+    fn join(&self, base: &Path, name: &str) -> PathBuf {
+        if self.join_marker {
+            base.join("__fs").join(name)
+        } else {
+            base.join(name)
+        }
     }
     async fn list(&self, p: &Path) -> Result<Vec<Entry>, DuetError> {
         if self.fail_list.as_deref() == Some(p) {
@@ -481,13 +489,10 @@ async fn sc11_subsecond_local_metadata_and_seconds_view_classify_predictably() {
 
 #[tokio::test]
 async fn sc51_verify_records_windows_path_strings_without_touching_them() {
-    for (base, want) in [
-        (r"C:\a", r"C:\a/sub/x"),
-        (r"\\?\C:\a", r"\\?\C:\a/sub/x"),
-        (r"C:\", r"C:\/sub/x"),
-    ] {
+    for base in [r"C:\a", r"\\?\C:\a", r"C:\"] {
         let fs = FixtureFs {
             record_only: true,
+            join_marker: true,
             ..Default::default()
         };
         let location = loc(Path::new(base));
@@ -497,6 +502,7 @@ async fn sc51_verify_records_windows_path_strings_without_touching_them() {
         assert_eq!(v[0].equal, None);
         let seen = fs.seen.lock().unwrap();
         assert_eq!(seen.len(), 2);
-        assert_eq!(seen[0].to_string_lossy(), want);
+        assert_eq!(seen[0], Path::new(base).join("__fs").join("sub/x"));
+        assert_eq!(seen[1], seen[0]);
     }
 }

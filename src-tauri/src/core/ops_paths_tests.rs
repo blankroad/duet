@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 
 struct ProbeFs {
     source: SourceId,
@@ -28,8 +29,17 @@ impl ProbeFs {
             seen: Mutex::new(Vec::new()),
         }
     }
+    fn loc(&self, path: &str) -> Location {
+        Location {
+            source: self.source.clone(),
+            path: path.into(),
+        }
+    }
     fn record(&self, path: &Path) {
         self.seen.lock().unwrap().push(path.into());
+    }
+    fn saw(&self, path: &Path) -> bool {
+        self.seen.lock().unwrap().iter().any(|p| p == path)
     }
 }
 fn absent() -> DuetError {
@@ -105,7 +115,26 @@ impl FileSystem for ProbeFs {
         panic!("unexpected open")
     }
 }
-
+fn entry(name: &str, kind: EntryKind) -> Entry {
+    Entry {
+        name: name.into(),
+        kind,
+        size: Some(0),
+        modified_ms: Some(0),
+        permissions: None,
+        hidden: false,
+    }
+}
+async fn ctx(path: &Path) -> OpCtx {
+    OpCtx {
+        journal: Journal::load_from(&path.join("j.jsonl")).await.unwrap(),
+        settings: SettingsStore::load_from(&path.join("s.toml"))
+            .await
+            .unwrap(),
+        pool: None,
+        app: None,
+    }
+}
 #[tokio::test]
 async fn remote17_keep_both_candidate_uses_destination_join() {
     let fs = ProbeFs::new("dst", 22);
@@ -119,4 +148,111 @@ async fn remote17_timestamp_fallback_uses_destination_join() {
     let p = dedup_dst_name(&fs, Path::new("/dst"), "x.txt").await;
     assert_eq!(p.parent(), Some(Path::new("/dst/__fs")));
     assert_eq!(fs.seen.lock().unwrap().len(), 9999);
+}
+#[tokio::test]
+async fn relay_count_and_preview_walks_use_each_filesystem() {
+    let mut left = ProbeFs::new("left", 22);
+    let mut right = ProbeFs::new("right", 23);
+    left.entries
+        .insert("/src".into(), vec![entry("sub", EntryKind::Dir)]);
+    left.entries
+        .insert("/src/__fs/sub".into(), vec![entry("leaf", EntryKind::File)]);
+    right
+        .entries
+        .insert("/dst".into(), vec![entry("extra", EntryKind::File)]);
+    assert_eq!(count_files(&left, Path::new("/src")).await, 1);
+    let mut out = SyncPreview {
+        copy: Vec::new(),
+        prune: Vec::new(),
+        truncated: false,
+    };
+    preview_copy_walk(
+        &left,
+        Path::new("/src"),
+        &right,
+        Path::new("/dst"),
+        "",
+        &mut out,
+    )
+    .await
+    .unwrap();
+    preview_prune_walk(
+        &left,
+        Path::new("/src"),
+        &right,
+        Path::new("/dst"),
+        "",
+        &mut out,
+    )
+    .await
+    .unwrap();
+    assert_eq!(out.copy, ["sub/leaf"]);
+    assert_eq!(out.prune, ["extra"]);
+    assert!(right.saw(Path::new("/dst/__fs/sub/__fs/leaf")));
+    assert!(left.saw(Path::new("/src/__fs/extra")));
+}
+#[tokio::test]
+async fn relay_apply_verify_trash_and_signatures_use_each_filesystem() {
+    let left = ProbeFs::new("left", 22);
+    let right = ProbeFs::new("right", 23);
+    let l = left.loc("/L");
+    let r = right.loc("/R");
+    for direction in [ApplyDirection::ToLeft, ApplyDirection::ToRight] {
+        let mut st = ApplyState::default();
+        assert!(apply_one_relay(
+            &direction,
+            Path::new("sub/x"),
+            &left,
+            &l,
+            &right,
+            &r,
+            &mut st
+        )
+        .await
+        .is_err());
+    }
+    assert!(left.saw(Path::new("/L/__fs/sub/x")));
+    assert!(right.saw(Path::new("/R/__fs/sub/x")));
+    left.seen.lock().unwrap().clear();
+    right.seen.lock().unwrap().clear();
+    verify_relay(&left, &l, &right, &r, vec!["sub/x".into()])
+        .await
+        .unwrap();
+    assert!(left.saw(Path::new("/L/__fs/sub/x")));
+    assert!(right.saw(Path::new("/R/__fs/sub/x")));
+    assert!(
+        trash_rel(&left, &l, Path::new("trash"), "batch", &mut Vec::new())
+            .await
+            .is_err()
+    );
+    assert!(left.saw(Path::new("/L/__fs/trash")));
+    compute_sigs(&right, &r, &[("sig".into(), 0)], false, None)
+        .await
+        .unwrap();
+    assert!(right.saw(Path::new("/R/__fs/sig")));
+}
+#[tokio::test]
+async fn relay_merge_uses_each_filesystem() {
+    use crate::core::compare::CompareStatus;
+    let left = ProbeFs::new("left", 22);
+    let right = ProbeFs::new("right", 23);
+    let t = tempfile::tempdir().unwrap();
+    let c = ctx(t.path()).await;
+    let out = merge_relay(
+        &left,
+        left.loc("/L"),
+        &right,
+        right.loc("/R"),
+        vec![
+            (CompareStatus::LeftOnly, "a".into()),
+            (CompareStatus::RightOnly, "b".into()),
+        ],
+        &c,
+        CancellationToken::new(),
+        None,
+    )
+    .await;
+    assert!(out.is_err());
+    assert!(left.saw(Path::new("/L/__fs/a")));
+    assert!(right.saw(Path::new("/R/__fs/a")));
 }
