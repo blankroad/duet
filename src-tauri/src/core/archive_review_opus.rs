@@ -1318,7 +1318,6 @@ async fn opus2_zip_cp949_names_extract_and_browse() {
 /// 0500 폴더 + 중첩(a/ 0555 안 a/b/ 와 a/b/c.txt). tar_unpack 직접.
 #[cfg(unix)]
 #[test]
-#[ignore = "archive-08 repro"]
 fn opus2_tar_readonly_dirs_0500_and_nested_0555() {
     let mut failed = Vec::new();
     for (label, entries) in [

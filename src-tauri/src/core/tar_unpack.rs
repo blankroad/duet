@@ -30,6 +30,7 @@ pub struct UnpackReport {
 pub fn unpack<R: Read>(reader: R, dest: &Path) -> Result<UnpackReport, DuetError> {
     let mut archive = tar::Archive::new(reader);
     let mut report = UnpackReport::default();
+    let mut dir_modes = Vec::new();
     let entries = archive.entries().map_err(|e| read_error(&e))?;
     for entry in entries {
         let mut entry = entry.map_err(|e| read_error(&e))?;
@@ -83,12 +84,94 @@ pub fn unpack<R: Read>(reader: R, dest: &Path) -> Result<UnpackReport, DuetError
                 HardLink::Placed => {}
                 HardLink::SkippedSymlink => report.skipped_links.push(shown),
             }
+        } else if is_dir_entry(&entry, &raw) {
+            // 폴더 권한은 지금 적용하지 않는다 — 0555·0500 폴더면 그 안 항목을 못 쓴다(archive-08).
+            make_dir(&dst).map_err(|e| write_error(&shown, &e))?;
+            if let Ok(mode) = entry.header().mode() {
+                dir_modes.push(DirMode {
+                    path: dst,
+                    mode,
+                    shown,
+                });
+            }
         } else {
-            // 파일·폴더·그 밖(POSIX 상 미지의 종류는 일반 파일). 권한·수정 시각 처리는 tar 에 맡긴다.
+            // 파일·그 밖(POSIX 상 미지의 종류는 일반 파일). 권한·수정 시각 처리는 tar 에 맡긴다.
             entry.unpack(&dst).map_err(|e| write_error(&shown, &e))?;
         }
     }
+    apply_dir_modes(dir_modes)?;
     Ok(report)
+}
+
+/// 폴더 항목인지 — tar 의 `unpack` 과 같은 기준(폴더 종류, 또는 옛 BSD tar 처럼 ustar 가
+/// 아닌 헤더에서 이름이 `/` 로 끝남).
+fn is_dir_entry<R: Read>(entry: &tar::Entry<'_, R>, raw: &[u8]) -> bool {
+    entry.header().entry_type().is_dir()
+        || (entry.header().as_ustar().is_none() && raw.ends_with(b"/"))
+}
+
+/// 폴더를 만든다. 이미 폴더면 그대로, 같은 이름의 파일·링크가 있으면 오류
+/// (링크를 따라 폴더 밖 폴더를 쓰지 않는다 — tar 의 `unpack_dir` 과 같은 판정).
+fn make_dir(dst: &Path) -> io::Result<()> {
+    match std::fs::create_dir(dst) {
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+            if std::fs::symlink_metadata(dst).is_ok_and(|m| m.is_dir()) {
+                Ok(())
+            } else {
+                Err(io::Error::new(
+                    e.kind(),
+                    format!("{e} when creating dir {}", dst.display()),
+                ))
+            }
+        }
+        r => r,
+    }
+}
+
+/// 미뤄 둔 폴더 권한 하나 — 폴더 경로, tar 헤더의 모드, 오류 표시용 아카이브 안 이름.
+struct DirMode {
+    path: PathBuf,
+    mode: u32,
+    shown: String,
+}
+
+/// 모든 항목을 쓴 뒤 폴더 권한을 **깊은 것부터** 적용한다(위 폴더를 먼저 잠그면 아래를
+/// 못 바꾼다). 같은 폴더가 여러 번 나오면 나중 항목이 이긴다(안정 정렬 + 순서대로 적용).
+/// 중간에 해제가 실패하면 이 함수까지 오지 않는다 — 폴더가 쓰기 가능하게 남아 정리·롤백이 쉽다.
+/// 적용 직전에 lstat 로 아직 폴더인지 본다(링크면 따라가 바깥 권한을 바꾸지 않는다).
+fn apply_dir_modes(mut dirs: Vec<DirMode>) -> Result<(), DuetError> {
+    dirs.sort_by_key(|d| std::cmp::Reverse(d.path.components().count()));
+    for d in dirs {
+        let Ok(meta) = std::fs::symlink_metadata(&d.path) else {
+            continue;
+        };
+        if !meta.is_dir() {
+            continue;
+        }
+        if let Some(perm) = dir_permissions(meta.permissions(), d.mode) {
+            std::fs::set_permissions(&d.path, perm).map_err(|e| write_error(&d.shown, &e))?;
+        }
+    }
+    Ok(())
+}
+
+/// tar 헤더 모드 → 적용할 폴더 권한 (tar crate 의 `set_perms` 와 같은 규칙).
+/// Unix: 하위 9비트(setuid 등은 버림). Windows: 소유자 쓰기 비트가 없을 때만 읽기 전용.
+fn dir_permissions(current: std::fs::Permissions, mode: u32) -> Option<std::fs::Permissions> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = current;
+        Some(std::fs::Permissions::from_mode(mode & 0o777))
+    }
+    #[cfg(not(unix))]
+    {
+        let mut perm = current;
+        (mode & 0o200 == 0).then(|| {
+            perm.set_readonly(true);
+            perm
+        })
+    }
 }
 
 /// tar 경로 바이트(항상 `/` 구분) → `dest` 기준 상대 경로. `..` 가 있으면 None, 빈 경로도 None.
@@ -571,6 +654,85 @@ mod tests {
         let err = copy_new(&src, &at).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
         assert!(!outside.path().join("new").exists());
+    }
+
+    /// 모드를 지정해 tar 를 만든다 (폴더 권한 테스트용).
+    #[cfg(unix)]
+    fn build_modes(entries: &[(&str, tar::EntryType, &[u8], u32)]) -> Vec<u8> {
+        let mut b = tar::Builder::new(Vec::new());
+        for (name, kind, data, mode) in entries {
+            let mut h = tar::Header::new_gnu();
+            h.set_entry_type(*kind);
+            h.set_mode(*mode);
+            h.set_size(data.len() as u64);
+            b.append_data(&mut h, name, *data).unwrap();
+        }
+        b.into_inner().unwrap()
+    }
+
+    #[cfg(unix)]
+    fn mode_of(p: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::symlink_metadata(p).unwrap().permissions().mode() & 0o777
+    }
+
+    /// TempDir 이 지울 수 있게 폴더 권한을 되돌린다.
+    #[cfg(unix)]
+    fn unlock(dirs: &[&Path]) {
+        use std::os::unix::fs::PermissionsExt;
+        for d in dirs {
+            let _ = std::fs::set_permissions(d, std::fs::Permissions::from_mode(0o755));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_only_folder_modes_are_applied_after_children() {
+        use tar::EntryType as T;
+        let tar = build_modes(&[
+            ("a/", T::Directory, b"", 0o555),
+            ("a/b/", T::Directory, b"", 0o500),
+            ("a/b/c.txt", T::Regular, b"c", 0o644),
+            ("a/d.txt", T::Regular, b"d", 0o600),
+        ]);
+        let dest = tempfile::tempdir().unwrap();
+        let r = unpack(&tar[..], dest.path());
+        let (a, b) = (dest.path().join("a"), dest.path().join("a/b"));
+        let modes = (mode_of(&a), mode_of(&b));
+        unlock(&[&a, &b]);
+        r.unwrap();
+        assert_eq!(modes, (0o555, 0o500));
+        assert_eq!(std::fs::read(b.join("c.txt")).unwrap(), b"c");
+        assert_eq!(std::fs::read(a.join("d.txt")).unwrap(), b"d");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn repeated_folder_entry_last_mode_wins() {
+        use tar::EntryType as T;
+        let tar = build_modes(&[
+            ("a/", T::Directory, b"", 0o555),
+            ("a/f", T::Regular, b"f", 0o644),
+            ("a/", T::Directory, b"", 0o750),
+        ]);
+        let dest = tempfile::tempdir().unwrap();
+        unpack(&tar[..], dest.path()).unwrap();
+        assert_eq!(mode_of(&dest.path().join("a")), 0o750);
+    }
+
+    /// 중간 실패면 폴더 권한을 적용하지 않는다 — 폴더가 쓰기 가능하게 남는다(정리·롤백용).
+    #[cfg(unix)]
+    #[test]
+    fn failure_leaves_folders_writable() {
+        use tar::EntryType as T;
+        let tar = build_modes(&[
+            ("a/", T::Directory, b"", 0o555),
+            ("a/f", T::Regular, b"f", 0o644),
+            ("a/f/x", T::Regular, b"x", 0o644), // f 가 파일이라 그 아래에 못 쓴다.
+        ]);
+        let dest = tempfile::tempdir().unwrap();
+        assert!(unpack(&tar[..], dest.path()).is_err());
+        assert_ne!(mode_of(&dest.path().join("a")) & 0o200, 0);
     }
 
     #[test]

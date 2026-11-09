@@ -330,7 +330,6 @@ fn sol_tar_regular_over_symlink_safe() {
 }
 #[cfg(unix)]
 #[test]
-#[ignore = "archive-08 repro"]
 fn sol_tar_readonly_directory_children() {
     use std::os::unix::fs::PermissionsExt;
     let d = tempfile::tempdir().unwrap();
