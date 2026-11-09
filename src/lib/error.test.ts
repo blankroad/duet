@@ -232,3 +232,92 @@ describe("explainError — connection causes (remote-26)", () => {
     );
   });
 });
+
+describe("explainError — target name in the sentence (ss-04, ss-15)", () => {
+  const plain = (reason: string) => i18n.t(`errors.reason.${reason}`);
+
+  it("puts the basename of a labelled absolute path in front", () => {
+    const r = explainError(
+      {
+        kind: "PermissionDenied",
+        message:
+          "permission denied: /srv/data/분기보고서 2026.xlsx (os error 13)",
+      },
+      "linux",
+    );
+    expect(r.text).toBe(`“분기보고서 2026.xlsx” — ${plain("accessDenied")}`);
+  });
+
+  it("treats a remote SFTP message that is only a path as the target", () => {
+    const r = explainError(
+      { kind: "NotFound", message: "/home/u/report (1).txt" },
+      "windows",
+    );
+    expect(r.text).toBe(`“report (1).txt” — ${plain("notFound")}`);
+  });
+
+  it("finds Windows drive, UNC and quoted paths", () => {
+    expect(
+      explainError(
+        {
+          kind: "PermissionDenied",
+          message: "C:\\Users\\a\\보고서.xlsx: Access is denied. (os error 5)",
+        },
+        "windows",
+      ).text,
+    ).toBe(`“보고서.xlsx” — ${plain("accessDenied")}`);
+    expect(
+      explainError(
+        {
+          kind: "Io",
+          message:
+            "open \\\\server\\share\\a.txt: The device is not ready. (os error 21)",
+        },
+        "windows",
+      ).text,
+    ).toBe(`“a.txt” — ${plain("deviceNotReady")}`);
+    expect(
+      explainError(
+        {
+          kind: "Ssh",
+          message:
+            "host command failed (exit 1): rm: cannot remove '/srv/x/old.log': Permission denied",
+        },
+        "macos",
+      ).text,
+    ).toBe(`“old.log” — ${plain("accessDenied")}`);
+  });
+
+  it("does not treat ordinary words with slashes as paths", () => {
+    for (const message of [
+      "Read/write error: Permission denied (os error 13)",
+      "zip/tar and/or 3/4: permission denied",
+      "https://example.com/a/b: permission denied",
+      "expected / got x: permission denied",
+    ])
+      expect(explainError({ kind: "Io", message }, "linux").text).toBe(
+        plain("accessDenied"),
+      );
+    expect(formatErr({ kind: "Io", message: "a: b" })).toBe("I/O error — a: b");
+  });
+
+  it("reads the cause from the text around the path, not the file name", () => {
+    expect(
+      explainError(
+        {
+          kind: "Io",
+          message:
+            "open /tmp/already exists/bad header.txt: Permission denied (os error 13)",
+        },
+        "linux",
+      ).text,
+    ).toBe(`“bad header.txt” — ${plain("accessDenied")}`);
+  });
+
+  it("keeps the path inside the raw text when the cause is unknown", () => {
+    expect(
+      explainError({ kind: "Io", message: "target exists: /w/A.txt" }, "linux")
+        .text,
+    ).toBe("I/O error — target exists: /w/A.txt");
+  });
+});

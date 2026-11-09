@@ -1,5 +1,6 @@
 import { platform } from "@tauri-apps/plugin-os";
 import i18n from "@/i18n";
+import { basename } from "@/lib/paths";
 import type { DuetError } from "@/types/bindings";
 
 /**
@@ -10,6 +11,10 @@ import type { DuetError } from "@/types/bindings";
  * 1) 오류 종류(kind), 2) **이 PC 의** OS 오류 번호, 3) 메시지 패턴(압축 손상 등)으로
  * 원인을 골라 "무엇이 왜 · 어떻게" 한 문장(`text`)을 만들고, 원문은 `detail` 로 남긴다
  * (알림 목록의 "자세히").
+ *
+ * 원문에 대상 경로가 있으면 그 이름(basename)을 문장 앞에 붙여 "어느 파일이" 실패했는지
+ * 남긴다. 패턴·번호는 경로를 뺀 나머지에만 적용한다 — 파일 이름에 "bad header" 같은 말이
+ * 있어도 원인을 잘못 고르지 않게.
  *
  * OS 오류 번호는 OS 마다 뜻이 다르다(1 = Windows "지원 안 되는 기능" / Unix EPERM,
  * 36 = Linux ENAMETOOLONG / macOS EINPROGRESS). "(os error N)" 은 로컬 Rust io 오류에만
@@ -226,6 +231,98 @@ function osCode(m: string): number | undefined {
   return last === undefined ? undefined : Number(last);
 }
 
+/**
+ * 원문 속 경로 하나 (`start`~`end` 는 원문 위치).
+ * `backup` = "original preserved at backup <경로>" 의 백업 위치 — 실패한 대상이 아니다.
+ */
+interface PathHit {
+  path: string;
+  start: number;
+  end: number;
+  backup: boolean;
+}
+
+/** 절대 경로의 시작: `/x`·`~/x`·`C:\`·`\\server`. */
+const ABS_START = String.raw`(?:~?\/(?=[^\s/])|[A-Za-z]:[\\/]|\\\\(?=[^\s\\]))`;
+/**
+ * 따옴표 없는 절대 경로 — 앞은 줄 시작·공백·여는 괄호·따옴표, 끝은 `: `·`; `·` (`·
+ * 따옴표·닫는 괄호·줄 끝. 파일 이름의 공백은 허용한다("분기보고서 2026.xlsx").
+ */
+const BARE_PATH = new RegExp(
+  String.raw`(?<=^|[\s(\`'"“‘])${ABS_START}[^\n]*?(?=: |; | \(|[\`'"”’]|\)(?:$|[\s:;,.])|\n|$)`,
+  "g",
+);
+/** 따옴표·백틱으로 감싼 덩어리. */
+const QUOTED = /[`'"“‘]([^`'"“”‘’\n]+)[`'"”’]/g;
+const ABS_ONLY = new RegExp(`^${ABS_START}`);
+
+/** 따옴표 안의 덩어리가 경로처럼 보이는지 — 절대 경로이거나, 공백 없는 `a/b` 꼴. */
+function looksLikePath(s: string): boolean {
+  if (ABS_ONLY.test(s)) return true;
+  return /[\\/]/.test(s) && !/\s/.test(s) && !s.startsWith("-");
+}
+
+/** 원문에서 경로를 찾는다(겹치지 않게, 앞에서부터). */
+function findPaths(raw: string, kind: string | undefined): PathHit[] {
+  const hit = (path: string, start: number): PathHit => ({
+    path,
+    start,
+    end: start + path.length,
+    backup: /backup\s+$/i.test(raw.slice(0, start)),
+  });
+  // 원격 SFTP 의 NotFound/PermissionDenied 는 message 가 경로 그 자체다(`fs/ssh.rs` map_sftp_error).
+  // 괄호가 든 이름("report (1).txt")도 통째로.
+  const whole = raw.trim();
+  if (
+    (kind === "NotFound" || kind === "PermissionDenied") &&
+    ABS_ONLY.test(whole) &&
+    !/: |\n/.test(whole)
+  )
+    return [hit(whole, raw.indexOf(whole))];
+  const hits: PathHit[] = [];
+  for (const m of raw.matchAll(QUOTED)) {
+    const inner = m[1]!.trim();
+    if (looksLikePath(inner))
+      hits.push(hit(inner, m.index + m[0].indexOf(inner)));
+  }
+  for (const m of raw.matchAll(BARE_PATH)) {
+    const path = m[0].replace(/[.,]$/, "");
+    const start = m.index;
+    if (!hits.some((h) => start < h.end && h.start < start + path.length))
+      hits.push(hit(path, start));
+  }
+  return hits.sort((a, b) => a.start - b.start);
+}
+
+/** 경로 자리를 지운 원문 — 패턴·번호가 파일 이름을 원인으로 읽지 않게. */
+function maskPaths(raw: string, hits: PathHit[]): string {
+  let out = "";
+  let at = 0;
+  for (const h of hits) {
+    out += `${raw.slice(at, h.start)}…`;
+    at = h.end;
+  }
+  return out + raw.slice(at);
+}
+
+/** 문장에 붙일 대상 이름 — 백업 위치는 대상이 아니다. */
+function targetName(hits: PathHit[]): string | undefined {
+  const target = hits.find((h) => !h.backup);
+  if (!target) return undefined;
+  const name = basename(target.path, "");
+  return name && name !== "~" && name !== "." && name !== ".."
+    ? name
+    : undefined;
+}
+
+/** 원인 문장 앞에 대상 이름을 붙인다 — 이미 들어 있으면 그대로. */
+function withTarget(text: string, paths: PathHit[]): string {
+  const name = targetName(paths);
+  return name && !text.includes(name)
+    ? i18n.t("errors.withName", { name, text })
+    : text;
+}
+
 function pickReason(
   kind: string | undefined,
   message: string,
@@ -268,12 +365,14 @@ export function explainError(
   }
   const detail = raw.trim();
   const cleaned = cleanMessage(raw);
-  const picked = pickReason(kind, raw, os);
+  const paths = findPaths(raw, kind);
+  const picked = pickReason(kind, maskPaths(raw, paths), os);
   if (picked) {
     const text = i18n.t(`errors.reason.${picked.reason}`, {
       prog: picked.prog,
     });
-    if (!APPEND_DETAIL.has(picked.reason) || !cleaned) return { text, detail };
+    if (!APPEND_DETAIL.has(picked.reason) || !cleaned)
+      return { text: withTarget(text, paths), detail };
     // 이미 설명한 오류를 다시 감싼 경우(대화상자가 formatErr 결과를 message 로 넘김) 그대로.
     if (cleaned.startsWith(text)) return { text: cleaned, detail };
     return { text: `${text} — ${cleaned}`, detail };

@@ -150,7 +150,7 @@ describe("C-15 error text keeps which file failed", () => {
     message: "permission denied: /srv/data/분기보고서 2026.xlsx (os error 13)",
   };
 
-  it.fails(
+  it(
     "shell-settings-04: formatErr 결과(토스트 문장)에 실패한 파일 이름이 남는다",
     () => {
       const text = formatErr(err);

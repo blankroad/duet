@@ -21,27 +21,21 @@ describe("shell-settings: 오류 원인의 경계 조건", () => {
     expect(result.text).not.toMatch(/disk is full/i);
   });
 
-  it.fails(
-    "shell-settings-15: NotFound 파일 이름의 bad header를 압축 손상으로 오해하지 않는다",
-    () => {
-      const result = explainError(
-        { kind: "NotFound", message: "/tmp/bad header.txt" },
-        "windows",
-      );
-      expect(result.text).toMatch(/can't be found/i);
-    },
-  );
+  it("shell-settings-15: NotFound 파일 이름의 bad header를 압축 손상으로 오해하지 않는다", () => {
+    const result = explainError(
+      { kind: "NotFound", message: "/tmp/bad header.txt" },
+      "windows",
+    );
+    expect(result.text).toMatch(/can't be found/i);
+  });
 
-  it.fails(
-    "shell-settings-15: PermissionDenied 경로의 already exists를 이름 충돌로 오해하지 않는다",
-    () => {
-      const result = explainError(
-        { kind: "PermissionDenied", message: "/tmp/already exists.txt" },
-        "unix",
-      );
-      expect(result.text).toMatch(/permission denied/i);
-    },
-  );
+  it("shell-settings-15: PermissionDenied 경로의 already exists를 이름 충돌로 오해하지 않는다", () => {
+    const result = explainError(
+      { kind: "PermissionDenied", message: "/tmp/already exists.txt" },
+      "unix",
+    );
+    expect(result.text).toMatch(/permission denied/i);
+  });
 
   it("shell-settings-improve: SSH exec의 원격 errno를 Windows 번호로 오해하지 않는다", () => {
     const remoteMac = explainError(
