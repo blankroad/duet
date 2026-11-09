@@ -32,7 +32,7 @@ pub async fn exec(handle: &Handle<HostKeyVerifier>, cmd: &str) -> Result<ExecOut
     channel
         .exec(true, cmd)
         .await
-        .map_err(|e| DuetError::Ssh(format!("exec '{cmd}': {e}")))?;
+        .map_err(|e| exec_failed(cmd, e))?;
 
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
@@ -135,7 +135,7 @@ where
     channel
         .exec(true, cmd)
         .await
-        .map_err(|e| DuetError::Ssh(format!("exec '{cmd}': {e}")))?;
+        .map_err(|e| exec_failed(cmd, e))?;
 
     let mut stdout_buf = Vec::<u8>::new();
     let mut stderr = Vec::new();
@@ -179,9 +179,60 @@ where
     Ok((exit, stderr))
 }
 
+/// exec 요청 실패 오류 — **명령 본문은 넣지 않는다**(§5).
+///
+/// 원격 명령에는 비밀이 들어갈 수 있다(원격 zip 해제 `unzip -P '<암호>'`, `core/archive.rs`).
+/// 예전엔 `exec '<명령 전체>': …` 로 오류에 실어 토스트·알림 "자세히"까지 암호가 갔다.
+/// 무엇을 하다 실패했는지는 프로그램 이름만으로 충분하다.
+fn exec_failed(cmd: &str, e: impl std::fmt::Display) -> DuetError {
+    DuetError::Ssh(format!("exec {}: {e}", program_name(cmd)))
+}
+
+/// 명령의 프로그램 이름(첫 낱말) — 단순한 이름이 아니면 `command`.
+///
+/// 앞쪽 환경변수 대입(`LC_ALL=C sort …`)은 건너뛴다. 따옴표·경로·메타문자가 섞인 낱말은
+/// 사용자 데이터일 수 있어 내보내지 않는다.
+fn program_name(cmd: &str) -> &str {
+    let is_plain = |w: &str| {
+        !w.is_empty()
+            && w.len() <= 32
+            && w.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '+'))
+    };
+    let first = cmd
+        .split_whitespace()
+        .find(|w| !matches!(w.split_once('='), Some((name, _)) if is_plain(name)));
+    match first {
+        Some(w) if is_plain(w) => w,
+        _ => "command",
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    // 실제 SSH 통합 테스트는 docker compose 후속 — 컴파일 시그니처만.
+    use super::{exec_failed, program_name};
+
+    // 실제 SSH 통합 테스트는 docker compose 후속 — 여기선 시그니처와 오류 문구만.
+
+    #[test]
+    fn exec_error_never_contains_the_command_body() {
+        // 원격 zip 해제 명령 모양(core/archive.rs remote_extract_command).
+        let cmd = "unzip -P 'hunter2-s3cret' -o '/srv/a.zip' -d '/srv/out'";
+        let msg = exec_failed(cmd, "channel closed").to_string();
+        assert!(!msg.contains("hunter2-s3cret"), "{msg}");
+        assert!(!msg.contains("/srv/a.zip"), "{msg}");
+        assert_eq!(msg, "ssh: exec unzip: channel closed");
+    }
+
+    #[test]
+    fn program_name_is_only_a_plain_first_word() {
+        assert_eq!(program_name("tar -z -xf 'a.tgz' -C 'b'"), "tar");
+        assert_eq!(program_name("LC_ALL=C sha256sum -- 'x'"), "sha256sum");
+        assert_eq!(program_name("'/opt/secret dir/bin' --x"), "command");
+        assert_eq!(program_name("p=hunter2"), "command");
+        assert_eq!(program_name("echo$IFS'pw'"), "command");
+        assert_eq!(program_name(""), "command");
+    }
 
     #[test]
     fn exec_signature_compiles() {
