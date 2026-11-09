@@ -115,6 +115,30 @@ pub async fn ensure_roots_unrelated(a: &Location, b: &Location) -> Result<(), Du
     Err(DuetError::IntoItself(msg))
 }
 
+/// compress: 만들 결과 파일(`output`)이 고른 항목 자신이거나 고른 폴더 안이면 `IntoItself`.
+///
+/// 결과 파일을 쓰는 동안 그 파일을 원본으로 읽게 되어(충돌 백업이 기존 파일을 치운 뒤라)
+/// 사용자가 고른 기존 내용 대신 쓰는 중인 자기 자신이 들어간다(archive-22).
+pub async fn ensure_output_not_in_selection(
+    source: &SourceId,
+    items: &[PathBuf],
+    output: &Path,
+) -> Result<(), DuetError> {
+    for item in items {
+        if matches!(
+            nesting(source, item, source, output).await,
+            Nesting::Same | Nesting::BInsideA
+        ) {
+            return Err(DuetError::IntoItself(format!(
+                "archive '{}' would be written into the selected item '{}'",
+                output.display(),
+                item.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// 로컬 경로 비교 키 — canonicalize, 실패하면 lexical 후 존재하는 가장 긴 조상만 canonicalize.
 async fn local_key(p: &Path) -> PathBuf {
     if let Ok(c) = tokio::fs::canonicalize(p).await {

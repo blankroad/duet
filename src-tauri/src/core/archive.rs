@@ -874,8 +874,10 @@ pub async fn compress_plan(
     };
     // fs.join — 원격은 POSIX(Windows 클라이언트의 `\` 회피, §7).
     let dest_path = fs.join(&src_dir.path, &file_name);
+    let item_names: Vec<String> = items.into_iter().map(|i| i.name).collect();
+    // 결과 파일이 고른 항목 중 하나면 거부 — 쓰는 중인 자기 자신을 담게 된다(archive-22).
+    ensure_output_not_selected(fs, &src_dir, &item_names, &dest_path).await?;
     let conflict = fs.metadata(&dest_path).await.is_ok();
-    let item_names = items.into_iter().map(|i| i.name).collect();
     Ok(CompressPlan {
         source: src_dir.source.clone(),
         src_dir,
@@ -886,12 +888,27 @@ pub async fn compress_plan(
     })
 }
 
+/// 압축 결과 경로가 선택 항목 자신/하위인지 — plan 과 execute 진입부에서 검사(archive-22).
+async fn ensure_output_not_selected(
+    fs: &dyn FileSystem,
+    src_dir: &Location,
+    item_names: &[String],
+    dest: &std::path::Path,
+) -> Result<(), DuetError> {
+    let items: Vec<std::path::PathBuf> = item_names
+        .iter()
+        .map(|n| fs.join(&src_dir.path, n))
+        .collect();
+    crate::core::path_guard::ensure_output_not_in_selection(&src_dir.source, &items, dest).await
+}
+
 pub async fn compress_execute(
     fs: &dyn FileSystem,
     plan: CompressPlan,
     ctx: &OpCtx,
     cancel_token: CancellationToken,
 ) -> Result<JournalEntry, DuetError> {
+    ensure_output_not_selected(fs, &plan.src_dir, &plan.item_names, &plan.dest_path).await?;
     // dest 충돌 → backup.
     let mut backups = Vec::new();
     if fs.metadata(&plan.dest_path).await.is_ok() {

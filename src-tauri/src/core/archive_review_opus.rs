@@ -660,13 +660,12 @@ fn opus_compress_zip_over_65535_entries() {
 }
 
 /// 선택 항목 중에 결과 이름과 같은 아카이브가 있을 때 (a.zip + b.txt 선택 → 이름 "a").
-/// 충돌 백업이 a.zip 을 먼저 치우고 File::create 가 새 a.zip 을 만든 뒤, "a.zip" 항목으로
-/// 자기 자신(쓰는 중인 파일)을 읽는다. 기대: 사용자가 고른 기존 a.zip 내용이 들어가야 한다.
+/// 예전엔 충돌 백업이 a.zip 을 먼저 치우고 File::create 가 새 a.zip 을 만든 뒤, "a.zip" 항목으로
+/// 자기 자신(쓰는 중인 파일)을 읽었다. 수정안(archive.md archive-22): plan 에서 거부하고
+/// 기존 a.zip 은 그대로 둔다(기존 내용을 담는 대안 대신 거부 — 사용자가 다른 이름을 고르게).
 #[tokio::test]
-#[ignore = "archive-22 repro"]
 async fn opus_compress_selection_includes_dest_name() {
     let root = tempfile::tempdir().unwrap();
-    let ctx = mk_ctx(root.path()).await;
     let work = root.path().join("work");
     std::fs::create_dir(&work).unwrap();
     write_zip(&work.join("a.zip"), &[("inner.txt", b"inner")]);
@@ -679,32 +678,13 @@ async fn opus_compress_selection_includes_dest_name() {
         "a".into(),
         CompressFormat::Zip,
     )
-    .await
-    .unwrap();
-    eprintln!(
-        "plan dest = {:?}, conflict = {}",
-        plan.dest_path, plan.conflict
+    .await;
+    eprintln!("plan = {plan:?}; work = {:?}", ls(&work));
+    assert!(
+        matches!(plan, Err(DuetError::IntoItself(_))),
+        "결과 파일이 선택 항목이면 plan 에서 거부해야 한다"
     );
-    let res = tokio::time::timeout(
-        std::time::Duration::from_secs(20),
-        compress_execute(&local, plan, &ctx, CancellationToken::new()),
-    )
-    .await
-    .expect("20초 안에 끝나지 않음");
-    eprintln!("result ok = {}; work = {:?}", res.is_ok(), ls(&work));
-    res.unwrap();
-    let mut z = zip::ZipArchive::new(std::fs::File::open(work.join("a.zip")).unwrap()).unwrap();
-    let mut inner = Vec::new();
-    std::io::Read::read_to_end(&mut z.by_name("a.zip").unwrap(), &mut inner).unwrap();
-    eprintln!(
-        "a.zip entry inside new a.zip: {} bytes (original a.zip = {} bytes)",
-        inner.len(),
-        a_bytes.len()
-    );
-    assert_eq!(
-        inner, a_bytes,
-        "고른 a.zip 대신 쓰는 중인 자기 자신이 들어갔다"
-    );
+    assert_eq!(std::fs::read(work.join("a.zip")).unwrap(), a_bytes);
 }
 
 /// compress_plan 의 이름 처리 기록 — `..`, `.`, 대문자 확장자, `.tgz`.

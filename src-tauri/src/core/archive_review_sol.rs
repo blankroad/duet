@@ -1028,52 +1028,24 @@ async fn sol2_pre_cancelled_compress_moves_original_without_journal() {
     assert!(journal_empty);
 }
 
+/// archive-22: 결과 파일이 선택 항목 자신이면 plan 에서 거부하고 기존 파일은 그대로 둔다.
+/// (예전 관찰: 기존 아카이브 대신 쓰는 중인 자기 자신을 담았다.)
 #[tokio::test]
-#[ignore = "archive-22 현재 결함을 관찰(통과=결함 있음) — 수정 시 기대값 반전"]
 async fn sol2_self_selection_zip_and_targz() {
     let d = tempfile::tempdir().unwrap();
-    let ctx = sol2_ctx(d.path()).await;
     let fs = crate::fs::LocalFs::new();
     for (n, c) in [
         ("self.zip", CompressFormat::Zip),
         ("self.tar.gz", CompressFormat::TarGz),
     ] {
         std::fs::write(d.path().join(n), b"PREVIOUS ARCHIVE").unwrap();
-        let p = compress_plan(&fs, vec![sol2_entry(d.path(), n)], n.into(), c)
-            .await
-            .unwrap();
-        let r = tokio::time::timeout(
-            std::time::Duration::from_secs(10),
-            compress_execute(&fs, p, &ctx, CancellationToken::new()),
-        )
-        .await
-        .unwrap();
-        r.unwrap();
-        if n.ends_with(".zip") {
-            let mut z =
-                zip::ZipArchive::new(std::fs::File::open(d.path().join(n)).unwrap()).unwrap();
-            let mut b = Vec::new();
-            z.by_index(0).unwrap().read_to_end(&mut b).unwrap();
-            eprintln!(
-                "self zip: embedded={} bytes, prefix={:?}",
-                b.len(),
-                &b[..b.len().min(12)]
-            );
-            assert_ne!(b, b"PREVIOUS ARCHIVE");
-            assert_eq!(sol2_zip_names(&d.path().join(n)), [n]);
-        } else {
-            let mut t = tar::Archive::new(flate2::read::GzDecoder::new(
-                std::fs::File::open(d.path().join(n)).unwrap(),
-            ));
-            let mut entries = t.entries().unwrap();
-            let mut e = entries.next().unwrap().unwrap();
-            let name = e.path().unwrap().to_string_lossy().into_owned();
-            let mut b = Vec::new();
-            e.read_to_end(&mut b).unwrap();
-            eprintln!("self tar.gz: name={name} embedded={} bytes", b.len());
-            assert_eq!(name, n);
-            assert_ne!(b, b"PREVIOUS ARCHIVE");
-        }
+        let p = compress_plan(&fs, vec![sol2_entry(d.path(), n)], n.into(), c).await;
+        eprintln!("self-selection {n}: {p:?}");
+        assert!(matches!(p, Err(DuetError::IntoItself(_))), "{n}: {p:?}");
+        assert_eq!(
+            std::fs::read(d.path().join(n)).unwrap(),
+            b"PREVIOUS ARCHIVE"
+        );
     }
 }
 
