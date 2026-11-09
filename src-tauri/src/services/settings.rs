@@ -2,6 +2,8 @@
 //!
 //! 필드 추가 시 `Default` impl + TOML 호환성 (없는 키는 default).
 
+use crate::fs::persist;
+use crate::services::startup_notices::StartupNotice;
 use crate::types::DuetError;
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -170,6 +172,8 @@ pub struct SettingsPatch {
 pub struct SettingsStore {
     path: PathBuf,
     inner: RwLock<Settings>,
+    /// 시작 로드 때 깨진 파일을 옆으로 옮기고 기본값으로 시작했으면 그 내역.
+    load_notice: Option<StartupNotice>,
 }
 
 impl SettingsStore {
@@ -179,28 +183,38 @@ impl SettingsStore {
         Self::load_from(&path).await
     }
 
+    /// 파일을 읽는다. 없으면 기본값. 깨져 있으면 `settings.toml.corrupt-<시각>` 으로 옮겨
+    /// 보존하고 기본값으로 시작한다(shell-settings-01) — [`Self::load_notice`] 로 알린다.
+    /// 읽기 자체의 IO 오류(권한 등)만 `Err`.
     pub async fn load_from(path: &Path) -> Result<Arc<Self>, DuetError> {
-        let settings = if path.exists() {
-            let text = tokio::fs::read_to_string(path)
-                .await
-                .map_err(DuetError::from)?;
-            toml::from_str::<Settings>(&text)
-                .map_err(|e| DuetError::Io(format!("settings parse: {e}")))?
-        } else {
-            Settings::default()
-        };
+        let loaded = persist::load_or_quarantine(
+            path,
+            |text| toml::from_str::<Settings>(text).map_err(|e| format!("settings parse: {e}")),
+            Settings::default,
+        )
+        .await?;
         Ok(Arc::new(Self {
             path: path.to_path_buf(),
-            inner: RwLock::new(settings),
+            inner: RwLock::new(loaded.value),
+            load_notice: loaded.quarantined.as_ref().map(StartupNotice::from),
         }))
+    }
+
+    /// 시작 로드 때 깨진 파일을 격리했으면 그 알림. 정상이면 `None`.
+    pub fn load_notice(&self) -> Option<StartupNotice> {
+        self.load_notice.clone()
     }
 
     pub async fn get(&self) -> Settings {
         self.inner.read().await.clone()
     }
 
+    /// 패치를 적용해 저장한다. 저장이 성공해야 메모리 값도 바뀐다 — 실패한 변경이 남아
+    /// 다음 저장에 섞여 나가지 않게(shell-settings-02). 쓰기 잠금을 쥔 채 저장해 순서를 지킨다.
     pub async fn apply(&self, patch: SettingsPatch) -> Result<Settings, DuetError> {
-        let mut s = self.inner.write().await;
+        let mut cur = self.inner.write().await;
+        let mut next = cur.clone();
+        let s = &mut next;
         if let Some(v) = patch.permanent_delete_enabled {
             s.permanent_delete_enabled = v;
         }
@@ -264,19 +278,11 @@ impl SettingsStore {
         if let Some(v) = patch.ext_app_overrides {
             s.ext_app_overrides = v;
         }
-        let snapshot = s.clone();
-        // 디스크 동기화 — write lock 잡은 채로 (race 방지)
-        if let Some(parent) = self.path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(DuetError::from)?;
-        }
-        let text = toml::to_string_pretty(&snapshot)
+        let text = toml::to_string_pretty(&next)
             .map_err(|e| DuetError::Io(format!("settings serialize: {e}")))?;
-        tokio::fs::write(&self.path, text)
-            .await
-            .map_err(DuetError::from)?;
-        Ok(snapshot)
+        persist::write_atomic(&self.path, text.as_bytes()).await?;
+        *cur = next.clone();
+        Ok(next)
     }
 }
 
@@ -340,6 +346,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn corrupt_file_is_moved_aside_and_defaults_used() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        let text = "permanent_delete_enabled = true\ntheme = \"li";
+        tokio::fs::write(&path, text).await.unwrap();
+        let store = SettingsStore::load_from(&path).await.unwrap();
+        // 기본값(영구 삭제 꺼짐)으로 시작.
+        assert!(!store.get().await.permanent_delete_enabled);
+        let notice = store.load_notice().expect("notice");
+        assert_eq!(notice.file, path);
+        let crate::services::startup_notices::StartupNoticeKind::Reset { backup } = notice.action
+        else {
+            panic!("expected Reset");
+        };
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), text);
+        assert!(!path.exists());
+        // 다음 부팅은 정상(알림 없음).
+        store.apply(SettingsPatch::default()).await.unwrap();
+        let again = SettingsStore::load_from(&path).await.unwrap();
+        assert!(again.load_notice().is_none());
+    }
+
+    #[tokio::test]
+    async fn healthy_file_has_no_notice() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        tokio::fs::write(&path, "theme = \"dark\"\n").await.unwrap();
+        let store = SettingsStore::load_from(&path).await.unwrap();
+        assert_eq!(store.get().await.theme, "dark");
+        assert!(store.load_notice().is_none());
+    }
+
+    #[tokio::test]
     async fn unknown_keys_in_toml_dont_fail() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("settings.toml");
@@ -365,7 +404,6 @@ mod review_shell_settings {
     }
 
     #[tokio::test]
-    #[ignore = "shell-settings-02 repro: 저장 실패한 설정이 메모리에 남아 다음 저장 때 적용됨"]
     async fn failed_apply_does_not_leak_into_next_save() {
         let dir = tempdir().unwrap();
         let (blocker, path) = blocked_path(dir.path());
@@ -400,7 +438,6 @@ mod review_shell_settings {
 
     /// 위 시나리오의 2단계만 — 실패한 값이 다음 성공 저장의 반환값(프론트 sync 대상)에 실린다.
     #[tokio::test]
-    #[ignore = "shell-settings-02 repro: 저장 실패한 영구 삭제가 다음 다른 설정 저장 때 켜짐"]
     async fn failed_permanent_delete_is_persisted_by_next_unrelated_save() {
         let dir = tempdir().unwrap();
         let (blocker, path) = blocked_path(dir.path());
