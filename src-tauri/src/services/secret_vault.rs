@@ -10,7 +10,9 @@
 //!
 //! CLAUDE.md §5 — master 와 평문 password 는 메모리에만, log 출력 금지.
 
+use crate::fs::persist;
 use crate::services::settings::duet_config_dir;
+use crate::services::startup_notices::StartupNotice;
 use crate::types::DuetError;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -68,6 +70,12 @@ impl SecretVault {
                 master: None,
             }),
         }))
+    }
+
+    /// 시작 알림 — 항상 `None`. vault 는 시작 때 파일을 읽지 않고(잠금 해제 때 해독),
+    /// 깨진 파일과 틀린 마스터 비밀번호를 구분할 수 없어 옮기지도 않는다(잠금 해제 실패로 닫힘).
+    pub fn load_notice(&self) -> Option<StartupNotice> {
+        None
     }
 
     /// disk 에 vault 파일 존재?
@@ -132,39 +140,41 @@ impl SecretVault {
         if alias.trim().is_empty() {
             return Err(DuetError::Io("alias required".into()));
         }
-        let mut inner = self.inner.write().await;
-        let master = inner
-            .master
-            .clone()
-            .ok_or_else(|| DuetError::Io("vault locked".into()))?;
-        let map = inner
-            .map
-            .as_mut()
-            .ok_or_else(|| DuetError::Io("vault locked".into()))?;
-        map.insert(alias, password);
-        let snapshot = map.clone();
-        drop(inner);
-        self.flush(&snapshot, &master).await
+        self.update(|map| {
+            map.insert(alias, password);
+        })
+        .await
     }
 
     /// alias 에 해당하는 항목 제거 후 disk flush. Locked 상태면 Err.
     pub async fn remove(&self, alias: &str) -> Result<(), DuetError> {
-        let mut inner = self.inner.write().await;
-        let master = inner
-            .master
-            .clone()
-            .ok_or_else(|| DuetError::Io("vault locked".into()))?;
-        let map = inner
-            .map
-            .as_mut()
-            .ok_or_else(|| DuetError::Io("vault locked".into()))?;
-        map.remove(alias);
-        let snapshot = map.clone();
-        drop(inner);
-        self.flush(&snapshot, &master).await
+        self.update(|map| {
+            map.remove(alias);
+        })
+        .await
     }
 
-    /// JSON 직렬화 + age passphrase encrypt + atomic write.
+    /// 쓰기 잠금을 쥔 채 사본 map 에 변경 → 디스크 저장 성공 → 메모리 교체.
+    ///
+    /// - 저장이 실패하면 메모리는 그대로라 "저장됨"으로 보이지 않는다(remote-22).
+    /// - 잠금 안에서 저장하므로 동시 저장이 같은 임시 파일을 쓰거나 옛 스냅샷이 새 것을
+    ///   덮지 않는다(remote-21).
+    async fn update(
+        &self,
+        change: impl FnOnce(&mut HashMap<String, String>),
+    ) -> Result<(), DuetError> {
+        let mut inner = self.inner.write().await;
+        let (Some(map), Some(master)) = (inner.map.as_ref(), inner.master.as_deref()) else {
+            return Err(DuetError::Io("vault locked".into()));
+        };
+        let mut next = map.clone();
+        change(&mut next);
+        self.flush(&next, master).await?;
+        inner.map = Some(next);
+        Ok(())
+    }
+
+    /// JSON 직렬화 + age passphrase encrypt + atomic write(소유자 전용 권한).
     async fn flush(
         &self,
         map: &HashMap<String, String>,
@@ -173,30 +183,10 @@ impl SecretVault {
         let json =
             serde_json::to_vec(map).map_err(|e| DuetError::Io(format!("vault serialize: {e}")))?;
         let encrypted = encrypt_passphrase(&json, passphrase)?;
-        if let Some(parent) = self.path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(DuetError::from)?;
-        }
-        // atomic write — tmp + rename
-        let tmp = self.path.with_extension("age.tmp");
-        tokio::fs::write(&tmp, encrypted)
-            .await
-            .map_err(DuetError::from)?;
         // §5 방어심층: 비밀 저장소는 소유자만 읽기(0o600). age 암호화라 유출돼도 평문은
-        // 아니지만, 파일 권한으로 노출면 자체를 줄인다. rename 전 tmp 에 설정해 넓은
-        // 권한으로 잠시라도 노출되지 않게 한다.
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            tokio::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))
-                .await
-                .map_err(DuetError::from)?;
-        }
-        tokio::fs::rename(&tmp, &self.path)
-            .await
-            .map_err(DuetError::from)?;
-        Ok(())
+        // 아니지만, 파일 권한으로 노출면 자체를 줄인다. 헬퍼가 rename 전 임시 파일에 걸어
+        // 넓은 권한으로 잠시라도 노출되지 않게 한다.
+        persist::write_atomic_private(&self.path, &encrypted).await
     }
 }
 

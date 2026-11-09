@@ -48,7 +48,6 @@ async fn first_creation_encrypts_and_sets_private_unix_permissions() {
 }
 
 #[tokio::test]
-#[ignore = "remote-21 repro: concurrent vault flushes share tmp path"]
 async fn concurrent_sets_all_persist_without_error() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("v.age");
@@ -69,7 +68,6 @@ async fn concurrent_sets_all_persist_without_error() {
 }
 
 #[tokio::test]
-#[ignore = "remote-22 repro: failed persistence still updates memory"]
 async fn failed_set_must_not_claim_secret_was_saved() {
     let dir = tempfile::tempdir().unwrap();
     let blocked = dir.path().join("not-a-directory");
