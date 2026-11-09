@@ -1893,21 +1893,15 @@ fn looks_binary(bytes: &[u8]) -> bool {
     ctrl * 100 / sample.len() > 30
 }
 
-/// 바이트를 텍스트로 디코드 — 유효 UTF-8 prefix 만 사용(head 절단 시 멀티바이트
-/// 경계 보호). 바이너리(NUL/제어문자 과다)거나 prefix 가 비면 Binary.
+/// BOM을 우선 처리하고 UTF-8/CP949를 시도한다. 디코딩 실패 시에도 본문을 버리지 않는다.
 fn decode_text(bytes: &[u8], truncated: bool, total_size: u64) -> PreviewData {
-    if looks_binary(bytes) {
+    let text = if let Some((encoding, bom_len)) = encoding_rs::Encoding::for_bom(bytes) {
+        decode_bom_text(&bytes[bom_len..], encoding, truncated)
+    } else if looks_binary(bytes) {
         return binary_preview(total_size);
-    }
-    let valid_len = match std::str::from_utf8(bytes) {
-        Ok(_) => bytes.len(),
-        Err(e) => e.valid_up_to(),
+    } else {
+        decode_unmarked_text(bytes, truncated)
     };
-    if valid_len == 0 && !bytes.is_empty() {
-        return binary_preview(total_size);
-    }
-    // valid_len 까지는 유효 UTF-8 보장.
-    let text = String::from_utf8_lossy(&bytes[..valid_len]).into_owned();
     PreviewData {
         kind: PreviewKind::Text,
         text: Some(text),
@@ -1916,6 +1910,52 @@ fn decode_text(bytes: &[u8], truncated: bool, total_size: u64) -> PreviewData {
         truncated,
         total_size,
     }
+}
+
+/// head는 마지막 입력으로 확정하지 않아 절단된 코드 단위/서로게이트를 출력하지 않는다.
+fn decode_bom_text(
+    mut bytes: &[u8],
+    encoding: &'static encoding_rs::Encoding,
+    truncated: bool,
+) -> String {
+    let mut decoder = encoding.new_decoder_without_bom_handling();
+    let mut text = String::new();
+    loop {
+        // UTF-16→UTF-8 확장과 대체 문자도 수용하며 OutputFull이면 버퍼를 늘려 계속한다.
+        text.reserve(bytes.len().max(4));
+        let (result, read, _) = decoder.decode_to_string(bytes, &mut text, !truncated);
+        bytes = &bytes[read..];
+        if matches!(result, encoding_rs::CoderResult::InputEmpty) {
+            return text;
+        }
+    }
+}
+
+/// BOM 없는 텍스트: UTF-8 절단 경계 보호 → windows-949 → 전체 lossy 표시.
+fn decode_unmarked_text(bytes: &[u8], truncated: bool) -> String {
+    match std::str::from_utf8(bytes) {
+        Ok(text) => return text.to_owned(),
+        Err(error) if truncated && error.error_len().is_none() => {
+            return String::from_utf8_lossy(&bytes[..error.valid_up_to()]).into_owned();
+        }
+        Err(_) => {}
+    }
+    let korean = encoding_rs::EUC_KR
+        .decode_without_bom_handling_and_without_replacement(bytes)
+        .or_else(|| {
+            if !truncated {
+                return None;
+            }
+            let (&last, head) = bytes.split_last()?;
+            // windows-949 선행 바이트 하나가 head 끝에서 절단된 경우만 제외한다.
+            if !(0x81..=0xFE).contains(&last) {
+                return None;
+            }
+            encoding_rs::EUC_KR.decode_without_bom_handling_and_without_replacement(head)
+        });
+    korean
+        .map(|text| text.into_owned())
+        .unwrap_or_else(|| String::from_utf8_lossy(bytes).into_owned())
 }
 
 /// src/dst SourceId 로부터 TaskQueue worker 키 결정.
@@ -1985,10 +2025,10 @@ mod preview_tests {
     }
 
     #[test]
-    fn decode_text_binary_when_no_valid_prefix() {
+    fn decode_text_bom_malformed_tail_uses_replacement() {
         let d = decode_text(&[0xFF, 0xFE, 0x00], false, 3);
-        assert_eq!(d.kind, PreviewKind::Binary);
-        assert!(d.text.is_none());
+        assert_eq!(d.kind, PreviewKind::Text);
+        assert_eq!(d.text.as_deref(), Some("�"));
     }
 
     #[test]
@@ -2005,6 +2045,70 @@ mod preview_tests {
     fn decode_text_plain_with_newlines_stays_text() {
         let d = decode_text(b"line1\nline2\ttab\r\n", false, 17);
         assert_eq!(d.kind, PreviewKind::Text);
+    }
+
+    #[test]
+    fn utf16be_bom_decodes_korean_and_ascii() {
+        let d = decode_text(&[0xFE, 0xFF, 0xAC, 0x00, 0x00, b'a'], false, 6);
+        assert_eq!(d.kind, PreviewKind::Text);
+        assert_eq!(d.text.as_deref(), Some("가a"));
+    }
+
+    #[test]
+    fn utf16_head_cuts_drop_incomplete_units_and_surrogates() {
+        let expected = ["", "", "가", "가", "가", "가", "가😀", "가😀", "가😀z"];
+        for little_endian in [true, false] {
+            let mut bytes = if little_endian {
+                vec![0xFF, 0xFE]
+            } else {
+                vec![0xFE, 0xFF]
+            };
+            for unit in "가😀z".encode_utf16() {
+                bytes.extend_from_slice(&if little_endian {
+                    unit.to_le_bytes()
+                } else {
+                    unit.to_be_bytes()
+                });
+            }
+            for (cut, want) in expected.iter().enumerate() {
+                let d = decode_text(&bytes[..2 + cut], true, 100);
+                assert_eq!(d.kind, PreviewKind::Text);
+                assert_eq!(
+                    d.text.as_deref(),
+                    Some(*want),
+                    "LE={little_endian}, cut={cut}"
+                );
+                assert!(d.truncated);
+                assert_eq!(d.total_size, 100);
+            }
+        }
+    }
+
+    #[test]
+    fn utf8_bom_head_cut_drops_partial_character() {
+        let d = decode_text(&[0xEF, 0xBB, 0xBF, b'a', 0xE2, 0x82], true, 7);
+        assert_eq!(d.kind, PreviewKind::Text);
+        assert_eq!(d.text.as_deref(), Some("a"));
+        assert!(d.truncated);
+    }
+
+    #[test]
+    fn cp949_head_cut_drops_partial_double_byte_character() {
+        let d = decode_text(&[0xC7, 0xD1, 0xB1], true, 4);
+        assert_eq!(d.kind, PreviewKind::Text);
+        assert_eq!(d.text.as_deref(), Some("한"));
+        assert!(d.truncated);
+        assert_eq!(d.total_size, 4);
+    }
+
+    #[test]
+    fn invalid_non_cp949_bytes_keep_the_entire_lossy_text() {
+        for truncated in [false, true] {
+            let d = decode_text(&[b'A', 0xFF, b'B'], truncated, 3);
+            assert_eq!(d.kind, PreviewKind::Text);
+            assert_eq!(d.text.as_deref(), Some("A�B"));
+            assert_eq!(d.truncated, truncated);
+        }
     }
 
     #[test]
@@ -2043,7 +2147,6 @@ mod review_browse {
     }
 
     #[test]
-    #[ignore = "browse-06 repro"]
     fn utf16le_text_is_shown_as_text() {
         // "가a" UTF-16LE + BOM — 메모장 "유니코드" 저장 형식.
         let bytes = [0xFF, 0xFE, 0x00, 0xAC, 0x61, 0x00];
@@ -2055,7 +2158,6 @@ mod review_browse {
     }
 
     #[test]
-    #[ignore = "browse-06 repro"]
     fn cp949_text_is_shown_as_text() {
         // "한글" CP949(EUC-KR) — Windows 한국어 메모장 ANSI 저장 형식.
         let bytes = [0xC7, 0xD1, 0xB1, 0xDB, b'\n'];
@@ -2067,7 +2169,6 @@ mod review_browse {
     }
 
     #[test]
-    #[ignore = "browse-06 repro"]
     fn non_utf8_tail_is_not_silently_dropped() {
         // ASCII 머리 + CP949 본문: 머리만 보이고 잘렸다는 표시(truncated)도 없다.
         let mut bytes = b"title: report\n".to_vec();
@@ -2075,13 +2176,9 @@ mod review_browse {
         let total = bytes.len() as u64;
         let p = decode_text(&bytes, false, total);
         assert!(matches!(p.kind, PreviewKind::Text));
-        let shown = text_of(&p).len() as u64;
-        assert!(
-            shown == total || p.truncated,
-            "본문 {}B 중 {}B 만 보이는데 truncated=false",
-            total,
-            shown
-        );
+        assert_eq!(text_of(&p), "title: report\n한글");
+        assert_eq!(p.total_size, total);
+        assert!(!p.truncated);
     }
 
     #[test]
@@ -2109,7 +2206,6 @@ mod review_sync_compare_opus_preview {
     }
 
     #[test]
-    #[ignore = "sync-compare repro: CP949 텍스트가 첫 비-UTF8 바이트에서 조용히 잘리고 truncated=false"]
     fn cp949_text_is_not_silently_cut() {
         let bytes = cp949_after_ascii();
         let d = decode_text(&bytes, false, bytes.len() as u64);
@@ -2126,35 +2222,40 @@ mod review_sync_compare_opus_preview {
     }
 
     #[test]
-    fn cp949_text_current_behavior_prefix_only() {
-        // 현재 동작 기록: 앞 ASCII 줄만 Text 로, truncated=false.
+    fn cp949_text_is_decoded_fully() {
+        // CP949 본문과 뒤의 ASCII 줄을 모두 디코드한다.
         let bytes = cp949_after_ascii();
         let d = decode_text(&bytes, false, bytes.len() as u64);
         assert_eq!(d.kind, PreviewKind::Text);
-        assert_eq!(d.text.as_deref(), Some("title: report\n"));
+        assert_eq!(
+            d.text.as_deref(),
+            Some("title: report\n한글\nline3 after korean\nline4\n")
+        );
         assert!(!d.truncated);
     }
 
     #[test]
-    fn cp949_starting_with_korean_is_binary() {
-        // 첫 바이트부터 비-UTF8 → valid_len 0 → Binary ("binary" 로 표시).
+    fn cp949_starting_with_korean_is_text() {
+        // ASCII 머리가 없어도 CP949 텍스트로 디코드한다.
         let d = decode_text(&[0xC7, 0xD1, 0xB1, 0xDB, b'\n'], false, 5);
-        assert_eq!(d.kind, PreviewKind::Binary);
+        assert_eq!(d.kind, PreviewKind::Text);
+        assert_eq!(d.text.as_deref(), Some("한글\n"));
     }
 
     #[test]
-    fn utf16le_with_bom_is_binary() {
-        // "ab\n" UTF-16LE + BOM — NUL 바이트 때문에 Binary.
+    fn utf16le_with_bom_is_text() {
+        // BOM이 있으면 NUL 바이트보다 인코딩 판정이 우선한다.
         let bytes = [0xFF, 0xFE, b'a', 0, b'b', 0, b'\n', 0];
         let d = decode_text(&bytes, false, bytes.len() as u64);
-        assert_eq!(d.kind, PreviewKind::Binary);
+        assert_eq!(d.kind, PreviewKind::Text);
+        assert_eq!(d.text.as_deref(), Some("ab\n"));
     }
 
     #[test]
-    fn utf8_with_bom_keeps_bom_char() {
-        // UTF-8 BOM 은 그대로 U+FEFF 로 남는다 → BOM 유무만 다른 파일은 1번째 줄이 다르게 보임.
+    fn utf8_with_bom_is_stripped() {
+        // UTF-8 BOM은 본문에서 제거한다.
         let d = decode_text(b"\xEF\xBB\xBFabc\n", false, 7);
         assert_eq!(d.kind, PreviewKind::Text);
-        assert!(d.text.unwrap().starts_with('\u{FEFF}'));
+        assert_eq!(d.text.as_deref(), Some("abc\n"));
     }
 }
