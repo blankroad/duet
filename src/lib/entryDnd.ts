@@ -1,4 +1,5 @@
 import type { Location, SourceId } from "@/types/bindings";
+import { splitRoot } from "@/lib/paths";
 
 /**
  * 인앱 드래그앤드롭 공용 순수 헬퍼 — 소스/경로 비교 및 자식 Location 계산.
@@ -17,7 +18,10 @@ export function normalizePath(p: string): string {
     const unc = p.startsWith("\\\\");
     let s = p.replace(/\//g, "\\").replace(/\\+/g, "\\");
     if (unc) s = "\\" + s; // 선두 UNC 백슬래시 복원
-    if (!/^[A-Za-z]:\\$/.test(s)) s = s.replace(/\\$/, "") || s; // 끝 `\` 제거(드라이브 루트 제외)
+    // 끝 `\` 제거 — 단 `\` 로 끝나는 루트(`C:\`, `\\?\C:\`)는 유지: `\\?\C:` 는 루트 폴더가 아니라 볼륨 장치다.
+    const root = splitRoot(s, "windows");
+    if (!(root && root.rest === "" && root.root.endsWith("\\")))
+      s = s.replace(/\\$/, "") || s;
     return s;
   }
   const s = p.replace(/\/+/g, "/");
@@ -97,17 +101,28 @@ export function childLocation(parent: Location, name: string): Location {
 }
 
 /**
- * 경로의 부모 — Windows(`C:\…`)·POSIX(`/…`)·혼합 구분자 모두 처리. 루트면 `null`.
- * 마지막 구분자에서 자르되, 드라이브 루트(`C:`)→`C:\`, POSIX 루트(``)→`/` 로 보정.
+ * 경로의 부모 — Windows(`C:\…`, UNC, `\\?\`)·POSIX(`/…`)·혼합 구분자 모두 처리. 루트면 `null`.
+ * 루트는 `splitRoot` 가 정한다 — `\\srv\share` 위로는 없고, `\\?\C:\long` 의 부모는 `\\?\C:\`.
+ * 소스를 모르므로 `"auto"` 규칙: `\\` 로 시작하는 원격 리눅스 경로는 사실상 없다는 전제.
  */
 export function parentPath(path: string): string | null {
-  const trimmed = path.replace(/[/\\]+$/, "");
-  const idx = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
-  if (idx < 0) return null; // 단일 컴포넌트(드라이브문자 단독 등) — 부모 없음
-  const parent = trimmed.slice(0, idx);
-  if (parent === "") return "/"; // POSIX 루트
-  if (/^[A-Za-z]:$/.test(parent)) return parent + "\\"; // Windows 드라이브 루트
-  return parent;
+  const split = splitRoot(path);
+  if (split === null) {
+    // 루트 없는 상대 경로 — 화면엔 거의 안 나온다. 마지막 구분자에서 자른다.
+    const trimmed = path.replace(/[/\\]+$/, "");
+    const idx = lastSep(trimmed);
+    return idx > 0 ? trimmed.slice(0, idx) : null;
+  }
+  const rest = split.rest.replace(/[/\\]+$/, "");
+  if (rest === "") return null; // 루트
+  const idx = lastSep(rest);
+  if (idx < 0) return split.root; // 루트 바로 아래
+  // 원문에서 자른다 — 루트 표기(`C:/`·`\\srv\share\`)를 그대로 둔다.
+  return path.slice(0, path.length - split.rest.length + idx);
+}
+
+function lastSep(s: string): number {
+  return Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
 }
 
 /** 부모 Location (없으면 null — 루트). */

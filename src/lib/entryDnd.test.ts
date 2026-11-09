@@ -81,6 +81,25 @@ describe("entryDnd — parentPath", () => {
   });
   it("mixed separators", () => {
     expect(parentPath("C:\\Users/foo")).toBe("C:\\Users");
+    expect(parentPath("C:/Users")).toBe("C:\\");
+  });
+  it("UNC and verbatim roots (browse-10)", () => {
+    expect(parentPath("\\\\srv\\share\\dir\\sub")).toBe("\\\\srv\\share\\dir");
+    expect(parentPath("\\\\srv\\share\\dir")).toBe("\\\\srv\\share");
+    expect(parentPath("\\\\srv\\share\\")).toBeNull();
+    expect(parentPath("\\\\?\\UNC\\srv\\share\\dir")).toBe(
+      "\\\\?\\UNC\\srv\\share",
+    );
+    expect(parentPath("\\\\?\\UNC\\srv\\share")).toBeNull();
+    expect(parentPath("\\\\?\\C:\\a\\b")).toBe("\\\\?\\C:\\a");
+  });
+  it("Korean and spaces keep their text", () => {
+    expect(parentPath("C:\\한글 폴더\\space name\\")).toBe("C:\\한글 폴더");
+    expect(parentPath("/srv/한글 폴더/a b")).toBe("/srv/한글 폴더");
+  });
+  it("relative paths cut at the last separator", () => {
+    expect(parentPath("docs/a")).toBe("docs");
+    expect(parentPath("docs")).toBeNull();
   });
 });
 
@@ -91,6 +110,15 @@ describe("entryDnd — normalizePath", () => {
     expect(normalizePath("C:\\Users\\")).toBe("C:\\Users"); // 끝 백슬래시 제거
     expect(normalizePath("C:\\")).toBe("C:\\"); // 드라이브 루트는 유지
     expect(normalizePath("\\\\server\\share")).toBe("\\\\server\\share"); // UNC 보존
+    expect(normalizePath("\\\\server\\share\\")).toBe("\\\\server\\share");
+  });
+  it("keeps the separator of verbatim drive roots (browse-10)", () => {
+    // `\\?\C:` 는 C 드라이브 볼륨 장치 — 루트 폴더는 `\\?\C:\`.
+    expect(normalizePath("\\\\?\\C:\\")).toBe("\\\\?\\C:\\");
+    expect(normalizePath("\\\\?\\C:\\long\\")).toBe("\\\\?\\C:\\long");
+    expect(normalizePath("\\\\?\\UNC\\srv\\share\\")).toBe(
+      "\\\\?\\UNC\\srv\\share",
+    );
   });
   it("cleans POSIX doubled/trailing separators", () => {
     expect(normalizePath("/home//x/")).toBe("/home/x");

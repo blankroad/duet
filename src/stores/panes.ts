@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { Entry, Location } from "@/types/bindings";
 import { normalizePath, sameLocation } from "@/lib/entryDnd";
+import { pathSegments, splitRoot } from "@/lib/paths";
 import { patternToMatcher } from "@/lib/glob";
 import { pushClosedTabs, popClosedTab, type ClosedTab } from "./closedTabs";
 
@@ -1050,12 +1051,13 @@ export function isParentEntry(e: Entry): boolean {
 
 /**
  * 경로가 최상위 루트인지 — 위로 갈 부모가 없는 곳. `..` 행을 숨길지 판단.
- * - Unix/SSH 루트: `/`
- * - Windows 드라이브 루트: `C:\`, `C:/`, `C:` (드라이브문자 + `:` + 선택적 구분자)
+ * 루트 규칙은 `splitRoot` 하나를 따른다: `/`, `C:\`·`C:`, UNC `\\srv\share`,
+ * `\\?\C:\`, `\\?\UNC\srv\share`.
  */
 export function isRootPath(p: string): boolean {
-  if (p.length === 0 || p === "/") return true;
-  return /^[A-Za-z]:[\\/]?$/.test(p);
+  if (p.length === 0) return true;
+  const r = splitRoot(p);
+  return r !== null && pathSegments(r.rest).length === 0;
 }
 
 export function computeDisplayed(t: TabState): Entry[] {

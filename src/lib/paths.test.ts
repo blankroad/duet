@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { basename, pathSegments, shortenPath } from "@/lib/paths";
+import { basename, pathSegments, shortenPath, splitRoot } from "@/lib/paths";
 
 describe("basename", () => {
   it("POSIX 경로의 마지막 세그먼트", () => {
@@ -63,5 +63,62 @@ describe("pathSegments", () => {
   it("'/'·'\\' 모두 분해하고 빈 조각 제거", () => {
     expect(pathSegments("/a/b//c")).toEqual(["a", "b", "c"]);
     expect(pathSegments("D:\\a\\b")).toEqual(["D:", "a", "b"]);
+  });
+});
+
+describe("splitRoot", () => {
+  it.each([
+    ["/", "/", ""],
+    ["/home/u", "/", "home/u"],
+    ["/한글 폴더/", "/", "한글 폴더/"],
+    ["C:\\", "C:\\", ""],
+    ["C:/", "C:\\", ""],
+    ["C:", "C:\\", ""],
+    ["c:\\Users\\space name", "c:\\", "Users\\space name"],
+    ["C:\\한글 폴더\\", "C:\\", "한글 폴더\\"],
+    ["\\\\srv\\share", "\\\\srv\\share", ""],
+    ["\\\\srv\\share\\", "\\\\srv\\share", ""],
+    ["\\\\서버\\공유\\한글 폴더\\", "\\\\서버\\공유", "한글 폴더\\"],
+    ["\\\\srv", "\\\\srv", ""],
+    ["\\\\?\\C:\\", "\\\\?\\C:\\", ""],
+    ["\\\\?\\C:\\long\\x", "\\\\?\\C:\\", "long\\x"],
+    ["\\\\?\\UNC\\srv\\share\\dir", "\\\\?\\UNC\\srv\\share", "dir"],
+    ["\\\\?\\unc\\srv\\share", "\\\\?\\UNC\\srv\\share", ""],
+    ["\\\\.\\PhysicalDrive0", "\\\\.\\PhysicalDrive0\\", ""],
+    ["\\\\?\\Volume{abc}\\dir", "\\\\?\\Volume{abc}\\", "dir"],
+  ])("%s → root %s, rest %s", (path, root, rest) => {
+    expect(splitRoot(path)).toEqual({ root, rest });
+  });
+
+  it("rest 는 원문의 끝 조각이다 (원문 위치 계산용)", () => {
+    const p = "C:/Users/foo";
+    const r = splitRoot(p)!;
+    expect(p.slice(p.length - r.rest.length)).toBe("Users/foo");
+  });
+
+  it("상대 경로는 루트가 없다", () => {
+    expect(splitRoot("")).toBeNull();
+    expect(splitRoot("docs/a")).toBeNull();
+    expect(splitRoot("C:docs")).toBeNull();
+  });
+
+  it("//srv/share 는 windows 에서만 UNC — 소스를 모르면 POSIX 루트", () => {
+    expect(splitRoot("//srv/share/dir", "windows")).toEqual({
+      root: "\\\\srv\\share",
+      rest: "dir",
+    });
+    expect(splitRoot("//srv/share/dir")).toEqual({
+      root: "/",
+      rest: "srv/share/dir",
+    });
+  });
+
+  it("posix 는 / 만 루트로 본다", () => {
+    expect(splitRoot("/srv/app", "posix")).toEqual({
+      root: "/",
+      rest: "srv/app",
+    });
+    expect(splitRoot("C:\\x", "posix")).toBeNull();
+    expect(splitRoot("\\\\srv\\share", "posix")).toBeNull();
   });
 });

@@ -52,3 +52,22 @@ it("드라이브 루트만 있으면 C:\\ 를 유지한다", () => {
     { label: "\\\\srv\\share", path: "\\\\srv\\share" },
   ]);
 });
+
+it("긴 경로·슬래시 UNC 루트도 한 조각이다 (browse-10)", () => {
+  expect(buildCrumbs("\\\\?\\C:\\", true)).toEqual([
+    { label: "\\\\?\\C:", path: "\\\\?\\C:\\" },
+  ]);
+  expect(buildCrumbs("\\\\?\\UNC\\srv\\share\\dir", true)).toEqual([
+    { label: "\\\\?\\UNC\\srv\\share", path: "\\\\?\\UNC\\srv\\share" },
+    { label: "dir", path: "\\\\?\\UNC\\srv\\share\\dir" },
+  ]);
+  expect(buildCrumbs("//srv/share/dir", true)).toEqual([
+    { label: "\\\\srv\\share", path: "\\\\srv\\share" },
+    { label: "dir", path: "//srv/share/dir" },
+  ]);
+  // 원격(POSIX)은 Windows 규칙을 타지 않는다.
+  expect(buildCrumbs("//srv/share", false)).toEqual([
+    { label: "srv", path: "/srv" },
+    { label: "share", path: "//srv/share" },
+  ]);
+});
