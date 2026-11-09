@@ -1,31 +1,12 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-/**
- * browse 점검 R3 (opus) — F-sol-201: Range 없는 첫 요청에 `preview_stream.rs` 가 16MiB 로
- * 자른 본문을 200 + Content-Length(=잘린 길이)로 보낸다. pdf.js 는 Content-Length 를 파일
- * 길이로 믿으므로(Windows fetch 경로는 그 안에서만 Range 요청, macOS 커스텀 스킴은 XHR 로
- * 본문 그대로) 실제로 받는 문서는 "앞 16MiB" 다. 그 바이트를 설치된 pdf.js 로 열어 본다.
- */
-
+import { preparePdfSource } from "../pdfRange";
+import { afterEach, vi } from "vitest";
 const ROOT = process.cwd();
-const STREAM = readFileSync(
-  resolve(ROOT, "src-tauri/src/services/preview_stream.rs"),
-  "utf8",
-);
-
-/** 제품 코드의 No-Range 상한을 그대로 확인 (값이 바뀌면 테스트가 알려 준다). */
-function productCap(): number {
-  expect(STREAM).toContain("const MAX_FULL: usize = 16 * 1024 * 1024;");
-  expect(STREAM).toContain("let want = (total as usize).min(MAX_FULL);");
-  expect(STREAM).toContain(
-    ".header(header::CONTENT_LENGTH, bytes.len().to_string())",
-  );
-  return 16 * 1024 * 1024;
-}
+afterEach(() => vi.unstubAllGlobals());
 
 /** 2쪽짜리 정상 PDF + 20MiB 패딩 스트림. catalogFirst=true 면 카탈로그·1쪽이 앞쪽에 있다. */
 function buildPdf(catalogFirst: boolean): Uint8Array {
@@ -102,29 +83,71 @@ async function openPdf(bytes: Uint8Array): Promise<number> {
   return n;
 }
 
-describe("F-sol-201 큰 PDF 미리보기 (pdf.js 4.10.38 실측)", () => {
-  it("대조: 20MiB 넘는 정상 PDF 전체 바이트는 열린다", async () => {
+describe("browse-33 large PDF range preview (pdf.js 4.10.38)", () => {
+  it("opens a complete large PDF as a control", async () => {
     expect(await openPdf(buildPdf(false))).toBe(2);
-    expect(await openPdf(buildPdf(true))).toBe(2);
-  }, 60_000);
+  });
 
-  it.fails(
-    "browse-33 (F-sol-201): 미리보기가 실제로 받는 앞 16MiB 는 열리지 않는다 (카탈로그가 뒤쪽)",
-    async () => {
-      const cap = productCap();
-      const full = buildPdf(false);
-      expect(full.length).toBeGreaterThan(cap);
-      expect(await openPdf(full.slice(0, cap))).toBe(2);
-    },
-    60_000,
-  );
-
-  it.fails(
-    "browse-33 (F-sol-201): 카탈로그·1쪽이 앞 16MiB 안에 있어도 열리지 않는다",
-    async () => {
-      const cap = productCap();
-      expect(await openPdf(buildPdf(true).slice(0, cap))).toBe(2);
-    },
-    60_000,
-  );
+  for (const catalogFirst of [false, true]) {
+    it(`opens both pages through capped ranges (catalogFirst=${catalogFirst})`, async () => {
+      const full = buildPdf(catalogFirst);
+      const requests: string[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url: string, init: RequestInit) => {
+          const header = (init.headers as Record<string, string>).Range!;
+          requests.push(header);
+          const [, start, last] = /^bytes=(\d+)-(\d+)$/.exec(header)!;
+          const begin = Number(start);
+          const end = Math.min(
+            Number(last) + 1,
+            begin + 8 * 1024 * 1024,
+            full.length,
+          );
+          return new Response(full.slice(begin, end), {
+            status: 206,
+            headers: {
+              "Content-Range": `bytes ${begin}-${end - 1}/${full.length}`,
+            },
+          });
+        }),
+      );
+      const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+      pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
+        resolve(ROOT, "node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs"),
+      ).href;
+      const controller = new AbortController();
+      let fail!: (error: unknown) => void;
+      const failed = new Promise<never>((_resolve, reject) => {
+        fail = reject;
+      });
+      const source = await preparePdfSource(
+        "pdf",
+        controller.signal,
+        pdfjs.PDFDataRangeTransport,
+        fail,
+      );
+      // Force a request larger than the server cap so continuation is exercised with real pdf.js.
+      const task = pdfjs.getDocument({
+        ...source,
+        rangeChunkSize: 16 * 1024 * 1024,
+        verbosity: 0,
+      });
+      try {
+        const doc = await Promise.race([task.promise, failed]);
+        expect(doc.numPages).toBe(2);
+        await Promise.race([
+          Promise.all([doc.getPage(1), doc.getPage(2)]),
+          failed,
+        ]);
+        const complete = await Promise.race([doc.getData(), failed]);
+        expect(complete.length).toBe(full.length);
+        expect(requests[0]).toBe("bytes=0-65535");
+        expect(requests.length).toBeGreaterThan(2);
+      } finally {
+        controller.abort();
+        await task.destroy();
+      }
+    }, 30_000);
+  }
 });

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import * as pdfjsLib from "pdfjs-dist";
+import { preparePdfSource } from "./pdfRange";
 // Vite ?url — 번들된 워커 에셋 경로. CSP worker-src 'self' blob: 로 허용.
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
@@ -32,7 +33,13 @@ export function PreviewPdf({
 
   useEffect(() => {
     let cancelled = false;
-    let doc: pdfjsLib.PDFDocumentProxy | null = null;
+    const controller = new AbortController();
+    let loadingTask: pdfjsLib.PDFDocumentLoadingTask | null = null;
+    const fail = () => {
+      if (!cancelled) setFailed(true);
+      controller.abort();
+      void loadingTask?.destroy();
+    };
     setPages(null);
     setFailed(false);
     void (async () => {
@@ -40,7 +47,15 @@ export function PreviewPdf({
       if (!container) return;
       container.replaceChildren();
       try {
-        doc = await pdfjsLib.getDocument({ url }).promise;
+        const source = await preparePdfSource(
+          url,
+          controller.signal,
+          pdfjsLib.PDFDataRangeTransport,
+          fail,
+        );
+        if (cancelled) return;
+        loadingTask = pdfjsLib.getDocument(source);
+        const doc = await loadingTask.promise;
         if (cancelled) return;
         const pages = Math.min(doc.numPages, MAX_PAGES);
         const total = doc.numPages;
@@ -69,12 +84,13 @@ export function PreviewPdf({
         }
         if (!shownInfo) setPages({ shown: pages, total });
       } catch {
-        if (!cancelled) setFailed(true);
+        fail();
       }
     })();
     return () => {
       cancelled = true;
-      void doc?.destroy();
+      controller.abort();
+      void loadingTask?.destroy();
     };
   }, [url]);
 

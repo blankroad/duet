@@ -10,16 +10,27 @@ const page = {
 };
 vi.mock("pdfjs-dist", () => ({
   GlobalWorkerOptions: {},
-  getDocument: () => ({
-    promise: Promise.resolve({
-      numPages: 30,
-      getPage: () =>
-        new Promise((r) => {
-          releasePage = () => r(page);
-        }),
+  PDFDataRangeTransport: class {
+    requestDataRange(_begin: number, _end: number) {}
+    onDataRange(_begin: number, _chunk: Uint8Array) {}
+  },
+  getDocument: (source: {
+    range?: { requestDataRange: (begin: number, end: number) => void };
+  }) => {
+    if (source.range)
+      queueMicrotask(() => source.range?.requestDataRange(65536, 131072));
+    return {
       destroy: () => Promise.resolve(),
-    }),
-  }),
+      promise: Promise.resolve({
+        numPages: 30,
+        getPage: () =>
+          new Promise((r) => {
+            releasePage = () => r(page);
+          }),
+        destroy: () => Promise.resolve(),
+      }),
+    };
+  },
 }));
 vi.mock("pdfjs-dist/build/pdf.worker.min.mjs?url", () => ({ default: "" }));
 
@@ -27,9 +38,16 @@ const { PreviewPdf } = await import("./PreviewPdf");
 
 beforeEach(async () => {
   await i18n.changeLanguage("en");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(new Uint8Array([1, 2, 3]))),
+  );
   HTMLCanvasElement.prototype.getContext = (() => ({})) as never;
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 it("keeps the loading notice until the first page is drawn, then shows the page limit", async () => {
   render(
@@ -63,4 +81,67 @@ it("re-reads the same PDF path when the file version changes", async () => {
   );
   await act(async () => {});
   expect(spy.mock.calls.length).toBe(before + 1);
+});
+
+it("requests the initial PDF range explicitly", async () => {
+  render(
+    <PreviewPdf url="duet-preview://x" fallback={<button>open</button>} />,
+  );
+  await act(async () => {});
+  expect(fetch).toHaveBeenCalledWith("duet-preview://x", {
+    headers: { Range: "bytes=0-65535" },
+    signal: expect.any(AbortSignal),
+  });
+});
+
+it("shows the existing fallback when the initial range fails", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(null, { status: 413 })),
+  );
+  render(
+    <PreviewPdf url="duet-preview://x" fallback={<button>open</button>} />,
+  );
+  await act(async () => {});
+  expect(screen.getByRole("button", { name: "open" })).toBeTruthy();
+  expect(screen.queryByText("Loading…")).toBeNull();
+});
+
+it("aborts an in-flight fetch when unmounted", async () => {
+  const signals: AbortSignal[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((_url: string, init: RequestInit) => {
+      const signal = init.signal as AbortSignal;
+      signals.push(signal);
+      return new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(new Error("aborted")));
+      });
+    }),
+  );
+  const view = render(<PreviewPdf url="duet-preview://x" fallback={null} />);
+  await act(async () => {});
+  view.unmount();
+  expect(signals).toHaveLength(1);
+  expect(signals[0]?.aborted).toBe(true);
+});
+
+it("shows the fallback when a later PDF range fails", async () => {
+  const mockFetch = vi
+    .fn()
+    .mockResolvedValueOnce(
+      new Response(new Uint8Array(65536), {
+        status: 206,
+        headers: { "Content-Range": "bytes 0-65535/200000" },
+      }),
+    )
+    .mockResolvedValueOnce(new Response(null, { status: 500 }));
+  vi.stubGlobal("fetch", mockFetch);
+  render(
+    <PreviewPdf url="duet-preview://x" fallback={<button>open</button>} />,
+  );
+  await act(async () => {});
+  expect(mockFetch).toHaveBeenCalledTimes(2);
+  expect(screen.getByRole("button", { name: "open" })).toBeTruthy();
+  expect(screen.queryByText("Loading…")).toBeNull();
 });
