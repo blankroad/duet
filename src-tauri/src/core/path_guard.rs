@@ -10,7 +10,8 @@
 //! 정규화:
 //! - 로컬: `tokio::fs::canonicalize` 로 실제 경로를 얻는다 — 심볼릭 링크, macOS `/var`→
 //!   `/private/var`, Windows `C:/a` vs `C:\a\` 표기 차이를 흡수한다. 경로가 아직 없으면
-//!   lexical(`.`/`..` 정리) 후 **존재하는 가장 긴 조상**만 canonicalize 하고 나머지를 붙인다.
+//!   `..` 를 지우지 않은 채 **처음 canonicalize 되는 조상**을 찾고, 남은 꼬리를 한 칸씩 붙인다
+//!   (`..` 는 한 칸 위로 — 심볼릭 링크 뒤의 `..` 가 링크 대상의 부모가 되도록).
 //!   OS 분기 없는 tokio 호출이라 `platform/` 을 거치지 않는다(`fs/local.rs` 는 수정 금지 구간).
 //! - 원격: POSIX 문자열 lexical (`/` 만 구분자, 이름 속 `\` 는 일반 문자). 네트워크 왕복을
 //!   더하지 않으므로 원격 심볼릭 링크로 하위를 가리키는 경우는 못 잡는다(그건 copy_tree 의
@@ -21,7 +22,6 @@
 use crate::core::copy_strategy::{decide_fs, CopyStrategy};
 use crate::fs::FileSystem;
 use crate::types::{DuetError, Location, SourceId};
-use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 
 /// 두 경로(a, b)의 포함 관계.
@@ -169,41 +169,60 @@ pub async fn ensure_output_not_in_selection(
 /// 항목이 심볼릭 링크면 복사·이동되는 것은 링크 자체다(copy_tree 는 lstat 로 링크 폴더 안으로
 /// 들어가지 않는다). 링크 대상을 따라가 비교하면 `lnk -> real` 을 `real/sub` 로 옮기는 정상
 /// 작업까지 막는다.
+/// 마지막이 `..`/`.` 이면 이름이 아니라 위치라 [`local_key`] 로 통째로 정규화한다.
 async fn local_item_key(p: &Path) -> PathBuf {
-    let lex = lexical_local(p);
-    match (lex.parent(), lex.file_name()) {
-        (Some(parent), Some(name)) => {
+    match (p.parent(), p.components().next_back()) {
+        (Some(parent), Some(Component::Normal(name))) => {
             let mut key = local_key(parent).await;
             key.push(name);
             key
         }
-        _ => local_key(&lex).await,
+        _ => local_key(p).await,
     }
 }
 
-/// 로컬 경로 비교 키 — canonicalize, 실패하면 lexical 후 존재하는 가장 긴 조상만 canonicalize.
+/// 로컬 경로 비교 키 — canonicalize. 경로가 아직 없으면 **원래 경로의 조상**을(`..` 를 지우지
+/// 않고) 위로 올라가 처음 canonicalize 되는 곳에서 시작해, 남은 꼬리를 한 칸씩 붙인다.
+///
+/// `..` 를 lexical 로 먼저 지우면 안 된다: 심볼릭 링크 뒤의 `..` 는 물리적으로 링크 대상의
+/// 부모다(`outside/link/..` 는 `link` 가 가리키는 폴더의 부모). 꼬리에서는 `..` 면 한 칸 올라가고,
+/// 이름을 붙인 뒤엔 다시 canonicalize 를 시도한다 — `nope/../link` 처럼 `..` 로 돌아온 뒤의
+/// 이름은 존재하는 링크일 수 있다(`create_dir_all` 은 `nope` 을 만든 뒤 그 링크를 따라간다).
+/// 어느 조상도 canonicalize 되지 않으면(상대경로 등) lexical 로 비교한다.
 async fn local_key(p: &Path) -> PathBuf {
     if let Ok(c) = tokio::fs::canonicalize(p).await {
         return c;
     }
-    let lex = lexical_local(p);
-    let mut base: &Path = &lex;
-    let mut tail: Vec<OsString> = Vec::new();
-    loop {
-        if let Ok(mut c) = tokio::fs::canonicalize(base).await {
-            for name in tail.iter().rev() {
-                c.push(name);
-            }
-            return c;
-        }
-        match (base.parent(), base.file_name()) {
-            (Some(parent), Some(name)) => {
-                tail.push(name.to_os_string());
+    let mut base: &Path = p;
+    let mut tail: Vec<Component<'_>> = Vec::new();
+    let mut key = loop {
+        match (base.parent(), base.components().next_back()) {
+            (Some(parent), Some(last)) => {
+                tail.push(last);
                 base = parent;
             }
-            _ => return lex,
+            _ => return lexical_local(p),
+        }
+        if let Ok(c) = tokio::fs::canonicalize(base).await {
+            break c;
+        }
+    };
+    for c in tail.into_iter().rev() {
+        match c {
+            Component::Normal(name) => {
+                key.push(name);
+                if let Ok(real) = tokio::fs::canonicalize(&key).await {
+                    key = real;
+                }
+            }
+            // canonical 경로의 부모도 canonical. 루트 위로는 못 올라간다(pop 이 false).
+            Component::ParentDir => {
+                key.pop();
+            }
+            Component::CurDir | Component::RootDir | Component::Prefix(_) => {}
         }
     }
+    key
 }
 
 /// `.` 제거·`..` 로 한 칸 올라가기(루트 위로는 안 감). 파일시스템을 보지 않는다.
@@ -456,6 +475,52 @@ mod tests {
         )
         .await;
         assert!(matches!(r, Err(DuetError::IntoItself(_))), "{r:?}");
+    }
+
+    /// 심볼릭 링크 뒤의 `..` 는 링크 대상의 부모다 — lexical 로 먼저 지우면 링크의 부모로 잘못 본다.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn dot_dot_after_symlink_follows_the_link_target() {
+        let t = tempfile::tempdir().unwrap();
+        let src = t.path().join("src");
+        std::fs::create_dir_all(src.join("existing")).unwrap();
+        let outside = t.path().join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        let link = outside.join("link");
+        std::os::unix::fs::symlink(src.join("existing"), &link).unwrap();
+        let into_src = |dst: PathBuf| {
+            let src = src.clone();
+            async move {
+                ensure_not_into_itself(
+                    &LocalFs,
+                    &SourceId::Local,
+                    std::slice::from_ref(&src),
+                    &LocalFs,
+                    &local(&dst),
+                )
+                .await
+            }
+        };
+        // 없는 목적지 outside/link/../not-yet — 실제로 만들면 src/not-yet(원본 안).
+        let r = into_src(link.join("..").join("not-yet")).await;
+        assert!(matches!(r, Err(DuetError::IntoItself(_))), "{r:?}");
+        // outside/nope/../link/new — create_dir_all 은 nope 을 만든 뒤 링크를 따라 src/existing/new
+        // 를 만든다. 꼬리의 이름이 새로 생긴 링크일 수 있으니 한 칸씩 다시 canonicalize 해야 한다.
+        let r = into_src(outside.join("nope").join("..").join("link").join("new")).await;
+        assert!(matches!(r, Err(DuetError::IntoItself(_))), "{r:?}");
+        // 항목 경로에도 같은 원칙 — outside/link/../existing 은 src/existing 이다.
+        let r = ensure_not_into_itself(
+            &LocalFs,
+            &SourceId::Local,
+            &[link.join("..").join("existing")],
+            &LocalFs,
+            &local(&src.join("existing").join("sub")),
+        )
+        .await;
+        assert!(matches!(r, Err(DuetError::IntoItself(_))), "{r:?}");
+        // 링크가 아닌 진짜 바깥 폴더로의 `..` 는 여전히 통과.
+        let r = into_src(outside.join("x").join("..").join("not-yet")).await;
+        assert!(r.is_ok(), "{r:?}");
     }
 
     #[tokio::test]
