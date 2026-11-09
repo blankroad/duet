@@ -76,7 +76,7 @@ describe("C-15 toast auto-dismiss", () => {
 });
 
 describe("C-15 notice badge", () => {
-  it.fails(
+  it(
     "shell-settings-25: 기록이 50개로 꽉 찬 뒤엔 목록을 열어 둔 채 새 알림이 와도 읽음 처리되지 않는다",
     () => {
       act(() => {
@@ -103,7 +103,7 @@ describe("C-15 notice badge", () => {
     expect(useNotices.getState().unread).toBe(0);
   });
 
-  it.fails(
+  it(
     "shell-settings-25: 키보드로 '모두 지우기' 를 누르면 포커스가 body 로 떨어지지 않는다",
     () => {
       act(() => useNotices.getState().add({ kind: "error", message: "x" }));
@@ -124,7 +124,7 @@ describe("C-15 notice badge", () => {
     },
   );
 
-  it.fails(
+  it(
     "shell-settings-25: 목록 밖으로 Tab 해 나간 뒤 Esc 로 목록을 닫을 수 있다",
     () => {
       act(() => useNotices.getState().add({ kind: "error", message: "x" }));

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { AlertCircle, AlertTriangle, X } from "lucide-react";
@@ -22,11 +22,42 @@ export function NoticeBadge() {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const close = useCallback((clearing = false) => {
+    setOpen(false);
+    const target = clearing ? returnFocusRef.current : buttonRef.current;
+    if (target?.isConnected) target.focus();
+  }, []);
+
+  const rememberFocus = () => {
+    const active = document.activeElement;
+    if (
+      active instanceof HTMLElement &&
+      active !== document.body &&
+      active !== buttonRef.current
+    ) {
+      returnFocusRef.current = active;
+      return;
+    }
+    // 배지가 비워져 사라질 때는 바로 앞의 안정된 컨트롤로 돌아간다.
+    const controls = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        "button, a[href], input, select, textarea, [tabindex]",
+      ),
+    ).filter(
+      (el) =>
+        el.tabIndex >= 0 &&
+        !el.matches(":disabled") &&
+        !el.closest('[hidden], [aria-hidden="true"]'),
+    );
+    const index = controls.indexOf(buttonRef.current!);
+    returnFocusRef.current = controls[index - 1] ?? controls[index + 1] ?? null;
+  };
 
   // 열려 있는 동안 새로 온 알림도 바로 읽음.
   useEffect(() => {
-    if (open) useNotices.getState().markAllRead();
-  }, [open, items.length]);
+    if (open && unread > 0) useNotices.getState().markAllRead();
+  }, [open, unread]);
 
   useEffect(() => {
     if (!open) return;
@@ -40,17 +71,43 @@ export function NoticeBadge() {
         return;
       setOpen(false);
     };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        close();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const panel = panelRef.current;
+      if (!panel) return;
+      const controls = Array.from(
+        panel.querySelectorAll<HTMLElement>(
+          "button, a[href], input, select, textarea, summary, [tabindex]",
+        ),
+      ).filter((el) => el.tabIndex >= 0 && !el.matches(":disabled"));
+      const first = controls[0];
+      const last = controls.at(-1);
+      const active = document.activeElement;
+      if (
+        !panel.contains(active) ||
+        active === panel ||
+        (e.shiftKey ? active === first : active === last)
+      ) {
+        e.preventDefault();
+        (e.shiftKey ? last : first)?.focus();
+      }
+    };
     document.addEventListener("pointerdown", onPointerDown, true);
-    return () =>
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
       document.removeEventListener("pointerdown", onPointerDown, true);
-  }, [open]);
+      window.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [open, close]);
 
   if (items.length === 0) return null;
 
-  const close = () => {
-    setOpen(false);
-    buttonRef.current?.focus();
-  };
   const label =
     unread > 0
       ? t("notices.openUnread", { count: unread })
@@ -61,7 +118,10 @@ export function NoticeBadge() {
       <button
         ref={buttonRef}
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          if (!open) rememberFocus();
+          setOpen((v) => !v);
+        }}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={label}
@@ -83,11 +143,6 @@ export function NoticeBadge() {
             role="dialog"
             aria-label={t("notices.title")}
             tabIndex={-1}
-            onKeyDown={(e) => {
-              if (e.key !== "Escape") return;
-              e.stopPropagation();
-              close();
-            }}
             className="fixed bottom-7 right-2 z-[60] flex max-h-[50vh] w-[min(28rem,calc(100vw-1rem))] flex-col rounded-panel border border-border bg-base text-base text-fg shadow-raised focus:outline-none"
           >
             <div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
@@ -95,8 +150,8 @@ export function NoticeBadge() {
               <button
                 type="button"
                 onClick={() => {
+                  close(true);
                   useNotices.getState().clear();
-                  close();
                 }}
                 className="rounded px-1.5 py-0.5 text-meta text-fg-muted hover:bg-border hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
               >
@@ -104,7 +159,7 @@ export function NoticeBadge() {
               </button>
               <button
                 type="button"
-                onClick={close}
+                onClick={() => close()}
                 aria-label={t("common.close")}
                 title={t("common.close")}
                 className="flex h-6 w-6 items-center justify-center rounded text-fg-muted hover:bg-border hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
