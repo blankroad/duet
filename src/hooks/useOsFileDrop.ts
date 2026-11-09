@@ -4,7 +4,7 @@ import { commands } from "@/types/bindings";
 import { useUIDialogs } from "@/stores/ui-dialogs";
 import { useToast } from "@/stores/toast";
 import { dropLocationAt, resolveSidebarDropAt } from "@/lib/dropTarget";
-import { formatErr } from "@/lib/error";
+import { showError } from "@/lib/errorToast";
 import { selfDropKind } from "@/lib/selfDrag";
 import i18n from "@/i18n";
 
@@ -52,10 +52,10 @@ export function useOsFileDrop() {
         const r = await commands.fsCopyPlanExternal(paths, dst);
         if (r.status === "ok") open({ kind: "copy-confirm", plan: r.data });
         else
-          showToast(
-            i18n.t("toast.importFailed", { err: formatErr(r.error) }),
-            "error",
-          );
+          showError("toast.importFailed", r.error, {
+            path: paths.length === 1 ? paths[0] : null,
+            toast: showToast,
+          });
       })
       .then((un) => {
         if (cancelled) un();

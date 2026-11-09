@@ -5,7 +5,7 @@ import { useToast } from "@/stores/toast";
 import { commands, type Entry, type Location } from "@/types/bindings";
 import { childLocation } from "@/lib/entryDnd";
 import { revealCreatedEntry } from "@/lib/newEntry";
-import { formatErr } from "@/lib/error";
+import { showError } from "@/lib/errorToast";
 import i18n from "@/i18n";
 
 export function useCreateEntry(
@@ -34,10 +34,7 @@ export function useCreateEntry(
         revealCreatedEntry(tabId, parent, name, entries);
         refreshAffected([parent], tabId);
       } catch (e) {
-        show(
-          i18n.t("dialog.newEntry.refreshFailed", { err: formatErr(e) }),
-          "error",
-        );
+        showError("dialog.newEntry.refreshFailed", e, { toast: show });
       }
       if (edit && dialog.kind === "new-file") {
         try {
@@ -48,10 +45,10 @@ export function useCreateEntry(
               : await commands.openPath(loc, true);
           if (result.status === "error") throw result.error;
         } catch (e) {
-          show(
-            i18n.t("dialog.newEntry.editFailed", { err: formatErr(e) }),
-            "error",
-          );
+          showError("dialog.newEntry.editFailed", e, {
+            path: name,
+            toast: show,
+          });
         }
       }
     },

@@ -1,7 +1,7 @@
 import { useTasks } from "@/stores/tasks";
 import { useToast } from "@/stores/toast";
 import { commands } from "@/types/bindings";
-import { formatErr } from "@/lib/error";
+import { explainError } from "@/lib/error";
 
 /** Shared cancellation state survives moving a task into the background. */
 export function useTaskCancel(id: string) {
@@ -15,7 +15,14 @@ export function useTaskCancel(id: string) {
       if (result.status === "error") throw result.error;
     } catch (e) {
       useTasks.getState().setCancelling(id, false);
-      useToast.getState().show(formatErr(e), "error");
+      const why = explainError(e);
+      useToast
+        .getState()
+        .show(
+          why.text,
+          "error",
+          why.detail ? { detail: why.detail } : undefined,
+        );
     }
   };
   return { cancelling, cancel };

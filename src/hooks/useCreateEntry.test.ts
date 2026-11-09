@@ -55,9 +55,11 @@ it("does not report refresh failure as creation failure or close a newer dialog"
   });
   expect(useUIDialogs.getState().dialog).toBe(newer);
   expect(commands.fsCreateFile).toHaveBeenCalledTimes(1);
+  // G-16: 원문은 알림 "자세히"(detail)에도 남는다.
   expect(useToast.getState().show).toHaveBeenCalledWith(
     expect.stringContaining("offline"),
     "error",
+    { detail: "offline" },
   );
 });
 it("opens the newly created remote file using the captured destination", async () => {
