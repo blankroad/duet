@@ -11,3 +11,4 @@ pub mod sudo;
 pub mod tar_unpack;
 pub mod three_way;
 pub mod undo;
+pub mod zip_names;
