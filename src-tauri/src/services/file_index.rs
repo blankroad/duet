@@ -58,6 +58,25 @@ impl CompactIndex {
     fn count(&self) -> usize {
         self.kinds.len()
     }
+
+    /// 디스크 캐시에서 읽은 인덱스의 구조 검사 — 배열 길이·오프셋이 어긋나면 검색 중
+    /// 범위 밖 인덱싱·문자 경계 slice 로 panic 한다(SC-26). 어긋나면 캐시를 버리고 새로 만든다.
+    fn is_consistent(&self) -> bool {
+        let n = self.count();
+        self.sizes.len() == n
+            && self.mtimes.len() == n
+            && offsets_ok(&self.path_off, &self.paths, n)
+            && offsets_ok(&self.name_off, &self.names_lower, n)
+    }
+}
+
+/// `off` 가 `n + 1` 개, 0 에서 시작해 단조 증가, `buf.len()` 에서 끝나고 모두 문자 경계인지.
+fn offsets_ok(off: &[u32], buf: &str, n: usize) -> bool {
+    off.len() == n + 1
+        && off.first() == Some(&0)
+        && off.last().map(|&e| e as usize) == Some(buf.len())
+        && off.windows(2).all(|w| w[0] <= w[1])
+        && off.iter().all(|&o| buf.is_char_boundary(o as usize))
 }
 
 /// 콤팩트 인덱스 빌더 — 워크/find 가 항목을 push, 끝나면 finish.
@@ -195,7 +214,13 @@ impl FileIndex {
 
     async fn load_from_disk(&self, key: &str) -> Option<CompactIndex> {
         let bytes = tokio::fs::read(self.cache_path(key)).await.ok()?;
-        serde_json::from_slice(&bytes).ok()
+        let idx: CompactIndex = serde_json::from_slice(&bytes).ok()?;
+        if idx.is_consistent() {
+            Some(idx)
+        } else {
+            tracing::warn!("index cache {key}: inconsistent structure, ignoring");
+            None
+        }
     }
 
     /// 인덱스가 이미(메모리/디스크에) 있으면 true.
@@ -497,6 +522,36 @@ mod tests {
     use super::*;
     use std::net::{IpAddr, Ipv4Addr};
     use tempfile::tempdir;
+
+    #[test]
+    fn built_index_is_consistent_and_broken_offsets_are_not() {
+        let mut b = CompactBuilder::new();
+        b.push(&IndexedPath {
+            path: PathBuf::from("/a/한글.txt"),
+            kind: EntryKind::File,
+            size: 1,
+            modified_ms: None,
+        });
+        let good = b.finish(0);
+        assert!(good.is_consistent());
+
+        let mut short = good.clone();
+        short.mtimes.clear();
+        assert!(!short.is_consistent());
+
+        // "/a/한" 중간(멀티바이트 문자 안쪽)을 가리키는 오프셋 — slice 하면 panic 했을 것.
+        let mut mid_char = good.clone();
+        mid_char.path_off = vec![0, 4, good.paths.len() as u32];
+        mid_char.kinds.push(0);
+        mid_char.sizes.push(0);
+        mid_char.mtimes.push(0);
+        mid_char.name_off.push(good.names_lower.len() as u32);
+        assert!(!mid_char.is_consistent());
+
+        let mut empty_off = good;
+        empty_off.path_off.clear();
+        assert!(!empty_off.is_consistent());
+    }
 
     fn ssh_source() -> SourceId {
         SourceId::Ssh {

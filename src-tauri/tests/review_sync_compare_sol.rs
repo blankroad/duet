@@ -668,7 +668,6 @@ async fn index_freshness_and_invalid_json_cache_fall_back() {
 }
 
 #[tokio::test]
-#[ignore = "sync-compare repro: F-sol-07 corrupt compact arrays panic"]
 async fn index_structurally_corrupt_json_does_not_panic() {
     let t = tempdir().unwrap();
     let cache = tempdir().unwrap();
