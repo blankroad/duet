@@ -332,12 +332,13 @@ fn remove_path(p: &Path) -> std::io::Result<()> {
 fn backup_temp_path(dst: &Path) -> PathBuf {
     // 이름 길이 한계(255)를 넘기면 앞부분을 잘라 자리를 만든다 — 안 그러면 긴 이름의
     // 항목에서 백업 자체가 실패해 덮어쓰기가 통째로 무산된다.
-    let cand = crate::fs::sibling_with_suffix(dst, ".duet-elevbak");
+    let cand = crate::fs::sibling_with_suffix(&crate::fs::LocalFs, dst, ".duet-elevbak");
     if !cand.exists() {
         return cand;
     }
     for n in 1..10000 {
-        let c = crate::fs::sibling_with_suffix(dst, &format!(".duet-elevbak.{n}"));
+        let c =
+            crate::fs::sibling_with_suffix(&crate::fs::LocalFs, dst, &format!(".duet-elevbak.{n}"));
         if !c.exists() {
             return c;
         }

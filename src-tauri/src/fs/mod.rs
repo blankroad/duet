@@ -457,8 +457,18 @@ fn fnv1a(s: &str) -> u32 {
 }
 
 /// `path` 의 파일명에 접미사를 붙인 형제 경로 — 길이 한계를 지킨다.
+/// 원격은 POSIX 부모·이름과 dst_fs.join, 로컬은 기존 native 경로 규칙을 쓴다.
 /// 이름이 비-UTF8 이면 예전처럼 그냥 이어붙인다(길이 조정 불가, 흔치 않은 경우).
-pub(crate) fn sibling_with_suffix(path: &std::path::Path, suffix: &str) -> std::path::PathBuf {
+pub(crate) fn sibling_with_suffix(
+    dst_fs: &dyn FileSystem,
+    path: &std::path::Path,
+    suffix: &str,
+) -> std::path::PathBuf {
+    if matches!(dst_fs.source_id(), SourceId::Ssh { .. }) {
+        if let Some((parent, name)) = posix_path::parent(path).zip(posix_path::file_name(path)) {
+            return dst_fs.join(&parent, &suffixed_name(name, suffix));
+        }
+    }
     match path.file_name().and_then(|n| n.to_str()) {
         Some(name) => path.with_file_name(suffixed_name(name, suffix)),
         None => {
@@ -483,7 +493,7 @@ async fn native_copy_file(
     dst: &std::path::Path,
     on_bytes: &(dyn Fn(u64) + Send + Sync),
 ) -> Result<(), DuetError> {
-    let part = part_path(dst);
+    let part = part_path(dst_fs, dst);
     let (from, to) = (src.to_path_buf(), part.clone());
     let written = tokio::task::spawn_blocking(move || {
         let n = std::fs::copy(&from, &to)?;
@@ -515,8 +525,8 @@ fn copy_mtime(src: &std::path::Path, dst: &std::path::Path) {
 
 /// `<dst>.duet-part` 임시 경로 — 완성 전까지 여기에 쓰고, 끝나면 dst 로 rename.
 /// 중단되면 dst(최종 이름)는 안 생기고 .part 만 남아 재개에 쓰인다.
-fn part_path(dst: &std::path::Path) -> std::path::PathBuf {
-    sibling_with_suffix(dst, ".duet-part")
+fn part_path(dst_fs: &dyn FileSystem, dst: &std::path::Path) -> std::path::PathBuf {
+    sibling_with_suffix(dst_fs, dst, ".duet-part")
 }
 
 /// 단일 파일을 고정 버퍼로 흘려 복사 — 전체를 메모리에 올리지 않음(대용량 안전).
@@ -532,7 +542,7 @@ pub(crate) async fn stream_copy_file(
     on_bytes: &(dyn Fn(u64) + Send + Sync),
 ) -> Result<(), DuetError> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    let part = part_path(dst);
+    let part = part_path(dst_fs, dst);
     // 재개 시작 오프셋 = 기존 .part 의 실제 크기 (실제 persist 된 만큼). fresh 면 0.
     let start = if resume {
         dst_fs
@@ -594,7 +604,7 @@ async fn finalize_part(
 ) -> Result<(), DuetError> {
     if let Err(e) = dst_fs.rename(part, dst).await {
         if dst_fs.metadata(dst).await.is_ok() {
-            let backup = sibling_with_suffix(dst, ".duet-old");
+            let backup = sibling_with_suffix(dst_fs, dst, ".duet-old");
             dst_fs.rename(dst, &backup).await?; // dst → 백업 (원본 보존)
             dst_fs.rename(part, dst).await?; // part → dst
             let _ = dst_fs.remove(&backup).await; // 백업 정리 (실패는 비치명)
@@ -689,12 +699,29 @@ mod tests {
         rename_count: Mutex<u32>,
         /// 첫 rename(part→dst) 을 실패시켜 SFTP "교체 불가" 를 흉내.
         fail_first_rename: bool,
+        /// Remote recording fixture: redirect child joins to a recognizable root.
+        remote: bool,
     }
 
     #[async_trait]
     impl FileSystem for RecordingFs {
         fn source_id(&self) -> SourceId {
-            SourceId::Local
+            if self.remote {
+                SourceId::Ssh {
+                    connection_id: crate::types::ConnectionId("record-only".into()),
+                    host_ip: "127.0.0.1".parse().unwrap(),
+                    user: "fixture".into(),
+                }
+            } else {
+                SourceId::Local
+            }
+        }
+        fn join(&self, base: &Path, name: &str) -> std::path::PathBuf {
+            if self.remote {
+                posix_join(Path::new("/mapped"), name)
+            } else {
+                base.join(name)
+            }
         }
         async fn list(&self, _p: &Path) -> Result<Vec<Entry>, DuetError> {
             unimplemented!()
@@ -748,18 +775,88 @@ mod tests {
         }
         async fn open_read(
             &self,
-            _p: &Path,
-            _o: u64,
+            path: &Path,
+            offset: u64,
         ) -> Result<Pin<Box<dyn tokio::io::AsyncRead + Send>>, DuetError> {
-            unimplemented!()
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("open_read({},{offset})", path.display()));
+            let mut reader = std::io::Cursor::new(b"abcdef".to_vec());
+            reader.set_position(offset);
+            Ok(Box::pin(reader))
         }
         async fn open_write(
             &self,
-            _p: &Path,
-            _o: u64,
+            path: &Path,
+            offset: u64,
         ) -> Result<Pin<Box<dyn tokio::io::AsyncWrite + Send>>, DuetError> {
-            unimplemented!()
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("open_write({},{offset})", path.display()));
+            Ok(Box::pin(tokio::io::sink()))
         }
+    }
+
+    #[tokio::test]
+    async fn r3_paths_remote_part_uses_destination_join_for_resume() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        let src = RecordingFs::default();
+        let dst = RecordingFs {
+            remote: true,
+            ..Default::default()
+        };
+        let written = AtomicU64::new(0);
+        super::stream_copy_file(
+            &src,
+            Path::new("/input"),
+            &dst,
+            Path::new(r"/home/u/dir/a\b"),
+            true,
+            &tokio_util::sync::CancellationToken::new(),
+            &|n| {
+                written.fetch_add(n, Ordering::Relaxed);
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(written.load(Ordering::Relaxed), 5);
+        assert_eq!(*src.calls.lock().unwrap(), ["open_read(/input,1)"]);
+        assert_eq!(
+            *dst.calls.lock().unwrap(),
+            [
+                r"metadata(/mapped/a\b.duet-part)",
+                r"open_write(/mapped/a\b.duet-part,1)",
+                r"rename(/mapped/a\b.duet-part,/home/u/dir/a\b)",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn r3_paths_remote_backup_uses_destination_join() {
+        let fs = RecordingFs {
+            remote: true,
+            fail_first_rename: true,
+            ..Default::default()
+        };
+        finalize_part(
+            &fs,
+            Path::new("/upload.part"),
+            Path::new(r"/home/u/dir/a\b"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            *fs.calls.lock().unwrap(),
+            [
+                r"rename(/upload.part,/home/u/dir/a\b)",
+                r"metadata(/home/u/dir/a\b)",
+                r"rename(/home/u/dir/a\b,/mapped/a\b.duet-old)",
+                r"rename(/upload.part,/home/u/dir/a\b)",
+                r"remove(/mapped/a\b.duet-old)",
+            ]
+        );
     }
 
     #[tokio::test]
