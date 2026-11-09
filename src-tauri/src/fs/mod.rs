@@ -345,19 +345,46 @@ async fn copy_tree(
     on_bytes: &(dyn Fn(u64) + Send + Sync),
     on_file: &(dyn Fn(&std::path::Path) + Send + Sync),
 ) -> Result<(), DuetError> {
+    // 같은 fs 면 이번 복사의 최상위 대상 경로를 기억해, 원본 트리를 걷다 그 경로를 만나면
+    // 건너뛴다 — 폴더를 자기 하위로 복사할 때 방금 만든 사본을 다시 복사하지 않는 마지막
+    // 방어선(정상 경로는 core::path_guard 가 plan/execute 에서 이미 거부한다).
+    let skip = (src_fs.source_id() == dst_fs.source_id()).then_some(dst);
+    copy_tree_inner(
+        src_fs, src, dst_fs, dst, skip, resume, cancel, on_bytes, on_file,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn copy_tree_inner(
+    src_fs: &dyn FileSystem,
+    src: &std::path::Path,
+    dst_fs: &dyn FileSystem,
+    dst: &std::path::Path,
+    skip: Option<&std::path::Path>,
+    resume: bool,
+    cancel: &CancellationToken,
+    on_bytes: &(dyn Fn(u64) + Send + Sync),
+    on_file: &(dyn Fn(&std::path::Path) + Send + Sync),
+) -> Result<(), DuetError> {
     // lstat 로 판정 — 심볼릭-디렉토리를 따라가 재귀하지 않게(원격 symlink 무한 복사/사이클
     // 방지). 링크는 아래 `_` 갈래로 가서 단일 항목으로 처리(파일 내용은 open_read 가 따라감).
     let meta = src_fs.symlink_metadata(src).await?;
     match meta.kind {
         crate::types::EntryKind::Dir => {
-            dst_fs.mkdir(dst).await?;
+            // 원본 목록을 **대상 mkdir 전에** 확정한다 — 대상이 원본 안에 있으면 mkdir 후에
+            // 읽은 목록엔 방금 만든 대상 폴더가 끼어 자기 복제가 된다(fileops-04).
             let entries = src_fs.list(src).await?;
+            dst_fs.mkdir(dst).await?;
             for e in entries {
                 // 각 fs 의 구분자 규칙으로 결합(원격=POSIX, 이름의 `\` 보존).
                 let child_src = src_fs.join(src, &e.name);
+                if skip == Some(child_src.as_path()) {
+                    continue;
+                }
                 let child_dst = dst_fs.join(dst, &e.name);
-                Box::pin(copy_tree(
-                    src_fs, &child_src, dst_fs, &child_dst, resume, cancel, on_bytes, on_file,
+                Box::pin(copy_tree_inner(
+                    src_fs, &child_src, dst_fs, &child_dst, skip, resume, cancel, on_bytes, on_file,
                 ))
                 .await?;
             }
@@ -890,5 +917,27 @@ mod review_fileops_opus_r3 {
             "folder resume fails at mkdir of the existing destination"
         );
         assert!(dst.join("b.txt").exists());
+    }
+}
+
+/// copy_tree 자기 하위 복사 방어선(fileops-04) — 상위 가드를 우회해 직접 불러도 한 벌만 복사.
+#[cfg(test)]
+mod copy_tree_self_nesting {
+    use super::{copy_relay, LocalFs};
+
+    #[tokio::test]
+    async fn copy_into_own_child_copies_snapshot_once() {
+        let t = tempfile::tempdir().unwrap();
+        let a = t.path().join("a");
+        std::fs::create_dir_all(a.join("sub")).unwrap();
+        std::fs::write(a.join("file"), b"payload").unwrap();
+        let fs = LocalFs::new();
+        let dst = a.join("sub").join("a");
+        copy_relay(&fs, &a, &fs, &dst).await.unwrap();
+        // 복사 시작 시점의 a = {file, sub(빈 폴더)} 만 들어간다.
+        assert_eq!(std::fs::read(dst.join("file")).unwrap(), b"payload");
+        assert!(dst.join("sub").is_dir());
+        assert!(!dst.join("sub").join("a").exists());
+        assert_eq!(std::fs::read_dir(dst.join("sub")).unwrap().count(), 0);
     }
 }
