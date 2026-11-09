@@ -100,7 +100,6 @@ impl FileSystem for Fixture {
 }
 
 #[tokio::test]
-#[ignore = "sync-compare repro: SC-03 independently confirmed in sol-3"]
 async fn sc03_apply_parent_child_backup_row_does_not_recurse_into_itself() {
     let t = tempdir().unwrap();
     let parent = t.path().join("project");

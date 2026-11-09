@@ -1128,11 +1128,9 @@ pub async fn sync_plan(
     src: Location,
     dst: Location,
 ) -> Result<SyncPlan, DuetError> {
-    if src.source == dst.source && src.path == dst.path {
-        return Err(DuetError::Io(
-            "sync: source and destination are the same".into(),
-        ));
-    }
+    // 같은 폴더뿐 아니라 상·하위 관계도 거부 — 자기 안으로 무한 복사, 반대 방향 + 삭제
+    // 전파면 원본 루트를 휴지통으로 보낸다(SC-03).
+    crate::core::path_guard::ensure_roots_unrelated(&src, &dst).await?;
     if src_fs.metadata(&src.path).await?.kind != crate::types::EntryKind::Dir
         || dst_fs.metadata(&dst.path).await?.kind != crate::types::EntryKind::Dir
     {
@@ -1185,6 +1183,7 @@ pub async fn sync_execute(
     cancel_token: tokio_util::sync::CancellationToken,
     progress: Option<crate::services::task_queue::ProgressEmitter>,
 ) -> Result<JournalEntry, DuetError> {
+    crate::core::path_guard::ensure_roots_unrelated(&plan.src, &plan.dst).await?;
     match plan.strategy {
         CopyStrategy::SshSameHost => {
             sync_execute_same_host(plan, ctx, cancel_token, progress).await
@@ -1649,6 +1648,7 @@ pub async fn sync_preview(
     dst: &Location,
     pool: Option<&Arc<crate::services::connection_pool::ConnectionPool>>,
 ) -> Result<SyncPreview, DuetError> {
+    crate::core::path_guard::ensure_roots_unrelated(src, dst).await?;
     match crate::core::copy_strategy::decide(&src.source, &dst.source) {
         crate::core::copy_strategy::CopyStrategy::SshSameHost => {
             let pool = pool
@@ -1824,6 +1824,7 @@ pub async fn merge_bidir(
     progress: Option<crate::services::task_queue::ProgressEmitter>,
 ) -> Result<JournalEntry, DuetError> {
     use crate::core::compare::CompareStatus;
+    crate::core::path_guard::ensure_roots_unrelated(&left, &right).await?;
     let mut plan =
         crate::core::compare::compare_dirs(left_fs, left.clone(), right_fs, right.clone()).await?;
     // 이동/이름변경 감지 시 — 이동 쌍을 entries 에서 제외해 양쪽 중복복제를 차단(핵심 안전).
@@ -2418,6 +2419,7 @@ pub async fn apply_compare(
     cancel_token: tokio_util::sync::CancellationToken,
     progress: Option<crate::services::task_queue::ProgressEmitter>,
 ) -> Result<JournalEntry, DuetError> {
+    crate::core::path_guard::ensure_roots_unrelated(&left, &right).await?;
     let work: Vec<(ApplyDirection, String)> = decisions
         .into_iter()
         .filter(|d| !matches!(d.direction, ApplyDirection::Skip))
@@ -2834,6 +2836,11 @@ pub async fn apply_three_way(
     progress: Option<crate::services::task_queue::ProgressEmitter>,
 ) -> Result<JournalEntry, DuetError> {
     use crate::core::three_way::{compare_three_way, ThreeWayStatus as S};
+    // left↔right 는 서로 복사·휴지통을 주고받고, base 는 둘의 기준이다 — 어느 쌍이든
+    // 상·하위면 비교 목록에 상대 루트가 섞여 자기 안으로 복사하거나 루트를 휴지통으로 보낸다.
+    for (a, b) in [(&left, &right), (&base, &left), (&base, &right)] {
+        crate::core::path_guard::ensure_roots_unrelated(a, b).await?;
+    }
     let plan = compare_three_way(
         base_fs,
         base.clone(),
@@ -5168,7 +5175,7 @@ mod tests {
             path: dir.path().to_path_buf(),
         };
         let r = sync_plan(&fs, &fs, loc.clone(), loc).await;
-        assert!(matches!(r, Err(DuetError::Io(_))));
+        assert!(matches!(r, Err(DuetError::IntoItself(_))));
     }
 
     #[tokio::test]
@@ -7264,7 +7271,7 @@ mod undo_record_tests {
     }
 }
 
-/// U-04: 폴더를 자기 자신/하위로 옮기는 이동 진입부 가드 + 정상 복사(부모·형제)는 허용.
+/// U-04 / SC-03: 같은 폴더·상하위 폴더끼리의 이동·동기화·병합·적용·3-way 진입부 가드.
 /// 모든 파일은 TempDir 안. 가드가 막는 경로만 실행하므로 OS 휴지통은 부르지 않는다.
 #[cfg(test)]
 mod nested_roots_guard {
@@ -7365,5 +7372,119 @@ mod nested_roots_guard {
         )
         .await;
         assert!(prefix.is_ok(), "{prefix:?}");
+    }
+
+    #[tokio::test]
+    async fn sync_plan_rejects_nested_roots_both_directions() {
+        let (_t, p, child) = tree();
+        for (src, dst) in [(&p, &child), (&child, &p), (&p, &p)] {
+            let r = sync_plan(&LocalFs, &LocalFs, loc(src), loc(dst)).await;
+            assert!(is_into_itself(&r), "{src:?} -> {dst:?}: {r:?}");
+            let pv = sync_preview(&LocalFs, &loc(src), &LocalFs, &loc(dst), None).await;
+            assert!(is_into_itself(&pv), "preview {src:?} -> {dst:?}: {pv:?}");
+        }
+    }
+
+    /// 반대 방향(자식 → 부모) + 삭제 전파: 부모에만 있는 `child` 가 prune 대상이 되어 원본
+    /// 루트가 휴지통으로 간다. plan 은 위에서 거부되고, execute 도 위조 plan 을 거부해야 한다.
+    /// (prune=false 로 보낸다 — 가드가 없을 때 이 테스트가 OS 휴지통을 부르지 않도록.
+    /// 가드는 prune 과 무관하게 진입부에서 동작한다.)
+    #[tokio::test]
+    async fn sync_execute_rejects_forged_child_to_parent_plan() {
+        let (t, p, child) = tree();
+        let c = mk_ctx(&t.path().join("ctx")).await;
+        let forged = SyncPlan {
+            src: loc(&child),
+            dst: loc(&p),
+            strategy: CopyStrategy::LocalToLocal,
+            prune: false,
+        };
+        let r = sync_execute(
+            &LocalFs,
+            &LocalFs,
+            forged,
+            &c,
+            CancellationToken::new(),
+            None,
+        )
+        .await;
+        assert!(is_into_itself(&r), "{r:?}");
+        assert!(!p.join("b.txt").exists(), "nothing may be copied");
+        assert_eq!(std::fs::read(child.join("b.txt")).unwrap(), b"b");
+        assert!(c.journal.history(10).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn merge_and_apply_reject_child_to_parent() {
+        let (t, p, child) = tree();
+        let c = mk_ctx(&t.path().join("ctx")).await;
+        let m = merge_bidir(
+            &LocalFs,
+            loc(&child),
+            &LocalFs,
+            loc(&p),
+            false,
+            &c,
+            CancellationToken::new(),
+            None,
+        )
+        .await;
+        assert!(is_into_itself(&m), "{m:?}");
+        let a = apply_compare(
+            &LocalFs,
+            loc(&child),
+            &LocalFs,
+            loc(&p),
+            vec![ApplyDecision {
+                rel: "b.txt".into(),
+                direction: ApplyDirection::ToRight,
+            }],
+            &c,
+            CancellationToken::new(),
+            None,
+        )
+        .await;
+        assert!(is_into_itself(&a), "{a:?}");
+        assert!(!p.join("b.txt").exists());
+        assert!(c.journal.history(10).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn three_way_rejects_any_nested_pair() {
+        let (t, p, child) = tree();
+        let base = t.path().join("base");
+        std::fs::create_dir_all(&base).unwrap();
+        let other = t.path().join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        let c = mk_ctx(&t.path().join("ctx")).await;
+        // (base, left, right) — left/right 상하위, base 가 left 를 품음, base 가 right 안.
+        let cases = [
+            (base.clone(), p.clone(), child.clone()),
+            (p.clone(), child.clone(), other.clone()),
+            (base.clone(), other.clone(), base.join(".")),
+        ];
+        for (b, l, r) in cases {
+            let res = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                apply_three_way(
+                    &LocalFs,
+                    loc(&b),
+                    &LocalFs,
+                    loc(&l),
+                    &LocalFs,
+                    loc(&r),
+                    &c,
+                    CancellationToken::new(),
+                    None,
+                ),
+            )
+            .await
+            .expect("guard must return immediately");
+            assert!(
+                is_into_itself(&res),
+                "base={b:?} left={l:?} right={r:?}: {res:?}"
+            );
+        }
+        assert!(c.journal.history(10).await.is_empty());
     }
 }

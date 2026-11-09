@@ -303,7 +303,6 @@ async fn sync_backups_accumulate_in_destination_and_are_pruned_later() {
 /// 방금 만든 폴더를 다시 읽어 끝없이 파고든다. 4단계에서 list 실패로 끊는다.
 /// 기대: 상하위 조합은 거부(또는 자기 자신은 제외).
 #[tokio::test]
-#[ignore = "sync-compare repro: SC-03 merge between a folder and its own subfolder copies the subfolder into itself"]
 async fn merge_parent_and_child_does_not_copy_into_itself() {
     let t = TempDir::new().unwrap();
     let p = t.path().join("p");
