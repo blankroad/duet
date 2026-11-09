@@ -321,3 +321,54 @@ describe("explainError — target name in the sentence (ss-04, ss-15)", () => {
     ).toBe("I/O error — target exists: /w/A.txt");
   });
 });
+
+describe("explainError — remote archive commands (archive-32)", () => {
+  const ssh = (message: string) => ({ kind: "Ssh", message });
+  const plain = (reason: string, vars?: Record<string, string>) =>
+    i18n.t(`errors.reason.${reason}`, vars ?? {});
+
+  it("unzip exit 50 is a full disk", () => {
+    expect(formatErr(ssh("host command failed (exit 50): "))).toBe(
+      plain("diskFull"),
+    );
+    expect(
+      formatErr(
+        ssh("host command failed (exit 50): error: write error (disk full?)"),
+      ),
+    ).toBe(plain("diskFull"));
+  });
+
+  it("an exit code without output says the command failed", () => {
+    expect(formatErr(ssh("host command failed (exit 1): "))).toBe(
+      plain("remoteExit", { code: "1" }),
+    );
+  });
+
+  it("a missing tar codec program names the program", () => {
+    expect(
+      formatErr(
+        ssh(
+          "host command failed (exit 2): tar (child): xz: Cannot exec: No such file or directory\ntar (child): Error is not recoverable: exiting now",
+        ),
+      ),
+    ).toBe(plain("remoteMissingProgram", { prog: "xz" }));
+    expect(
+      formatErr(
+        ssh(
+          'host command failed (exit 1): tar: Error opening archive: Can\'t initialize filter; unable to run program "zstd -d -qq"',
+        ),
+      ),
+    ).toBe(plain("remoteMissingProgram", { prog: "zstd" }));
+    expect(
+      formatErr(
+        ssh("host command failed (exit 64): tar: unrecognized option '--zstd'"),
+      ),
+    ).toBe(plain("remoteMissingProgram", { prog: "zstd" }));
+  });
+
+  it("an unknown host failure drops the developer prefix", () => {
+    expect(
+      formatErr(ssh("host command failed (exit 2): tar: something odd")),
+    ).toBe("SSH error — tar: something odd");
+  });
+});

@@ -104,7 +104,7 @@ describe("archive-opus C-15: explainError on archive errors (ko)", () => {
     expect(r.text).toMatch(expected);
   });
 
-  it.fails.each(raw)("archive-16: raw English stays: %s %s: %s", (os, kind, message, expected) => {
+  it.each(raw)("archive-16: raw English stays: %s %s: %s", (os, kind, message, expected) => {
     const r = explainError({ kind, message }, os);
     // 기대: 한국어 설명 문장. 현재: "입출력 오류 — <영어 원문>".
     expect(r.text).toMatch(expected);
@@ -119,7 +119,7 @@ describe("archive-opus C-15: explainError on archive errors (ko)", () => {
     expect(r.text).toMatch(/암호/);
   });
 
-  it.fails("archive-16: 원격 AES zip (unzip exit 81) 은 '압축 방식 미지원 · 7-Zip 으로 푸세요' 로 보인다 — 암호 zip 이라는 사실과 '내 PC 로 복사' 해결책이 빠짐", () => {
+  it("archive-16: 원격 AES zip (unzip exit 81) 은 '압축 방식 미지원 · 7-Zip 으로 푸세요' 로 보인다 — 암호 zip 이라는 사실과 '내 PC 로 복사' 해결책이 빠짐", () => {
     const message =
       "the remote host's unzip cannot extract this zip (AES encryption or an unsupported compression method)";
     const r = explainError({ kind: "NotSupported", message }, "unix");

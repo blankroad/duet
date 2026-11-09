@@ -54,6 +54,11 @@ type Reason =
   | "notFound"
   | "exists"
   | "notEmpty"
+  | "linkLoop"
+  | "zipLargeFile"
+  | "repackEmpty"
+  | "remoteZipUnsupported"
+  | "remoteExit"
   | "deviceNotReady"
   | "networkLogon"
   | "virus"
@@ -123,6 +128,7 @@ const OS_CODES: Record<HostOs, Record<number, Reason>> = {
     54: "connReset", // ECONNRESET
     60: "connTimeout", // ETIMEDOUT
     61: "connRefused", // ECONNREFUSED
+    62: "linkLoop", // ELOOP
     63: "nameTooLong", // ENAMETOOLONG
     65: "connUnreachable", // EHOSTUNREACH
     66: "notEmpty", // ENOTEMPTY
@@ -132,6 +138,7 @@ const OS_CODES: Record<HostOs, Record<number, Reason>> = {
     ...UNIX_CODES,
     36: "nameTooLong", // ENAMETOOLONG
     39: "notEmpty", // ENOTEMPTY
+    40: "linkLoop", // ELOOP
     95: "unsupportedOp", // EOPNOTSUPP
     101: "connUnreachable", // ENETUNREACH
     104: "connReset", // ECONNRESET
@@ -154,10 +161,15 @@ const PATTERNS: Array<[RegExp, Reason]> = [
     /archive is damaged|corrupt deflate|invalid gzip header|invalid checksum|unexpected end of file|failed to fill whole buffer|invalid zip archive|could not find central directory|bad header|not a tar/i,
     "damagedArchive",
   ],
-  [/invalid entry name|syntax is incorrect/i, "invalidName"],
+  [/invalid entry name|invalid name|syntax is incorrect/i, "invalidName"],
   [/name too long/i, "nameTooLong"],
+  [/too many levels of symbolic links/i, "linkLoop"],
   [/directory not empty/i, "notEmpty"],
-  [/no space left|disk is full|quota exceeded/i, "diskFull"],
+  [
+    // unzip exit 50 = 해제 중 디스크 가득 ("write error (disk full?)").
+    /no space left|disk is full|disk full|quota exceeded|host command failed \(exit 50\)/i,
+    "diskFull",
+  ],
   [/being used by another process|resource busy|text file busy/i, "inUse"],
   [/read-only file system|write.protected/i, "readOnly"],
   [
@@ -171,6 +183,26 @@ const PATTERNS: Array<[RegExp, Reason]> = [
   [/cloud file provider|cloud operation/i, "cloudFile"],
   [/operation not supported/i, "unsupportedOp"],
 ];
+
+/** 압축 작업의 구체적 문구 — 아래 `PATTERNS` 앞부분(압축·안전)보다도 먼저 본다. */
+const ARCHIVE_PATTERNS: Array<[RegExp, Reason]> = [
+  // 서버 unzip exit 81 — AES 암호 zip 등. 암호를 다시 물어도 소용없어 내 PC 로 복사해 풀어야 한다.
+  [/remote host's unzip cannot extract/i, "remoteZipUnsupported"],
+  [/unsafe path in/i, "unsafeArchive"], // rar 의 경로 탈출 항목
+  [/large file option has not been set/i, "zipLargeFile"], // zip 4GB 초과
+  [/nothing to repack/i, "repackEmpty"],
+];
+
+/** 서버 호스트 프로그램이 없다는 원문 → 프로그램 이름 (unzip 미설치, tar 의 압축 코덱 없음). */
+const MISSING_PROGRAM: RegExp[] = [
+  /`([\w.+-]+)` is not installed on the remote host/i,
+  /([\w.+-]+): Cannot exec\b/i, // GNU tar: "tar (child): xz: Cannot exec: No such file…"
+  /unable to run program "([\w.+-]+)/i, // bsdtar
+  /unrecognized option '--(zstd)'/i, // zstd 를 모르는 오래된 GNU tar
+];
+
+/** 호스트 명령 실패의 개발자용 앞머리 (`core/archive.rs` `host_failure`). */
+const HOST_FAILURE = /^host command failed \(exit (\d+)\):\s*/i;
 
 /**
  * 연결 원인 문구 — 번호보다 먼저 본다. 연결 오류의 번호는 원격·중계 쪽 것일 수 있어
@@ -327,14 +359,16 @@ function pickReason(
   kind: string | undefined,
   message: string,
   os: HostOs,
-): { reason: Reason; prog?: string } | undefined {
+): { reason: Reason; vars?: Record<string, string> } | undefined {
   const fixed = kind ? KIND_REASON[kind] : undefined;
   if (fixed) return { reason: fixed };
-  const prog = /`([\w.+-]+)` is not installed on the remote host/i.exec(
-    message,
-  )?.[1];
-  if (prog) return { reason: "remoteMissingProgram", prog };
+  for (const re of MISSING_PROGRAM) {
+    const prog = re.exec(message)?.[1];
+    if (prog) return { reason: "remoteMissingProgram", vars: { prog } };
+  }
   // 압축·안전 관련 문구는 번호보다 구체적이다(손상된 gzip 도 io 오류 번호가 없다).
+  for (const [re, reason] of ARCHIVE_PATTERNS)
+    if (re.test(message)) return { reason };
   for (const [re, reason] of PATTERNS.slice(0, 4))
     if (re.test(message)) return { reason };
   for (const [re, reason] of CONNECTION_PATTERNS)
@@ -345,6 +379,10 @@ function pickReason(
   if (byCode) return { reason: byCode };
   for (const [re, reason] of PATTERNS.slice(4))
     if (re.test(message)) return { reason };
+  // 호스트 명령이 출력 없이 실패 — 종료 코드만 알린다.
+  const exit = HOST_FAILURE.exec(message.trim());
+  if (exit && !message.trim().slice(exit[0].length))
+    return { reason: "remoteExit", vars: { code: exit[1] ?? "" } };
   const fallback = kind ? KIND_FALLBACK[kind] : undefined;
   return fallback ? { reason: fallback } : undefined;
 }
@@ -368,9 +406,7 @@ export function explainError(
   const paths = findPaths(raw, kind);
   const picked = pickReason(kind, maskPaths(raw, paths), os);
   if (picked) {
-    const text = i18n.t(`errors.reason.${picked.reason}`, {
-      prog: picked.prog,
-    });
+    const text = i18n.t(`errors.reason.${picked.reason}`, picked.vars ?? {});
     if (!APPEND_DETAIL.has(picked.reason) || !cleaned)
       return { text: withTarget(text, paths), detail };
     // 이미 설명한 오류를 다시 감싼 경우(대화상자가 formatErr 결과를 message 로 넘김) 그대로.
@@ -381,13 +417,15 @@ export function explainError(
   const label = kind
     ? i18n.t(`errors.kind.${kind}`, { defaultValue: kind })
     : undefined;
-  if (label && cleaned) {
-    const text = cleaned.toLowerCase().startsWith(label.toLowerCase())
-      ? cleaned
-      : `${label} — ${cleaned}`;
+  // 호스트 명령 실패의 개발자용 앞머리는 빼고 서버가 남긴 말만.
+  const shown = cleaned.replace(HOST_FAILURE, "");
+  if (label && shown) {
+    const text = shown.toLowerCase().startsWith(label.toLowerCase())
+      ? shown
+      : `${label} — ${shown}`;
     return { text, detail };
   }
-  return { text: label ?? (cleaned || String(e)), detail };
+  return { text: label ?? (shown || String(e)), detail };
 }
 
 /**
