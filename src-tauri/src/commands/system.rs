@@ -593,13 +593,18 @@ pub async fn ssh_volumes(
         SourceId::Ssh { user, .. } => user,
         SourceId::Local => String::new(),
     };
+    ssh_volumes_in(&fs, &user).await
+}
+
+/// Collect remote mounts using the supplied filesystem's path rules.
+async fn ssh_volumes_in(fs: &dyn FileSystem, user: &str) -> Result<Vec<Volume>, DuetError> {
     let mut roots = vec![
         PathBuf::from("/Volumes"),
         PathBuf::from("/mnt"),
         PathBuf::from("/media"),
     ];
     if !user.is_empty() {
-        roots.push(fs.join(Path::new("/media"), &user));
+        roots.push(fs.join(Path::new("/media"), user));
     }
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -979,19 +984,49 @@ mod review_shell_settings {
         assert_eq!(places[1].path, joined.join("Documents"));
     }
 
-    #[test]
-    fn remote_places_and_volumes_keep_posix_separators() {
-        assert_eq!(
-            crate::fs::posix_join(Path::new("/home/review"), "Documents").to_str(),
-            Some("/home/review/Documents")
-        );
-        assert_eq!(
-            crate::fs::posix_join(Path::new("/media"), "review").to_str(),
-            Some("/media/review")
-        );
-        assert_eq!(
-            crate::fs::posix_join(Path::new("/mnt"), "문서").to_str(),
-            Some("/mnt/문서")
-        );
+    fn volume_entry(name: &str, kind: EntryKind) -> crate::types::Entry {
+        crate::types::Entry {
+            name: name.into(),
+            kind,
+            size: None,
+            modified_ms: None,
+            permissions: None,
+            hidden: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn r3_paths_remote_volumes_probe_user_root_with_fs_join() {
+        let mut fs = crate::fs::testing::TestFs::new(Path::new("/joined"));
+        fs.override_join = true;
+        let user_root = fs.join(Path::new("/media"), "review");
+        fs.list_entries = Some(std::collections::HashMap::from([(
+            user_root.clone(),
+            vec![volume_entry("disk", EntryKind::Dir)],
+        )]));
+        let out = ssh_volumes_in(&fs, "review").await.unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].path, fs.join(&user_root, "disk"));
+        assert!(!out[0].ejectable);
+    }
+
+    #[tokio::test]
+    async fn r3_paths_remote_volumes_build_entries_with_fs_join() {
+        let mut fs = crate::fs::testing::TestFs::new(Path::new("/joined"));
+        fs.override_join = true;
+        fs.list_entries = Some(std::collections::HashMap::from([(
+            PathBuf::from("/mnt"),
+            vec![
+                volume_entry("disk", EntryKind::Dir),
+                volume_entry("disk", EntryKind::Dir),
+                volume_entry(r"link\한글", EntryKind::Symlink),
+                volume_entry("skip", EntryKind::File),
+            ],
+        )]));
+        let out = ssh_volumes_in(&fs, "").await.unwrap();
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].path, fs.join(Path::new("/mnt"), "disk"));
+        assert_eq!(out[1].path, fs.join(Path::new("/mnt"), r"link\한글"));
+        assert!(out.iter().all(|v| !v.ejectable));
     }
 }

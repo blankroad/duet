@@ -12,6 +12,7 @@ pub(crate) struct TestFs {
     pub cancel_after_trash: Option<CancellationToken>,
     pub late_write: bool,
     pub fail_list: bool,
+    pub list_entries: Option<std::collections::HashMap<PathBuf, Vec<Entry>>>,
     pub override_join: bool,
     pub endpoint: Option<crate::types::ServerEndpoint>,
 }
@@ -23,6 +24,7 @@ impl TestFs {
             cancel_after_trash: None,
             late_write: false,
             fail_list: false,
+            list_entries: None,
             override_join: false,
             endpoint: None,
         }
@@ -47,6 +49,9 @@ impl FileSystem for TestFs {
     async fn list(&self, path: &Path) -> Result<Vec<Entry>, DuetError> {
         if self.fail_list {
             return Err(DuetError::PermissionDenied("fixture".into()));
+        }
+        if let Some(entries) = &self.list_entries {
+            return Ok(entries.get(path).cloned().unwrap_or_default());
         }
         LocalFs.list(path).await
     }
