@@ -5983,6 +5983,7 @@ mod review_fileops_sol {
         std::fs::create_dir(&d).unwrap();
         (t, s, d)
     }
+    #[allow(clippy::too_many_arguments)]
     async fn cp(
         sf: &dyn FileSystem,
         df: &dyn FileSystem,

@@ -54,15 +54,13 @@ async fn wait_ssh_ready(host: &ssh_common::Host) {
         if tokio::net::TcpStream::connect((host.host.as_str(), host.port))
             .await
             .is_ok()
-        {
-            if duet_lib::ssh::connection::connect_with_password(
+            && duet_lib::ssh::connection::connect_with_password(
                 &host.host, host.port, &host.user, &host.pass, true, false,
             )
             .await
             .is_ok()
-            {
-                return;
-            }
+        {
+            return;
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
@@ -515,7 +513,7 @@ async fn c11_connect_to_unresponsive_host_duration() {
     .await;
     println!(
         "[review] c11 connect to PAUSED host: {:?} after {:?}",
-        r.as_ref().map(|r| fmt(r)),
+        r.as_ref().map(fmt),
         t.elapsed()
     );
     docker(&["unpause", CHAOS]);
@@ -529,7 +527,7 @@ async fn c11_connect_to_unresponsive_host_duration() {
     .await;
     println!(
         "[review] c11 connect to blackholed 192.0.2.1:22: {:?} after {:?}",
-        r.as_ref().map(|r| fmt(r)),
+        r.as_ref().map(fmt),
         t.elapsed()
     );
 }

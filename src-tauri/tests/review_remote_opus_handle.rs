@@ -2,6 +2,7 @@
 //! `Mutex` 없이 `Arc` 로 공유할 수 있는가.
 //! - 컴파일 확인: `Handle<HostKeyVerifier>: Send + Sync` (아래 assert 가 컴파일되면 참).
 //! - 실행 확인: `Arc<Handle>` 하나로 긴 exec 와 SFTP 목록을 **동시에** — 목록이 기다리지 않는가.
+//!
 //! 게이트: DUET_SSH_IT=1 (실행 테스트만). `DUET_SSH_IT_PORT` 는 내 컨테이너(2224) 권장.
 
 mod ssh_common;
