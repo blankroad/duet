@@ -4,7 +4,7 @@
 //! "경로가 너무 깁니다"로 멈춤), 동기화 반대 방향 + 삭제 전파면 원본이 휴지통으로 간다.
 //!
 //! 두 위치는 **같은 실제 파일시스템**일 때만 비교한다: 로컬↔로컬, 같은 연결, 같은 서버
-//! (`copy_strategy::decide == SshSameHost`). 로컬↔원격·다른 서버는 경로 문자열이 겹쳐도
+//! (`copy_strategy::decide_fs == SshSameHost`). 로컬↔원격·다른 서버는 경로 문자열이 겹쳐도
 //! 서로 다른 트리라 통과.
 //!
 //! 정규화:
@@ -18,7 +18,8 @@
 //!
 //! 포함 판정은 컴포넌트 단위라 `/a/b` 는 `/a/bc` 의 조상이 아니다.
 
-use crate::core::copy_strategy::{decide, CopyStrategy};
+use crate::core::copy_strategy::{decide_fs, CopyStrategy};
+use crate::fs::FileSystem;
 use crate::types::{DuetError, Location, SourceId};
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
@@ -37,19 +38,36 @@ pub enum Nesting {
 }
 
 /// 두 source 가 같은 실제 파일시스템을 가리키는지 — 경로 비교가 의미 있는 경우.
-pub fn same_real_fs(a: &SourceId, b: &SourceId) -> bool {
+pub fn same_real_fs(
+    a_fs: &dyn FileSystem,
+    a: &SourceId,
+    b_fs: &dyn FileSystem,
+    b: &SourceId,
+) -> bool {
     a == b
         || matches!(
-            decide(a, b),
+            decide_fs(a_fs, a, b_fs, b),
             CopyStrategy::LocalToLocal | CopyStrategy::SshSameHost
         )
 }
 
 /// `(a_src, a)` 와 `(b_src, b)` 의 포함 관계. 다른 실제 FS 면 `Unrelated`.
-pub async fn nesting(a_src: &SourceId, a: &Path, b_src: &SourceId, b: &Path) -> Nesting {
-    if !same_real_fs(a_src, b_src) {
+pub async fn nesting(
+    a_fs: &dyn FileSystem,
+    a_src: &SourceId,
+    a: &Path,
+    b_fs: &dyn FileSystem,
+    b_src: &SourceId,
+    b: &Path,
+) -> Nesting {
+    if !same_real_fs(a_fs, a_src, b_fs, b_src) {
         return Nesting::Unrelated;
     }
+    same_fs_nesting(a_src, a, b_src, b).await
+}
+
+// The compression guard has one source filesystem, so identity is already known.
+async fn same_fs_nesting(a_src: &SourceId, a: &Path, b_src: &SourceId, b: &Path) -> Nesting {
     if matches!((a_src, b_src), (SourceId::Local, SourceId::Local)) {
         let (ka, kb) = (local_key(a).await, local_key(b).await);
         relate_local(&ka, &kb)
@@ -63,11 +81,13 @@ pub async fn nesting(a_src: &SourceId, a: &Path, b_src: &SourceId, b: &Path) -> 
 /// `items` 는 항목의 전체 경로(부모 + 이름, 각 fs 의 join 으로 만든 것). 받는 폴더는 한 번만
 /// 정규화한다(항목이 수천 개여도 dst canonicalize 는 1회).
 pub async fn ensure_not_into_itself(
+    src_fs: &dyn FileSystem,
     src_source: &SourceId,
     items: &[PathBuf],
+    dst_fs: &dyn FileSystem,
     dst: &Location,
 ) -> Result<(), DuetError> {
-    if !same_real_fs(src_source, &dst.source) {
+    if !same_real_fs(src_fs, src_source, dst_fs, &dst.source) {
         return Ok(());
     }
     let local = matches!(
@@ -101,8 +121,13 @@ pub async fn ensure_not_into_itself(
 ///
 /// 한쪽이 다른 쪽 안에 있으면 비교 목록에 상대 루트 자신이 "한쪽에만 있음"으로 잡혀 그 폴더를
 /// 자기 안으로 복사하거나, 삭제 전파 시 상대 루트를 휴지통으로 보낸다.
-pub async fn ensure_roots_unrelated(a: &Location, b: &Location) -> Result<(), DuetError> {
-    let msg = match nesting(&a.source, &a.path, &b.source, &b.path).await {
+pub async fn ensure_roots_unrelated(
+    a_fs: &dyn FileSystem,
+    a: &Location,
+    b_fs: &dyn FileSystem,
+    b: &Location,
+) -> Result<(), DuetError> {
+    let msg = match nesting(a_fs, &a.source, &a.path, b_fs, &b.source, &b.path).await {
         Nesting::Unrelated => return Ok(()),
         Nesting::Same => format!(
             "'{}' and '{}' are the same folder",
@@ -126,7 +151,7 @@ pub async fn ensure_output_not_in_selection(
 ) -> Result<(), DuetError> {
     for item in items {
         if matches!(
-            nesting(source, item, source, output).await,
+            same_fs_nesting(source, item, source, output).await,
             Nesting::Same | Nesting::BInsideA
         ) {
             return Err(DuetError::IntoItself(format!(
@@ -251,6 +276,7 @@ fn relate(a: &[String], b: &[String]) -> Nesting {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fs::LocalFs;
     use crate::types::ConnectionId;
     use std::net::{IpAddr, Ipv4Addr};
 
@@ -275,13 +301,29 @@ mod tests {
         std::fs::create_dir_all(t.path().join("a/bc")).unwrap();
         let l = SourceId::Local;
         assert_eq!(
-            nesting(&l, &t.path().join("a/b"), &l, &t.path().join("a/bc")).await,
+            nesting(
+                &LocalFs,
+                &l,
+                &t.path().join("a/b"),
+                &LocalFs,
+                &l,
+                &t.path().join("a/bc")
+            )
+            .await,
             Nesting::Unrelated
         );
         // 원격도 컴포넌트 단위.
         let s = ssh("c1", [10, 0, 0, 1]);
         assert_eq!(
-            nesting(&s, Path::new("/a/b"), &s, Path::new("/a/bc")).await,
+            nesting(
+                &LocalFs,
+                &s,
+                Path::new("/a/b"),
+                &LocalFs,
+                &s,
+                Path::new("/a/bc")
+            )
+            .await,
             Nesting::Unrelated
         );
     }
@@ -292,23 +334,30 @@ mod tests {
         let p = t.path().join("p");
         std::fs::create_dir_all(p.join("child")).unwrap();
         let l = SourceId::Local;
-        assert_eq!(nesting(&l, &p, &l, &p).await, Nesting::Same);
         assert_eq!(
-            nesting(&l, &p.join("child"), &l, &p).await,
+            nesting(&LocalFs, &l, &p, &LocalFs, &l, &p).await,
+            Nesting::Same
+        );
+        assert_eq!(
+            nesting(&LocalFs, &l, &p.join("child"), &LocalFs, &l, &p).await,
             Nesting::AInsideB
         );
         assert_eq!(
-            nesting(&l, &p, &l, &p.join("child")).await,
+            nesting(&LocalFs, &l, &p, &LocalFs, &l, &p.join("child")).await,
             Nesting::BInsideA
         );
-        assert!(ensure_roots_unrelated(&local(&p), &local(&p.join("child")))
-            .await
-            .is_err());
-        assert!(ensure_roots_unrelated(&local(&p.join("child")), &local(&p))
-            .await
-            .is_err());
+        assert!(
+            ensure_roots_unrelated(&LocalFs, &local(&p), &LocalFs, &local(&p.join("child")))
+                .await
+                .is_err()
+        );
+        assert!(
+            ensure_roots_unrelated(&LocalFs, &local(&p.join("child")), &LocalFs, &local(&p))
+                .await
+                .is_err()
+        );
         assert!(matches!(
-            ensure_roots_unrelated(&local(&p), &local(&p)).await,
+            ensure_roots_unrelated(&LocalFs, &local(&p), &LocalFs, &local(&p)).await,
             Err(DuetError::IntoItself(_))
         ));
     }
@@ -321,18 +370,40 @@ mod tests {
         let l = SourceId::Local;
         // p/x/y/../.  == p/x  → p/x 는 p 의 하위.
         let dotted = p.join("x").join("y").join("..").join(".");
-        assert_eq!(nesting(&l, &dotted, &l, &p).await, Nesting::AInsideB);
+        assert_eq!(
+            nesting(&LocalFs, &l, &dotted, &LocalFs, &l, &p).await,
+            Nesting::AInsideB
+        );
         // 아직 없는 경로에 `..` — lexical 로 정리.
         let ghost = p.join("nope").join("..").join("x").join("new");
-        assert_eq!(nesting(&l, &ghost, &l, &p).await, Nesting::AInsideB);
+        assert_eq!(
+            nesting(&LocalFs, &l, &ghost, &LocalFs, &l, &p).await,
+            Nesting::AInsideB
+        );
         // 원격 POSIX.
         let s = ssh("c1", [10, 0, 0, 1]);
         assert_eq!(
-            nesting(&s, Path::new("/srv/a/./b/../c"), &s, Path::new("/srv/a/")).await,
+            nesting(
+                &LocalFs,
+                &s,
+                Path::new("/srv/a/./b/../c"),
+                &LocalFs,
+                &s,
+                Path::new("/srv/a/")
+            )
+            .await,
             Nesting::AInsideB
         );
         assert_eq!(
-            nesting(&s, Path::new("/../srv"), &s, Path::new("/srv")).await,
+            nesting(
+                &LocalFs,
+                &s,
+                Path::new("/../srv"),
+                &LocalFs,
+                &s,
+                Path::new("/srv")
+            )
+            .await,
             Nesting::Same
         );
     }
@@ -346,8 +417,14 @@ mod tests {
         // 바깥의 링크가 a/sub 를 가리킨다 — 링크 경로로 고른 받는 폴더도 a 의 하위.
         let link = t.path().join("link-to-sub");
         std::os::unix::fs::symlink(a.join("sub"), &link).unwrap();
-        let r =
-            ensure_not_into_itself(&SourceId::Local, std::slice::from_ref(&a), &local(&link)).await;
+        let r = ensure_not_into_itself(
+            &LocalFs,
+            &SourceId::Local,
+            std::slice::from_ref(&a),
+            &LocalFs,
+            &local(&link),
+        )
+        .await;
         assert!(matches!(r, Err(DuetError::IntoItself(_))), "{r:?}");
     }
 
@@ -361,16 +438,20 @@ mod tests {
         let lnk = t.path().join("lnk");
         std::os::unix::fs::symlink(&real, &lnk).unwrap();
         let r = ensure_not_into_itself(
+            &LocalFs,
             &SourceId::Local,
             std::slice::from_ref(&lnk),
+            &LocalFs,
             &local(&real.join("sub")),
         )
         .await;
         assert!(r.is_ok(), "{r:?}");
         // 진짜 폴더를 자기 하위로는 여전히 거부.
         let r = ensure_not_into_itself(
+            &LocalFs,
             &SourceId::Local,
             std::slice::from_ref(&real),
+            &LocalFs,
             &local(&real.join("sub")),
         )
         .await;
@@ -385,21 +466,36 @@ mod tests {
         let l = SourceId::Local;
         for bad in [a.clone(), a.join("sub")] {
             assert!(matches!(
-                ensure_not_into_itself(&l, std::slice::from_ref(&a), &local(&bad)).await,
+                ensure_not_into_itself(
+                    &LocalFs,
+                    &l,
+                    std::slice::from_ref(&a),
+                    &LocalFs,
+                    &local(&bad)
+                )
+                .await,
                 Err(DuetError::IntoItself(_))
             ));
         }
         // 부모로 복사(같은 폴더에 사본)·형제로 복사는 허용.
-        assert!(
-            ensure_not_into_itself(&l, std::slice::from_ref(&a), &local(t.path()))
-                .await
-                .is_ok()
-        );
-        assert!(
-            ensure_not_into_itself(&l, &[a.join("sub")], &local(&a.join("..")))
-                .await
-                .is_ok()
-        );
+        assert!(ensure_not_into_itself(
+            &LocalFs,
+            &l,
+            std::slice::from_ref(&a),
+            &LocalFs,
+            &local(t.path())
+        )
+        .await
+        .is_ok());
+        assert!(ensure_not_into_itself(
+            &LocalFs,
+            &l,
+            &[a.join("sub")],
+            &LocalFs,
+            &local(&a.join(".."))
+        )
+        .await
+        .is_ok());
     }
 
     #[tokio::test]
@@ -409,15 +505,27 @@ mod tests {
         let s2 = ssh("c2", [10, 0, 0, 2]);
         let p = Path::new("/srv/a");
         // 로컬↔원격: 같은 문자열이어도 다른 트리.
-        assert_eq!(nesting(&l, p, &s1, p).await, Nesting::Unrelated);
+        assert_eq!(
+            nesting(&LocalFs, &l, p, &LocalFs, &s1, p).await,
+            Nesting::Unrelated
+        );
         // 다른 서버.
-        assert_eq!(nesting(&s1, p, &s2, &p.join("b")).await, Nesting::Unrelated);
+        assert_eq!(
+            nesting(&LocalFs, &s1, p, &LocalFs, &s2, &p.join("b")).await,
+            Nesting::Unrelated
+        );
         // 같은 서버(다른 연결) — 같은 FS 로 본다.
         let s1b = ssh("c9", [10, 0, 0, 1]);
-        assert_eq!(nesting(&s1, p, &s1b, &p.join("b")).await, Nesting::BInsideA);
+        assert_eq!(
+            nesting(&LocalFs, &s1, p, &LocalFs, &s1b, &p.join("b")).await,
+            Nesting::BInsideA
+        );
         // 같은 연결이면 host_ip 가 미해석(0.0.0.0)이어도 같은 FS.
         let u = ssh("cu", [0, 0, 0, 0]);
-        assert_eq!(nesting(&u, p, &u, p).await, Nesting::Same);
+        assert_eq!(
+            nesting(&LocalFs, &u, p, &LocalFs, &u, p).await,
+            Nesting::Same
+        );
     }
 
     #[tokio::test]
@@ -425,7 +533,15 @@ mod tests {
         // 원격에서 `\` 는 이름 문자 — `/srv/a\b` 는 `/srv/a` 의 하위가 아니다.
         let s = ssh("c1", [10, 0, 0, 1]);
         assert_eq!(
-            nesting(&s, Path::new("/srv/a\\b"), &s, Path::new("/srv/a")).await,
+            nesting(
+                &LocalFs,
+                &s,
+                Path::new("/srv/a\\b"),
+                &LocalFs,
+                &s,
+                Path::new("/srv/a")
+            )
+            .await,
             Nesting::Unrelated
         );
     }
@@ -441,7 +557,15 @@ mod tests {
         let variant = t.path().join("casedir").join("sub");
         let case_insensitive = variant.exists();
         let canon = tokio::fs::canonicalize(&variant).await;
-        let n = nesting(&SourceId::Local, &real, &SourceId::Local, &variant).await;
+        let n = nesting(
+            &LocalFs,
+            &SourceId::Local,
+            &real,
+            &LocalFs,
+            &SourceId::Local,
+            &variant,
+        )
+        .await;
         eprintln!(
             "case-insensitive fs={case_insensitive} canonicalize({variant:?})={canon:?} nesting={n:?}"
         );

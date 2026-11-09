@@ -392,6 +392,29 @@ async fn endpoint_changes_reject_same_host_execute_before_io() {
     assert!(c.journal.history(10).await.is_empty());
 }
 #[tokio::test]
+async fn endpoint_guard_allows_nested_paths_on_distinct_servers_only() {
+    let left = ProbeFs::new("left", 22);
+    for (port, conn, reject) in [
+        (23, "right", false),
+        (22, "right", true),
+        (23, "left", true),
+    ] {
+        let right = ProbeFs::new(conn, port);
+        let result = copy_plan(
+            &left,
+            &right,
+            vec![item(&left)],
+            right.loc("/src/__fs/file/child"),
+        )
+        .await;
+        assert_eq!(
+            matches!(result, Err(DuetError::IntoItself(_))),
+            reject,
+            "port={port} conn={conn}: {result:?}"
+        );
+    }
+}
+#[tokio::test]
 async fn endpoints_skip_same_host_rename_detection_for_distinct_servers() {
     let mut left = ProbeFs::new("left", 22);
     left.exists = true;
@@ -412,6 +435,27 @@ async fn endpoints_skip_same_host_rename_detection_for_distinct_servers() {
         .is_empty());
     assert!(p.moves.is_empty());
 }
+#[tokio::test]
+async fn endpoint_guard_allows_nested_sync_preview_on_distinct_servers() {
+    let left = ProbeFs::new("left", 22);
+    for (port, reject) in [(23, false), (22, true)] {
+        let right = ProbeFs::new("right", port);
+        let result = sync_preview(
+            &left,
+            &left.loc("/vagrant"),
+            &right,
+            &right.loc("/vagrant/x"),
+            None,
+        )
+        .await;
+        assert_eq!(
+            matches!(result, Err(DuetError::IntoItself(_))),
+            reject,
+            "{result:?}"
+        );
+    }
+}
+
 #[test]
 fn progress_remote_names_and_backup_parents_preserve_backslashes() {
     let fs = ProbeFs::new("ssh", 22);

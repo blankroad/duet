@@ -411,7 +411,7 @@ async fn plan_transfer(
         }
     }
     // 폴더를 자기 자신/하위로 — 끝없는 자기 복제를 시작 전에 거부(fileops-04).
-    ensure_items_not_into_dst(src_fs, &src_source, &items, &dst).await?;
+    ensure_items_not_into_dst(src_fs, &src_source, &items, dst_fs, &dst).await?;
 
     let mut conflicts = Vec::new();
     let mut total = 0u64;
@@ -461,13 +461,14 @@ async fn ensure_items_not_into_dst(
     src_fs: &dyn FileSystem,
     src_source: &SourceId,
     items: &[EntryRef],
+    dst_fs: &dyn FileSystem,
     dst: &Location,
 ) -> Result<(), DuetError> {
     let paths: Vec<PathBuf> = items
         .iter()
         .map(|it| src_fs.join(&it.location.path, &it.name))
         .collect();
-    crate::core::path_guard::ensure_not_into_itself(src_source, &paths, dst).await
+    crate::core::path_guard::ensure_not_into_itself(src_fs, src_source, &paths, dst_fs, dst).await
 }
 
 /// Refuse stale/forged host-side plans before any I/O; the caller must plan again.
@@ -538,7 +539,7 @@ pub async fn copy_execute(
         dst_fs,
         &plan.dst.source,
     )?;
-    ensure_items_not_into_dst(src_fs, &plan.src_source, &plan.items, &plan.dst).await?;
+    ensure_items_not_into_dst(src_fs, &plan.src_source, &plan.items, dst_fs, &plan.dst).await?;
     match plan.strategy {
         CopyStrategy::LocalToLocal | CopyStrategy::Relay => {
             copy_execute_relay(src_fs, dst_fs, plan, policy, ctx, cancel_token, progress).await
@@ -872,7 +873,7 @@ pub async fn move_execute(
     if plan.items.is_empty() {
         return Err(DuetError::Io("plan has no items".into()));
     }
-    ensure_items_not_into_dst(src_fs, &plan.src_source, &plan.items, &plan.dst).await?;
+    ensure_items_not_into_dst(src_fs, &plan.src_source, &plan.items, dst_fs, &plan.dst).await?;
     // same-host SSH move: **같은 연결**(= 같은 SourceId, is_same_fs) 이면 SFTP rename
     // 한 번으로 서버 안에서 끝난다 — 원격 서버 정리에서 가장 흔한 작업이라 지원한다.
     // 서로 다른 연결(같은 머신이지만 다른 세션/유저)은 아직 막는다: rename 을 어느 쪽
@@ -1177,7 +1178,7 @@ pub async fn sync_plan(
 ) -> Result<SyncPlan, DuetError> {
     // 같은 폴더뿐 아니라 상·하위 관계도 거부 — 자기 안으로 무한 복사, 반대 방향 + 삭제
     // 전파면 원본 루트를 휴지통으로 보낸다(SC-03).
-    crate::core::path_guard::ensure_roots_unrelated(&src, &dst).await?;
+    crate::core::path_guard::ensure_roots_unrelated(src_fs, &src, dst_fs, &dst).await?;
     if src_fs.metadata(&src.path).await?.kind != crate::types::EntryKind::Dir
         || dst_fs.metadata(&dst.path).await?.kind != crate::types::EntryKind::Dir
     {
@@ -1237,7 +1238,7 @@ pub async fn sync_execute(
         dst_fs,
         &plan.dst.source,
     )?;
-    crate::core::path_guard::ensure_roots_unrelated(&plan.src, &plan.dst).await?;
+    crate::core::path_guard::ensure_roots_unrelated(src_fs, &plan.src, dst_fs, &plan.dst).await?;
     match plan.strategy {
         CopyStrategy::SshSameHost => {
             sync_execute_same_host(plan, ctx, cancel_token, progress).await
@@ -1702,7 +1703,7 @@ pub async fn sync_preview(
     dst: &Location,
     pool: Option<&Arc<crate::services::connection_pool::ConnectionPool>>,
 ) -> Result<SyncPreview, DuetError> {
-    crate::core::path_guard::ensure_roots_unrelated(src, dst).await?;
+    crate::core::path_guard::ensure_roots_unrelated(src_fs, src, dst_fs, dst).await?;
     match decide_fs(src_fs, &src.source, dst_fs, &dst.source) {
         crate::core::copy_strategy::CopyStrategy::SshSameHost => {
             let pool = pool
@@ -1878,7 +1879,7 @@ pub async fn merge_bidir(
     progress: Option<crate::services::task_queue::ProgressEmitter>,
 ) -> Result<JournalEntry, DuetError> {
     use crate::core::compare::CompareStatus;
-    crate::core::path_guard::ensure_roots_unrelated(&left, &right).await?;
+    crate::core::path_guard::ensure_roots_unrelated(left_fs, &left, right_fs, &right).await?;
     let mut plan =
         crate::core::compare::compare_dirs(left_fs, left.clone(), right_fs, right.clone()).await?;
     // 이동/이름변경 감지 시 — 이동 쌍을 entries 에서 제외해 양쪽 중복복제를 차단(핵심 안전).
@@ -2480,7 +2481,7 @@ pub async fn apply_compare(
     cancel_token: tokio_util::sync::CancellationToken,
     progress: Option<crate::services::task_queue::ProgressEmitter>,
 ) -> Result<JournalEntry, DuetError> {
-    crate::core::path_guard::ensure_roots_unrelated(&left, &right).await?;
+    crate::core::path_guard::ensure_roots_unrelated(left_fs, &left, right_fs, &right).await?;
     let work: Vec<(ApplyDirection, String)> = decisions
         .into_iter()
         .filter(|d| !matches!(d.direction, ApplyDirection::Skip))
@@ -2909,8 +2910,12 @@ pub async fn apply_three_way(
     use crate::core::three_way::{compare_three_way, ThreeWayStatus as S};
     // left↔right 는 서로 복사·휴지통을 주고받고, base 는 둘의 기준이다 — 어느 쌍이든
     // 상·하위면 비교 목록에 상대 루트가 섞여 자기 안으로 복사하거나 루트를 휴지통으로 보낸다.
-    for (a, b) in [(&left, &right), (&base, &left), (&base, &right)] {
-        crate::core::path_guard::ensure_roots_unrelated(a, b).await?;
+    for (a_fs, a, b_fs, b) in [
+        (left_fs, &left, right_fs, &right),
+        (base_fs, &base, left_fs, &left),
+        (base_fs, &base, right_fs, &right),
+    ] {
+        crate::core::path_guard::ensure_roots_unrelated(a_fs, a, b_fs, b).await?;
     }
     let plan = compare_three_way(
         base_fs,
