@@ -256,3 +256,16 @@ async fn relay_merge_uses_each_filesystem() {
     assert!(left.saw(Path::new("/L/__fs/a")));
     assert!(right.saw(Path::new("/R/__fs/a")));
 }
+#[test]
+fn progress_remote_names_and_backup_parents_preserve_backslashes() {
+    let fs = ProbeFs::new("ssh", 22);
+    let path = Path::new(r"/srv/a\b/c\d");
+    assert_eq!(
+        file_name_for(&fs.source, path),
+        Some(std::ffi::OsStr::new(r"c\d"))
+    );
+    assert_eq!(
+        parent_for(&fs.source, path),
+        Some(PathBuf::from(r"/srv/a\b"))
+    );
+}

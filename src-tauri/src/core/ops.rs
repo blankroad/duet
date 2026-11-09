@@ -266,7 +266,7 @@ pub async fn delete_execute_cancellable(
                         done,
                         total,
                         path.map(|p| {
-                            p.file_name()
+                            file_name_for(&plan.source, &p)
                                 .unwrap_or(p.as_os_str())
                                 .to_string_lossy()
                                 .into_owned()
@@ -600,10 +600,10 @@ async fn copy_execute_relay(
     };
     // 복사 중인 실제 파일명 갱신(폴더 내부 개별 파일까지). copy_tree 가 파일마다 호출.
     let cur_file = cur.clone();
+    let file_source = plan.src_source.clone();
     let on_file = move |path: &std::path::Path| {
         if let Ok(mut g) = cur_file.lock() {
-            g.0 = path
-                .file_name()
+            g.0 = file_name_for(&file_source, path)
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
         }
@@ -903,10 +903,10 @@ pub async fn move_execute(
         ));
     };
     let cur_file = cur.clone();
+    let file_source = plan.src_source.clone();
     let on_file = move |path: &std::path::Path| {
         if let Ok(mut g) = cur_file.lock() {
-            g.0 = path
-                .file_name()
+            g.0 = file_name_for(&file_source, path)
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
         }
@@ -2369,10 +2369,9 @@ async fn host_side_copy_one(
     let cmd = if use_rsync {
         // rsync 는 SRC(trailing-slash 없음)의 basename 을 DEST 디렉토리 안에 만든다 →
         // dst 의 부모를 줘야 dst/<basename> 으로 떨어진다 (file/dir 동일).
-        let dst_parent = dst
-            .parent()
-            .ok_or_else(|| DuetError::Io("dst has no parent".into()))?;
-        let dst_parent_arg = shell_escape_path(dst_parent)?;
+        let dst_parent =
+            posix_path::parent(dst).ok_or_else(|| DuetError::Io("dst has no parent".into()))?;
+        let dst_parent_arg = shell_escape_path(&dst_parent)?;
         format!("rsync -a -- {src_arg} {dst_parent_arg}")
     } else {
         // cp 는 DEST 를 새 이름으로 → 최종 경로 그대로.
@@ -2786,14 +2785,11 @@ async fn apply_one_same_host(
     let dst_fs = crate::fs::SshFs::new(pool.get(dst_conn).await?);
     let mut created = false;
     if dst_fs.metadata(&dst_path).await.is_ok() {
-        let parent = dst_path
-            .parent()
+        let parent = posix_path::parent(&dst_path)
             .ok_or_else(|| DuetError::Io("dst has no parent".into()))?;
-        let name = dst_path
-            .file_name()
-            .and_then(|s| s.to_str())
+        let name = posix_path::file_name(&dst_path)
             .ok_or_else(|| DuetError::Io("dst has no name".into()))?;
-        let backup = pick_backup_path(&dst_fs, parent, name).await?;
+        let backup = pick_backup_path(&dst_fs, &parent, name).await?;
         dst_fs.rename(&dst_path, &backup).await?;
         let br = BackupRestore {
             backup_path: backup,
