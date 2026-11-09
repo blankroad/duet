@@ -266,57 +266,35 @@ pub fn run() {
     }
 
     let pool = services::connection_pool::ConnectionPool::new();
-    let settings = tauri::async_runtime::block_on(async {
-        services::settings::SettingsStore::load_default().await
-    })
-    .expect("settings load");
-    let journal =
-        tauri::async_runtime::block_on(async { services::journal::Journal::load_default().await })
-            .expect("journal load");
-    let saved_hosts = tauri::async_runtime::block_on(async {
-        services::saved_hosts::SavedHostsStore::load_default().await
-    })
-    .expect("saved hosts load");
-    let secret_vault = tauri::async_runtime::block_on(async {
-        services::secret_vault::SecretVault::load_default().await
-    })
-    .expect("secret vault load");
-    let bookmarks = tauri::async_runtime::block_on(async {
-        services::bookmarks::BookmarksStore::load_default().await
-    })
-    .expect("bookmarks load");
-    let host_favorites = tauri::async_runtime::block_on(async {
-        services::host_favorites::HostFavoritesStore::load_default().await
-    })
-    .expect("host favorites load");
-    let host_groups = tauri::async_runtime::block_on(async {
-        services::host_groups::HostGroupsStore::load_default().await
-    })
-    .expect("host groups load");
-    let user_aliases = tauri::async_runtime::block_on(async {
-        services::user_aliases::UserAliasesStore::load_default().await
-    })
-    .expect("user aliases load");
-    let app_launchers = tauri::async_runtime::block_on(async {
-        services::app_launchers::AppLaunchersStore::load_default().await
-    })
-    .expect("app launchers load");
-    let keymap = tauri::async_runtime::block_on(async {
-        services::keymap::KeymapStore::load_default().await
-    })
-    .expect("keymap load");
+    // 저장 파일 로드 — 깨진 파일은 각 store 가 옆으로 보존하고 기본값으로 시작한다(U-03).
+    // 읽을 수조차 없으면(권한 등) 패닉 대신 오류 창을 띄우고 끝낸다 — Windows 릴리스는 콘솔이
+    // 없어 패닉하면 아무것도 보이지 않는다.
+    let context = tauri::generate_context!();
+    let stores = match tauri::async_runtime::block_on(services::boot::BootStores::load_default()) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!("startup load failed: {e}");
+            run_fatal(context, &e);
+            return;
+        }
+    };
+    let startup_notices = services::startup_notices::StartupNotices::new(stores.notices());
+    let services::boot::BootStores {
+        settings,
+        journal,
+        saved_hosts,
+        secret_vault,
+        bookmarks,
+        host_favorites,
+        host_groups,
+        user_aliases,
+        app_launchers,
+        keymap,
+        frecency,
+        host_nicknames,
+        tags,
+    } = stores;
     let keymap_for_setup = keymap.clone();
-    let frecency = tauri::async_runtime::block_on(async {
-        services::frecency::FrecencyStore::load_default().await
-    })
-    .expect("frecency load");
-    let host_nicknames = tauri::async_runtime::block_on(async {
-        services::host_nicknames::HostNicknamesStore::load_default().await
-    })
-    .expect("host nicknames load");
-    let tags =
-        tauri::async_runtime::block_on(async { services::tags::TagsStore::load_default().await })
-            .expect("tags load");
 
     // single-instance 는 "가장 먼저" 등록돼야 한다(공식 문서). Windows 에서 duet 이
     // 기본 폴더 핸들러일 때 폴더를 열면 새 인스턴스가 뜨는데, 이를 기존 창으로 forward
@@ -370,7 +348,7 @@ pub fn run() {
         .manage(frecency)
         .manage(host_nicknames)
         .manage(tags)
-        .manage(services::startup_notices::StartupNotices::default())
+        .manage(startup_notices)
         .manage(platform::ShellMenuRegistry::new())
         .invoke_handler(specta_builder.invoke_handler())
         .setup(move |app| {
@@ -415,6 +393,58 @@ pub fn run() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running tauri application");
+}
+
+/// 저장 파일을 읽을 수 없어 시작할 수 없을 때 — 오류 창을 띄우고, 닫으면 종료한다.
+///
+/// 설정(tauri.conf.json)의 메인 창은 setup 전에 만들어지는데, 저장소 없이 앱 UI 가 뜨면 안 되므로
+/// 닫는다. 창이 하나도 없으면 앱이 바로 끝나려 하므로 사용자 조작에 의한 종료 요청은 막고,
+/// 오류 창을 닫을 때의 `exit(1)` 만 통과시킨다.
+fn run_fatal(context: tauri::Context<tauri::Wry>, err: &services::boot::BootError) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+    let message = fatal_message(err);
+    let built = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .setup(move |app| {
+            for w in app.webview_windows().values() {
+                let _ = w.destroy();
+            }
+            let handle = app.handle().clone();
+            app.dialog()
+                .message(message)
+                .title("duet")
+                .kind(MessageDialogKind::Error)
+                .show(move |_| handle.exit(1));
+            Ok(())
+        })
+        .build(context);
+    match built {
+        Ok(app) => app.run(|_, event| {
+            if let tauri::RunEvent::ExitRequested {
+                code: None, api, ..
+            } = event
+            {
+                api.prevent_exit();
+            }
+        }),
+        Err(e) => {
+            tracing::error!("error dialog failed: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// 시작 실패 오류 창 문구 — 언어 설정을 읽기 전이라 한국어·영어를 함께 쓴다.
+fn fatal_message(err: &services::boot::BootError) -> String {
+    let dir = services::settings::duet_config_dir()
+        .map(|d| d.display().to_string())
+        .unwrap_or_default();
+    format!(
+        "duet 을 시작할 수 없습니다 — 저장 파일을 읽지 못했습니다.\n\
+         duet could not start — a saved file could not be read.\n\n\
+         {err}\n\n\
+         {dir}"
+    )
 }

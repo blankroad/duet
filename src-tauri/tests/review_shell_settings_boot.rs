@@ -15,7 +15,6 @@ fn write(p: &Path, s: &str) {
 
 /// 사용자가 손으로 고친 keymap.toml 에 오타 하나 — 감시 기능이 직접 편집을 권장하는 파일.
 #[tokio::test]
-#[ignore = "shell-settings-01 repro"]
 async fn keymap_typo_does_not_block_boot() {
     let d = tempdir().unwrap();
     let p = d.path().join("keymap.toml");
@@ -31,7 +30,6 @@ async fn keymap_typo_does_not_block_boot() {
 
 /// settings.toml 이 쓰다 만 상태(전원 차단·강제 종료) — 저장은 tokio::fs::write(비원자적).
 #[tokio::test]
-#[ignore = "shell-settings-01 repro"]
 async fn truncated_settings_does_not_block_boot() {
     let d = tempdir().unwrap();
     let p = d.path().join("settings.toml");
@@ -43,7 +41,6 @@ async fn truncated_settings_does_not_block_boot() {
 
 /// settings.toml 의 값 타입이 틀림(손편집) — 필드 하나 때문에 전체 부팅 실패.
 #[tokio::test]
-#[ignore = "shell-settings-01 repro"]
 async fn wrong_type_settings_does_not_block_boot() {
     let d = tempdir().unwrap();
     let p = d.path().join("settings.toml");
@@ -54,7 +51,6 @@ async fn wrong_type_settings_does_not_block_boot() {
 }
 
 #[tokio::test]
-#[ignore = "shell-settings-01 repro"]
 async fn truncated_bookmarks_does_not_block_boot() {
     let d = tempdir().unwrap();
     let p = d.path().join("bookmarks.json");
@@ -65,7 +61,6 @@ async fn truncated_bookmarks_does_not_block_boot() {
 }
 
 #[tokio::test]
-#[ignore = "shell-settings-01 repro"]
 async fn truncated_app_launchers_does_not_block_boot() {
     let d = tempdir().unwrap();
     let p = d.path().join("app-launchers.json");
@@ -76,7 +71,6 @@ async fn truncated_app_launchers_does_not_block_boot() {
 }
 
 #[tokio::test]
-#[ignore = "shell-settings-01 repro"]
 async fn truncated_user_aliases_does_not_block_boot() {
     let d = tempdir().unwrap();
     let p = d.path().join("user-aliases.json");
@@ -87,7 +81,6 @@ async fn truncated_user_aliases_does_not_block_boot() {
 }
 
 #[tokio::test]
-#[ignore = "shell-settings-01 repro"]
 async fn truncated_host_favorites_does_not_block_boot() {
     let d = tempdir().unwrap();
     let p = d.path().join("host-favorites.json");
@@ -98,7 +91,6 @@ async fn truncated_host_favorites_does_not_block_boot() {
 }
 
 #[tokio::test]
-#[ignore = "shell-settings-01 repro"]
 async fn truncated_host_groups_does_not_block_boot() {
     let d = tempdir().unwrap();
     let p = d.path().join("host-groups.json");
@@ -109,7 +101,6 @@ async fn truncated_host_groups_does_not_block_boot() {
 }
 
 #[tokio::test]
-#[ignore = "shell-settings-01 repro"]
 async fn truncated_saved_hosts_does_not_block_boot() {
     let d = tempdir().unwrap();
     let p = d.path().join("saved-hosts.json");
@@ -121,7 +112,6 @@ async fn truncated_saved_hosts_does_not_block_boot() {
 
 /// journal.jsonl 마지막 줄이 쓰다 만 상태 — 앞의 정상 항목(undo 기록)은 살아야 한다.
 #[tokio::test]
-#[ignore = "shell-settings-01 repro"]
 async fn journal_with_partial_last_line_does_not_block_boot() {
     let d = tempdir().unwrap();
     let p = d.path().join("journal.jsonl");

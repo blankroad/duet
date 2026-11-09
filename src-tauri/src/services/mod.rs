@@ -3,6 +3,7 @@
 pub mod app_launchers;
 pub mod archive_events;
 pub mod bookmarks;
+pub mod boot;
 pub mod compare_events;
 pub mod connection_events;
 pub mod connection_pool;
