@@ -3,7 +3,7 @@
 //! 양쪽(좌/우 패널) 트리를 걸어 상대경로별 상태를 분류한다 — 읽기 전용, fs 변경 없음.
 //! 결과는 IPC 로 노출돼 비교 다이얼로그가 보여주고, 안전한 양방향 머지의 입력이 된다.
 
-use crate::core::copy_strategy::{decide, CopyStrategy};
+use crate::core::copy_strategy::{decide_fs, CopyStrategy};
 use crate::core::search::nfc_key;
 use crate::fs::FileSystem;
 use crate::types::{DuetError, Entry, EntryKind, Location};
@@ -232,7 +232,7 @@ pub async fn compare_dirs_progress(
             CompareStatus::Unreadable => {}
         }
     }
-    let strategy = decide(&left.source, &right.source);
+    let strategy = decide_fs(left_fs, &left.source, right_fs, &right.source);
     Ok(ComparePlan {
         left,
         right,

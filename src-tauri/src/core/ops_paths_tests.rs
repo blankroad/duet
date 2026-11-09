@@ -415,6 +415,17 @@ async fn endpoint_guard_allows_nested_paths_on_distinct_servers_only() {
     }
 }
 #[tokio::test]
+async fn compare_uses_endpoint_aware_strategy() {
+    let mut left = ProbeFs::new("left", 22);
+    left.exists = true;
+    let mut right = ProbeFs::new("right", 23);
+    right.exists = true;
+    let p = crate::core::compare::compare_dirs(&left, left.loc("/src"), &right, right.loc("/dst"))
+        .await
+        .unwrap();
+    assert_eq!(p.strategy, CopyStrategy::Relay);
+}
+#[tokio::test]
 async fn endpoints_skip_same_host_rename_detection_for_distinct_servers() {
     let mut left = ProbeFs::new("left", 22);
     left.exists = true;
