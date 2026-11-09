@@ -1,6 +1,8 @@
 //! 호스트별 즐겨찾기. `<config_dir>/duet/host-favorites.json`.
 
+use crate::fs::persist;
 use crate::services::settings::duet_config_dir;
+use crate::services::startup_notices::StartupNotice;
 use crate::types::DuetError;
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -19,6 +21,8 @@ pub struct HostFavorite {
 pub struct HostFavoritesStore {
     path: PathBuf,
     inner: RwLock<Vec<HostFavorite>>,
+    /// 시작 시 손상 파일을 보존하고 기본값으로 복구한 내역.
+    load_notice: Option<StartupNotice>,
 }
 
 impl HostFavoritesStore {
@@ -28,23 +32,28 @@ impl HostFavoritesStore {
     }
 
     pub async fn load_from(path: &Path) -> Result<Arc<Self>, DuetError> {
-        let items = if path.exists() {
-            let text = tokio::fs::read_to_string(path)
-                .await
-                .map_err(DuetError::from)?;
-            if text.trim().is_empty() {
-                Vec::new()
-            } else {
-                serde_json::from_str::<Vec<HostFavorite>>(&text)
-                    .map_err(|e| DuetError::Io(format!("host-favorites parse: {e}")))?
-            }
-        } else {
-            Vec::new()
-        };
+        let loaded = persist::load_or_quarantine(
+            path,
+            |text| {
+                if text.trim().is_empty() {
+                    return Ok(Vec::new());
+                }
+                serde_json::from_str::<Vec<HostFavorite>>(text)
+                    .map_err(|e| format!("host-favorites parse: {e}"))
+            },
+            Vec::new,
+        )
+        .await?;
         Ok(Arc::new(Self {
             path: path.to_path_buf(),
-            inner: RwLock::new(items),
+            inner: RwLock::new(loaded.value),
+            load_notice: loaded.quarantined.as_ref().map(StartupNotice::from),
         }))
+    }
+
+    /// 시작 로드 때 손상 파일을 복구했으면 그 알림.
+    pub fn load_notice(&self) -> Option<StartupNotice> {
+        self.load_notice.clone()
     }
 
     pub async fn list(&self) -> Vec<HostFavorite> {
@@ -132,17 +141,9 @@ impl HostFavoritesStore {
     }
 
     async fn write_to_disk(&self, items: &[HostFavorite]) -> Result<(), DuetError> {
-        if let Some(parent) = self.path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(DuetError::from)?;
-        }
         let text = serde_json::to_string_pretty(items)
             .map_err(|e| DuetError::Io(format!("host-favorites serialize: {e}")))?;
-        tokio::fs::write(&self.path, text)
-            .await
-            .map_err(DuetError::from)?;
-        Ok(())
+        persist::write_atomic(&self.path, text.as_bytes()).await
     }
 }
 
@@ -150,6 +151,29 @@ impl HostFavoritesStore {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn corrupt_file_is_preserved_and_loads_defaults() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("store.json");
+        let broken = b"[{broken";
+        std::fs::write(&path, broken).unwrap();
+        let store = HostFavoritesStore::load_from(&path).await.unwrap();
+        assert!(store.list().await.is_empty());
+        assert!(store.load_notice().is_some());
+        let backups: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|p| {
+                p.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("store.json.corrupt-")
+            })
+            .collect();
+        assert_eq!(backups.len(), 1);
+        assert_eq!(std::fs::read(&backups[0]).unwrap(), broken);
+    }
 
     #[tokio::test]
     async fn add_list_remove() {

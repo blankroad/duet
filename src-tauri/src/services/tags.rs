@@ -3,7 +3,9 @@
 //! `{ key: [tag, ...] }` 맵. key = 접두사 + 식별자(`host:<alias>` / `bm:<id>` /
 //! `fav:<id>`). 호스트·북마크를 가로지르는 태그로 사이드바를 좁히는 데 쓰임.
 
+use crate::fs::persist;
 use crate::services::settings::duet_config_dir;
+use crate::services::startup_notices::StartupNotice;
 use crate::types::DuetError;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -14,6 +16,8 @@ use tokio::sync::RwLock;
 pub struct TagsStore {
     path: PathBuf,
     inner: RwLock<HashMap<String, Vec<String>>>,
+    /// 시작 시 손상 파일을 보존하고 기본값으로 복구한 내역.
+    load_notice: Option<StartupNotice>,
 }
 
 impl TagsStore {
@@ -23,22 +27,40 @@ impl TagsStore {
         Self::load_from(&path).await
     }
 
-    /// 지정 경로에서 초기화. 없음/파싱 실패면 빈 맵(캐시성, 손상 무시).
+    /// 지정 경로에서 초기화. 손상 파일은 보존하고 빈 맵으로 복구한다.
     pub async fn load_from(path: &Path) -> Result<Arc<Self>, DuetError> {
-        let map = if path.exists() {
-            tokio::fs::read_to_string(path)
-                .await
-                .ok()
-                .filter(|t| !t.trim().is_empty())
-                .and_then(|t| serde_json::from_str::<HashMap<String, Vec<String>>>(&t).ok())
-                .unwrap_or_default()
-        } else {
-            HashMap::new()
+        let loaded = persist::load_or_quarantine(
+            path,
+            |text| {
+                if text.trim().is_empty() {
+                    return Ok(HashMap::new());
+                }
+                serde_json::from_str::<HashMap<String, Vec<String>>>(text)
+                    .map_err(|e| format!("tags parse: {e}"))
+            },
+            HashMap::new,
+        )
+        .await;
+        let (value, load_notice) = match loaded {
+            Ok(loaded) => (
+                loaded.value,
+                loaded.quarantined.as_ref().map(StartupNotice::from),
+            ),
+            Err(error) => {
+                tracing::warn!("tags load failed: {error}");
+                (HashMap::new(), None)
+            }
         };
         Ok(Arc::new(Self {
             path: path.to_path_buf(),
-            inner: RwLock::new(map),
+            inner: RwLock::new(value),
+            load_notice,
         }))
+    }
+
+    /// 시작 로드 때 손상 파일을 복구했으면 그 알림.
+    pub fn load_notice(&self) -> Option<StartupNotice> {
+        self.load_notice.clone()
     }
 
     /// 전체 맵 반환.
@@ -71,17 +93,9 @@ impl TagsStore {
     }
 
     async fn write_to_disk(&self, map: &HashMap<String, Vec<String>>) -> Result<(), DuetError> {
-        if let Some(parent) = self.path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(DuetError::from)?;
-        }
         let text = serde_json::to_string_pretty(map)
             .map_err(|e| DuetError::Io(format!("tags serialize: {e}")))?;
-        tokio::fs::write(&self.path, text)
-            .await
-            .map_err(DuetError::from)?;
-        Ok(())
+        persist::write_atomic(&self.path, text.as_bytes()).await
     }
 }
 
@@ -89,6 +103,37 @@ impl TagsStore {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn read_io_error_still_starts_empty_without_notice() {
+        let dir = tempdir().unwrap();
+        let store = TagsStore::load_from(dir.path()).await.unwrap();
+        assert!(store.list().await.is_empty());
+        assert!(store.load_notice().is_none());
+    }
+
+    #[tokio::test]
+    async fn corrupt_file_is_preserved_and_loads_defaults() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("store.json");
+        let broken = b"[{broken";
+        std::fs::write(&path, broken).unwrap();
+        let store = TagsStore::load_from(&path).await.unwrap();
+        assert!(store.list().await.is_empty());
+        assert!(store.load_notice().is_some());
+        let backups: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|p| {
+                p.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("store.json.corrupt-")
+            })
+            .collect();
+        assert_eq!(backups.len(), 1);
+        assert_eq!(std::fs::read(&backups[0]).unwrap(), broken);
+    }
 
     #[tokio::test]
     async fn set_dedups_trims_and_persists() {

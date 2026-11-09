@@ -3,7 +3,9 @@
 //! `<config_dir>/duet/frecency.json`. navigate 성공 시 `record`, 점퍼에서 `query`.
 //! 점수 = `ln(count+1) / (1 + days_since_last_visit)` — 자주·최근일수록 높음.
 
+use crate::fs::persist;
 use crate::services::settings::duet_config_dir;
+use crate::services::startup_notices::StartupNotice;
 use crate::types::{DuetError, Location, SourceId};
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -53,6 +55,8 @@ fn score(count: u32, last_visit_ms: i64, now_ms: i64) -> f64 {
 pub struct FrecencyStore {
     path: PathBuf,
     inner: RwLock<Vec<FrecencyEntry>>,
+    /// 시작 시 손상 파일을 보존하고 기본값으로 복구한 내역.
+    load_notice: Option<StartupNotice>,
 }
 
 impl FrecencyStore {
@@ -87,7 +91,13 @@ impl FrecencyStore {
         Ok(Arc::new(Self {
             path: path.to_path_buf(),
             inner: RwLock::new(entries),
+            load_notice: None,
         }))
+    }
+
+    /// 시작 로드 때 손상 파일을 복구했으면 그 알림.
+    pub fn load_notice(&self) -> Option<StartupNotice> {
+        self.load_notice.clone()
     }
 
     /// 방문 기록 — 같은 위치면 count+1·최근성 갱신, 처음이면 추가. 상한 초과 시 prune.
@@ -152,17 +162,9 @@ impl FrecencyStore {
     }
 
     async fn write_to_disk(&self, items: &[FrecencyEntry]) -> Result<(), DuetError> {
-        if let Some(parent) = self.path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(DuetError::from)?;
-        }
         let text = serde_json::to_string_pretty(items)
             .map_err(|e| DuetError::Io(format!("frecency serialize: {e}")))?;
-        tokio::fs::write(&self.path, text)
-            .await
-            .map_err(DuetError::from)?;
-        Ok(())
+        persist::write_atomic(&self.path, text.as_bytes()).await
     }
 }
 

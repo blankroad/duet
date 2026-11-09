@@ -4,7 +4,9 @@
 //! 한 항목(`AppItem`)은 앱(`path: Some`) 또는 폴더(`path: None` + `children`).
 //! 폴더는 1-레벨(폴더 안에 폴더 없음) — 타입이 아닌 invariant 로 강제.
 
+use crate::fs::persist;
 use crate::services::settings::duet_config_dir;
+use crate::services::startup_notices::StartupNotice;
 use crate::types::DuetError;
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -112,6 +114,8 @@ fn normalize(items: &mut Vec<AppItem>) {
 pub struct AppLaunchersStore {
     path: PathBuf,
     inner: RwLock<Vec<AppItem>>,
+    /// 시작 시 손상 파일을 보존하고 기본값으로 복구한 내역.
+    load_notice: Option<StartupNotice>,
 }
 
 impl AppLaunchersStore {
@@ -121,24 +125,31 @@ impl AppLaunchersStore {
     }
 
     pub async fn load_from(path: &Path) -> Result<Arc<Self>, DuetError> {
-        let mut items = if path.exists() {
-            let text = tokio::fs::read_to_string(path)
-                .await
-                .map_err(DuetError::from)?;
-            if text.trim().is_empty() {
-                Vec::new()
-            } else {
-                serde_json::from_str::<Vec<AppItem>>(&text)
-                    .map_err(|e| DuetError::Io(format!("app-launchers parse: {e}")))?
-            }
-        } else {
-            Vec::new()
-        };
-        normalize(&mut items);
+        let loaded = persist::load_or_quarantine(
+            path,
+            |text| {
+                let mut items = if text.trim().is_empty() {
+                    Vec::new()
+                } else {
+                    serde_json::from_str::<Vec<AppItem>>(text)
+                        .map_err(|e| format!("app-launchers parse: {e}"))?
+                };
+                normalize(&mut items);
+                Ok(items)
+            },
+            Vec::new,
+        )
+        .await?;
         Ok(Arc::new(Self {
             path: path.to_path_buf(),
-            inner: RwLock::new(items),
+            inner: RwLock::new(loaded.value),
+            load_notice: loaded.quarantined.as_ref().map(StartupNotice::from),
         }))
+    }
+
+    /// 시작 로드 때 손상 파일을 복구했으면 그 알림.
+    pub fn load_notice(&self) -> Option<StartupNotice> {
+        self.load_notice.clone()
     }
 
     pub async fn list(&self) -> Vec<AppItem> {
@@ -345,17 +356,9 @@ impl AppLaunchersStore {
     }
 
     async fn write_to_disk(&self, items: &[AppItem]) -> Result<(), DuetError> {
-        if let Some(parent) = self.path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(DuetError::from)?;
-        }
         let text = serde_json::to_string_pretty(items)
             .map_err(|e| DuetError::Io(format!("app-launchers serialize: {e}")))?;
-        tokio::fs::write(&self.path, text)
-            .await
-            .map_err(DuetError::from)?;
-        Ok(())
+        persist::write_atomic(&self.path, text.as_bytes()).await
     }
 }
 
@@ -363,6 +366,49 @@ impl AppLaunchersStore {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn saved_launcher_args_survive_reload() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("apps.json");
+        let store = AppLaunchersStore::load_from(&path).await.unwrap();
+        let added = store
+            .add("Editor".into(), PathBuf::from("/editor"))
+            .await
+            .unwrap();
+        store
+            .set_args(&added[0].id, vec!["--new".into()])
+            .await
+            .unwrap();
+        let reloaded = AppLaunchersStore::load_from(&path).await.unwrap();
+        let items = reloaded.list().await;
+        assert_eq!(items[0].name, "Editor");
+        assert_eq!(items[0].args, vec!["--new"]);
+        assert!(reloaded.load_notice().is_none());
+    }
+
+    #[tokio::test]
+    async fn corrupt_file_is_preserved_and_loads_defaults() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("store.json");
+        let broken = b"[{broken";
+        std::fs::write(&path, broken).unwrap();
+        let store = AppLaunchersStore::load_from(&path).await.unwrap();
+        assert!(store.list().await.is_empty());
+        assert!(store.load_notice().is_some());
+        let backups: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|p| {
+                p.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("store.json.corrupt-")
+            })
+            .collect();
+        assert_eq!(backups.len(), 1);
+        assert_eq!(std::fs::read(&backups[0]).unwrap(), broken);
+    }
 
     async fn store() -> Arc<AppLaunchersStore> {
         let dir = tempdir().unwrap();

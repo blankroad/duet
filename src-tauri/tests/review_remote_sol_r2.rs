@@ -320,7 +320,6 @@ async fn long_exec_delays_the_supervisor_mutex() {
 }
 
 #[tokio::test]
-#[ignore = "remote-19 repro: corrupt host stores block startup"]
 async fn corrupt_host_stores_should_be_recoverable() {
     use duet_lib::services::{
         host_favorites::HostFavoritesStore, host_groups::HostGroupsStore,
