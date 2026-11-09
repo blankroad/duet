@@ -18,7 +18,8 @@ describe("sync-compare: FE glob contract for backend comparison", () => {
     const message =
       "sync supports local↔local and same-host SSH only (cross-host relay is a follow-up)";
     const result = explainError({ kind: "NotSupported", message }, "windows");
-    expect(result.text).toContain(message);
+    // SC-15: 문장은 쉬운 안내, 원문은 detail 에.
+    expect(result.text).not.toContain(message);
     expect(result.detail).toBe(message);
   });
 });

@@ -59,6 +59,7 @@ type Reason =
   | "repackEmpty"
   | "remoteZipUnsupported"
   | "remoteExit"
+  | "syncCrossHost"
   | "deviceNotReady"
   | "networkLogon"
   | "virus"
@@ -184,13 +185,15 @@ const PATTERNS: Array<[RegExp, Reason]> = [
   [/operation not supported/i, "unsupportedOp"],
 ];
 
-/** 압축 작업의 구체적 문구 — 아래 `PATTERNS` 앞부분(압축·안전)보다도 먼저 본다. */
+/** 압축·동기화 작업의 구체적 문구 — 아래 `PATTERNS` 앞부분(압축·안전)보다도 먼저 본다. */
 const ARCHIVE_PATTERNS: Array<[RegExp, Reason]> = [
   // 서버 unzip exit 81 — AES 암호 zip 등. 암호를 다시 물어도 소용없어 내 PC 로 복사해 풀어야 한다.
   [/remote host's unzip cannot extract/i, "remoteZipUnsupported"],
   [/unsafe path in/i, "unsafeArchive"], // rar 의 경로 탈출 항목
   [/large file option has not been set/i, "zipLargeFile"], // zip 4GB 초과
   [/nothing to repack/i, "repackEmpty"],
+  // 동기화는 local↔local·같은 서버만 — 그 밖의 조합은 비교 창의 적용/병합으로 안내.
+  [/sync supports local↔local/i, "syncCrossHost"],
 ];
 
 /** 서버 호스트 프로그램이 없다는 원문 → 프로그램 이름 (unzip 미설치, tar 의 압축 코덱 없음). */

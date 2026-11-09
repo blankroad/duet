@@ -44,7 +44,7 @@ describe("sync-compare C-26: 이 영역 오류의 사용자 문장 (ko)", () => 
     await i18n.changeLanguage("en");
   });
 
-  it("현재 문장 기록 — 종류 라벨 + 영문 원문이 그대로 붙는다", () => {
+  it("현재 문장 기록 — 종류 라벨 + 영문 원문이 그대로 붙는다 (relay 동기화는 SC-15 로 쉬운 문장)", () => {
     const out = [
       SYNC_RELAY_REFUSED,
       MERGE_TRUNCATED,
@@ -53,7 +53,7 @@ describe("sync-compare C-26: 이 영역 오류의 사용자 문장 (ko)", () => 
       SYNC_SAME_DIR,
     ].map((e) => explainError(e, "unix").text);
     expect(out).toEqual([
-      "지원하지 않음 — sync supports local↔local and same-host SSH only (cross-host relay is a follow-up)",
+      i18n.t("errors.reason.syncCrossHost"),
       "입출력 오류 — merge refused: comparison was truncated (too many entries) — narrow the scope",
       "입출력 오류 — three-way: all sides must be directories",
       "입출력 오류 — compare: both sides must be directories",
@@ -61,7 +61,7 @@ describe("sync-compare C-26: 이 영역 오류의 사용자 문장 (ko)", () => 
     ]);
   });
 
-  it.fails(
+  it(
     "sync-compare: relay 동기화 거부가 한국어로 '왜 안 되는지·대안'을 말해야 한다",
     () => {
       const t = explainError(SYNC_RELAY_REFUSED, "unix").text;

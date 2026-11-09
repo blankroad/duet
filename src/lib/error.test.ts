@@ -372,3 +372,16 @@ describe("explainError — remote archive commands (archive-32)", () => {
     ).toBe("SSH error — tar: something odd");
   });
 });
+
+describe("explainError — sync between different hosts (SC-15)", () => {
+  it("points to Compare → Apply/Merge instead of the developer sentence", () => {
+    const r = explainError({
+      kind: "NotSupported",
+      message:
+        "sync supports local↔local and same-host SSH only (cross-host relay is a follow-up)",
+    });
+    expect(r.text).toBe(i18n.t("errors.reason.syncCrossHost"));
+    expect(r.text).toMatch(/Compare/);
+    expect(r.text).not.toMatch(/local↔local/);
+  });
+});
