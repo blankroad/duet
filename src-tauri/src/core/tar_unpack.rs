@@ -589,6 +589,10 @@ fn root_kind(e: &io::Error) -> io::ErrorKind {
     kind
 }
 
+/// 아카이브 항목 `entry`(표시용 아카이브 안 이름)를 쓰다 난 io 오류 → DuetError.
+/// 메시지는 `"<entry>: <오류 사슬 전체>"`([`describe_io`] — 가장 안쪽 OS 원인과 "(os error N)"
+/// 까지). 종류는 가장 안쪽 io 오류로 고른다: `PermissionDenied` → `DuetError::PermissionDenied`,
+/// `NotFound` → `DuetError::NotFound`, 그 밖 → `DuetError::Io`.
 pub(crate) fn write_error(entry: &str, e: &io::Error) -> DuetError {
     let msg = format!("{entry}: {}", describe_io(e));
     match root_kind(e) {
