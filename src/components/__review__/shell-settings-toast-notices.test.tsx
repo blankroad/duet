@@ -16,6 +16,7 @@ import { NoticeBadge } from "@/components/NoticeBadge";
 import { useToast } from "@/stores/toast";
 import { useNotices } from "@/stores/notices";
 import { formatErr } from "@/lib/error";
+import { showError } from "@/lib/errorToast";
 
 afterEach(() => {
   cleanup();
@@ -154,8 +155,7 @@ describe("C-15 notice badge", () => {
 describe("C-15 error text keeps which file failed", () => {
   const err = {
     kind: "PermissionDenied",
-    message:
-      "permission denied: /srv/data/분기보고서 2026.xlsx (os error 13)",
+    message: "permission denied: /srv/data/분기보고서 2026.xlsx (os error 13)",
   };
 
   it.fails(
@@ -167,15 +167,11 @@ describe("C-15 error text keeps which file failed", () => {
     },
   );
 
-  it.fails(
-    "shell-settings-04: formatErr 로 만든 오류 토스트도 알림 기록 '자세히' 에 원문이 남는다",
-    () => {
-      // 오류 토스트 98곳 중 73곳이 이 형태(`show(t(..., {err: formatErr(e)}), "error")`).
-      useToast
-        .getState()
-        .show(i18n.t("toast.deleteFailed", { err: formatErr(err) }), "error");
-      const [logged] = useNotices.getState().items;
-      expect(logged!.detail).toContain("분기보고서 2026.xlsx");
-    },
-  );
+  it("shell-settings-04: 오류 토스트(showError)는 알림 기록 '자세히' 에 원문이 남는다", () => {
+    // 예전 호출부 형태 `show(t(..., {err: formatErr(e)}), "error")` 는 원문을 버렸다 —
+    // 오류 토스트는 showError 헬퍼로 띄운다(G-16).
+    showError("toast.deleteFailed", err);
+    const [logged] = useNotices.getState().items;
+    expect(logged!.detail).toContain("분기보고서 2026.xlsx");
+  });
 });

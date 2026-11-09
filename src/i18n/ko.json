@@ -1324,6 +1324,7 @@
     "remove": "제거"
   },
   "errors": {
+    "withName": "“{{name}}” — {{text}}",
     "reason": {
       "needPassword": "암호가 필요하거나 틀렸습니다.",
       "authFailed": "로그인하지 못했습니다. 사용자 이름, 비밀번호나 키를 확인하세요.",
