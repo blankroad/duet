@@ -224,6 +224,26 @@ mod tests {
         assert_eq!(msg, "ssh: exec unzip: channel closed");
     }
 
+    /// 실제 exec 요청 실패 경로(russh 채널)는 단위 테스트로 흉내 내기 어렵다 — 대신 이 파일의
+    /// 비테스트 코드가 명령 본문을 오류 문구에 넣지 않고 exec 실패를 모두 `exec_failed` 로
+    /// 보내는지 소스로 검사한다(옛 `exec '{cmd}': …` 로 되돌리면 실패).
+    #[test]
+    fn exec_call_sites_route_failures_through_exec_failed() {
+        let src = include_str!("remote_exec.rs");
+        let code = src.split("#[cfg(test)]").next().unwrap_or(src);
+        assert!(
+            !code.contains("{cmd}"),
+            "command body interpolated into a message"
+        );
+        assert!(
+            !code.contains("{cmd:"),
+            "command body interpolated into a message"
+        );
+        // exec 요청 3곳 중 exec_with_stdin 은 원래부터 `exec: {e}`, 나머지 2곳은 헬퍼로.
+        assert_eq!(code.matches(".exec(true, cmd)").count(), 3);
+        assert_eq!(code.matches(".map_err(|e| exec_failed(cmd, e))").count(), 2);
+    }
+
     #[test]
     fn program_name_is_only_a_plain_first_word() {
         assert_eq!(program_name("tar -z -xf 'a.tgz' -C 'b'"), "tar");
