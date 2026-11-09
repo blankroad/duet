@@ -318,10 +318,19 @@ const BARE_PATH = new RegExp(
 const QUOTED = /[`'"“‘]([^`'"“”‘’\n]+)[`'"”’]/g;
 const ABS_ONLY = new RegExp(`^${ABS_START}`);
 
-/** 따옴표 안의 덩어리가 경로처럼 보이는지 — 절대 경로이거나, 공백 없는 `a/b` 꼴. */
+/**
+ * 따옴표 안의 덩어리가 경로처럼 보이는지 — 절대 경로이거나, 공백 없는 `a/b` 꼴.
+ * 상대 꼴에서 URL(`scheme://`)·`:` 가 든 주소(IPv6/CIDR `…::/64`)·비율(`3/4`)은 뺀다.
+ */
 function looksLikePath(s: string): boolean {
   if (ABS_ONLY.test(s)) return true;
-  return /[\\/]/.test(s) && !/\s/.test(s) && !s.startsWith("-");
+  return (
+    /[\\/]/.test(s) &&
+    !/\s/.test(s) &&
+    !s.startsWith("-") &&
+    !s.includes(":") &&
+    !/^\d+\/\d+$/.test(s)
+  );
 }
 
 /** 롤백 실패 문장의 백업 위치 표지 (`core/ops.rs` copy/move — 형식 고정). */

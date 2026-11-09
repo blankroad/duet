@@ -482,3 +482,48 @@ describe("explainError — R3 review (sol-3) R3-02", () => {
     ).toBe(named("a: already exists.txt", "notFound"));
   });
 });
+
+describe("explainError — R3 review (sol-3) R3-04", () => {
+  const plain = (reason: string, vars?: Record<string, string>) =>
+    i18n.t(`errors.reason.${reason}`, vars ?? {});
+  const named = (name: string, reason: string) =>
+    i18n.t("errors.withName", { name, text: plain(reason) });
+
+  // R3-04: 따옴표 속 URL·':' 포함 주소·숫자/숫자 는 경로가 아니다.
+  it.each([
+    "ratio or URL 'https://example.com/a/b': Permission denied",
+    "ratio or URL '2001:db8::/64': Permission denied",
+    "ratio or URL '3/4': Permission denied",
+  ])("R3-04 does not name %j", (message) => {
+    expect(explainError({ kind: "Io", message }, "linux").text).toBe(
+      plain("accessDenied"),
+    );
+  });
+
+  it("R3-04 still finds relative and extended paths in quotes", () => {
+    expect(
+      explainError(
+        { kind: "Io", message: "unpack 'dir/link': Permission denied" },
+        "linux",
+      ).text,
+    ).toBe(named("link", "accessDenied"));
+    expect(
+      explainError(
+        {
+          kind: "Io",
+          message:
+            "open '\\\\?\\C:\\work\\file.txt': Access is denied. (os error 5)",
+        },
+        "windows",
+      ).text,
+    ).toBe(named("file.txt", "accessDenied"));
+    for (const message of [
+      "C: Permission denied",
+      "at 10:30 Permission denied",
+      "--output=/tmp/a Permission denied",
+    ])
+      expect(explainError({ kind: "Io", message }, "linux").text).toBe(
+        plain("accessDenied"),
+      );
+  });
+});
