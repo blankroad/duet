@@ -445,25 +445,33 @@ fn place_hard_link(src: &Path, dst: &Path) -> io::Result<HardLink> {
         ));
     }
     let mut from = std::fs::File::open(src)?;
-    let to = write_new_file(dst, &mut from)?;
-    to.set_permissions(from.metadata()?.permissions())
-        .map(|()| HardLink::Placed)
+    let perm = from.metadata()?.permissions();
+    // 권한까지 임시 파일에서 끝낸 뒤 교체한다 — 실패하면 기존 dst 는 그대로.
+    write_new_file(dst, &mut from, |f| f.set_permissions(perm))?;
+    Ok(HardLink::Placed)
 }
 
-/// `dst` 자리에 새 일반 파일을 만들어 `content` 로 채우고 열린 파일을 돌려준다(권한·시각 설정용).
-/// 기존 파일·심볼릭 링크는 따라가지 않고 그 자리를 교체하고, 폴더면 오류다
-/// ([`create_replacing`] 규칙). 파일은 `create_new`(O_EXCL)로 만든다 — 끊어진 링크 자리라도
-/// 따라가 폴더 밖에 만들지 않는다. `dst` 의 상위 폴더 검사는 호출자 몫([`refuse_through_link`]).
-pub(crate) fn write_new_file(dst: &Path, content: &mut impl Read) -> io::Result<std::fs::File> {
-    let made = create_replacing(dst, |at| {
+/// `dst` 자리에 새 일반 파일을 만들어 `content` 로 채우고, `finish`(권한·시각 등 마무리)까지
+/// 마친다. 기존 파일·심볼릭 링크는 따라가지 않고 그 자리를 교체하고, 폴더면 오류다
+/// ([`create_replacing`] 규칙). 기존 항목이 있으면 내용 쓰기와 `finish` 를 모두 **임시 파일에서**
+/// 끝낸 뒤에야 교체한다 — 어느 단계든 실패하면 기존 `dst` 는 그대로다(임시 파일은 해제 폴더
+/// 안에 남는다). 파일은 `create_new`(O_EXCL)로 만든다 — 끊어진 링크 자리라도 따라가 폴더 밖에
+/// 만들지 않는다. `dst` 의 상위 폴더 검사는 호출자 몫([`refuse_through_link`]).
+pub(crate) fn write_new_file(
+    dst: &Path,
+    content: &mut impl Read,
+    finish: impl FnOnce(&std::fs::File) -> io::Result<()>,
+) -> io::Result<()> {
+    create_replacing(dst, |at| {
         let mut f = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(at)?;
         io::copy(content, &mut f)?;
-        Ok(Some(f))
-    })?;
-    made.ok_or_else(|| io::Error::other("file was not created"))
+        finish(&f)?;
+        Ok(Some(()))
+    })
+    .map(|_| ())
 }
 
 /// `dst` 자리에 `make` 로 새 항목을 만든다. `make` 는 **비어 있는** 경로를 받아 그 자리에
@@ -818,7 +826,7 @@ mod tests {
         let fresh = dest.path().join("f");
 
         for p in [&dst, &dangling, &fresh] {
-            write_new_file(p, &mut &b"PAYLOAD"[..]).unwrap();
+            write_new_file(p, &mut &b"PAYLOAD"[..], |_| Ok(())).unwrap();
         }
 
         assert_eq!(std::fs::read(&victim).unwrap(), b"ORIGINAL");
@@ -831,13 +839,36 @@ mod tests {
         assert_eq!(names(dest.path()), ["d", "f", "h"], "임시 이름이 남았다");
     }
 
+    /// 마무리(권한 등)가 실패하면 기존 dst 는 그대로다 — 교체는 모든 단계가 끝난 뒤(R2 리뷰).
+    #[test]
+    fn write_new_file_keeps_destination_when_finish_fails() {
+        let dest = tempfile::tempdir().unwrap();
+        let dst = dest.path().join("f.txt");
+        std::fs::write(&dst, b"ORIGINAL").unwrap();
+        let err = write_new_file(&dst, &mut &b"PAYLOAD"[..], |_| {
+            Err(io::Error::from(io::ErrorKind::PermissionDenied))
+        })
+        .unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(std::fs::read(&dst).unwrap(), b"ORIGINAL");
+        // 마무리는 새 내용이 다 쓰인 파일을 받는다.
+        let mut seen = Vec::new();
+        write_new_file(&dst, &mut &b"PAYLOAD"[..], |f| {
+            seen = std::fs::read(dest.path().join("f.txt"))?;
+            f.metadata().map(|m| assert_eq!(m.len(), 7))
+        })
+        .unwrap();
+        assert_eq!(seen, b"ORIGINAL", "교체 전에 마무리가 돌아야 한다");
+        assert_eq!(std::fs::read(&dst).unwrap(), b"PAYLOAD");
+    }
+
     #[test]
     fn write_new_file_refuses_a_folder() {
         let dest = tempfile::tempdir().unwrap();
         let dir = dest.path().join("d");
         std::fs::create_dir(&dir).unwrap();
         std::fs::write(dir.join("keep"), b"k").unwrap();
-        let err = write_new_file(&dir, &mut &b"x"[..]).unwrap_err();
+        let err = write_new_file(&dir, &mut &b"x"[..], |_| Ok(())).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
         assert_eq!(std::fs::read(dir.join("keep")).unwrap(), b"k");
     }

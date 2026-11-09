@@ -200,14 +200,12 @@ fn sevenz_entry(
         inner: data,
         failed: false,
     };
-    match out.file_handle(name, path, &mut src, mode) {
-        Ok(file) => {
-            if entry.has_last_modified_date {
-                // 예전 `default_entry_extract_fn` 처럼 수정 시각을 옮긴다(실패는 무시).
-                let _ = file.set_modified(entry.last_modified_date().into());
-            }
-            Ok(())
-        }
+    // 예전 `default_entry_extract_fn` 처럼 수정 시각을 옮긴다.
+    let modified = entry
+        .has_last_modified_date
+        .then(|| entry.last_modified_date().into());
+    match out.file_handle(name, path, &mut src, mode, modified) {
+        Ok(()) => Ok(()),
         Err(FileError::Io(e)) if src.failed => Err(Failure::Read(e)),
         Err(FileError::Io(e)) => Err(Failure::Ours(write_error(name, &e))),
         Err(FileError::Duet(e)) => Err(Failure::Ours(e)),
@@ -334,30 +332,37 @@ impl<'d> Output<'d> {
         content: &mut impl Read,
         mode: Option<u32>,
     ) -> Result<(), DuetError> {
-        match self.file_handle(shown, path, content, mode) {
-            Ok(_) => Ok(()),
+        match self.file_handle(shown, path, content, mode, None) {
+            Ok(()) => Ok(()),
             Err(FileError::Io(e)) => Err(write_error(shown, &e)),
             Err(FileError::Duet(e)) => Err(e),
         }
     }
 
-    /// 새 일반 파일을 만들어 채우고 모드를 준다. 열린 파일을 돌려준다(시각 설정용).
+    /// 새 일반 파일을 만들어 채우고 수정 시각(있으면, 실패는 무시 — 예전과 같음)·모드를 준다.
+    /// 시각·모드도 교체 전에 끝낸다([`write_new_file`] 의 `finish`) — 실패하면 기존 항목은 그대로.
     fn file_handle(
         &mut self,
         shown: &str,
         path: (PathBuf, bool),
         content: &mut impl Read,
         mode: Option<u32>,
-    ) -> Result<std::fs::File, FileError> {
+        modified: Option<std::time::SystemTime>,
+    ) -> Result<(), FileError> {
         let (_, dst) = self.prepare(shown, path, false).map_err(FileError::Duet)?;
-        let file = write_new_file(&dst, content).map_err(FileError::Io)?;
-        if let Some(mode) = mode {
-            let current = file.metadata().map_err(FileError::Io)?.permissions();
-            if let Some(perm) = permissions_from_mode(current, mode) {
-                file.set_permissions(perm).map_err(FileError::Io)?;
+        write_new_file(&dst, content, |file| {
+            if let Some(t) = modified {
+                let _ = file.set_modified(t);
             }
-        }
-        Ok(file)
+            let Some(mode) = mode else {
+                return Ok(());
+            };
+            match permissions_from_mode(file.metadata()?.permissions(), mode) {
+                Some(perm) => file.set_permissions(perm),
+                None => Ok(()),
+            }
+        })
+        .map_err(FileError::Io)
     }
 
     /// 링크 항목 — 만들 수 없는 환경이면 건너뛰고 보고한다.
