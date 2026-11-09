@@ -1246,13 +1246,15 @@ function App() {
       closeDialog();
       const plan = await commands.fsCompressPlan(items, name, format);
       if (plan.status === "error") {
-        showError("toast.compressFailed", plan.error);
+        showError("toast.compressFailed", plan.error, { path: name });
         return;
       }
       // execute 는 task 로 — 완료 시 affected_locations 자동 새로고침 (useTaskEvents).
       const exec = await commands.fsCompressExecute(plan.data);
       if (exec.status === "error")
-        showError("toast.compressFailed", exec.error);
+        showError("toast.compressFailed", exec.error, {
+          path: plan.data.dest_path,
+        });
     },
     [dialog, closeDialog],
   );
@@ -1270,7 +1272,9 @@ function App() {
         };
         const r = await commands.fsRepackPlan(tab.location, original);
         if (r.status === "error") {
-          showError("toast.updateArchiveFailed", r.error);
+          showError("toast.updateArchiveFailed", r.error, {
+            path: archive.label,
+          });
           return;
         }
         openDialog({
@@ -1295,7 +1299,9 @@ function App() {
       });
     } else {
       closeDialog();
-      showError("toast.updateArchiveFailed", r.error);
+      showError("toast.updateArchiveFailed", r.error, {
+        path: plan.dest_path,
+      });
     }
   }, [dialog, openDialog, closeDialog]);
 
@@ -2245,7 +2251,9 @@ function App() {
             // NeedPassword 로 실패하고 useTaskEvents 가 이 다이얼로그를 다시 연다.
             const r = await commands.fsExtractExecute(dialog.plan, pw);
             if (r.status === "error") {
-              showError("toast.extractFailed", r.error);
+              showError("toast.extractFailed", r.error, {
+                path: dialog.plan.archive_name,
+              });
               return "ok";
             }
             rememberExtract(r.data, { plan: dialog.plan, attempted: true });
