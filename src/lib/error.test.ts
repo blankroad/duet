@@ -417,3 +417,68 @@ describe("explainError — R3 review (sol-3) R3-01", () => {
     expect(r.text).toContain(i18n.t("errors.backupKept", { path: backup }));
   });
 });
+
+describe("explainError — R3 review (sol-3) R3-02", () => {
+  const plain = (reason: string, vars?: Record<string, string>) =>
+    i18n.t(`errors.reason.${reason}`, vars ?? {});
+  const named = (name: string, reason: string) =>
+    i18n.t("errors.withName", { name, text: plain(reason) });
+
+  // R3-02 A: SFTP NotFound/PermissionDenied 는 message 전체가 경로(fs/ssh.rs:786).
+  it.each([
+    [
+      "NotFound",
+      "/srv/project: permission denied.txt",
+      "project: permission denied.txt",
+      "notFound",
+    ],
+    [
+      "PermissionDenied",
+      "/srv/report: no such file.txt",
+      "report: no such file.txt",
+      "accessDenied",
+    ],
+    [
+      "NotFound",
+      "/srv/report\nconnection refused.txt",
+      "report\nconnection refused.txt",
+      "notFound",
+    ],
+  ])("R3-02 A %s whole-path message %j", (kind, message, name, reason) => {
+    expect(explainError({ kind, message }, "linux").text).toBe(
+      named(name, reason),
+    );
+  });
+
+  // R3-02 B: combine_failures(core/ops.rs:447) 의 "<name>: <err>" 이름도 원인으로 읽지 않는다.
+  it.each([
+    [
+      "bad header.txt",
+      "1 item(s) failed — bad header.txt: permission denied: /src/bad header.txt",
+    ],
+    [
+      "timed out.txt",
+      "1 item(s) failed — timed out.txt: permission denied: /src/timed out.txt",
+    ],
+  ])(
+    "R3-02 B item name %s keeps the PermissionDenied cause",
+    (name, message) => {
+      expect(
+        explainError({ kind: "PermissionDenied", message }, "linux").text,
+      ).toBe(named(name, "accessDenied"));
+    },
+  );
+
+  it("R3-02 B item names containing ': ' are masked up to the error prefix", () => {
+    expect(
+      explainError(
+        {
+          kind: "NotFound",
+          message:
+            "2 item(s) failed — a: already exists.txt: not found: x; b.txt: not found: y",
+        },
+        "linux",
+      ).text,
+    ).toBe(named("a: already exists.txt", "notFound"));
+  });
+});

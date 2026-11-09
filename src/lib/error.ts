@@ -235,6 +235,28 @@ const KIND_REASON: Partial<Record<string, Reason>> = {
   NotPermitted: "notPermitted",
 };
 
+/**
+ * kind 가 원인을 이미 말하는 경우, 패턴·번호가 고른 원인이 그와 어울려야 한다 — 아니면
+ * 원문 속 다른 단어(파일 이름 등)를 잘못 읽은 것이니 kind 를 믿는다.
+ */
+const KIND_COMPATIBLE: Partial<Record<string, ReadonlySet<Reason>>> = {
+  PermissionDenied: new Set<Reason>([
+    "accessDenied",
+    "readOnly",
+    "inUse",
+    "linkPrivilege",
+    "virus",
+    "cloudFile",
+    "networkLogon",
+  ]),
+  NotFound: new Set<Reason>([
+    "notFound",
+    "deviceNotReady",
+    "network",
+    "cloudFile",
+  ]),
+};
+
 /** 번호·패턴으로 못 고르면 kind 로 (위 두 표가 더 구체적이라 나중에 본다). */
 const KIND_FALLBACK: Partial<Record<string, Reason>> = {
   PermissionDenied: "accessDenied",
@@ -318,6 +340,27 @@ function findBackup(raw: string): PathHit | undefined {
     : undefined;
 }
 
+/** 백엔드 `DuetError` Display 앞머리 (`types/error.rs`) — 항목 이름의 끝을 찾는 데 쓴다. */
+const ERROR_PREFIX =
+  "(?:not found|permission denied|connection failed|auth failed|destructive op not permitted|cancelled|not supported|password required|io|cross-device|ssh|unverified host key)\\b";
+/**
+ * 여러 항목 실패 요약(`core/ops.rs` combine_failures: `N item(s) failed — <name>: <err>; …`)
+ * 의 항목 이름. 이름에 `: ` 가 있을 수 있어 뒤따르는 오류 앞머리까지를 이름으로 본다.
+ */
+const ITEM_NAME = new RegExp(
+  `(?:— |; )(?!${BACKUP_MARKER})(.+?): (?=${ERROR_PREFIX})`,
+  "g",
+);
+
+function findItemNames(raw: string): PathHit[] {
+  if (!/^\d+ item\(s\) failed — /.test(raw)) return [];
+  return [...raw.matchAll(ITEM_NAME)].map((m) => {
+    const path = m[1]!;
+    const start = m.index + m[0].indexOf(path);
+    return { path, start, end: start + path.length, backup: false };
+  });
+}
+
 /** 원문에서 경로를 찾는다(겹치지 않게, 앞에서부터). */
 function findPaths(raw: string, kind: string | undefined): PathHit[] {
   const hit = (path: string, start: number): PathHit => ({
@@ -327,12 +370,13 @@ function findPaths(raw: string, kind: string | undefined): PathHit[] {
     backup: false,
   });
   // 원격 SFTP 의 NotFound/PermissionDenied 는 message 가 경로 그 자체다(`fs/ssh.rs` map_sftp_error).
-  // 괄호가 든 이름("report (1).txt")도 통째로.
+  // 괄호·`: `·줄바꿈이 든 이름("report (1).txt", "a: b.txt")도 통째로.
+  // 로컬 io 오류("(os error N)" 꼬리표)는 경로로 시작해도 이 모양이 아니다.
   const whole = raw.trim();
   if (
     (kind === "NotFound" || kind === "PermissionDenied") &&
     ABS_ONLY.test(whole) &&
-    !/: |\n/.test(whole)
+    !/\(os error \d+\)/i.test(whole)
   )
     return [hit(whole, raw.indexOf(whole))];
   const hits: PathHit[] = [];
@@ -340,6 +384,8 @@ function findPaths(raw: string, kind: string | undefined): PathHit[] {
   if (backup) hits.push(backup);
   const free = (start: number, end: number) =>
     !hits.some((h) => start < h.end && h.start < end);
+  for (const item of findItemNames(raw))
+    if (free(item.start, item.end)) hits.push(item);
   for (const m of raw.matchAll(QUOTED)) {
     const inner = m[1]!.trim();
     const start = m.index + m[0].indexOf(inner);
@@ -418,6 +464,12 @@ function pickReason(
   const exit = HOST_FAILURE.exec(message.trim());
   if (exit && !message.trim().slice(exit[0].length))
     return { reason: "remoteExit", vars: { code: exit[1] ?? "" } };
+  return kindFallback(kind);
+}
+
+function kindFallback(
+  kind: string | undefined,
+): { reason: Reason; vars?: Record<string, string> } | undefined {
   const fallback = kind ? KIND_FALLBACK[kind] : undefined;
   return fallback ? { reason: fallback } : undefined;
 }
@@ -442,9 +494,12 @@ export function explainError(
   const masked = maskPaths(raw, paths);
   // 롤백 실패("…; original preserved at backup … (rollback failed: …)")는 앞쪽이 원래 원인.
   const cut = masked.search(/;?\s*original preserved at backup/i);
-  const picked =
+  let picked =
     (cut > 0 ? pickReason(kind, masked.slice(0, cut), os) : undefined) ??
     pickReason(kind, masked, os);
+  const compatible = kind ? KIND_COMPATIBLE[kind] : undefined;
+  if (picked && compatible && !compatible.has(picked.reason))
+    picked = kindFallback(kind);
   if (picked) {
     const text = i18n.t(`errors.reason.${picked.reason}`, picked.vars ?? {});
     if (!APPEND_DETAIL.has(picked.reason) || !cleaned)
