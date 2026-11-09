@@ -441,7 +441,10 @@ export async function executeTransfer(
     showError(
       mode === "move" ? "toast.moveFailed" : "toast.copyFailed",
       r.error,
-      { toast: showToast },
+      {
+        path: plan.items.length === 1 ? plan.items[0]!.name : null,
+        toast: showToast,
+      },
     );
     return;
   }

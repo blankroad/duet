@@ -9,11 +9,14 @@ vi.mock("@/types/bindings", () => ({
   commands: {
     fsMovePlan: () => Promise.resolve(h.plan),
     fsCopyPlan: () => Promise.resolve(h.plan),
+    fsMoveExecute: () => Promise.resolve(h.plan),
+    fsCopyExecute: () => Promise.resolve(h.plan),
   },
 }));
 
 import i18n from "@/i18n";
-import { planTransferTo } from "@/lib/fileActions";
+import { executeTransfer, planTransferTo } from "@/lib/fileActions";
+import type { CopyPlan } from "@/types/bindings";
 
 const src: Location = { source: { kind: "local" }, path: "C:\\work" };
 const dst: Location = { source: { kind: "local" }, path: "D:\\backup" };
@@ -64,4 +67,26 @@ describe("fileActions error toasts (G-16)", () => {
     expect(message).not.toContain("report.docx");
     expect(opts).toEqual({ detail: raw });
   });
+});
+
+describe("fileActions execute error toasts (R3-03)", () => {
+  it.each(["move", "copy"] as const)(
+    "%s execute failure names the single item",
+    async (mode) => {
+      const toast = vi.fn();
+      const plan = { items: one } as unknown as CopyPlan;
+      await executeTransfer(mode, plan, "skip", vi.fn(), vi.fn(), toast);
+      const [message, kind, opts] = toast.mock.calls[0]!;
+      expect(kind).toBe("error");
+      expect(message).toBe(
+        i18n.t(mode === "move" ? "toast.moveFailed" : "toast.copyFailed", {
+          err: i18n.t("errors.withName", {
+            name: "report.docx",
+            text: i18n.t("errors.reason.accessDenied"),
+          }),
+        }),
+      );
+      expect(opts).toEqual({ detail: `report.docx: ${raw}` });
+    },
+  );
 });
