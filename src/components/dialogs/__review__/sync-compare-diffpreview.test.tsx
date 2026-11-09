@@ -128,27 +128,25 @@ describe("sync-compare C-09 CompareDiffPreview", () => {
     },
   );
 
-  it.fails(
-    "sync-compare: CRLF vs LF 만 다른 파일은 모든 줄이 -/+ 로 보이고 줄끝 차이 안내가 없다",
-    async () => {
-      mockPair({
-        left: text("alpha\r\nbeta\r\ngamma\r\n"),
-        right: text("alpha\nbeta\ngamma\n"),
-      });
-      const { container } = render(
-        <CompareDiffPreview entry={entry("differ")} left={L} right={R} />,
-      );
-      await waitFor(() =>
-        expect(container.querySelector(".font-mono")).toBeTruthy(),
-      );
-      // 현재: 3줄 모두 del+add (눈으로는 똑같은 텍스트 6행).
-      // 기대: 줄끝(CRLF/LF) 차이라는 안내가 있거나, 내용 줄은 같게 취급.
-      const hint = /CRLF|LF|줄 ?끝|line ending/i.test(
-        container.textContent ?? "",
-      );
-      expect(hint || changedRows(container) === 0).toBe(true);
-    },
-  );
+  it("SC-22: CRLF vs LF 만 다른 파일은 내용 줄이 같게 보이고 줄끝 차이를 따로 알린다", async () => {
+    mockPair({
+      left: text("alpha\r\nbeta\r\ngamma\r\n"),
+      right: text("alpha\nbeta\ngamma\n"),
+    });
+    const { container } = render(
+      <CompareDiffPreview entry={entry("differ")} left={L} right={R} />,
+    );
+    await waitFor(() =>
+      expect(container.querySelector(".font-mono")).toBeTruthy(),
+    );
+    // 현재: 3줄 모두 del+add (눈으로는 똑같은 텍스트 6행).
+    // 기대: 줄끝(CRLF/LF) 차이라는 안내가 있거나, 내용 줄은 같게 취급.
+    const hint = /CRLF|LF|줄 ?끝|line ending/i.test(
+      container.textContent ?? "",
+    );
+    expect(hint).toBe(true);
+    expect(changedRows(container)).toBe(0);
+  });
 
   it.fails(
     "sync-compare: 큰 이미지 쌍은 내부 enum 'toolarge ↔ toolarge (텍스트/이미지 아님)' 이 그대로 보인다",

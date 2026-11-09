@@ -201,6 +201,8 @@
       "previewLoading": "Loading…",
       "previewFailed": "Preview failed: {{err}}",
       "previewTruncated": "(truncated — large file)",
+      "eolDiffers": "Line endings differ: {{left}} ↔ {{right}} (lines below are compared without them)",
+      "eolMixed": "mixed",
       "previewKinds": "Preview: {{left}} ↔ {{right}} (not text/image)",
       "applySummary": "Apply: create <1>{{create}}</1> · overwrite <3>{{overwrite}}</3>",
       "applyBackupNote": " (after backup, undoable)",

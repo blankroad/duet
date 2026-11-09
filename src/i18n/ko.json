@@ -199,6 +199,8 @@
       "previewLoading": "불러오는 중…",
       "previewFailed": "미리보기 실패: {{err}}",
       "previewTruncated": "(잘림 — 큰 파일)",
+      "eolDiffers": "줄 끝 방식이 다름: {{left}} ↔ {{right}} (아래는 줄 끝을 빼고 비교)",
+      "eolMixed": "섞임",
       "previewKinds": "미리보기: {{left}} ↔ {{right}} (텍스트/이미지 아님)",
       "applySummary": "적용: 생성 <1>{{create}}</1> · 덮어쓰기 <3>{{overwrite}}</3>",
       "applyBackupNote": " (백업 후 — 되돌리기 가능)",

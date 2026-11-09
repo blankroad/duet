@@ -9,6 +9,7 @@ import {
   type PreviewData,
 } from "@/types/bindings";
 import { lineDiff } from "@/lib/lineDiff";
+import { detectLineEnding, splitLines, type LineEnding } from "@/lib/eol";
 import { formatErr } from "@/lib/error";
 
 const MAX_DIFF_LINES = 600; // LCS O(n*m) 보호 — 초과분은 잘라 표시.
@@ -86,8 +87,15 @@ export function CompareDiffPreview({
   if (!data) return null;
 
   if (data.left.kind === "text" && data.right.kind === "text") {
-    const a = (data.left.text ?? "").split("\n").slice(0, MAX_DIFF_LINES);
-    const b = (data.right.text ?? "").split("\n").slice(0, MAX_DIFF_LINES);
+    // 줄 끝(CRLF/LF)은 떼고 내용만 비교한다 — 줄 끝만 다르면 모든 줄이 -/+ 로 보이던 것
+    // (SC-22). 대신 줄 끝 방식이 다르면 위에 따로 알린다.
+    const a = splitLines(data.left.text ?? "").slice(0, MAX_DIFF_LINES);
+    const b = splitLines(data.right.text ?? "").slice(0, MAX_DIFF_LINES);
+    const eolL = detectLineEnding(data.left.text ?? "");
+    const eolR = detectLineEnding(data.right.text ?? "");
+    const eolDiffers = eolL !== null && eolR !== null && eolL !== eolR;
+    const eolLabel = (e: LineEnding) =>
+      e === "crlf" ? "CRLF" : e === "lf" ? "LF" : t("dialog.compare.eolMixed");
     const ops = lineDiff(a, b);
     const truncated =
       data.left.truncated ||
@@ -96,6 +104,15 @@ export function CompareDiffPreview({
     return (
       <Shell>
         <div className="font-mono">
+          {eolDiffers &&
+            eolL !== null &&
+            eolR !== null &&
+            note(
+              t("dialog.compare.eolDiffers", {
+                left: eolLabel(eolL),
+                right: eolLabel(eolR),
+              }),
+            )}
           {ops.map((op, i) => (
             <div
               key={i}
