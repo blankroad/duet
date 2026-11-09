@@ -17,7 +17,8 @@ export function useJournalEvents() {
     let cancelled = false;
     commands.undoHistory(100).then((r) => {
       if (cancelled) return;
-      if (r.status === "ok") setHistory(r.data);
+      // 백엔드는 최신 먼저, store 는 최신 마지막 순서로 보관한다.
+      if (r.status === "ok") setHistory([...r.data].reverse());
     });
     return () => {
       cancelled = true;

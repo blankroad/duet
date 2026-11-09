@@ -46,7 +46,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("fileops-opus: 재시작 후 작업 기록", () => {
-  it.fails("fileops-20: '다음 되돌리기' 배지는 가장 최근 작업에 붙는다", async () => {
+  it("fileops-20: '다음 되돌리기' 배지는 가장 최근 작업에 붙는다", async () => {
     // 백엔드 응답 모양 그대로: 최신(newest) 먼저.
     h.history = [
       mkdir("newest", "2026-11-08T10:03:00Z"),
@@ -63,7 +63,7 @@ describe("fileops-opus: 재시작 후 작업 기록", () => {
     expect(badgeRow?.textContent).toContain("newest");
   });
 
-  it.fails("fileops-20: 마지막 작업을 되돌린 상태로 재시작하면 다시 실행(redo)이 가능해야 한다", async () => {
+  it("fileops-20: 마지막 작업을 되돌린 상태로 재시작하면 다시 실행(redo)이 가능해야 한다", async () => {
     h.history = [
       mkdir("newest", "2026-11-08T10:03:00Z", true), // 되돌린 상태
       mkdir("oldest", "2026-11-08T10:01:00Z"),

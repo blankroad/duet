@@ -30,7 +30,7 @@ beforeEach(async () => {
   useJournal.setState({ entries: [], hasUndoable: false, hasRedoable: false });
 });
 afterEach(cleanup);
-it.fails("fileops-20: next-undo badge targets newest actionable entry after bootstrap", async () => {
+it("fileops-20: next-undo badge targets newest actionable entry after bootstrap", async () => {
   fixture.history = [entry("newest"), entry("oldest")];
   renderHook(() => useJournalEvents());
   await act(async () => {});
@@ -38,7 +38,7 @@ it.fails("fileops-20: next-undo badge targets newest actionable entry after boot
   const badgeRow = screen.getByText("Next undo").closest("li");
   expect(badgeRow?.textContent).toContain("newest");
 });
-it.fails("fileops-20: latest undone mkdir remains redoable after bootstrap", async () => {
+it("fileops-20: latest undone mkdir remains redoable after bootstrap", async () => {
   fixture.history = [entry("newest", true), entry("oldest")];
   renderHook(() => useJournalEvents());
   await act(async () => {});
