@@ -13,10 +13,10 @@ fn fixture_extract(name: &str) -> (tempfile::TempDir, Result<UnpackReport, DuetE
     eprintln!("{name}: {r:?}");
     (d, r)
 }
+// archive-06: 7-Zip·반디집 등이 고른 방식(BZip2·LZMA·Zstd)의 zip — Python zipfile 픽스처.
 macro_rules! codec_test {
     ($test:ident, $file:literal) => {
         #[test]
-        #[ignore = "archive-06 repro"]
         fn $test() {
             let (d, r) = fixture_extract($file);
             assert!(r.is_ok(), "valid ZIP should extract: {r:?}");
@@ -30,14 +30,50 @@ macro_rules! codec_test {
 codec_test!(sol_zip_bzip2, "sol-bzip2.zip");
 codec_test!(sol_zip_lzma, "sol-lzma.zip");
 codec_test!(sol_zip_zstd, "sol-zstd.zip");
+/// 방식 번호만 XZ·PPMd 로 바꾼 stored zip — 이제 해당 디코더로 가서 "깨진 데이터" 오류로
+/// 끝나야 한다(패닉·멈춤 없이). 정상 XZ·PPMd 는 아래 왕복 테스트.
 #[test]
 fn sol_zip_xz_ppmd_method_dispatch() {
     for name in ["sol-xz-method-only.zip", "sol-ppmd-method-only.zip"] {
         let (_, r) = fixture_extract(name);
-        assert!(
-            matches!(r, Err(DuetError::Io(ref m)) if m.contains("unsupported") || m.contains("Unsupported")),
-            "{r:?}"
+        assert!(matches!(r, Err(DuetError::Io(_))), "{name}: {r:?}");
+    }
+}
+/// archive-06: XZ·PPMd 방식 zip 해제·내부 보기. Python 은 이 두 방식을 못 써서 zip crate 로
+/// 만든다(같은 crate 왕복 — 7-Zip 산출물 확인은 기기 확인 목록).
+#[tokio::test]
+async fn zip_xz_and_ppmd_methods_extract_and_browse() {
+    let d = tempfile::tempdir().unwrap();
+    for (name, method) in [
+        ("xz.zip", zip::CompressionMethod::Xz),
+        ("ppmd.zip", zip::CompressionMethod::Ppmd),
+        ("bzip2.zip", zip::CompressionMethod::Bzip2),
+        ("zstd.zip", zip::CompressionMethod::Zstd),
+    ] {
+        let p = d.path().join(name);
+        {
+            let mut w = zip::ZipWriter::new(std::fs::File::create(&p).unwrap());
+            let o: zip::write::FileOptions<'_, '_, ()> =
+                zip::write::FileOptions::default().compression_method(method);
+            w.add_directory("docs/", o).unwrap();
+            w.start_file("docs/hello.txt", o).unwrap();
+            w.write_all(&b"hello archive review\n".repeat(50)).unwrap();
+            w.finish().unwrap();
+        }
+        let out = d.path().join(format!("out-{name}"));
+        std::fs::create_dir(&out).unwrap();
+        extract_local_blocking(&p, &out, ArchiveFormat::Zip, None)
+            .unwrap_or_else(|e| panic!("{name}: {e:?}"));
+        assert_eq!(
+            std::fs::read(out.join("docs/hello.txt")).unwrap(),
+            b"hello archive review\n".repeat(50),
+            "{name}"
         );
+        let pool = crate::services::connection_pool::ConnectionPool::new();
+        let (loc, _) = open_for_browse(sol2_entry(d.path(), name), None, &pool)
+            .await
+            .unwrap_or_else(|e| panic!("browse {name}: {e:?}"));
+        assert!(loc.path.join("docs/hello.txt").is_file(), "browse {name}");
     }
 }
 fn names(d: &Path) -> Vec<String> {
