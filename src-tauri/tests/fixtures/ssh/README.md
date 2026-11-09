@@ -56,6 +56,9 @@ DUET_SSH_IT_BYTES=10000000000 DUET_SSH_IT_COUNT=10000 \
 
 ## 주의
 
+- 스크립트는 `HOME` 을 `it-home/`(gitignore)으로 바꾸고 SSH agent 를 끊은 채 테스트를 돌린다.
+  `~/.ssh/known_hosts` 는 실행마다 컨테이너 호스트키로 새로 채운다 — 사용자 `~/.ssh` 는 건드리지 않는다
+  (remote-35). 스크립트 없이 직접 돌릴 때도 `HOME=<임시폴더> SSH_AUTH_SOCK=` 를 붙일 것.
 - `keys/` 는 매 실행마다 생성되는 테스트 전용 키 — `.gitignore` 로 커밋 제외.
 - 픽스처가 `docker compose` 를 셸 호출하는 것은 CLAUDE.md §9(앱의 시스템 ssh
   클라이언트 호출 금지)와 무관하다 — 앱 코드가 아니라 테스트 하니스다.
