@@ -401,3 +401,19 @@ describe("explainError — backup kept after a failed folder replace (fileops-09
     expect(r.detail).toBe(message);
   });
 });
+
+describe("explainError — R3 review (sol-3) R3-01", () => {
+  // R3-01: 백업 경로는 marker 와 마지막 " (rollback failed:" 사이 전체(core/ops.rs:695,1027).
+  it.each([
+    ["macos", "/w/dst/a (1).bak.20261108-101500"],
+    ["macos", "/w/dst/it's.bak.20261108-101500"],
+    ["windows", "C:\\w\\dst\\a (1).bak.20261108-101500"],
+  ] as const)("R3-01 %s keeps the whole backup path %s", (os, backup) => {
+    const message =
+      "1 item(s) failed — a: io: copy failed (permission denied: injected list failure); " +
+      `original preserved at backup ${backup} ` +
+      "(rollback failed: io: Directory not empty (os error 66))";
+    const r = explainError({ kind: "Io", message }, os);
+    expect(r.text).toContain(i18n.t("errors.backupKept", { path: backup }));
+  });
+});

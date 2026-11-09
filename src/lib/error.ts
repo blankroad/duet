@@ -297,13 +297,34 @@ function looksLikePath(s: string): boolean {
   return /[\\/]/.test(s) && !/\s/.test(s) && !s.startsWith("-");
 }
 
+/** 롤백 실패 문장의 백업 위치 표지 (`core/ops.rs` copy/move — 형식 고정). */
+const BACKUP_MARKER = "original preserved at backup ";
+const ROLLBACK_SUFFIX = " (rollback failed:";
+
+/**
+ * 백업 위치 — 표지와 **마지막** ` (rollback failed:` 사이 전체. 백업 이름은 원래 이름에
+ * `.bak.<시각>` 을 붙인 것이라 괄호·작은따옴표 같은 정상 이름 문자를 그대로 가진다 —
+ * 일반 경로 파서의 경계(` (`·따옴표)로 자르면 안 된다.
+ */
+function findBackup(raw: string): PathHit | undefined {
+  const at = raw.indexOf(BACKUP_MARKER);
+  if (at < 0) return undefined;
+  const start = at + BACKUP_MARKER.length;
+  const suffix = raw.lastIndexOf(ROLLBACK_SUFFIX);
+  const end = suffix > start ? suffix : raw.length;
+  const path = raw.slice(start, end).trimEnd();
+  return path
+    ? { path, start, end: start + path.length, backup: true }
+    : undefined;
+}
+
 /** 원문에서 경로를 찾는다(겹치지 않게, 앞에서부터). */
 function findPaths(raw: string, kind: string | undefined): PathHit[] {
   const hit = (path: string, start: number): PathHit => ({
     path,
     start,
     end: start + path.length,
-    backup: /backup\s+$/i.test(raw.slice(0, start)),
+    backup: false,
   });
   // 원격 SFTP 의 NotFound/PermissionDenied 는 message 가 경로 그 자체다(`fs/ssh.rs` map_sftp_error).
   // 괄호가 든 이름("report (1).txt")도 통째로.
@@ -315,16 +336,20 @@ function findPaths(raw: string, kind: string | undefined): PathHit[] {
   )
     return [hit(whole, raw.indexOf(whole))];
   const hits: PathHit[] = [];
+  const backup = findBackup(raw);
+  if (backup) hits.push(backup);
+  const free = (start: number, end: number) =>
+    !hits.some((h) => start < h.end && h.start < end);
   for (const m of raw.matchAll(QUOTED)) {
     const inner = m[1]!.trim();
-    if (looksLikePath(inner))
-      hits.push(hit(inner, m.index + m[0].indexOf(inner)));
+    const start = m.index + m[0].indexOf(inner);
+    if (looksLikePath(inner) && free(m.index, m.index + m[0].length))
+      hits.push(hit(inner, start));
   }
   for (const m of raw.matchAll(BARE_PATH)) {
     const path = m[0].replace(/[.,]$/, "");
     const start = m.index;
-    if (!hits.some((h) => start < h.end && h.start < start + path.length))
-      hits.push(hit(path, start));
+    if (free(start, start + path.length)) hits.push(hit(path, start));
   }
   return hits.sort((a, b) => a.start - b.start);
 }
