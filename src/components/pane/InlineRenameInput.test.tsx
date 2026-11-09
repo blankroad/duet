@@ -121,3 +121,28 @@ it("stays open under StrictMode's dev double effect run", async () => {
   expect(useUI.getState().renameTarget?.name).toBe(target.name);
   act(() => useUI.getState().clearInlineRename());
 });
+
+it("names the item in the failure toast and keeps the raw text (ss-04)", async () => {
+  const show = vi.spyOn(useToast.getState(), "show");
+  vi.mocked(commands.fsRename).mockResolvedValue({
+    status: "error",
+    error: {
+      kind: "PermissionDenied",
+      message: "Permission denied (os error 13)",
+    },
+  } as never);
+  const { input } = setup();
+  fireEvent.change(input, { target: { value: "new.txt" } });
+  await act(async () => fireEvent.keyDown(input, { key: "Enter" }));
+  expect(show).toHaveBeenCalledWith(
+    i18n.t("toast.renameFailed", {
+      err: i18n.t("errors.withName", {
+        name: "report.final.txt",
+        text: i18n.t("errors.reason.accessDenied"),
+      }),
+    }),
+    "error",
+    { detail: "report.final.txt: Permission denied (os error 13)" },
+  );
+  show.mockRestore();
+});

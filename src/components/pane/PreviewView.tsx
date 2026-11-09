@@ -3,10 +3,8 @@ import { useTranslation } from "react-i18next";
 import { commands } from "@/types/bindings";
 import type { Location, PreviewData } from "@/types/bindings";
 import { formatSize } from "@/lib/format";
-import { formatErr } from "@/lib/error";
+import { showError } from "@/lib/errorToast";
 import { previewStreamUrl } from "@/lib/previewUrl";
-import { useToast } from "@/stores/toast";
-import i18n from "@/i18n";
 
 // 무거운 스택은 lazy chunk 로 분리.
 const PreviewContent = lazy(() =>
@@ -106,16 +104,9 @@ export function OpenExternalButton({ location }: { location: Location }) {
     try {
       const r = await commands.openPath(location, false);
       if (r.status === "error")
-        useToast
-          .getState()
-          .show(
-            i18n.t("preview.openFailed", { err: formatErr(r.error) }),
-            "error",
-          );
+        showError("preview.openFailed", r.error, { path: location.path });
     } catch (e) {
-      useToast
-        .getState()
-        .show(i18n.t("preview.openFailed", { err: formatErr(e) }), "error");
+      showError("preview.openFailed", e, { path: location.path });
     } finally {
       setPending(false);
     }

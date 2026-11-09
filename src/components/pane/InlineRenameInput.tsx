@@ -4,7 +4,7 @@ import { commands } from "@/types/bindings";
 import type { EntryRef } from "@/types/bindings";
 import { useToast } from "@/stores/toast";
 import { useUI } from "@/stores/ui";
-import { formatErr } from "@/lib/error";
+import { errorToastText } from "@/lib/errorToast";
 import { validateEntryName } from "@/lib/newEntry";
 import { isWindows } from "@/lib/fileIcon";
 import i18n from "@/i18n";
@@ -90,8 +90,8 @@ export function InlineRenameInput({
    * 실패 처리 — Enter 면 편집 유지(재시도), blur 면 닫기. Enter 뒤 응답을 기다리는
    * 사이 다른 곳을 눌렀다면(포커스가 떠났으면) 포커스를 되찾지 않고 닫는다.
    */
-  const fail = (message: string, keepEditing: boolean) => {
-    useToast.getState().show(message, "error");
+  const fail = (message: string, keepEditing: boolean, detail?: string) => {
+    useToast.getState().show(message, "error", detail ? { detail } : undefined);
     if (!keepEditing || document.activeElement !== ref.current) {
       finish(false);
       return;
@@ -122,18 +122,20 @@ export function InlineRenameInput({
     pendingRef.current = true;
     setPending(true);
     // IPC 자체가 reject 해도(채널·직렬화 오류) 잠금을 풀어야 Esc·재시도가 된다.
-    let err: string | null = null;
+    let err: { message: string; detail: string } | null = null;
+    const why = (e: unknown) =>
+      errorToastText("toast.renameFailed", e, { path: target.name });
     try {
       const r = await commands.fsRename(target, newName);
-      if (r.status === "error") err = formatErr(r.error);
+      if (r.status === "error") err = why(r.error);
     } catch (e) {
-      err = formatErr(e);
+      err = why(e);
     } finally {
       pendingRef.current = false;
       setPending(false);
     }
     if (err === null) finish(true, newName);
-    else fail(i18n.t("toast.renameFailed", { err }), keepEditingOnError);
+    else fail(err.message, keepEditingOnError, err.detail);
   };
 
   return (

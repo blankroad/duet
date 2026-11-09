@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { ShieldCheck } from "lucide-react";
 import { commands } from "@/types/bindings";
 import type { EntryRef } from "@/types/bindings";
-import { formatErr } from "@/lib/error";
+import { showError } from "@/lib/errorToast";
 import { isImeComposing } from "@/lib/keyEvent";
 import { useToast } from "@/stores/toast";
 import { DialogShell } from "./DialogShell";
@@ -96,10 +96,10 @@ export function PermissionsDialog({
       const r = await commands.fsSetPermissions(targets, mode, recursive);
       if (r.status === "error") {
         setBusy(false);
-        showToast(
-          t("dialog.permissions.failed", { err: formatErr(r.error) }),
-          "error",
-        );
+        showError("dialog.permissions.failed", r.error, {
+          path: targets.length === 1 ? targets[0]!.name : null,
+          toast: showToast,
+        });
         return;
       }
     }
@@ -112,10 +112,10 @@ export function PermissionsDialog({
       );
       if (o.status === "error") {
         setBusy(false);
-        showToast(
-          t("dialog.permissions.ownerFailed", { err: formatErr(o.error) }),
-          "error",
-        );
+        showError("dialog.permissions.ownerFailed", o.error, {
+          path: targets.length === 1 ? targets[0]!.name : null,
+          toast: showToast,
+        });
         return;
       }
     }
