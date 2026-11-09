@@ -73,8 +73,10 @@ async fn sol2_201_large_pdf_without_range_should_not_be_presented_as_a_complete_
 
 #[test]
 fn browse_06_shift_jis_latin1_and_utf16_primitive_evidence() {
-    assert!(DECODE_SOURCE.contains("if bytes.contains(&0)"));
-    assert!(DECODE_SOURCE.contains("Err(e) => e.valid_up_to(),"));
+    // browse-06 수정(archive 팀) 뒤 decode_text 는 BOM·UTF-16·CP949 를 디코드한다 — 예전 소스
+    // 문자열(UTF-8 유효 prefix 만 사용) 단언은 뺐다. 동작은 fs_ops.rs `mod review_browse`·
+    // `preview_tests` 가 검증한다. 아래는 입력 바이트 자체에 대한 사실이라 그대로 둔다.
+    assert!(DECODE_SOURCE.contains("encoding_rs::EUC_KR"));
     let shift_jis = [0x93u8, 0xfa, 0x96, 0x7b];
     let latin1 = [b'c', b'a', b'f', 0xe9];
     let sjis_prefix = [b'h', b'i', b':', 0x93, 0xfa];
