@@ -836,6 +836,7 @@ async fn c19_same_host_different_user_runs_as_source_user() {
             id: id.clone(),
             alias: user.into(),
             host_ip: s.host_ip,
+            endpoint: duet_lib::types::ServerEndpoint::new(s.host_ip, host.port, &[]),
             user: user.into(),
             session: Some(tokio::sync::Mutex::new(s.handle)),
             rsync_available: tokio::sync::Mutex::new(None),

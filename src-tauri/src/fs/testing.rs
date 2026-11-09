@@ -13,6 +13,7 @@ pub(crate) struct TestFs {
     pub late_write: bool,
     pub fail_list: bool,
     pub override_join: bool,
+    pub endpoint: Option<crate::types::ServerEndpoint>,
 }
 
 impl TestFs {
@@ -23,6 +24,7 @@ impl TestFs {
             late_write: false,
             fail_list: false,
             override_join: false,
+            endpoint: None,
         }
     }
 }
@@ -31,6 +33,9 @@ impl TestFs {
 impl FileSystem for TestFs {
     fn source_id(&self) -> SourceId {
         SourceId::Local
+    }
+    fn endpoint(&self) -> Option<crate::types::ServerEndpoint> {
+        self.endpoint.clone()
     }
     fn join(&self, base: &Path, name: &str) -> PathBuf {
         if self.override_join {

@@ -4,7 +4,7 @@
 //! 연결 끊김 watcher / 자동 재연결은 Task 13 에서 추가.
 
 use crate::ssh::connection::HostKeyVerifier;
-use crate::types::{ConnectionId, DuetError, SourceId};
+use crate::types::{ConnectionId, DuetError, ServerEndpoint, SourceId};
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::path::PathBuf;
@@ -21,6 +21,8 @@ pub struct ActiveConnection {
     pub id: ConnectionId,
     pub alias: String,
     pub host_ip: IpAddr,
+    /// Backend server identity, including port forwarding and jump route.
+    pub endpoint: ServerEndpoint,
     pub user: String,
     /// SSH session. None 인 경우는 테스트만 — 프로덕션 경로는 항상 Some.
     ///
@@ -42,6 +44,7 @@ impl std::fmt::Debug for ActiveConnection {
             .field("id", &self.id)
             .field("alias", &self.alias)
             .field("host_ip", &self.host_ip)
+            .field("endpoint", &self.endpoint)
             .field("user", &self.user)
             .field("session", &"<russh::Handle>")
             .field("rsync_available", &"<cached>")
@@ -148,6 +151,7 @@ mod tests {
             id: ConnectionId(id.to_string()),
             alias: id.to_string(),
             host_ip: ip.parse().unwrap(),
+            endpoint: ServerEndpoint::new(ip.parse().unwrap(), 22, &[]),
             user: "test".to_string(),
             session: None, // 단위 테스트 전용 — 실제 SSH 서버 불필요
             rsync_available: tokio::sync::Mutex::new(None),
@@ -176,6 +180,7 @@ mod tests {
         let got = pool.get(&ConnectionId("a".into())).await.unwrap();
         assert_eq!(got.alias, "a");
         assert_eq!(got.host_ip.to_string(), "10.0.0.1");
+        assert_eq!(got.endpoint, ServerEndpoint::new(got.host_ip, 22, &[]));
 
         pool.remove(&ConnectionId("a".into())).await;
         assert!(pool.get(&ConnectionId("a".into())).await.is_err());

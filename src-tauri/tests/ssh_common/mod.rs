@@ -112,6 +112,7 @@ async fn register(host: &Host, session: SshSession) -> Session {
         id: conn_id.clone(),
         alias: "ssh-it".to_string(),
         host_ip: session.host_ip,
+        endpoint: duet_lib::types::ServerEndpoint::new(session.host_ip, host.port, &[]),
         user: host.user.clone(),
         session: Some(tokio::sync::Mutex::new(session.handle)),
         rsync_available: tokio::sync::Mutex::new(None),

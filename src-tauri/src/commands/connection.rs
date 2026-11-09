@@ -29,7 +29,7 @@ use crate::services::connection_supervisor::spawn_supervisor;
 use crate::services::secret_vault::SecretVault;
 use crate::ssh::config::{load_ssh_hosts, SshHostEntry};
 use crate::ssh::connection::{connect, connect_with_password, SshSession};
-use crate::types::{ConnectionId, DuetError};
+use crate::types::{ConnectionId, DuetError, ServerEndpoint};
 
 /// Sidebar 에 표시할 호스트 정보 DTO.
 ///
@@ -129,6 +129,7 @@ async fn open_and_register(
         id: id.clone(),
         alias: host.alias.clone(),
         host_ip,
+        endpoint: ServerEndpoint::new(host_ip, host.port, &host.proxy_jump),
         user: host.user.clone(),
         session: Some(tokio::sync::Mutex::new(session.handle)),
         rsync_available: tokio::sync::Mutex::new(None),

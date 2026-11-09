@@ -1,9 +1,11 @@
 //! IPC 경계에서 공유되는 핵심 타입.
 //!
-//! 모두 `specta::Type` derive — `tauri-specta`가 TS 자동 export.
+//! IPC 타입은 `specta::Type` derive — `tauri-specta`가 TS 자동 export.
+//! `ServerEndpoint`는 backend 전용이며 IPC에 노출하지 않는다.
 //! `ARCHITECTURE.md` 의 "IPC 데이터 타입" 섹션과 1:1 매칭.
 
 pub mod error;
+pub mod server_endpoint;
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -11,6 +13,7 @@ use std::net::IpAddr;
 use std::path::PathBuf;
 
 pub use error::{DuetError, HostKeyInfo};
+pub use server_endpoint::ServerEndpoint;
 
 /// 연결 식별자. 백엔드 ConnectionPool 키.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]

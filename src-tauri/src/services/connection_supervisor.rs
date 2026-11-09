@@ -22,7 +22,7 @@ use crate::services::connection_events::{ConnectionStateChange, ConnectionStateE
 use crate::services::connection_pool::{ActiveConnection, ConnectionPool};
 use crate::ssh::config::load_ssh_hosts;
 use crate::ssh::connection::connect;
-use crate::types::{ConnectionId, DuetError};
+use crate::types::{ConnectionId, DuetError, ServerEndpoint};
 
 /// Health check 폴링 간격.
 const HEALTH_CHECK_INTERVAL: Duration = Duration::from_secs(5);
@@ -150,6 +150,7 @@ async fn reconnect_loop(
                     id: id.clone(),
                     alias: alias.clone(),
                     host_ip,
+                    endpoint: ServerEndpoint::new(host_ip, host.port, &host.proxy_jump),
                     user: host.user.clone(),
                     session: Some(tokio::sync::Mutex::new(session.handle)),
                     rsync_available: tokio::sync::Mutex::new(None),

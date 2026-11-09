@@ -38,6 +38,11 @@ pub trait FileSystem: Send + Sync {
     /// 같은-호스트 판정에 사용 (`SourceId::Ssh.host_ip` 일치 시 same-host).
     fn source_id(&self) -> SourceId;
 
+    /// Backend SSH endpoint identity; unknown for local or custom filesystems.
+    fn endpoint(&self) -> Option<crate::types::ServerEndpoint> {
+        None
+    }
+
     /// 디렉토리 경로 + 항목 이름 → 자식 경로. **이 fs 의 구분자 규칙**으로 결합한다.
     ///
     /// 기본(로컬): 호스트 OS 의 `Path::join`. SSH 는 항상 POSIX(`/`)로 결합하도록 override —

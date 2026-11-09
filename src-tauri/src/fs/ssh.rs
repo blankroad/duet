@@ -198,6 +198,10 @@ impl FileSystem for SshFs {
         self.conn.source_id()
     }
 
+    fn endpoint(&self) -> Option<crate::types::ServerEndpoint> {
+        Some(self.conn.endpoint.clone())
+    }
+
     /// 원격은 항상 POSIX 결합 — Windows 호스트 `\` 끼임 / 파일명 `\` 오해 방지.
     fn join(&self, base: &Path, name: &str) -> std::path::PathBuf {
         crate::fs::posix_join(base, name)

@@ -204,6 +204,7 @@ async fn cross_account_copy_permission_controls() {
             id: alt_id.clone(),
             alias: "alt".into(),
             host_ip: raw.host_ip,
+            endpoint: duet_lib::types::ServerEndpoint::new(raw.host_ip, host.port, &[]),
             user: "alt".into(),
             session: Some(tokio::sync::Mutex::new(raw.handle)),
             rsync_available: tokio::sync::Mutex::new(Some(false)),
