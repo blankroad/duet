@@ -67,7 +67,7 @@ import {
   sameLocation,
   sameLocationDir,
 } from "@/lib/entryDnd";
-import { canExtractArchive } from "@/lib/archive";
+import { canExtractArchive, repackBrowseRoot } from "@/lib/archive";
 import { basename } from "@/lib/paths";
 import { useBookmarks } from "@/stores/bookmarks";
 import { useHostFavorites } from "@/stores/hostFavorites";
@@ -1270,7 +1270,10 @@ function App() {
           location: archive.exitTo,
           name: archive.label,
         };
-        const r = await commands.fsRepackPlan(tab.location, original);
+        const r = await commands.fsRepackPlan(
+          repackBrowseRoot(tab.location, archive),
+          original,
+        );
         if (r.status === "error") {
           showError("toast.updateArchiveFailed", r.error, {
             path: archive.label,

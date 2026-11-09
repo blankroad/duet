@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { canExtractArchive, canRepackArchive } from "./archive";
-import type { SourceId } from "@/types/bindings";
+import {
+  canExtractArchive,
+  canRepackArchive,
+  repackBrowseRoot,
+} from "./archive";
+import type { ArchiveBrowse } from "@/stores/panes";
+import type { Location, SourceId } from "@/types/bindings";
 
 const local: SourceId = { kind: "local" };
 const ssh: SourceId = {
@@ -56,5 +61,52 @@ describe("canRepackArchive", () => {
       expect(canRepackArchive(n), n).toBe(true);
     for (const n of ["a.tar", "a.tar.xz", "a.7z", "a.rar", "log.txt.gz", "x"])
       expect(canRepackArchive(n), n).toBe(false);
+  });
+});
+
+describe("repackBrowseRoot", () => {
+  it.each<[SourceId, string, string]>([
+    [
+      local,
+      "/tmp/duet-archive/token/content",
+      "/tmp/duet-archive/token/content/docs/sub",
+    ],
+    [
+      local,
+      "C:\\Temp\\duet-archive\\token\\content",
+      "C:\\Temp\\duet-archive\\token\\content\\docs",
+    ],
+    [
+      ssh,
+      "/home/u/.duet-tmp/browse-token/content",
+      "/home/u/.duet-tmp/browse-token/content/docs",
+    ],
+  ])(
+    "uses the browse root from a subfolder with the same source (%j)",
+    (source, root, path) => {
+      const location: Location = { source, path };
+      const archive: ArchiveBrowse = {
+        label: "data.zip",
+        root,
+        exitTo: { source, path: "/archives" },
+      };
+      const result = repackBrowseRoot(location, archive);
+      expect(result).toEqual({ source, path: root });
+      expect(result.source).toBe(source);
+      expect(location.path).toBe(path);
+    },
+  );
+
+  it("keeps the same location values when already at the browse root", () => {
+    const location: Location = {
+      source: local,
+      path: "/tmp/duet-archive/token/content",
+    };
+    const archive: ArchiveBrowse = {
+      label: "data.tar.gz",
+      root: location.path,
+      exitTo: { source: local, path: "/archives" },
+    };
+    expect(repackBrowseRoot(location, archive)).toEqual(location);
   });
 });

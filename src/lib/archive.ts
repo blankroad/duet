@@ -4,7 +4,8 @@
  * 아래 세 목록은 백엔드 `SUFFIXES` 표·능력과 같아야 하며 Rust 테스트
  * `frontend_archive_lists_match_backend` 가 대조한다 — 한쪽만 고치면 테스트가 깨진다.
  */
-import type { SourceId } from "@/types/bindings";
+import type { ArchiveBrowse } from "@/stores/panes";
+import type { Location, SourceId } from "@/types/bindings";
 
 /** 원격(SSH)에서도 해제·탐색되는 포맷 — 서버의 unzip/tar 로 처리(PC 경유 0). */
 const REMOTE_SUFFIXES = [
@@ -59,4 +60,12 @@ export function canExtractArchive(name: string, source: SourceId): boolean {
 export function canRepackArchive(name: string): boolean {
   const suffix = archiveSuffix(name);
   return suffix !== null && REPACK.has(suffix);
+}
+
+/** 하위 폴더에서도 아카이브 전체를 갱신하도록 browse 루트 Location 을 반환. */
+export function repackBrowseRoot(
+  location: Location,
+  archive: ArchiveBrowse,
+): Location {
+  return { source: location.source, path: archive.root };
 }
