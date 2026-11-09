@@ -1309,6 +1309,9 @@ async fn opus2_zip_cp949_names_extract_and_browse() {
             && got.contains(&"회의록 (최종).hwp".to_string()),
         "CP949 이름이 깨졌다: {got:?}"
     );
+    // browse(더블클릭 내부 보기)도 같은 이름으로 보여야 한다.
+    assert_eq!(ls(&loc.path), ["보고서 2024", "회의록 (최종).hwp"]);
+    assert_eq!(ls(&loc.path.join("보고서 2024")), ["결과.xlsx"]);
 }
 
 // ---------- archive-08: 읽기 전용 폴더 ----------
