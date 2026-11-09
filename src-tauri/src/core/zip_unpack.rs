@@ -101,18 +101,89 @@ fn zip_error(e: zip::result::ZipError) -> DuetError {
     }
 }
 
-/// zip 항목 이름 → 상대 경로. `/` 와 `\` 를 모두 구분자로 본다 — zip crate 9 의 `extract`
-/// 와 같다(Windows PowerShell 5 `Compress-Archive` 같은 도구가 `\` 로 쓴다). 맨 앞 루트
-/// (`/x`)와 드라이브(`C:\x`)는 떼어 해제 폴더 아래로 둔다(zip crate 와 같음). `..`·NUL 이 있으면 None.
+/// zip 항목 이름 → 상대 경로. zip crate 9.5 `ZipArchive::extract` 가 쓰던 해석
+/// (`path.rs` `components` → typed-path Windows 파서 + `split_drive_prefix` →
+/// `simplified_components`)을 OS 와 무관하게 문자열로 재현한다:
+/// - `/` 와 `\` 모두 구분자(Windows PowerShell 5 `Compress-Archive` 같은 도구가 `\` 로 쓴다).
+///   단 정확히 `\\?\` 로 시작하는 verbatim 이름은 `\` 만 구분자이고, 조각 안에 `/` 가 있으면
+///   zip crate 처럼 그 항목을 받지 않는다(None).
+/// - 맨 앞 Windows 접두사([`strip_windows_prefix`])와 루트는 떼어 해제 폴더 아래로 둔다.
+/// - 조각마다 앞의 드라이브 지정(`C:x` → `x`, `c:d:x` → `x`)을 뗀다.
+///
+/// 다른 점(더 보수적): `..` 가 하나라도 있으면 None(zip crate 는 `a/../b` 를 `b` 로 풀었다).
+/// NUL 이 있어도 None(`enclosed_name` 과 같음).
 fn zip_path(name: &str, sanitize: Sanitize) -> Option<(PathBuf, bool)> {
     if name.contains('\0') {
-        return None; // zip crate `enclosed_name` 처럼 NUL 이 든 이름은 건너뛴다.
+        return None;
     }
-    let mut parts = name.split(['/', '\\']).peekable();
-    if parts.peek().is_some_and(|p| is_drive(p)) {
-        parts.next();
+    let (rest, verbatim) = strip_windows_prefix(name);
+    let separators: &[char] = if verbatim { &['\\'] } else { &['/', '\\'] };
+    let mut parts = Vec::new();
+    for part in rest.split(separators) {
+        if part.contains('/') {
+            return None; // verbatim 안의 `/` — 쓸 때 다시 나뉘므로 받지 않는다.
+        }
+        parts.push(strip_drive_letters(part));
     }
     relative_path(parts, sanitize)
+}
+
+/// 이름 맨 앞의 Windows 경로 접두사를 뗀다(typed-path 0.13 `prefix` 파서와 같은 모양, 구분자는
+/// `\`·`/` 혼용 가능): `\\?\UNC\server\share`, `\\?\C:`, `\\?\name`, `\\.\device`,
+/// `\\server\share`. 드라이브(`C:`)는 [`strip_drive_letters`] 가 조각 단위로 뗀다.
+/// 두 번째 값은 정확히 `\\?\` 로 시작했는지(그 뒤로는 `\` 만 구분자).
+fn strip_windows_prefix(name: &str) -> (&str, bool) {
+    let b = name.as_bytes();
+    let sep_at = |i: usize| matches!(b.get(i), Some(b'/' | b'\\'));
+    if sep_at(0) && sep_at(1) && matches!(b.get(2), Some(b'?' | b'.')) && sep_at(3) {
+        let strict = name.starts_with(r"\\?\");
+        let rest = &name[4..];
+        if b[2] == b'?' {
+            if let Some(after) = rest.strip_prefix("UNC") {
+                if after.starts_with(|c| is_separator(c, strict)) {
+                    return (skip_names(&after[1..], 2, strict), strict); // server, share
+                }
+            }
+            if matches!(rest.as_bytes(), [d, b':', ..] if d.is_ascii_alphabetic()) {
+                return (&rest[2..], strict);
+            }
+        }
+        return (skip_names(rest, 1, strict), strict); // \\?\name, \\.\device
+    }
+    if sep_at(0) && sep_at(1) && b.get(2).is_some_and(|c| !matches!(c, b'/' | b'\\')) {
+        return (skip_names(&name[2..], 2, false), false); // \\server\share
+    }
+    (name, false)
+}
+
+/// `s` 앞에서 이름 조각 `n` 개(사이 구분자 하나씩)를 건너뛴다 — 없으면 있는 만큼만.
+fn skip_names(mut s: &str, n: usize, strict: bool) -> &str {
+    for i in 0..n {
+        if i > 0 {
+            match s.strip_prefix(|c| is_separator(c, strict)) {
+                Some(rest) => s = rest,
+                None => return s,
+            }
+        }
+        let end = s.find(|c| is_separator(c, strict)).unwrap_or(s.len());
+        s = &s[end..];
+    }
+    s
+}
+
+fn is_separator(c: char, strict: bool) -> bool {
+    c == '\\' || (!strict && c == '/')
+}
+
+/// 조각 앞의 드라이브 지정자(`C:`)를 모두 뗀다 — zip crate `split_drive_prefix`.
+fn strip_drive_letters(mut part: &str) -> &str {
+    while let [d, b':', ..] = part.as_bytes() {
+        if !d.is_ascii_alphabetic() {
+            break;
+        }
+        part = &part[2..];
+    }
+    part
 }
 
 /// `C:` 같은 드라이브 지정자인지.
@@ -439,6 +510,45 @@ mod tests {
         assert_eq!(p("/"), None);
     }
 
+    /// 드라이브·UNC·verbatim 접두사 — zip crate 9.5 `ZipArchive::extract`(`path.rs`
+    /// `components`·`split_drive_prefix`·`simplified_components`)와 같은 결과(R2 리뷰 R2).
+    #[test]
+    fn zip_path_prefixes_match_the_zip_crate() {
+        let p = |n: &str| {
+            zip_path(n, entry_name::sanitize_local_name)
+                .map(|(p, _)| p.to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/"))
+        };
+        for (name, want) in [
+            // 리뷰 표.
+            ("C:relative.txt", "relative.txt"),
+            ("C:/dir/x", "dir/x"),
+            ("/C:/dir/x", "dir/x"),
+            (r"\\server\share\x", "x"),
+            // 같은 규칙의 다른 모양.
+            (r"C:\dir\x", "dir/x"),
+            ("c:d:x", "x"),
+            ("a/c:x", "a/x"),
+            ("//server/share/dir/x", "dir/x"),
+            (r"\\?\C:\foo\bar.txt", "foo/bar.txt"),
+            (r"\\?\UNC\server\share\foo\bar.txt", "foo/bar.txt"),
+            (r"\\.\C:\foo\bar.txt", "foo/bar.txt"),
+            (r"\\?\Volume{x}\foo", "foo"),
+            ("./a/./b", "a/b"),
+        ] {
+            assert_eq!(p(name).as_deref(), Some(want), "{name}");
+        }
+        for name in [
+            // verbatim(`\\?\`) 안에서 `/` 는 구분자가 아니다 — zip crate 는 이런 조각을 거부한다.
+            r"\\?\C:\a/b",
+            r"\\?\C:\../b",
+            // 비면 None.
+            "C:",
+            r"\\server\share",
+        ] {
+            assert_eq!(p(name), None, "{name}");
+        }
+    }
+
     #[test]
     fn windows_names_are_sanitized_and_reported() {
         let d = tempfile::tempdir().unwrap();
@@ -577,23 +687,28 @@ mod tests {
         assert!(!d.path().join("evil2.txt").exists());
     }
 
-    /// Windows 치환 뒤 같아지는 이름(`a:b.txt` → `a_b.txt`)이 앞 항목을 덮지 않는다(archive-17).
+    /// Windows 치환 뒤 같아지는 이름(`ab:cd.txt` → `ab_cd.txt`)이 앞 항목을 덮지 않는다(archive-17).
+    /// (한 글자 + `:` 는 드라이브로 떼므로 — zip crate 와 같음 — 두 글자 이상으로 만든다.)
     #[test]
     fn names_equal_after_sanitizing_keep_both() {
         let d = tempfile::tempdir().unwrap();
         let zp = d.path().join("c.zip");
-        zip_with(&zp, &[("a_b.txt", b"FIRST"), ("a:b.txt", b"SECOND")], &[]);
+        zip_with(
+            &zp,
+            &[("ab_cd.txt", b"FIRST"), ("ab:cd.txt", b"SECOND")],
+            &[],
+        );
         let out = d.path().join("out");
         std::fs::create_dir(&out).unwrap();
         let r = unpack_zip_with(&zp, &out, None, windows).unwrap();
-        assert_eq!(names(&out), ["a_b (2).txt", "a_b.txt"]);
-        assert_eq!(std::fs::read(out.join("a_b.txt")).unwrap(), b"FIRST");
-        assert_eq!(std::fs::read(out.join("a_b (2).txt")).unwrap(), b"SECOND");
-        assert_eq!(r.renamed, ["a:b.txt"]);
+        assert_eq!(names(&out), ["ab_cd (2).txt", "ab_cd.txt"]);
+        assert_eq!(std::fs::read(out.join("ab_cd.txt")).unwrap(), b"FIRST");
+        assert_eq!(std::fs::read(out.join("ab_cd (2).txt")).unwrap(), b"SECOND");
+        assert_eq!(r.renamed, ["ab:cd.txt"]);
     }
 
     /// 중첩 이동 합성을 Windows 치환 충돌로(대소문자 구분 FS 에서도 결정적, R2 리뷰 R3):
-    /// `a:b/` → `a_b (2)`, `a:b/c:d/` → `a_b (2)/c_d (2)`, 그 안 파일은 둘을 합친 자리로.
+    /// `ab:cd/` → `ab_cd (2)`, `ab:cd/ef:gh/` → `ab_cd (2)/ef_gh (2)`, 그 안 파일은 둘을 합친 자리로.
     #[test]
     fn nested_sanitize_collisions_compose() {
         let d = tempfile::tempdir().unwrap();
@@ -601,28 +716,31 @@ mod tests {
         let mut w = zip::ZipWriter::new(std::fs::File::create(&zp).unwrap());
         let o = zip::write::SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Stored);
-        w.start_file("a_b", o).unwrap();
+        w.start_file("ab_cd", o).unwrap();
         w.write_all(b"one").unwrap();
-        w.add_directory("a:b/", o).unwrap();
-        w.start_file("a:b/c_d", o).unwrap();
+        w.add_directory("ab:cd/", o).unwrap();
+        w.start_file("ab:cd/ef_gh", o).unwrap();
         w.write_all(b"two").unwrap();
-        w.add_directory("a:b/c:d/", o).unwrap();
-        w.start_file("a:b/c:d/child", o).unwrap();
+        w.add_directory("ab:cd/ef:gh/", o).unwrap();
+        w.start_file("ab:cd/ef:gh/child", o).unwrap();
         w.write_all(b"three").unwrap();
         w.finish().unwrap();
         let out = d.path().join("out");
         std::fs::create_dir(&out).unwrap();
         let r = unpack_zip_with(&zp, &out, None, windows).unwrap();
-        let top = out.join("a_b (2)");
-        assert_eq!(names(&out), ["a_b", "a_b (2)"]);
-        assert_eq!(names(&top), ["c_d", "c_d (2)"]);
-        assert_eq!(std::fs::read(out.join("a_b")).unwrap(), b"one");
-        assert_eq!(std::fs::read(top.join("c_d")).unwrap(), b"two");
+        let top = out.join("ab_cd (2)");
+        assert_eq!(names(&out), ["ab_cd", "ab_cd (2)"]);
+        assert_eq!(names(&top), ["ef_gh", "ef_gh (2)"]);
+        assert_eq!(std::fs::read(out.join("ab_cd")).unwrap(), b"one");
+        assert_eq!(std::fs::read(top.join("ef_gh")).unwrap(), b"two");
         assert_eq!(
-            std::fs::read(top.join("c_d (2)").join("child")).unwrap(),
+            std::fs::read(top.join("ef_gh (2)").join("child")).unwrap(),
             b"three"
         );
-        assert_eq!(r.renamed, ["a:b/", "a:b/c_d", "a:b/c:d/", "a:b/c:d/child"]);
+        assert_eq!(
+            r.renamed,
+            ["ab:cd/", "ab:cd/ef_gh", "ab:cd/ef:gh/", "ab:cd/ef:gh/child"]
+        );
     }
 
     fn sevenz_with(path: &Path, files: &[(&str, &[u8])]) {
