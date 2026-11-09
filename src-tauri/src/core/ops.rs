@@ -105,16 +105,16 @@ async fn dedup_dst_name(dst_fs: &dyn FileSystem, dir: &std::path::Path, name: &s
     for n in 1..=9999 {
         // 길이 한계를 넘으면 stem 을 잘라 자리를 만든다(§ suffixed_name).
         let cand = crate::fs::suffixed_name(stem, &format!(" ({n}){ext}"));
-        let path = dir.join(&cand);
+        let path = dst_fs.join(dir, &cand);
         if dst_fs.metadata(&path).await.is_err() {
             return path;
         }
     }
     // 극단적 폴백 — timestamp 로 유일화.
-    dir.join(crate::fs::suffixed_name(
-        stem,
-        &format!(" ({}){ext}", backup_name("")),
-    ))
+    dst_fs.join(
+        dir,
+        &crate::fs::suffixed_name(stem, &format!(" ({}){ext}", backup_name(""))),
+    )
 }
 
 /// `name` → `name.bak.<ts>`. timestamp 충돌 시 .<n> suffix 는 호출자가 retry.
@@ -7525,3 +7525,7 @@ mod batch_rename_name_validation {
         assert!(ctx.journal.history(10).await.is_empty());
     }
 }
+
+#[cfg(test)]
+#[path = "ops_paths_tests.rs"]
+mod ops_paths_tests;
