@@ -19,9 +19,10 @@ export function detectLineEnding(text: string): LineEnding | null {
   return crlf > 0 ? "crlf" : "lf";
 }
 
-/** 줄로 나누고 각 줄 끝의 `\r` 하나를 뗀다 — 내용 비교는 줄 끝 방식과 무관하게. */
+/**
+ * 줄로 나눈다 — `\n` 바로 앞의 `\r`(CRLF 의 CR)만 뗀다. 내용 비교는 줄 끝 방식과 무관하게.
+ * `\n` 이 뒤따르지 않는 CR(파일 끝 `abc\r` 등)은 줄 끝이 아니라 내용이라 남긴다.
+ */
 export function splitLines(text: string): string[] {
-  return text
-    .split("\n")
-    .map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line));
+  return text.replace(/\r\n/g, "\n").split("\n");
 }
