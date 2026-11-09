@@ -26,37 +26,29 @@ afterEach(() => {
 });
 
 describe("C-15 toast auto-dismiss", () => {
-  it.fails(
-    "shell-settings-23: 마우스를 올려 읽는 중인 오류 토스트는 사라지지 않는다",
-    () => {
-      vi.useFakeTimers();
-      render(<Toast />);
-      act(() =>
-        useToast
-          .getState()
-          .show(`삭제 실패: ${"긴 설명 ".repeat(40)}`, "error"),
-      );
-      const card = screen.getByRole("alert").parentElement!;
-      fireEvent.mouseEnter(card);
-      fireEvent.pointerEnter(card);
-      act(() => vi.advanceTimersByTime(8000));
-      expect(screen.queryByRole("alert")).not.toBeNull();
-    },
-  );
+  it("shell-settings-23: 마우스를 올려 읽는 중인 오류 토스트는 사라지지 않는다", () => {
+    vi.useFakeTimers();
+    render(<Toast />);
+    act(() =>
+      useToast.getState().show(`삭제 실패: ${"긴 설명 ".repeat(40)}`, "error"),
+    );
+    const card = screen.getByRole("alert").parentElement!;
+    fireEvent.mouseEnter(card);
+    fireEvent.pointerEnter(card);
+    act(() => vi.advanceTimersByTime(8000));
+    expect(screen.queryByRole("alert")).not.toBeNull();
+  });
 
-  it.fails(
-    "shell-settings-23: 키보드로 포커스해 스크롤하며 읽는 오류 토스트는 사라지지 않는다",
-    () => {
-      vi.useFakeTimers();
-      render(<Toast />);
-      act(() => useToast.getState().show("복사 실패: …", "error"));
-      const body = screen.getByRole("alert");
-      body.focus();
-      expect(document.activeElement).toBe(body);
-      act(() => vi.advanceTimersByTime(8000));
-      expect(screen.queryByRole("alert")).not.toBeNull();
-    },
-  );
+  it("shell-settings-23: 키보드로 포커스해 스크롤하며 읽는 오류 토스트는 사라지지 않는다", () => {
+    vi.useFakeTimers();
+    render(<Toast />);
+    act(() => useToast.getState().show("복사 실패: …", "error"));
+    const body = screen.getByRole("alert");
+    body.focus();
+    expect(document.activeElement).toBe(body);
+    act(() => vi.advanceTimersByTime(8000));
+    expect(screen.queryByRole("alert")).not.toBeNull();
+  });
 
   it.fails(
     "shell-settings-24: 오류 4개가 떠 있어도 방금 한 작업의 성공 토스트는 보인다",

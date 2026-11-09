@@ -43,13 +43,37 @@ const MAX_VISIBLE = 4;
 interface State {
   toasts: ToastItem[];
   show: (msg: string, kind?: ToastKind, opts?: ToastOptions) => void;
+  pause: (id: number) => void;
+  resume: (id: number) => void;
   dismiss: (id: number) => void;
   clear: () => void;
 }
 
 let seq = 0;
 
-export const useToast = create<State>((set) => ({
+interface DismissTimer {
+  timer: ReturnType<typeof setTimeout> | undefined;
+  remaining: number;
+  startedAt: number;
+}
+
+const timers = new Map<number, DismissTimer>();
+
+function clearTimer(id: number) {
+  const entry = timers.get(id);
+  if (entry) clearTimeout(entry.timer);
+  timers.delete(id);
+}
+
+function startTimer(id: number, remaining: number) {
+  timers.set(id, {
+    remaining,
+    startedAt: Date.now(),
+    timer: setTimeout(() => useToast.getState().dismiss(id), remaining),
+  });
+}
+
+export const useToast = create<State>((set, get) => ({
   toasts: [],
   show: (msg, kind = "info", opts) => {
     seq += 1;
@@ -65,17 +89,38 @@ export const useToast = create<State>((set) => ({
       // 정작 읽어야 할 오류를 밀어내지 않게.
       while (next.length > MAX_VISIBLE) {
         const victim = next.findIndex((t) => !LOGGED[t.kind]);
-        next.splice(victim >= 0 ? victim : 0, 1);
+        const [removed] = next.splice(victim >= 0 ? victim : 0, 1);
+        if (removed) clearTimer(removed.id);
       }
       return { toasts: next };
     });
-    setTimeout(() => {
-      set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
-    }, DURATION_MS[kind]);
+    if (get().toasts.some((t) => t.id === id))
+      startTimer(id, DURATION_MS[kind]);
   },
-  dismiss: (id) =>
-    set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
-  clear: () => set({ toasts: [] }),
+  pause: (id) => {
+    const entry = timers.get(id);
+    if (!entry || entry.timer === undefined) return;
+    clearTimeout(entry.timer);
+    entry.remaining = Math.max(
+      0,
+      entry.remaining - (Date.now() - entry.startedAt),
+    );
+    entry.timer = undefined;
+  },
+  resume: (id) => {
+    const entry = timers.get(id);
+    if (!entry || entry.timer !== undefined) return;
+    // 읽기를 마친 뒤 닫기 버튼까지 갈 여유를 남긴다.
+    startTimer(id, Math.max(1500, entry.remaining));
+  },
+  dismiss: (id) => {
+    clearTimer(id);
+    set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
+  },
+  clear: () => {
+    for (const id of timers.keys()) clearTimer(id);
+    set({ toasts: [] });
+  },
 }));
 
 /** 호출부 주입용 타입 — fileActions 등이 toast fn 을 인자로 받을 때 사용. */

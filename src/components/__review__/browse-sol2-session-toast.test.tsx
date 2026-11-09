@@ -83,17 +83,14 @@ it.fails(
   },
 );
 
-it.fails(
-  "browse-31: hovering a long error keeps it visible past its initial deadline",
-  () => {
-    act(() => useToast.getState().show("R2 error that needs reading", "error"));
-    render(<Toast />);
-    act(() => vi.advanceTimersByTime(7000));
-    fireEvent.mouseEnter(screen.getByRole("alert"));
-    act(() => vi.advanceTimersByTime(2000));
-    expect(screen.queryByRole("alert")).not.toBeNull();
-  },
-);
+it("browse-31: hovering a long error keeps it visible past its initial deadline", () => {
+  act(() => useToast.getState().show("R2 error that needs reading", "error"));
+  render(<Toast />);
+  act(() => vi.advanceTimersByTime(7000));
+  fireEvent.mouseEnter(screen.getByRole("alert"));
+  act(() => vi.advanceTimersByTime(2000));
+  expect(screen.queryByRole("alert")).not.toBeNull();
+});
 
 it("browse-30/31: error history survives timeout and explicitly provided detail is readable", () => {
   act(() =>

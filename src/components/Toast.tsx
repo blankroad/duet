@@ -56,8 +56,33 @@ export function Toast() {
 function ToastCard({ toast }: { toast: ToastItem }) {
   const { t } = useTranslation();
   const dismiss = useToast((s) => s.dismiss);
+  const pause = useToast((s) => s.pause);
+  const resume = useToast((s) => s.resume);
+  const hovered = useRef(false);
+  const focused = useRef(false);
   return (
     <div
+      onMouseEnter={() => {
+        hovered.current = true;
+        pause(toast.id);
+      }}
+      onMouseLeave={() => {
+        hovered.current = false;
+        if (!focused.current) resume(toast.id);
+      }}
+      onFocus={() => {
+        focused.current = true;
+        pause(toast.id);
+      }}
+      onBlur={(e) => {
+        if (
+          e.relatedTarget instanceof Node &&
+          e.currentTarget.contains(e.relatedTarget)
+        )
+          return;
+        focused.current = false;
+        if (!hovered.current) resume(toast.id);
+      }}
       className={clsx(
         "pointer-events-auto flex w-full shrink-0 items-start gap-2 rounded-panel border bg-base px-3 py-2 text-base text-fg shadow-raised",
         toast.kind === "error"
