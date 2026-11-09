@@ -569,6 +569,8 @@ mod tests {
         let s1 = ssh("c1", [10, 0, 0, 1]);
         let s2 = ssh("c2", [10, 0, 0, 2]);
         let p = Path::new("/srv/a");
+        // SSH 하위 경로는 POSIX join — native join 은 Windows 에서 `\` 를 끼운다.
+        let pb = crate::fs::posix_join(p, "b");
         // 로컬↔원격: 같은 문자열이어도 다른 트리.
         assert_eq!(
             nesting(&LocalFs, &l, p, &LocalFs, &s1, p).await,
@@ -576,13 +578,13 @@ mod tests {
         );
         // 다른 서버.
         assert_eq!(
-            nesting(&LocalFs, &s1, p, &LocalFs, &s2, &p.join("b")).await,
+            nesting(&LocalFs, &s1, p, &LocalFs, &s2, &pb).await,
             Nesting::Unrelated
         );
         // 같은 서버(다른 연결) — 같은 FS 로 본다.
         let s1b = ssh("c9", [10, 0, 0, 1]);
         assert_eq!(
-            nesting(&LocalFs, &s1, p, &LocalFs, &s1b, &p.join("b")).await,
+            nesting(&LocalFs, &s1, p, &LocalFs, &s1b, &pb).await,
             Nesting::BInsideA
         );
         // 같은 연결이면 host_ip 가 미해석(0.0.0.0)이어도 같은 FS.
