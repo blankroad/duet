@@ -156,9 +156,14 @@ impl AppLaunchersStore {
         self.inner.read().await.clone()
     }
 
-    async fn commit(&self, v: &[AppItem]) -> Result<Vec<AppItem>, DuetError> {
-        self.write_to_disk(v).await?;
-        Ok(v.to_vec())
+    async fn commit(
+        &self,
+        current: &mut Vec<AppItem>,
+        next: Vec<AppItem>,
+    ) -> Result<Vec<AppItem>, DuetError> {
+        self.write_to_disk(&next).await?;
+        *current = next.clone();
+        Ok(next)
     }
 
     pub async fn add(&self, name: String, path: PathBuf) -> Result<Vec<AppItem>, DuetError> {
@@ -172,26 +177,29 @@ impl AppLaunchersStore {
         } else {
             name
         };
-        let mut v = self.inner.write().await;
+        let mut current = self.inner.write().await;
+        let mut v = current.clone();
         v.push(AppItem::new_app(name, path));
         let snap = v.clone();
-        self.commit(&snap).await
+        self.commit(&mut current, snap).await
     }
 
     pub async fn rename(&self, id: &str, name: String) -> Result<Vec<AppItem>, DuetError> {
         if name.trim().is_empty() {
             return Err(DuetError::Io("name required".into()));
         }
-        let mut v = self.inner.write().await;
+        let mut current = self.inner.write().await;
+        let mut v = current.clone();
         if let Some(it) = find_mut(&mut v, id) {
             it.name = name;
         }
         let snap = v.clone();
-        self.commit(&snap).await
+        self.commit(&mut current, snap).await
     }
 
     pub async fn set_args(&self, id: &str, args: Vec<String>) -> Result<Vec<AppItem>, DuetError> {
-        let mut v = self.inner.write().await;
+        let mut current = self.inner.write().await;
+        let mut v = current.clone();
         if let Some(it) = find_mut(&mut v, id) {
             if it.is_folder() {
                 return Err(DuetError::Io("cannot set args on a folder".into()));
@@ -199,35 +207,37 @@ impl AppLaunchersStore {
             it.args = args;
         }
         let snap = v.clone();
-        self.commit(&snap).await
+        self.commit(&mut current, snap).await
     }
 
     pub async fn remove(&self, id: &str) -> Result<Vec<AppItem>, DuetError> {
-        let mut v = self.inner.write().await;
+        let mut current = self.inner.write().await;
+        let mut v = current.clone();
         take_item(&mut v, id);
         dissolve_if_small(&mut v);
         let snap = v.clone();
-        self.commit(&snap).await
+        self.commit(&mut current, snap).await
     }
 
     /// 드래그-온토 머지: 둘 다 앱이면 target 자리에 새 폴더, target 이 폴더면 그 안으로.
     pub async fn group(&self, drag_id: &str, target_id: &str) -> Result<Vec<AppItem>, DuetError> {
-        let mut v = self.inner.write().await;
+        let mut current = self.inner.write().await;
+        let mut v = current.clone();
         if drag_id == target_id {
             let snap = v.clone();
-            return self.commit(&snap).await;
+            return self.commit(&mut current, snap).await;
         }
         let (Some(dpos), Some(tpos)) = (
             v.iter().position(|i| i.id == drag_id),
             v.iter().position(|i| i.id == target_id),
         ) else {
             let snap = v.clone();
-            return self.commit(&snap).await;
+            return self.commit(&mut current, snap).await;
         };
         // 폴더 → x 는 거부 (reorder 가 처리). drag 는 반드시 앱.
         if v[dpos].is_folder() {
             let snap = v.clone();
-            return self.commit(&snap).await;
+            return self.commit(&mut current, snap).await;
         }
         if v[tpos].is_folder() {
             let app = v.remove(dpos);
@@ -253,7 +263,7 @@ impl AppLaunchersStore {
             v.insert(tpos2, folder);
         }
         let snap = v.clone();
-        self.commit(&snap).await
+        self.commit(&mut current, snap).await
     }
 
     pub async fn move_into_folder(
@@ -261,12 +271,13 @@ impl AppLaunchersStore {
         app_id: &str,
         folder_id: &str,
     ) -> Result<Vec<AppItem>, DuetError> {
-        let mut v = self.inner.write().await;
+        let mut current = self.inner.write().await;
+        let mut v = current.clone();
         // 폴더 검증
         let is_folder = v.iter().any(|i| i.id == folder_id && i.is_folder());
         if !is_folder {
             let snap = v.clone();
-            return self.commit(&snap).await;
+            return self.commit(&mut current, snap).await;
         }
         if let Some(app) = take_item(&mut v, app_id) {
             if app.is_folder() {
@@ -280,15 +291,16 @@ impl AppLaunchersStore {
         }
         dissolve_if_small(&mut v);
         let snap = v.clone();
-        self.commit(&snap).await
+        self.commit(&mut current, snap).await
     }
 
     pub async fn move_out(&self, app_id: &str, folder_id: &str) -> Result<Vec<AppItem>, DuetError> {
-        let mut v = self.inner.write().await;
+        let mut current = self.inner.write().await;
+        let mut v = current.clone();
         let fpos = v.iter().position(|i| i.id == folder_id);
         let Some(fpos) = fpos else {
             let snap = v.clone();
-            return self.commit(&snap).await;
+            return self.commit(&mut current, snap).await;
         };
         let cpos = v[fpos].children.iter().position(|c| c.id == app_id);
         if let Some(cpos) = cpos {
@@ -298,12 +310,13 @@ impl AppLaunchersStore {
         }
         dissolve_if_small(&mut v);
         let snap = v.clone();
-        self.commit(&snap).await
+        self.commit(&mut current, snap).await
     }
 
     /// 폴더 해체 — 자식들을 폴더 자리에 펼침.
     pub async fn dissolve(&self, folder_id: &str) -> Result<Vec<AppItem>, DuetError> {
-        let mut v = self.inner.write().await;
+        let mut current = self.inner.write().await;
+        let mut v = current.clone();
         if let Some(pos) = v.iter().position(|i| i.id == folder_id && i.is_folder()) {
             let folder = v.remove(pos);
             for (k, child) in folder.children.into_iter().enumerate() {
@@ -311,12 +324,13 @@ impl AppLaunchersStore {
             }
         }
         let snap = v.clone();
-        self.commit(&snap).await
+        self.commit(&mut current, snap).await
     }
 
     /// top-level 재배치 (order 에 든 id 만 그 순서로, 나머지는 뒤에 보존).
     pub async fn reorder(&self, order: Vec<String>) -> Result<Vec<AppItem>, DuetError> {
-        let mut v = self.inner.write().await;
+        let mut current = self.inner.write().await;
+        let mut v = current.clone();
         let mut reordered: Vec<AppItem> = order
             .iter()
             .filter_map(|id| v.iter().find(|a| &a.id == id).cloned())
@@ -326,9 +340,9 @@ impl AppLaunchersStore {
                 reordered.push(a.clone());
             }
         }
-        *v = reordered;
+        v = reordered;
         let snap = v.clone();
-        self.commit(&snap).await
+        self.commit(&mut current, snap).await
     }
 
     /// 폴더 내부 자식 재배치.
@@ -337,7 +351,8 @@ impl AppLaunchersStore {
         folder_id: &str,
         order: Vec<String>,
     ) -> Result<Vec<AppItem>, DuetError> {
-        let mut v = self.inner.write().await;
+        let mut current = self.inner.write().await;
+        let mut v = current.clone();
         if let Some(f) = v.iter_mut().find(|i| i.id == folder_id && i.is_folder()) {
             let mut reordered: Vec<AppItem> = order
                 .iter()
@@ -352,7 +367,7 @@ impl AppLaunchersStore {
         }
         dissolve_if_small(&mut v);
         let snap = v.clone();
-        self.commit(&snap).await
+        self.commit(&mut current, snap).await
     }
 
     async fn write_to_disk(&self, items: &[AppItem]) -> Result<(), DuetError> {
@@ -366,6 +381,66 @@ impl AppLaunchersStore {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn failed_saves_keep_memory_unchanged() {
+        let dir = tempdir().unwrap();
+        let blocker = dir.path().join("blocker");
+        std::fs::write(&blocker, b"x").unwrap();
+        let store = AppLaunchersStore::load_from(&blocker.join("store.json"))
+            .await
+            .unwrap();
+        let app = |id: &str| AppItem {
+            id: id.into(),
+            name: id.into(),
+            path: Some(PathBuf::from(id)),
+            args: Vec::new(),
+            children: Vec::new(),
+        };
+        *store.inner.write().await = vec![
+            app("a"),
+            app("b"),
+            AppItem {
+                id: "folder".into(),
+                name: "Folder".into(),
+                path: None,
+                args: Vec::new(),
+                children: vec![app("d"), app("e")],
+            },
+        ];
+        let before = serde_json::to_value(store.list().await).unwrap();
+        assert!(store
+            .add("new".into(), PathBuf::from("/new"))
+            .await
+            .is_err());
+        assert_eq!(serde_json::to_value(store.list().await).unwrap(), before);
+        assert!(store.rename("a", "renamed".into()).await.is_err());
+        assert_eq!(serde_json::to_value(store.list().await).unwrap(), before);
+        assert!(store.set_args("a", vec!["--new".into()]).await.is_err());
+        assert_eq!(serde_json::to_value(store.list().await).unwrap(), before);
+        assert!(store.remove("d").await.is_err());
+        assert_eq!(serde_json::to_value(store.list().await).unwrap(), before);
+        assert!(store.group("a", "b").await.is_err());
+        assert_eq!(serde_json::to_value(store.list().await).unwrap(), before);
+        assert!(store.group("a", "folder").await.is_err());
+        assert_eq!(serde_json::to_value(store.list().await).unwrap(), before);
+        assert!(store.move_into_folder("a", "folder").await.is_err());
+        assert_eq!(serde_json::to_value(store.list().await).unwrap(), before);
+        assert!(store.move_out("d", "folder").await.is_err());
+        assert_eq!(serde_json::to_value(store.list().await).unwrap(), before);
+        assert!(store.dissolve("folder").await.is_err());
+        assert_eq!(serde_json::to_value(store.list().await).unwrap(), before);
+        assert!(store
+            .reorder(vec!["folder".into(), "b".into(), "a".into()])
+            .await
+            .is_err());
+        assert_eq!(serde_json::to_value(store.list().await).unwrap(), before);
+        assert!(store
+            .reorder_in_folder("folder", vec!["e".into(), "d".into()])
+            .await
+            .is_err());
+        assert_eq!(serde_json::to_value(store.list().await).unwrap(), before);
+    }
 
     #[tokio::test]
     async fn saved_launcher_args_survive_reload() {

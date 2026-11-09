@@ -81,7 +81,8 @@ impl SavedHostsStore {
         if host.alias.trim().is_empty() {
             return Err(DuetError::Io("saved host alias required".into()));
         }
-        let mut hosts = self.inner.write().await;
+        let mut current = self.inner.write().await;
+        let mut hosts = current.clone();
         if let Some(existing) = hosts.iter_mut().find(|h| h.alias == host.alias) {
             *existing = host;
         } else {
@@ -89,21 +90,25 @@ impl SavedHostsStore {
         }
         let snapshot = hosts.clone();
         self.write_to_disk(&snapshot).await?;
+        *current = snapshot.clone();
         Ok(snapshot)
     }
 
     /// alias 로 제거. 없으면 no-op (Ok 반환).
     pub async fn remove(&self, alias: &str) -> Result<Vec<SavedHost>, DuetError> {
-        let mut hosts = self.inner.write().await;
+        let mut current = self.inner.write().await;
+        let mut hosts = current.clone();
         hosts.retain(|h| h.alias != alias);
         let snapshot = hosts.clone();
         self.write_to_disk(&snapshot).await?;
+        *current = snapshot.clone();
         Ok(snapshot)
     }
 
     /// `order` 에 담긴 alias 들만 그 순서대로 재배치 — 나머지 항목은 원위치 유지.
     pub async fn reorder(&self, order: Vec<String>) -> Result<Vec<SavedHost>, DuetError> {
-        let mut hosts = self.inner.write().await;
+        let mut current = self.inner.write().await;
+        let mut hosts = current.clone();
         let slots: Vec<usize> = hosts
             .iter()
             .enumerate()
@@ -119,6 +124,7 @@ impl SavedHostsStore {
         }
         let snapshot = hosts.clone();
         self.write_to_disk(&snapshot).await?;
+        *current = snapshot.clone();
         Ok(snapshot)
     }
 
@@ -133,6 +139,28 @@ impl SavedHostsStore {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn failed_saves_keep_memory_unchanged() {
+        let dir = tempdir().unwrap();
+        let blocker = dir.path().join("blocker");
+        std::fs::write(&blocker, b"x").unwrap();
+        let store = SavedHostsStore::load_from(&blocker.join("store.json"))
+            .await
+            .unwrap();
+        *store.inner.write().await = vec![mk("a"), mk("b")];
+        let before = serde_json::to_value(store.list().await).unwrap();
+        assert!(store.upsert(mk("new")).await.is_err());
+        assert_eq!(serde_json::to_value(store.list().await).unwrap(), before);
+        let mut replacement = mk("a");
+        replacement.host = "changed".into();
+        assert!(store.upsert(replacement).await.is_err());
+        assert_eq!(serde_json::to_value(store.list().await).unwrap(), before);
+        assert!(store.remove("a").await.is_err());
+        assert_eq!(serde_json::to_value(store.list().await).unwrap(), before);
+        assert!(store.reorder(vec!["b".into(), "a".into()]).await.is_err());
+        assert_eq!(serde_json::to_value(store.list().await).unwrap(), before);
+    }
 
     #[tokio::test]
     async fn corrupt_file_is_preserved_and_loads_defaults() {

@@ -74,7 +74,8 @@ impl HostNicknamesStore {
         alias: String,
         nickname: String,
     ) -> Result<HashMap<String, String>, DuetError> {
-        let mut m = self.inner.write().await;
+        let mut current = self.inner.write().await;
+        let mut m = current.clone();
         if nickname.trim().is_empty() {
             m.remove(&alias);
         } else {
@@ -82,15 +83,18 @@ impl HostNicknamesStore {
         }
         let snap = m.clone();
         self.write_to_disk(&snap).await?;
+        *current = snap.clone();
         Ok(snap)
     }
 
     /// 별명 제거. 갱신된 맵 반환.
     pub async fn remove(&self, alias: &str) -> Result<HashMap<String, String>, DuetError> {
-        let mut m = self.inner.write().await;
+        let mut current = self.inner.write().await;
+        let mut m = current.clone();
         m.remove(alias);
         let snap = m.clone();
         self.write_to_disk(&snap).await?;
+        *current = snap.clone();
         Ok(snap)
     }
 
@@ -105,6 +109,24 @@ impl HostNicknamesStore {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn failed_saves_keep_memory_unchanged() {
+        let dir = tempdir().unwrap();
+        let blocker = dir.path().join("blocker");
+        std::fs::write(&blocker, b"x").unwrap();
+        let store = HostNicknamesStore::load_from(&blocker.join("store.json"))
+            .await
+            .unwrap();
+        store.inner.write().await.insert("a".into(), "Old".into());
+        let before = serde_json::to_value(store.list().await).unwrap();
+        assert!(store.set("a".into(), "new".into()).await.is_err());
+        assert_eq!(serde_json::to_value(store.list().await).unwrap(), before);
+        assert!(store.set("a".into(), String::new()).await.is_err());
+        assert_eq!(serde_json::to_value(store.list().await).unwrap(), before);
+        assert!(store.remove("a").await.is_err());
+        assert_eq!(serde_json::to_value(store.list().await).unwrap(), before);
+    }
 
     #[tokio::test]
     async fn read_io_error_still_starts_empty_without_notice() {

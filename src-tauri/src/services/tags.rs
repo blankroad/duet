@@ -81,7 +81,8 @@ impl TagsStore {
                 clean.push(t);
             }
         }
-        let mut m = self.inner.write().await;
+        let mut current = self.inner.write().await;
+        let mut m = current.clone();
         if clean.is_empty() {
             m.remove(&key);
         } else {
@@ -89,6 +90,7 @@ impl TagsStore {
         }
         let snap = m.clone();
         self.write_to_disk(&snap).await?;
+        *current = snap.clone();
         Ok(snap)
     }
 
@@ -103,6 +105,29 @@ impl TagsStore {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn failed_saves_keep_memory_unchanged() {
+        let dir = tempdir().unwrap();
+        let blocker = dir.path().join("blocker");
+        std::fs::write(&blocker, b"x").unwrap();
+        let store = TagsStore::load_from(&blocker.join("store.json"))
+            .await
+            .unwrap();
+        store
+            .inner
+            .write()
+            .await
+            .insert("host:a".into(), vec!["old".into()]);
+        let before = serde_json::to_value(store.list().await).unwrap();
+        assert!(store
+            .set("host:a".into(), vec!["new".into()])
+            .await
+            .is_err());
+        assert_eq!(serde_json::to_value(store.list().await).unwrap(), before);
+        assert!(store.set("host:a".into(), Vec::new()).await.is_err());
+        assert_eq!(serde_json::to_value(store.list().await).unwrap(), before);
+    }
 
     #[tokio::test]
     async fn read_io_error_still_starts_empty_without_notice() {

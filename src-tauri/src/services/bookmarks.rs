@@ -82,10 +82,12 @@ impl BookmarksStore {
             name,
             location,
         };
-        let mut v = self.inner.write().await;
+        let mut current = self.inner.write().await;
+        let mut v = current.clone();
         v.push(bm);
         let snap = v.clone();
         self.write_to_disk(&snap).await?;
+        *current = snap.clone();
         Ok(snap)
     }
 
@@ -94,21 +96,25 @@ impl BookmarksStore {
         if name.trim().is_empty() {
             return Err(DuetError::Io("bookmark name required".into()));
         }
-        let mut v = self.inner.write().await;
+        let mut current = self.inner.write().await;
+        let mut v = current.clone();
         if let Some(b) = v.iter_mut().find(|b| b.id == id) {
             b.name = name;
         }
         let snap = v.clone();
         self.write_to_disk(&snap).await?;
+        *current = snap.clone();
         Ok(snap)
     }
 
     /// id 로 제거. 없으면 no-op (Ok 반환).
     pub async fn remove(&self, id: &str) -> Result<Vec<Bookmark>, DuetError> {
-        let mut v = self.inner.write().await;
+        let mut current = self.inner.write().await;
+        let mut v = current.clone();
         v.retain(|b| b.id != id);
         let snap = v.clone();
         self.write_to_disk(&snap).await?;
+        *current = snap.clone();
         Ok(snap)
     }
 
@@ -117,7 +123,8 @@ impl BookmarksStore {
     /// 부분 리스트도 안전: `order` 에 포함된 id 가 차지하던 슬롯에만 새 순서를
     /// 채워 넣으므로(다른 항목 위치 불변), 그룹 단위 부분 재정렬에도 쓸 수 있다.
     pub async fn reorder(&self, order: Vec<String>) -> Result<Vec<Bookmark>, DuetError> {
-        let mut v = self.inner.write().await;
+        let mut current = self.inner.write().await;
+        let mut v = current.clone();
         let slots: Vec<usize> = v
             .iter()
             .enumerate()
@@ -133,6 +140,7 @@ impl BookmarksStore {
         }
         let snap = v.clone();
         self.write_to_disk(&snap).await?;
+        *current = snap.clone();
         Ok(snap)
     }
 
@@ -304,7 +312,6 @@ mod review_shell_settings {
     }
 
     #[tokio::test]
-    #[ignore = "shell-settings-02 repro: 추가 실패한 북마크가 메모리에 남음"]
     async fn failed_add_is_not_kept_in_memory() {
         let dir = tempdir().unwrap();
         let blocker = dir.path().join("cfg");

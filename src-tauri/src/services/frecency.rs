@@ -108,7 +108,8 @@ impl FrecencyStore {
         now_ms: i64,
     ) -> Result<(), DuetError> {
         let key = loc_key(&location, host_alias.as_deref());
-        let mut v = self.inner.write().await;
+        let mut current = self.inner.write().await;
+        let mut v = current.clone();
         if let Some(e) = v
             .iter_mut()
             .find(|e| loc_key(&e.location, e.host_alias.as_deref()) == key)
@@ -133,6 +134,7 @@ impl FrecencyStore {
         }
         let snap = v.clone();
         self.write_to_disk(&snap).await?;
+        *current = snap;
         Ok(())
     }
 
@@ -172,6 +174,33 @@ impl FrecencyStore {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn failed_saves_keep_memory_unchanged() {
+        let dir = tempdir().unwrap();
+        let blocker = dir.path().join("blocker");
+        std::fs::write(&blocker, b"x").unwrap();
+        let store = FrecencyStore::load_from(&blocker.join("store.json"))
+            .await
+            .unwrap();
+        *store.inner.write().await = vec![FrecencyEntry {
+            location: loc("/a"),
+            host_alias: None,
+            count: 3,
+            last_visit_ms: 1000,
+        }];
+        let before = serde_json::to_value(store.query("", 10, 1000).await).unwrap();
+        assert!(store.record(loc("/a"), None, 3000).await.is_err());
+        assert_eq!(
+            serde_json::to_value(store.query("", 10, 1000).await).unwrap(),
+            before
+        );
+        assert!(store.record(loc("/new"), None, 4000).await.is_err());
+        assert_eq!(
+            serde_json::to_value(store.query("", 10, 1000).await).unwrap(),
+            before
+        );
+    }
 
     fn loc(p: &str) -> Location {
         Location {

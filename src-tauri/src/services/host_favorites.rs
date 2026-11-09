@@ -72,7 +72,8 @@ impl HostFavoritesStore {
         if name.trim().is_empty() {
             return Err(DuetError::Io("favorite name required".into()));
         }
-        let mut v = self.inner.write().await;
+        let mut current = self.inner.write().await;
+        let mut v = current.clone();
         // 같은 (호스트, 경로)는 한 번만 — 예전엔 ★/Ctrl+D 를 누를 때마다 같은 폴더가
         // 계속 쌓였다(프론트가 원격에서는 토글이 아니라 추가만 했기 때문).
         if let Some(existing) = v
@@ -91,6 +92,7 @@ impl HostFavoritesStore {
         v.push(item);
         let snap = v.clone();
         self.write_to_disk(&snap).await?;
+        *current = snap.clone();
         Ok(snap)
     }
 
@@ -99,20 +101,24 @@ impl HostFavoritesStore {
         if name.trim().is_empty() {
             return Err(DuetError::Io("favorite name required".into()));
         }
-        let mut v = self.inner.write().await;
+        let mut current = self.inner.write().await;
+        let mut v = current.clone();
         if let Some(f) = v.iter_mut().find(|f| f.id == id) {
             f.name = name;
         }
         let snap = v.clone();
         self.write_to_disk(&snap).await?;
+        *current = snap.clone();
         Ok(snap)
     }
 
     pub async fn remove(&self, id: &str) -> Result<Vec<HostFavorite>, DuetError> {
-        let mut v = self.inner.write().await;
+        let mut current = self.inner.write().await;
+        let mut v = current.clone();
         v.retain(|f| f.id != id);
         let snap = v.clone();
         self.write_to_disk(&snap).await?;
+        *current = snap.clone();
         Ok(snap)
     }
 
@@ -121,7 +127,8 @@ impl HostFavoritesStore {
     /// 프론트는 한 alias 그룹의 id 들만 보내므로, 그 id 가 차지하던 슬롯에만 새
     /// 순서를 채워 다른 그룹 위치를 건드리지 않는다.
     pub async fn reorder(&self, order: Vec<String>) -> Result<Vec<HostFavorite>, DuetError> {
-        let mut v = self.inner.write().await;
+        let mut current = self.inner.write().await;
+        let mut v = current.clone();
         let slots: Vec<usize> = v
             .iter()
             .enumerate()
@@ -137,6 +144,7 @@ impl HostFavoritesStore {
         }
         let snap = v.clone();
         self.write_to_disk(&snap).await?;
+        *current = snap.clone();
         Ok(snap)
     }
 
@@ -151,6 +159,42 @@ impl HostFavoritesStore {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn failed_saves_keep_memory_unchanged() {
+        let dir = tempdir().unwrap();
+        let blocker = dir.path().join("blocker");
+        std::fs::write(&blocker, b"x").unwrap();
+        let store = HostFavoritesStore::load_from(&blocker.join("store.json"))
+            .await
+            .unwrap();
+        *store.inner.write().await = vec![
+            HostFavorite {
+                id: "a".into(),
+                host_alias: "host".into(),
+                name: "A".into(),
+                path: PathBuf::from("/a"),
+            },
+            HostFavorite {
+                id: "b".into(),
+                host_alias: "host".into(),
+                name: "B".into(),
+                path: PathBuf::from("/b"),
+            },
+        ];
+        let before = serde_json::to_value(store.list().await).unwrap();
+        assert!(store
+            .add("host".into(), "new".into(), PathBuf::from("/new"))
+            .await
+            .is_err());
+        assert_eq!(serde_json::to_value(store.list().await).unwrap(), before);
+        assert!(store.rename("a", "renamed".into()).await.is_err());
+        assert_eq!(serde_json::to_value(store.list().await).unwrap(), before);
+        assert!(store.remove("a").await.is_err());
+        assert_eq!(serde_json::to_value(store.list().await).unwrap(), before);
+        assert!(store.reorder(vec!["b".into(), "a".into()]).await.is_err());
+        assert_eq!(serde_json::to_value(store.list().await).unwrap(), before);
+    }
 
     #[tokio::test]
     async fn corrupt_file_is_preserved_and_loads_defaults() {

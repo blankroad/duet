@@ -89,19 +89,23 @@ impl UserAliasesStore {
             name,
             kind,
         };
-        let mut v = self.inner.write().await;
+        let mut current = self.inner.write().await;
+        let mut v = current.clone();
         v.push(item);
         let snap = v.clone();
         self.write_to_disk(&snap).await?;
+        *current = snap.clone();
         Ok(snap)
     }
 
     /// id 로 제거. 없으면 no-op (Ok 반환).
     pub async fn remove(&self, id: &str) -> Result<Vec<UserAlias>, DuetError> {
-        let mut v = self.inner.write().await;
+        let mut current = self.inner.write().await;
+        let mut v = current.clone();
         v.retain(|a| a.id != id);
         let snap = v.clone();
         self.write_to_disk(&snap).await?;
+        *current = snap.clone();
         Ok(snap)
     }
 
@@ -117,6 +121,36 @@ mod tests {
     use super::*;
     use crate::types::SourceId;
     use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn failed_saves_keep_memory_unchanged() {
+        let dir = tempdir().unwrap();
+        let blocker = dir.path().join("blocker");
+        std::fs::write(&blocker, b"x").unwrap();
+        let store = UserAliasesStore::load_from(&blocker.join("store.json"))
+            .await
+            .unwrap();
+        *store.inner.write().await = vec![UserAlias {
+            id: "a".into(),
+            name: "A".into(),
+            kind: AliasKind::Connect {
+                saved_host_alias: "host".into(),
+            },
+        }];
+        let before = serde_json::to_value(store.list().await).unwrap();
+        assert!(store
+            .add(
+                "new".into(),
+                AliasKind::Connect {
+                    saved_host_alias: "host".into()
+                }
+            )
+            .await
+            .is_err());
+        assert_eq!(serde_json::to_value(store.list().await).unwrap(), before);
+        assert!(store.remove("a").await.is_err());
+        assert_eq!(serde_json::to_value(store.list().await).unwrap(), before);
+    }
 
     #[tokio::test]
     async fn corrupt_file_is_preserved_and_loads_defaults() {
