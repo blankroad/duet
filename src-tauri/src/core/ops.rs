@@ -2117,7 +2117,10 @@ async fn merge_relay(
         emit_merge_progress(&progress, done, total);
     }
     // SC-40: 아무것도 만들지 않고 실패·취소했으면 빈 기록을 남기지 않는다(Ctrl+Z 를 소모하지 않게).
-    if left_created.is_empty() && right_created.is_empty() {
+    // 생성 예정으로 적어 둔 경로는 실제로 생겼는지 확인한다(첫 복사가 시작 전에 실패한 경우).
+    if !any_exists(Some(left_fs), &left_created).await
+        && !any_exists(Some(right_fs), &right_created).await
+    {
         if let Err(e) = outcome {
             return Err(e);
         }
@@ -2239,14 +2242,24 @@ async fn merge_same_host(
         done += 1;
         emit_merge_progress(&progress, done, total);
     }
+    let left_fs = ssh_fs_opt(pool, left_conn).await;
+    let right_fs = ssh_fs_opt(pool, right_conn).await;
     // SC-40: 아무것도 만들지 않고 실패·취소했으면 빈 기록을 남기지 않는다.
-    if left_created.is_empty() && right_created.is_empty() {
+    if !any_exists(
+        left_fs.as_ref().map(|f| f as &dyn FileSystem),
+        &left_created,
+    )
+    .await
+        && !any_exists(
+            right_fs.as_ref().map(|f| f as &dyn FileSystem),
+            &right_created,
+        )
+        .await
+    {
         if let Err(e) = outcome {
             return Err(e);
         }
     }
-    let left_fs = ssh_fs_opt(pool, left_conn).await;
-    let right_fs = ssh_fs_opt(pool, right_conn).await;
     let entry = push_merge_journal(
         ctx,
         (
@@ -2465,12 +2478,31 @@ async fn stamp_apply_state(
     )
 }
 
-/// 아무것도 만들거나 덮어쓰지 않은 적용인가(SC-40 — 실패·취소면 빈 기록을 남기지 않음).
-fn apply_state_is_empty(st: &ApplyState) -> bool {
-    st.left_created.is_empty()
-        && st.right_created.is_empty()
-        && st.left_backups.is_empty()
-        && st.right_backups.is_empty()
+/// 실제로 무언가 바뀐 적용인가(SC-40 — 실패·취소면 빈 기록을 남기지 않음). 백업이 있으면
+/// 바뀐 것이고, 생성 예정 경로는 실제로 생겼는지 본다.
+async fn apply_state_changed(
+    fs: (Option<&dyn FileSystem>, Option<&dyn FileSystem>),
+    st: &ApplyState,
+) -> bool {
+    !st.left_backups.is_empty()
+        || !st.right_backups.is_empty()
+        || any_exists(fs.0, &st.left_created).await
+        || any_exists(fs.1, &st.right_created).await
+}
+
+/// 생성 예정으로 적어 둔 경로 중 실제로 생긴 것이 있나(SC-40). 확인할 fs 가 없거나 확인이
+/// 실패하면 true — 부분 결과를 잃지 않도록 보수적으로 기록 쪽.
+async fn any_exists(fs: Option<&dyn FileSystem>, paths: &[PathBuf]) -> bool {
+    let Some(fs) = fs else {
+        return !paths.is_empty();
+    };
+    for p in paths {
+        match fs.symlink_metadata(p).await {
+            Err(DuetError::NotFound(_)) => {}
+            _ => return true,
+        }
+    }
+    false
 }
 
 /// 한 행을 relay 로 적용 — dst 존재면 백업 후 복사, 아니면 생성 기록 후 복사.
@@ -2590,7 +2622,7 @@ async fn apply_relay(
         done += 1;
         emit_merge_progress(&progress, done, total);
     }
-    if apply_state_is_empty(&st) {
+    if !apply_state_changed((Some(left_fs), Some(right_fs)), &st).await {
         if let Err(e) = outcome {
             return Err(e);
         }
@@ -2650,17 +2682,17 @@ async fn apply_same_host(
         done += 1;
         emit_merge_progress(&progress, done, total);
     }
-    if apply_state_is_empty(&st) {
-        if let Err(e) = outcome {
-            return Err(e);
-        }
-    }
     let left_fs = ssh_fs_opt(pool, left_conn).await;
     let right_fs = ssh_fs_opt(pool, right_conn).await;
     let fs = (
         left_fs.as_ref().map(|f| f as &dyn FileSystem),
         right_fs.as_ref().map(|f| f as &dyn FileSystem),
     );
+    if !apply_state_changed(fs, &st).await {
+        if let Err(e) = outcome {
+            return Err(e);
+        }
+    }
     let entry = push_compare_apply_journal(ctx, fs, left, right, st).await?;
     outcome?;
     Ok(entry)
@@ -2860,7 +2892,10 @@ pub async fn apply_three_way(
     }
 
     // SC-40: 아무것도 바꾸지 않고 실패·취소했으면 빈 기록을 남기지 않는다.
-    if apply_state_is_empty(&st) && trashed_left.is_empty() && trashed_right.is_empty() {
+    if !apply_state_changed((Some(left_fs), Some(right_fs)), &st).await
+        && trashed_left.is_empty()
+        && trashed_right.is_empty()
+    {
         if let Err(e) = outcome {
             return Err(e);
         }
@@ -7069,6 +7104,36 @@ mod undo_record_tests {
         assert!(
             c.journal.history(10).await.is_empty(),
             "SC-40: a cancelled-before-start merge/apply/3-way must not consume a Ctrl+Z slot"
+        );
+    }
+
+    /// R2-sol-06: 첫 복사가 아무것도 만들기 전에 실패하면(소스 사라짐) 생성 예정 경로만으로
+    /// "바뀜"으로 보지 않는다 — 빈 기록 없음.
+    #[tokio::test]
+    async fn sc40_first_copy_failure_before_creating_leaves_no_journal_entry() {
+        let (t, l, r, _b) = trees();
+        let c = ctx(t.path()).await;
+        let fs = LocalFs::new();
+        let decisions = vec![ApplyDecision {
+            rel: "missing.txt".into(),
+            direction: ApplyDirection::ToRight,
+        }];
+        let res = apply_compare(
+            &fs,
+            loc(&l),
+            &fs,
+            loc(&r),
+            decisions,
+            &c,
+            tokio_util::sync::CancellationToken::new(),
+            None,
+        )
+        .await;
+        assert!(res.is_err());
+        assert!(!r.join("missing.txt").exists());
+        assert!(
+            c.journal.history(10).await.is_empty(),
+            "SC-40: nothing was created, so nothing should be journaled"
         );
     }
 
