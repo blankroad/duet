@@ -430,9 +430,10 @@ async fn compare_apply_undo_with_unreachable_side_reports_error() {
     assert!(matches!(out.kind, UndoKind::Error));
 }
 
-/// 머지: 충돌(양쪽 다른 내용)은 그대로, 한쪽 전용 폴더는 통째 복사, 취소 시 journal.
+/// 시작 전에 취소된 머지는 아무것도 바꾸지 않았으므로 기록도 남기지 않는다(SC-40 —
+/// 빈 기록이 Ctrl+Z 한 번을 소모하던 결함).
 #[tokio::test]
-async fn merge_cancelled_before_start_still_journals_empty_entry() {
+async fn merge_cancelled_before_start_leaves_no_journal_entry() {
     let (dir, l, r) = sides();
     std::fs::write(l.join("a.txt"), b"L").unwrap();
     let fs = LocalFs::new();
@@ -442,8 +443,10 @@ async fn merge_cancelled_before_start_still_journals_empty_entry() {
     let res = merge_bidir(&fs, loc(&l), &fs, loc(&r), false, &ctx, tok, None).await;
     assert!(res.is_err());
     assert!(!r.join("a.txt").exists());
-    // 취소여도 (빈) 기록은 남는다 — 히스토리에 "0 → 0" 머지가 생김.
-    assert!(ctx.journal.peek_undoable().await.unwrap().is_some());
+    assert!(
+        ctx.journal.peek_undoable().await.unwrap().is_none(),
+        "SC-40: cancelled-before-start merge must not leave an empty undo entry"
+    );
 }
 
 // ─── C-13 3-way ─────────────────────────────────────────────────────────

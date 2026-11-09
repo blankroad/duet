@@ -2116,6 +2116,12 @@ async fn merge_relay(
         done += 1;
         emit_merge_progress(&progress, done, total);
     }
+    // SC-40: 아무것도 만들지 않고 실패·취소했으면 빈 기록을 남기지 않는다(Ctrl+Z 를 소모하지 않게).
+    if left_created.is_empty() && right_created.is_empty() {
+        if let Err(e) = outcome {
+            return Err(e);
+        }
+    }
     let entry = push_merge_journal(
         ctx,
         (Some(left_fs), Some(right_fs)),
@@ -2232,6 +2238,12 @@ async fn merge_same_host(
         }
         done += 1;
         emit_merge_progress(&progress, done, total);
+    }
+    // SC-40: 아무것도 만들지 않고 실패·취소했으면 빈 기록을 남기지 않는다.
+    if left_created.is_empty() && right_created.is_empty() {
+        if let Err(e) = outcome {
+            return Err(e);
+        }
     }
     let left_fs = ssh_fs_opt(pool, left_conn).await;
     let right_fs = ssh_fs_opt(pool, right_conn).await;
@@ -2453,6 +2465,14 @@ async fn stamp_apply_state(
     )
 }
 
+/// 아무것도 만들거나 덮어쓰지 않은 적용인가(SC-40 — 실패·취소면 빈 기록을 남기지 않음).
+fn apply_state_is_empty(st: &ApplyState) -> bool {
+    st.left_created.is_empty()
+        && st.right_created.is_empty()
+        && st.left_backups.is_empty()
+        && st.right_backups.is_empty()
+}
+
 /// 한 행을 relay 로 적용 — dst 존재면 백업 후 복사, 아니면 생성 기록 후 복사.
 #[allow(clippy::too_many_arguments)]
 async fn apply_one_relay(
@@ -2570,6 +2590,11 @@ async fn apply_relay(
         done += 1;
         emit_merge_progress(&progress, done, total);
     }
+    if apply_state_is_empty(&st) {
+        if let Err(e) = outcome {
+            return Err(e);
+        }
+    }
     let entry =
         push_compare_apply_journal(ctx, (Some(left_fs), Some(right_fs)), left, right, st).await?;
     outcome?;
@@ -2624,6 +2649,11 @@ async fn apply_same_host(
         }
         done += 1;
         emit_merge_progress(&progress, done, total);
+    }
+    if apply_state_is_empty(&st) {
+        if let Err(e) = outcome {
+            return Err(e);
+        }
     }
     let left_fs = ssh_fs_opt(pool, left_conn).await;
     let right_fs = ssh_fs_opt(pool, right_conn).await;
@@ -2829,6 +2859,12 @@ pub async fn apply_three_way(
         emit_merge_progress(&progress, done, total);
     }
 
+    // SC-40: 아무것도 바꾸지 않고 실패·취소했으면 빈 기록을 남기지 않는다.
+    if apply_state_is_empty(&st) && trashed_left.is_empty() && trashed_right.is_empty() {
+        if let Err(e) = outcome {
+            return Err(e);
+        }
+    }
     let (left_created_stamps, right_created_stamps) =
         stamp_apply_state((Some(left_fs), Some(right_fs)), &mut st).await;
     let op = OpKind::ThreeWayApply {
@@ -6963,7 +6999,7 @@ mod review_sync_compare_lead {
     }
 }
 
-/// undo 기록(지문·만든 폴더). TempDir 안에서만,
+/// undo 기록(지문·만든 폴더)과 SC-40(아무것도 안 한 작업은 빈 기록 없음). TempDir 안에서만,
 /// undo 는 실행하지 않는다(OS 휴지통 미사용).
 #[cfg(test)]
 mod undo_record_tests {
@@ -7000,6 +7036,50 @@ mod undo_record_tests {
         }
         std::fs::write(l.join("only_l.txt"), b"L").unwrap();
         (t, l, r, b)
+    }
+
+    fn cancelled() -> tokio_util::sync::CancellationToken {
+        let c = tokio_util::sync::CancellationToken::new();
+        c.cancel();
+        c
+    }
+
+    #[tokio::test]
+    async fn sc40_cancelled_before_start_leaves_no_journal_entry() {
+        let (t, l, r, b) = trees();
+        let c = ctx(t.path()).await;
+        let fs = LocalFs::new();
+
+        let merged = merge_bidir(&fs, loc(&l), &fs, loc(&r), false, &c, cancelled(), None).await;
+        assert!(matches!(merged, Err(DuetError::Cancelled)), "{merged:?}");
+
+        let decisions = vec![ApplyDecision {
+            rel: "only_l.txt".into(),
+            direction: ApplyDirection::ToRight,
+        }];
+        let applied =
+            apply_compare(&fs, loc(&l), &fs, loc(&r), decisions, &c, cancelled(), None).await;
+        assert!(matches!(applied, Err(DuetError::Cancelled)), "{applied:?}");
+
+        let three = apply_three_way(
+            &fs,
+            loc(&b),
+            &fs,
+            loc(&l),
+            &fs,
+            loc(&r),
+            &c,
+            cancelled(),
+            None,
+        )
+        .await;
+        assert!(matches!(three, Err(DuetError::Cancelled)), "{three:?}");
+
+        assert!(!r.join("only_l.txt").exists(), "nothing applied");
+        assert!(
+            c.journal.history(10).await.is_empty(),
+            "SC-40: a cancelled-before-start merge/apply/3-way must not consume a Ctrl+Z slot"
+        );
     }
 
     #[tokio::test]
