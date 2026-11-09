@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { AlertCircle, AlertTriangle, X } from "lucide-react";
 import clsx from "clsx";
 import { useNotices, type Notice } from "@/stores/notices";
+import { releaseFocusAfterMouse } from "@/lib/keyIsolation";
 
 /**
  * 상태바 알림 배지 — 사라진 오류·경고 토스트를 다시 보는 곳.
@@ -23,13 +24,32 @@ export function NoticeBadge() {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
+  const pointerFocusCaptured = useRef(false);
   const close = useCallback((clearing = false) => {
     setOpen(false);
     const target = clearing ? returnFocusRef.current : buttonRef.current;
-    if (target?.isConnected) target.focus();
+    if (target?.isConnected) {
+      target.focus();
+      if (document.activeElement === target) return;
+    }
+    if (!clearing) return;
+    // 기억할 컨트롤이 없으면 토글 버튼 대신 상태바 자체로 돌아간다.
+    // Tab 순서에는 넣지 않고, 다음 Enter가 인접 버튼을 누르지 않게 한다.
+    const container = buttonRef.current?.parentElement;
+    if (!container || container === document.body) return;
+    if (!container.hasAttribute("tabindex")) {
+      container.tabIndex = -1;
+      container.addEventListener(
+        "blur",
+        () => container.removeAttribute("tabindex"),
+        { once: true },
+      );
+    }
+    container.focus();
   }, []);
 
-  const rememberFocus = () => {
+  const rememberFocus = (allowDomFallback: boolean) => {
+    returnFocusRef.current = null;
     const active = document.activeElement;
     if (
       active instanceof HTMLElement &&
@@ -39,7 +59,8 @@ export function NoticeBadge() {
       returnFocusRef.current = active;
       return;
     }
-    // 배지가 비워져 사라질 때는 바로 앞의 안정된 컨트롤로 돌아간다.
+    if (!allowDomFallback) return;
+    // 키보드로 연 경우에만 인접 컨트롤로 돌아간다.
     const controls = Array.from(
       document.querySelectorAll<HTMLElement>(
         "button, a[href], input, select, textarea, [tabindex]",
@@ -50,8 +71,10 @@ export function NoticeBadge() {
         !el.matches(":disabled") &&
         !el.closest('[hidden], [aria-hidden="true"]'),
     );
-    const index = controls.indexOf(buttonRef.current!);
-    returnFocusRef.current = controls[index - 1] ?? controls[index + 1] ?? null;
+    const index = buttonRef.current ? controls.indexOf(buttonRef.current) : -1;
+    if (index >= 0)
+      returnFocusRef.current =
+        controls[index - 1] ?? controls[index + 1] ?? null;
   };
 
   // 열려 있는 동안 새로 온 알림도 바로 읽음.
@@ -124,8 +147,19 @@ export function NoticeBadge() {
       <button
         ref={buttonRef}
         type="button"
-        onClick={() => {
-          if (!open) rememberFocus();
+        onPointerDown={(e) => {
+          if (open || e.button > 0) return;
+          rememberFocus(false);
+          pointerFocusCaptured.current = true;
+        }}
+        onPointerCancel={() => {
+          pointerFocusCaptured.current = false;
+        }}
+        onClick={(e) => {
+          if (!open && !pointerFocusCaptured.current)
+            rememberFocus(e.detail === 0);
+          pointerFocusCaptured.current = false;
+          releaseFocusAfterMouse(e);
           setOpen((v) => !v);
         }}
         aria-haspopup="dialog"
@@ -155,7 +189,10 @@ export function NoticeBadge() {
               <span className="flex-1 font-medium">{t("notices.title")}</span>
               <button
                 type="button"
-                onClick={() => {
+                onClick={(e) => {
+                  // 복귀한 컨테이너를 상태바의 mouse blur가 다시 해제하지 않게 한다.
+                  e.stopPropagation();
+                  releaseFocusAfterMouse(e);
                   close(true);
                   useNotices.getState().clear();
                 }}
