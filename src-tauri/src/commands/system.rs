@@ -370,6 +370,13 @@ pub async fn open_recycle_bin() -> Result<(), DuetError> {
     }
 }
 
+/// Preserve the POSIX basename, then adapt only the local working copy's name.
+fn remote_download_name(path: &Path) -> Result<std::borrow::Cow<'_, str>, DuetError> {
+    let name = crate::fs::posix_path::file_name(path)
+        .ok_or_else(|| DuetError::Io("remote path has no file name".into()))?;
+    Ok(crate::platform::entry_name::sanitize_local_name(name))
+}
+
 /// 원격 파일을 임시 디렉토리(`<temp>/duet-opened/`)로 다운로드 후 그 경로 반환.
 async fn download_to_temp(
     location: &Location,
@@ -380,15 +387,12 @@ async fn download_to_temp(
     if meta.kind != EntryKind::File {
         return Err(DuetError::Io("can only open regular files".into()));
     }
-    let name = location
-        .path
-        .file_name()
-        .ok_or_else(|| DuetError::Io("remote path has no file name".into()))?;
+    let name = remote_download_name(&location.path)?;
     let dir = std::env::temp_dir().join("duet-opened");
     tokio::fs::create_dir_all(&dir)
         .await
         .map_err(|e| DuetError::Io(format!("create temp dir: {e}")))?;
-    let dst = dir.join(name);
+    let dst = dir.join(name.as_ref());
     let bytes = fs.read_full(&location.path).await?;
     tokio::fs::write(&dst, &bytes)
         .await
@@ -552,12 +556,17 @@ pub async fn ssh_places(
     let conn = pool.inner().get(&connection_id).await?;
     let fs = SshFs::new(conn);
     let home = fs.home().await?;
+    ssh_places_in(&fs, &home).await
+}
+
+/// Collect remote places with the filesystem supplied by the caller.
+async fn ssh_places_in(fs: &dyn FileSystem, home: &Path) -> Result<Vec<Place>, DuetError> {
     let mut out = vec![Place {
         label: "Home".into(),
-        path: home.clone(),
+        path: home.to_path_buf(),
     }];
     for label in ["Desktop", "Documents", "Downloads", "Pictures", "Movies"] {
-        let p = home.join(label);
+        let p = fs.join(home, label);
         if let Ok(meta) = fs.metadata(&p).await {
             if meta.kind == EntryKind::Dir {
                 out.push(Place {
@@ -590,7 +599,7 @@ pub async fn ssh_volumes(
         PathBuf::from("/media"),
     ];
     if !user.is_empty() {
-        roots.push(Path::new("/media").join(&user));
+        roots.push(fs.join(Path::new("/media"), &user));
     }
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -604,7 +613,7 @@ pub async fn ssh_volumes(
             if e.kind != EntryKind::Dir && e.kind != EntryKind::Symlink {
                 continue;
             }
-            let path = root.join(&e.name);
+            let path = fs.join(&root, &e.name);
             if seen.insert(path.clone()) {
                 // 원격 마운트는 우리 eject(로컬 macOS diskutil) 대상이 아님.
                 out.push(Volume {
@@ -946,20 +955,42 @@ mod review_shell_settings {
         assert_eq!(resolve_open_path(&root), Some(root));
     }
 
-    #[cfg(windows)]
     #[test]
-    #[ignore = "shell-settings-09 repro: remote places/volumes use native path join"]
+    fn remote_download_keeps_the_full_posix_basename() {
+        let name = r"한글\file.txt";
+        assert_eq!(
+            remote_download_name(Path::new(r"/srv/dir\name/한글\file.txt")).unwrap(),
+            crate::platform::entry_name::sanitize_local_name(name)
+        );
+        assert!(remote_download_name(Path::new("/")).is_err());
+    }
+
+    #[tokio::test]
+    async fn remote_places_use_filesystem_join() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("home");
+        let joined = temp.path().join("joined");
+        std::fs::create_dir(&home).unwrap();
+        std::fs::create_dir_all(joined.join("Documents")).unwrap();
+        let mut fs = crate::fs::testing::TestFs::new(&joined);
+        fs.override_join = true;
+        let places = ssh_places_in(&fs, &home).await.unwrap();
+        assert_eq!(places.len(), 2, "Documents must be probed through fs.join");
+        assert_eq!(places[1].path, joined.join("Documents"));
+    }
+
+    #[test]
     fn remote_places_and_volumes_keep_posix_separators() {
         assert_eq!(
-            PathBuf::from("/home/review").join("Documents").to_str(),
+            crate::fs::posix_join(Path::new("/home/review"), "Documents").to_str(),
             Some("/home/review/Documents")
         );
         assert_eq!(
-            PathBuf::from("/media").join("review").to_str(),
+            crate::fs::posix_join(Path::new("/media"), "review").to_str(),
             Some("/media/review")
         );
         assert_eq!(
-            PathBuf::from("/mnt").join("문서").to_str(),
+            crate::fs::posix_join(Path::new("/mnt"), "문서").to_str(),
             Some("/mnt/문서")
         );
     }
