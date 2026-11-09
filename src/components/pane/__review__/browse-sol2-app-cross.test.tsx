@@ -481,18 +481,15 @@ it("browse-05: sidebar remote bookmark keeps the same tab and Back must restore 
   expect(tabL().location.source.kind).toBe("local");
 });
 
-it.fails(
-  "browse-30: directory failure preserves the backend original in notice detail",
-  async () => {
-    await boot();
-    useNotices.getState().clear();
-    failing.add("/home/b");
-    cursorTo("b");
-    enter();
-    await wait(100);
-    const notice = useNotices.getState().items[0];
-    expect(notice?.kind).toBe("error");
-    expect(notice?.message).toContain("Cannot open");
-    expect(notice?.detail).toContain("no such dir: /home/b");
-  },
-);
+it("browse-30: directory failure preserves the backend original in notice detail", async () => {
+  await boot();
+  useNotices.getState().clear();
+  failing.add("/home/b");
+  cursorTo("b");
+  enter();
+  await wait(100);
+  const notice = useNotices.getState().items[0];
+  expect(notice?.kind).toBe("error");
+  expect(notice?.message).toContain("Cannot open");
+  expect(notice?.detail).toContain("no such dir: /home/b");
+});

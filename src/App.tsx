@@ -155,6 +155,7 @@ import { useIndexProgressEvents } from "@/hooks/useIndexProgressEvents";
 import i18n from "@/i18n";
 import { Trans } from "react-i18next";
 import { explainError, formatErr } from "@/lib/error";
+import { showError } from "@/lib/errorToast";
 import {
   aliasFromConnectionId,
   findSavedHostForAlias,
@@ -288,13 +289,10 @@ function App() {
         if (!current()) return; // 낡은 요청의 실패는 무시
         usePanes.getState().setLoading(id, false, tabId);
         // 사용자가 더블클릭해도 silent fail 면 무반응으로 인식. toast 로 노출.
-        showToast(
-          i18n.t("toast.cannotOpen", { name: path, err: formatErr(e) }),
-          "error",
-        );
+        showError("toast.cannotOpen", e, { vars: { name: path } });
       }
     },
-    [listEntries, showToast],
+    [listEntries],
   );
 
   /** location 전체를 받아 해당 패널을 이동 — Bookmark(SSH 포함) 에서 사용. */
@@ -351,17 +349,11 @@ function App() {
       } catch (e) {
         if (!current()) return false;
         usePanes.getState().setLoading(id, false, tabId);
-        showToast(
-          i18n.t("toast.cannotOpen", {
-            name: location.path,
-            err: formatErr(e),
-          }),
-          "error",
-        );
+        showError("toast.cannotOpen", e, { vars: { name: location.path } });
         return false;
       }
     },
-    [listEntries, showToast],
+    [listEntries],
   );
 
   /** 로컬/SSH location 을 지정 패널로 이동 — 사이드바 Places/Volumes/Recent/Bookmarks 공용. */
@@ -413,10 +405,7 @@ function App() {
         const r = await commands.trashLocation(src);
         if (r.status === "error") {
           if (current()) usePanes.getState().setLoading(id, false, startTab.id);
-          showToast(
-            i18n.t("toast.trashUnavailable", { err: formatErr(r.error) }),
-            "error",
-          );
+          showError("toast.trashUnavailable", r.error);
           return;
         }
         // 휴지통 위치를 묻는 사이 탭을 바꿔도 시작한 탭이 휴지통이 된다.
@@ -424,7 +413,7 @@ function App() {
           usePanes.getState().setTrashRoot(id, r.data.path, startTab.id);
       })();
     },
-    [navigateTo, showToast],
+    [navigateTo],
   );
 
   /** 휴지통 항목 "Put back" — 원본 위치로 복원(원격) 후 휴지통 뷰 갱신. */
@@ -439,10 +428,7 @@ function App() {
         const ids = trashIdsFor(targets.map((t) => t.name));
         const r = await commands.trashPutBack(ids);
         if (r.status === "error") {
-          showToast(
-            i18n.t("toast.putBackFailed", { err: formatErr(r.error) }),
-            "error",
-          );
+          showError("toast.putBackFailed", r.error);
           return;
         }
         await navigateTo(id, tab.location, { pushHistory: false });
@@ -456,11 +442,7 @@ function App() {
       for (const t of targets) {
         const r = await commands.trashRestore(t);
         if (r.status === "ok") ok += 1;
-        else
-          showToast(
-            i18n.t("toast.putBackFailed", { err: formatErr(r.error) }),
-            "error",
-          );
+        else showError("toast.putBackFailed", r.error);
       }
       if (ok > 0) {
         const loc = activeTab(usePanes.getState(), id).location;
@@ -480,10 +462,7 @@ function App() {
         ? await commands.trashEmpty(word)
         : await commands.trashPurge(trashIdsFor(dlg.names), word);
       if (r.status === "error") {
-        showToast(
-          i18n.t("toast.purgeFailed", { err: formatErr(r.error) }),
-          "error",
-        );
+        showError("toast.purgeFailed", r.error);
         return;
       }
       showToast(i18n.t("toast.purgeDone", { count: r.data }), "success");
@@ -594,13 +573,9 @@ function App() {
           false,
         );
         if (r.status === "error")
-          showToast(
-            i18n.t("toast.cannotOpen", {
-              name: entry.name,
-              err: formatErr(r.error),
-            }),
-            "error",
-          );
+          showError("toast.cannotOpen", r.error, {
+            vars: { name: entry.name },
+          });
       })();
     },
     [navigate, navigateTo, onUp, showToast, syncMirror],
@@ -995,13 +970,9 @@ function App() {
               ? await commands.sshEditOpen(loc)
               : await commands.openPath(loc, true);
           if (r.status === "error")
-            showToast(
-              i18n.t("toast.cannotOpen", {
-                name: entry.name,
-                err: formatErr(r.error),
-              }),
-              "error",
-            );
+            showError("toast.cannotOpen", r.error, {
+              vars: { name: entry.name },
+            });
         })();
       },
       // 커서가 폴더면 그 폴더를, 아니면 현재 폴더를 반대 패널/새 탭에서 연다.
@@ -1226,12 +1197,9 @@ function App() {
           });
           if (!ok) return;
           const r = await commands.sshSetupKeyAuth(src.connection_id);
-          showToast(
-            r.status === "ok"
-              ? i18n.t("toast.keyAuthDone", { path: r.data })
-              : i18n.t("toast.keyAuthFailed", { err: formatErr(r.error) }),
-            r.status === "ok" ? "success" : "error",
-          );
+          if (r.status === "ok")
+            showToast(i18n.t("toast.keyAuthDone", { path: r.data }), "success");
+          else showError("toast.keyAuthFailed", r.error);
         })();
       },
     });
@@ -1260,13 +1228,9 @@ function App() {
       closeDialog();
       const r = await commands.fsBatchRename(targets, rule);
       if (r.status === "ok") refreshAffected([targets[0]!.location]);
-      else
-        showToast(
-          i18n.t("toast.batchRenameFailed", { err: formatErr(r.error) }),
-          "error",
-        );
+      else showError("toast.batchRenameFailed", r.error);
     },
-    [dialog, closeDialog, refreshAffected, showToast],
+    [dialog, closeDialog, refreshAffected],
   );
 
   const onCreateEntrySubmit = useCreateEntry(
@@ -1282,21 +1246,15 @@ function App() {
       closeDialog();
       const plan = await commands.fsCompressPlan(items, name, format);
       if (plan.status === "error") {
-        showToast(
-          i18n.t("toast.compressFailed", { err: formatErr(plan.error) }),
-          "error",
-        );
+        showError("toast.compressFailed", plan.error);
         return;
       }
       // execute 는 task 로 — 완료 시 affected_locations 자동 새로고침 (useTaskEvents).
       const exec = await commands.fsCompressExecute(plan.data);
       if (exec.status === "error")
-        showToast(
-          i18n.t("toast.compressFailed", { err: formatErr(exec.error) }),
-          "error",
-        );
+        showError("toast.compressFailed", exec.error);
     },
-    [dialog, closeDialog, showToast],
+    [dialog, closeDialog],
   );
 
   /** 아카이브 browse 중 "Update archive" — 편집을 원본 아카이브로 repack (확인). */
@@ -1312,10 +1270,7 @@ function App() {
         };
         const r = await commands.fsRepackPlan(tab.location, original);
         if (r.status === "error") {
-          showToast(
-            i18n.t("toast.updateArchiveFailed", { err: formatErr(r.error) }),
-            "error",
-          );
+          showError("toast.updateArchiveFailed", r.error);
           return;
         }
         openDialog({
@@ -1325,7 +1280,7 @@ function App() {
         });
       })();
     },
-    [showToast, openDialog],
+    [openDialog],
   );
 
   const onRepackConfirm = useCallback(async () => {
@@ -1340,12 +1295,9 @@ function App() {
       });
     } else {
       closeDialog();
-      showToast(
-        i18n.t("toast.updateArchiveFailed", { err: formatErr(r.error) }),
-        "error",
-      );
+      showError("toast.updateArchiveFailed", r.error);
     }
-  }, [dialog, openDialog, closeDialog, showToast]);
+  }, [dialog, openDialog, closeDialog]);
 
   const onDeleteConfirm = useCallback(
     async (confirmWord = "") => {
@@ -1363,13 +1315,9 @@ function App() {
       const r = await commands.fsDeleteExecute(plan, word);
       if (r.status === "ok")
         rememberElevatable(r.data, { op: "delete", plan, confirmWord: word });
-      else
-        showToast(
-          i18n.t("toast.deleteFailed", { err: formatErr(r.error) }),
-          "error",
-        );
+      else showError("toast.deleteFailed", r.error);
     },
-    [dialog, closeDialog, showToast],
+    [dialog, closeDialog],
   );
 
   /** 볼륨 우클릭 "Eject" → 확인 다이얼로그 오픈. */
@@ -1387,10 +1335,7 @@ function App() {
       showToast(i18n.t("toast.ejected", { name }), "success");
       void refreshVolumes();
     } else {
-      showToast(
-        i18n.t("toast.ejectFailed", { err: formatErr(r.error) }),
-        "error",
-      );
+      showError("toast.ejectFailed", r.error);
     }
   }, [dialog, closeDialog, showToast]);
 
@@ -1452,18 +1397,12 @@ function App() {
         if (mode === "copy") {
           const p = await commands.fsCopyPlan(items, plan.dst);
           if (p.status === "error") {
-            showToast(
-              i18n.t("toast.copyPlanFailed", { err: formatErr(p.error) }),
-              "error",
-            );
+            showError("toast.copyPlanFailed", p.error);
             continue;
           }
           const r = await commands.fsCopyExecute(p.data, policy);
           if (r.status === "error") {
-            showToast(
-              i18n.t("toast.copyFailed", { err: formatErr(r.error) }),
-              "error",
-            );
+            showError("toast.copyFailed", r.error);
             continue;
           }
           rememberElevatable(r.data, { op: "copy", plan: p.data, policy });
@@ -1471,18 +1410,12 @@ function App() {
         } else {
           const p = await commands.fsMovePlan(items, plan.dst);
           if (p.status === "error") {
-            showToast(
-              i18n.t("toast.movePlanFailed", { err: formatErr(p.error) }),
-              "error",
-            );
+            showError("toast.movePlanFailed", p.error);
             continue;
           }
           const r = await commands.fsMoveExecute(p.data, policy);
           if (r.status === "error") {
-            showToast(
-              i18n.t("toast.moveFailed", { err: formatErr(r.error) }),
-              "error",
-            );
+            showError("toast.moveFailed", r.error);
             continue;
           }
           rememberElevatable(r.data, { op: "move", plan: p.data, policy });
@@ -1521,10 +1454,7 @@ function App() {
     closeDialog();
     const r = await runElevated(p);
     if (r.status === "error") {
-      showToast(
-        i18n.t("toast.elevatedFailed", { op: p.op, err: formatErr(r.error) }),
-        "error",
-      );
+      showError("toast.elevatedFailed", r.error, { vars: { op: p.op } });
       return;
     }
     const o = r.data;
@@ -1564,10 +1494,7 @@ function App() {
       p: ElevatablePlan,
     ) => {
       if (r.status === "error") {
-        showToast(
-          i18n.t("toast.sudoFailed", { op: p.op, err: formatErr(r.error) }),
-          "error",
-        );
+        showError("toast.sudoFailed", r.error, { vars: { op: p.op } });
         return;
       }
       const o = r.data;
@@ -1631,13 +1558,10 @@ function App() {
         });
       } else {
         closeDialog();
-        showToast(
-          i18n.t("toast.syncFailed", { err: formatErr(r.error) }),
-          "error",
-        );
+        showError("toast.syncFailed", r.error);
       }
     },
-    [dialog, openDialog, closeDialog, showToast],
+    [dialog, openDialog, closeDialog],
   );
 
   const onMoveConfirm = useCallback(
@@ -1946,6 +1870,7 @@ function App() {
       const stillTarget = () =>
         activeTab(usePanes.getState(), pane).id === targetId;
       const failures: string[] = [];
+      const failureDetails: string[] = []; // 원문 — 알림 "자세히"
       /** 이 경로를 목표 탭에 연다. stale = 사용자가 그사이 움직였음 → 흐름 전체 중단. */
       const land = async (
         path: string,
@@ -1968,6 +1893,7 @@ function App() {
           if (!current()) return "stale";
           // useTauri throws DuetError 또는 IpcError; formatErr 가 양쪽 처리.
           failures.push(`${path}: ${formatErr(e)}`);
+          failureDetails.push(`${path}: ${explainError(e).detail}`);
           return "failed";
         }
       };
@@ -1985,7 +1911,10 @@ function App() {
         if (!stillTarget() || !homeTok()) return;
         const tries = ["~", "/"];
         if (homeRes.status === "ok") tries.unshift(homeRes.data);
-        else failures.push(`~: ${formatErr(homeRes.error)}`);
+        else {
+          failures.push(`~: ${formatErr(homeRes.error)}`);
+          failureDetails.push(`~: ${explainError(homeRes.error).detail}`);
+        }
         for (const path of tries) {
           result = await land(path);
           if (result === "applied") landed = path;
@@ -2000,6 +1929,7 @@ function App() {
             failures: failures.join("\n"),
           }),
           "error",
+          { detail: failureDetails.join("\n") },
         );
         return;
       }
@@ -2074,16 +2004,13 @@ function App() {
             reconnect: { pane: paneId, error: r.error },
           });
         } else {
-          showToast(
-            i18n.t("toast.reconnectFailed", { alias, err: formatErr(r.error) }),
-            "error",
-          );
+          showError("toast.reconnectFailed", r.error, { vars: { alias } });
         }
       } finally {
         useConnections.getState().setReconnecting(alias, false);
       }
     },
-    [connectToAlias, onConnected, showToast],
+    [connectToAlias, onConnected],
   );
 
   // 부트스트랩: 양쪽 패널 초기 로드 (home 디렉토리, Windows 호환) + saved hosts + bookmarks + hostFavorites
@@ -2299,10 +2226,7 @@ function App() {
                 target,
               );
               if (r.status === "error") {
-                showToast(
-                  i18n.t("toast.symlinkFailed", { err: formatErr(r.error) }),
-                  "error",
-                );
+                showError("toast.symlinkFailed", r.error);
                 return;
               }
               closeDialog();
@@ -2321,10 +2245,7 @@ function App() {
             // NeedPassword 로 실패하고 useTaskEvents 가 이 다이얼로그를 다시 연다.
             const r = await commands.fsExtractExecute(dialog.plan, pw);
             if (r.status === "error") {
-              showToast(
-                i18n.t("toast.extractFailed", { err: formatErr(r.error) }),
-                "error",
-              );
+              showError("toast.extractFailed", r.error);
               return "ok";
             }
             rememberExtract(r.data, { plan: dialog.plan, attempted: true });
@@ -2356,13 +2277,9 @@ function App() {
               return "ok";
             }
             if (r.error.kind === "NeedPassword") return "retry";
-            showToast(
-              i18n.t("toast.cannotOpen", {
-                name: dialog.archive.name,
-                err: formatErr(r.error),
-              }),
-              "error",
-            );
+            showError("toast.cannotOpen", r.error, {
+              vars: { name: dialog.archive.name },
+            });
             return "ok";
           }}
         />
@@ -2404,12 +2321,7 @@ function App() {
                 });
               } else {
                 closeDialog();
-                showToast(
-                  i18n.t("toast.threeWayApplyFailed", {
-                    err: formatErr(r.error),
-                  }),
-                  "error",
-                );
+                showError("toast.threeWayApplyFailed", r.error);
               }
             })();
           }}
@@ -2431,10 +2343,7 @@ function App() {
                 });
               } else {
                 closeDialog();
-                showToast(
-                  i18n.t("toast.mergeFailed", { err: formatErr(r.error) }),
-                  "error",
-                );
+                showError("toast.mergeFailed", r.error);
               }
             })();
           }}
@@ -2450,10 +2359,7 @@ function App() {
                 });
               } else {
                 closeDialog();
-                showToast(
-                  i18n.t("toast.applyFailed", { err: formatErr(r.error) }),
-                  "error",
-                );
+                showError("toast.applyFailed", r.error);
               }
             })();
           }}
