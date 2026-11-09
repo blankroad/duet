@@ -140,7 +140,10 @@ import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
 import { useSshHosts } from "@/hooks/useSshHosts";
 import { useConnectionEvents } from "@/hooks/useConnectionEvents";
 import { useFsChangedEvents } from "@/hooks/useFsChangedEvents";
-import { useOpenPathEvents } from "@/hooks/useOpenPathEvents";
+import {
+  openLocalPathInNewTab,
+  useOpenPathEvents,
+} from "@/hooks/useOpenPathEvents";
 import { useOsFileDrop } from "@/hooks/useOsFileDrop";
 import { useJournalEvents } from "@/hooks/useJournalEvents";
 import { useArchiveNoticeEvents } from "@/hooks/useArchiveNoticeEvents";
@@ -716,10 +719,10 @@ function App() {
       if (entry.kind !== "dir") return;
       const opposite: PaneId = srcId === "left" ? "right" : "left";
       const tab = activeTab(usePanes.getState(), srcId);
-      const sep = tab.location.path.endsWith("/") ? "" : "/";
-      void navigate(opposite, tab.location.path + sep + entry.name);
+      // 전체 Location 으로 — 반대 패널의 소스(로컬/다른 호스트)를 물려받지 않게 (browse-04).
+      void navigateTo(opposite, childLocation(tab.location, entry.name));
     },
-    [navigate],
+    [navigateTo],
   );
 
   /** 엔트리 컨텍스트 메뉴를 (cx, cy) 좌표에 오픈 — 마우스 우클릭과 키보드가 공유. */
@@ -901,14 +904,18 @@ function App() {
       const rootPaneId = useSearch.getState().rootPaneId;
       if (!rootPaneId) return;
       void (async () => {
-        await navigate(rootPaneId, hit.location.path);
+        // 결과의 소스 그대로 — 그사이 패널이 다른 호스트로 옮겨 가도 섞이지 않게 (browse-05).
+        const tabId = activeTab(usePanes.getState(), rootPaneId).id;
+        if (!(await navigateTo(rootPaneId, hit.location, { tabId }))) return;
         const tab = activeTab(usePanes.getState(), rootPaneId);
-        const idx = tab.entries.findIndex((e: Entry) => e.name === hit.name);
+        if (tab.id !== tabId) return;
+        // 커서는 화면 인덱스 — 정렬·숨김·".." 행을 반영한 목록에서 찾는다.
+        const idx = computeDisplayed(tab).findIndex((e) => e.name === hit.name);
         if (idx >= 0) usePanes.getState().setCursor(rootPaneId, idx);
         // 검색창은 닫지 않음 — 여러 결과를 연속 클릭하며 탐색 가능(Enter/Esc 로 닫기).
       })();
     },
-    [navigate],
+    [navigateTo],
   );
 
   useKeyboardNav(onKeyboardActivate, onUp, onQuickLook);
@@ -916,7 +923,7 @@ function App() {
   useSshHosts();
   useConnectionEvents();
   useFsChangedEvents(onRefresh);
-  useOpenPathEvents(navigate);
+  useOpenPathEvents(navigateTo);
   useOsFileDrop();
   useJournalEvents();
   useArchiveNoticeEvents();
@@ -2111,8 +2118,9 @@ function App() {
       }
       // 탐색기 "Open in duet" 로 폴더 경로가 argv 로 들어왔으면 왼쪽 패널을 그 폴더로.
       const startup = await commands.startupOpenPath();
+      // 로컬 새 탭으로 — 복원된 왼쪽 활성 탭이 원격이어도 소스가 섞이지 않게 (shell-settings-08).
       if (startup.status === "ok" && startup.data) {
-        await navigate("left", startup.data);
+        await openLocalPathInNewTab("left", startup.data, navigateTo);
       }
       void bootstrapSavedHosts();
       // 즐겨찾기 먼저 로드 → 북마크 마이그레이션이 중복을 정확히 걸러냄.

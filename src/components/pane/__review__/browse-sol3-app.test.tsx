@@ -67,82 +67,120 @@ function setStartupSession(host?: string) {
   );
 }
 
-it.fails(
-  "browse-05: startup local path overrides the restored remote source",
-  async () => {
-    setStartupSession("r3-prod");
-    startup.path = "/r3-startup-local";
-    render(<App />);
-    await waitFor(() =>
-      expect(listCalls.some((c) => c.endsWith(":/r3-startup-local"))).toBe(
-        true,
-      ),
-    );
-    const request = listLocations.find(
-      (loc) => loc.path === "/r3-startup-local",
-    );
-    console.info("browse-sol3-startup", JSON.stringify(request));
-    expect(request?.source.kind).toBe("local");
-    expect(tabL().location.source.kind).toBe("local");
-  },
-);
+it("browse-05: startup local path overrides the restored remote source", async () => {
+  setStartupSession("r3-prod");
+  startup.path = "/r3-startup-local";
+  render(<App />);
+  await waitFor(() =>
+    expect(listCalls.some((c) => c.endsWith(":/r3-startup-local"))).toBe(true),
+  );
+  const request = listLocations.find((loc) => loc.path === "/r3-startup-local");
+  console.info("browse-sol3-startup", JSON.stringify(request));
+  expect(request?.source.kind).toBe("local");
+  expect(tabL().location.source.kind).toBe("local");
+});
 
 it("R3 control: startup local path succeeds when the restored tab is local", async () => {
   setStartupSession();
   startup.path = "/r3-startup-local";
   render(<App />);
-  await waitFor(() => expect(tabL().location.path).toBe("/r3-startup-local"));
+  // 시작 경로는 로컬 새 탭으로 열린다 — 탭이 먼저 생기고 목록은 그다음에 온다.
+  await waitFor(() =>
+    expect(tabL().entries.map((e) => e.name)).toContain("startup-target.txt"),
+  );
   expect(listCalls).toContain("local:/r3-startup-local");
+  expect(tabL().location.path).toBe("/r3-startup-local");
   expect(tabL().location.source.kind).toBe("local");
 });
 
-it.fails(
-  "browse-05: a retained search hit uses its original source after the pane source changes",
-  async () => {
+it("browse-05: a retained search hit uses its original source after the pane source changes", async () => {
+  await boot();
+  act(() =>
+    useSearch
+      .getState()
+      .open("left", { source: { kind: "local" }, path: "/home" }),
+  );
+  const source = {
+    kind: "ssh" as const,
+    connection_id: "r3-live:id",
+    host_ip: "10.0.0.9",
+    user: "review",
+  };
+  act(() => {
+    useConnections.getState().upsertActive({
+      id: source.connection_id,
+      alias: "r3-live",
+      host_ip: source.host_ip,
+      user: source.user,
+      state: { kind: "connected" },
+    });
+    usePanes
+      .getState()
+      .setEntries("left", { source, path: "/srv" }, listing["/srv"] as never);
+  });
+  act(() =>
+    useSearch.getState().setResults([
+      {
+        location: { source: { kind: "local" }, path: "/home/a" },
+        name: "a.txt",
+        kind: "file",
+        size: 1,
+        modified_ms: 1,
+      },
+    ]),
+  );
+  listCalls.length = 0;
+  fireEvent.click(screen.getByText("a.txt"));
+  await waitFor(() =>
+    expect(listCalls.some((c) => c.endsWith(":/home/a"))).toBe(true),
+  );
+  console.info("browse-sol3-search", JSON.stringify(listCalls));
+  expect(listCalls).toContain("local:/home/a");
+});
+
+describe("search hit cursor (browse 넘김: onPickHit)", () => {
+  const hitIn = (path: string, name: string) => ({
+    location: { source: { kind: "local" as const }, path },
+    name,
+    kind: "dir" as const,
+    size: 0,
+    modified_ms: 1,
+  });
+
+  it("puts the cursor on the hit even when the sort order differs from the listing", async () => {
     await boot();
     act(() =>
       useSearch
         .getState()
         .open("left", { source: { kind: "local" }, path: "/home" }),
     );
-    const source = {
-      kind: "ssh" as const,
-      connection_id: "r3-live:id",
-      host_ip: "10.0.0.9",
-      user: "review",
-    };
-    act(() => {
-      useConnections.getState().upsertActive({
-        id: source.connection_id,
-        alias: "r3-live",
-        host_ip: source.host_ip,
-        user: source.user,
-        state: { kind: "connected" },
-      });
-      usePanes
-        .getState()
-        .setEntries("left", { source, path: "/srv" }, listing["/srv"] as never);
-    });
+    // /w 원본 순서는 old, mid, new — 이름순 화면은 .., mid, new, old.
+    act(() => useSearch.getState().setResults([hitIn("/w", "old")]));
+    fireEvent.click(screen.getByText("old"));
+    await waitFor(() => expect(tabL().location.path).toBe("/w"));
+    await wait(20);
+    const t = tabL();
+    expect(computeDisplayed(t)[t.cursorIndex]?.name).toBe("old");
+  });
+
+  it("leaves the cursor alone when the hit's folder cannot be opened", async () => {
+    await boot();
+    cursorTo("b");
+    const before = tabL().cursorIndex;
+    failing.add("/w");
     act(() =>
-      useSearch.getState().setResults([
-        {
-          location: { source: { kind: "local" }, path: "/home/a" },
-          name: "a.txt",
-          kind: "file",
-          size: 1,
-          modified_ms: 1,
-        },
-      ]),
+      useSearch
+        .getState()
+        .open("left", { source: { kind: "local" }, path: "/home" }),
     );
-    listCalls.length = 0;
-    fireEvent.click(screen.getByText("a.txt"));
-    await waitFor(() =>
-      expect(listCalls.some((c) => c.endsWith(":/home/a"))).toBe(true),
-    );
-    console.info("browse-sol3-search", JSON.stringify(listCalls));
-    expect(listCalls).toContain("local:/home/a");
-  },
-);
+    act(() => useSearch.getState().setResults([hitIn("/w", "old")]));
+    fireEvent.click(screen.getByText("old"));
+    await waitFor(() => expect(listCalls).toContain("local:/w"));
+    await wait(80);
+    expect(tabL().location.path).toBe("/home");
+    expect(tabL().cursorIndex).toBe(before);
+  });
+});
 const file = (name: string) => ({ ...dir(name), kind: "file", size: 1 });
 const listing: Record<string, unknown[]> = {
   "/r3-startup-local": [file("startup-target.txt")],

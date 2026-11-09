@@ -113,7 +113,10 @@ vi.mock("@/types/bindings", () => {
           if (loc.source.kind === "ssh")
             return {
               status: "error",
-              error: { kind: "ConnectionFailed", message: "no such connection" },
+              error: {
+                kind: "ConnectionFailed",
+                message: "no such connection",
+              },
             };
           await new Promise((r) => setTimeout(r, delay[loc.path] ?? 20));
           return { status: "ok", data: listing[loc.path] ?? [] };
@@ -170,38 +173,35 @@ const wait = (ms: number) =>
   act(() => new Promise<void>((r) => setTimeout(r, ms)));
 
 describe("shell-settings-08 cold start", () => {
-  it.fails(
-    "shell-settings-08: 복원된 왼쪽 활성 탭이 SSH 여도 시작 경로(로컬 폴더)는 로컬로 열린다",
-    async () => {
-      const tab = (path: string, host?: string) => ({
-        path,
-        ...(host ? { host } : {}),
-        sortKey: "name",
-        sortOrder: "asc",
-        showHidden: false,
-        viewMode: "details",
-      });
-      localStorage.setItem(
-        "duet.session.v1",
-        JSON.stringify({
-          activePane: "left",
-          panes: {
-            left: { activeTabIndex: 0, tabs: [tab("/srv/app", "prod")] },
-            right: { activeTabIndex: 0, tabs: [tab("/home")] },
-          },
-        }),
-      );
-      render(<App />);
-      await wait(400);
-      // 관찰용: 어떤 source 로 무엇을 요청했나.
-      const left = activeTab(usePanes.getState(), "left");
-      const toasts = useToast.getState().toasts.map((t) => t.message);
-      expect(
-        listSources,
-        `left=${left.location.source.kind}:${String(left.location.path)} toasts=${JSON.stringify(toasts)}`,
-      ).toContain("local:/home/b");
-      expect(left.location.source.kind).toBe("local");
-      expect(String(left.location.path)).toBe("/home/b");
-    },
-  );
+  it("shell-settings-08: 복원된 왼쪽 활성 탭이 SSH 여도 시작 경로(로컬 폴더)는 로컬로 열린다", async () => {
+    const tab = (path: string, host?: string) => ({
+      path,
+      ...(host ? { host } : {}),
+      sortKey: "name",
+      sortOrder: "asc",
+      showHidden: false,
+      viewMode: "details",
+    });
+    localStorage.setItem(
+      "duet.session.v1",
+      JSON.stringify({
+        activePane: "left",
+        panes: {
+          left: { activeTabIndex: 0, tabs: [tab("/srv/app", "prod")] },
+          right: { activeTabIndex: 0, tabs: [tab("/home")] },
+        },
+      }),
+    );
+    render(<App />);
+    await wait(400);
+    // 관찰용: 어떤 source 로 무엇을 요청했나.
+    const left = activeTab(usePanes.getState(), "left");
+    const toasts = useToast.getState().toasts.map((t) => t.message);
+    expect(
+      listSources,
+      `left=${left.location.source.kind}:${String(left.location.path)} toasts=${JSON.stringify(toasts)}`,
+    ).toContain("local:/home/b");
+    expect(left.location.source.kind).toBe("local");
+    expect(String(left.location.path)).toBe("/home/b");
+  });
 });

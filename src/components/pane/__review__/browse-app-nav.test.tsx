@@ -308,54 +308,51 @@ describe("C-11 탐색·히스토리·경쟁", () => {
 });
 
 describe("C-11 우클릭 '반대 패널에서 열기'", () => {
-  it.fails(
-    "browse-04 (F-opus-02): 원격 패널의 폴더를 우클릭 → 반대 패널에서 열기 하면 반대 패널(로컬)에서 같은 경로를 연다",
-    async () => {
-      await boot();
-      useConnections.setState({
-        hosts: [],
-        active: {
-          "prod:u1": {
-            id: "prod:u1",
-            alias: "prod",
-            host_ip: "10.0.0.7",
-            user: "deploy",
-            state: { kind: "connected" },
-          },
-        },
-      });
-      const srv: Location = {
-        source: {
-          kind: "ssh",
-          connection_id: "prod:u1",
+  it("browse-04 (F-opus-02): 원격 패널의 폴더를 우클릭 → 반대 패널에서 열기 하면 반대 패널(로컬)에서 같은 경로를 연다", async () => {
+    await boot();
+    useConnections.setState({
+      hosts: [],
+      active: {
+        "prod:u1": {
+          id: "prod:u1",
+          alias: "prod",
           host_ip: "10.0.0.7",
           user: "deploy",
+          state: { kind: "connected" },
         },
-        path: "/srv",
-      };
-      act(() =>
-        usePanes.getState().setEntries("left", srv, listing["/srv"] as never, {
-          tabId: tabL().id,
-        }),
-      );
-      cursorTo("app");
-      key({ key: "F10", code: "F10", shiftKey: true }); // 컨텍스트 메뉴 (키보드)
-      const item = useContextMenu
-        .getState()
-        .items.find((m) => "label" in m && m.label === "Open in other pane") as
-        | { onSelect: () => void }
-        | undefined;
-      expect(item).toBeDefined();
-      act(() => {
-        item!.onSelect();
-        useContextMenu.getState().close();
-      });
-      await wait(80);
-      // 기대: 반대 패널이 같은 원격 호스트의 /srv/app 을 연다
-      expect(listCalls).toContain("ssh:/srv/app");
-      expect(tabR().location.source.kind).toBe("ssh");
-    },
-  );
+      },
+    });
+    const srv: Location = {
+      source: {
+        kind: "ssh",
+        connection_id: "prod:u1",
+        host_ip: "10.0.0.7",
+        user: "deploy",
+      },
+      path: "/srv",
+    };
+    act(() =>
+      usePanes.getState().setEntries("left", srv, listing["/srv"] as never, {
+        tabId: tabL().id,
+      }),
+    );
+    cursorTo("app");
+    key({ key: "F10", code: "F10", shiftKey: true }); // 컨텍스트 메뉴 (키보드)
+    const item = useContextMenu
+      .getState()
+      .items.find((m) => "label" in m && m.label === "Open in other pane") as
+      | { onSelect: () => void }
+      | undefined;
+    expect(item).toBeDefined();
+    act(() => {
+      item!.onSelect();
+      useContextMenu.getState().close();
+    });
+    await wait(80);
+    // 기대: 반대 패널이 같은 원격 호스트의 /srv/app 을 연다
+    expect(listCalls).toContain("ssh:/srv/app");
+    expect(tabR().location.source.kind).toBe("ssh");
+  });
 });
 
 describe("C-16 동기 탐색", () => {
