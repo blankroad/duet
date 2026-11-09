@@ -30,7 +30,7 @@ pub struct UnpackReport {
 pub fn unpack<R: Read>(reader: R, dest: &Path) -> Result<UnpackReport, DuetError> {
     let mut archive = tar::Archive::new(reader);
     let mut report = UnpackReport::default();
-    let mut dir_modes = Vec::new();
+    let mut dir_modes = DeferredDirModes::default();
     let entries = archive.entries().map_err(|e| read_error(&e))?;
     for entry in entries {
         let mut entry = entry.map_err(|e| read_error(&e))?;
@@ -88,18 +88,14 @@ pub fn unpack<R: Read>(reader: R, dest: &Path) -> Result<UnpackReport, DuetError
             // 폴더 권한은 지금 적용하지 않는다 — 0555·0500 폴더면 그 안 항목을 못 쓴다(archive-08).
             make_dir(&dst).map_err(|e| write_error(&shown, &e))?;
             if let Ok(mode) = entry.header().mode() {
-                dir_modes.push(DirMode {
-                    path: dst,
-                    mode,
-                    shown,
-                });
+                dir_modes.push(dst, mode, shown);
             }
         } else {
             // 파일·그 밖(POSIX 상 미지의 종류는 일반 파일). 권한·수정 시각 처리는 tar 에 맡긴다.
             entry.unpack(&dst).map_err(|e| write_error(&shown, &e))?;
         }
     }
-    apply_dir_modes(dir_modes)?;
+    dir_modes.apply()?;
     Ok(report)
 }
 
@@ -112,7 +108,7 @@ fn is_dir_entry<R: Read>(entry: &tar::Entry<'_, R>, raw: &[u8]) -> bool {
 
 /// 폴더를 만든다. 이미 폴더면 그대로, 같은 이름의 파일·링크가 있으면 오류
 /// (링크를 따라 폴더 밖 폴더를 쓰지 않는다 — tar 의 `unpack_dir` 과 같은 판정).
-fn make_dir(dst: &Path) -> io::Result<()> {
+pub(crate) fn make_dir(dst: &Path) -> io::Result<()> {
     match std::fs::create_dir(dst) {
         Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
             if std::fs::symlink_metadata(dst).is_ok_and(|m| m.is_dir()) {
@@ -128,31 +124,47 @@ fn make_dir(dst: &Path) -> io::Result<()> {
     }
 }
 
-/// 미뤄 둔 폴더 권한 하나 — 폴더 경로, tar 헤더의 모드, 오류 표시용 아카이브 안 이름.
+/// 미뤄 둔 폴더 권한 하나 — 폴더 경로, 아카이브의 모드(Unix 비트), 오류 표시용 아카이브 안 이름.
 struct DirMode {
     path: PathBuf,
     mode: u32,
     shown: String,
 }
 
-/// 모든 항목을 쓴 뒤 폴더 권한을 **깊은 것부터** 적용한다(위 폴더를 먼저 잠그면 아래를
-/// 못 바꾼다). 같은 폴더가 여러 번 나오면 나중 항목이 이긴다(안정 정렬 + 순서대로 적용).
-/// 중간에 해제가 실패하면 이 함수까지 오지 않는다 — 폴더가 쓰기 가능하게 남아 정리·롤백이 쉽다.
-/// 적용 직전에 lstat 로 아직 폴더인지 본다(링크면 따라가 바깥 권한을 바꾸지 않는다).
-fn apply_dir_modes(mut dirs: Vec<DirMode>) -> Result<(), DuetError> {
-    dirs.sort_by_key(|d| std::cmp::Reverse(d.path.components().count()));
-    for d in dirs {
-        let Ok(meta) = std::fs::symlink_metadata(&d.path) else {
-            continue;
-        };
-        if !meta.is_dir() {
-            continue;
-        }
-        if let Some(perm) = dir_permissions(meta.permissions(), d.mode) {
-            std::fs::set_permissions(&d.path, perm).map_err(|e| write_error(&d.shown, &e))?;
-        }
+/// 폴더 권한 지연 적용(archive-08). 해제 중엔 폴더를 쓰기 가능하게 만들고 [`push`] 로
+/// 모드만 기록한 뒤, 모든 항목을 쓰고 나서 [`apply`] 한다. 0555·0500 폴더도 안을 채울 수 있다.
+/// 해제가 중간에 실패하면 `apply` 를 부르지 않는다 — 폴더가 쓰기 가능하게 남아 정리·롤백이 쉽다.
+///
+/// [`push`]: DeferredDirModes::push
+/// [`apply`]: DeferredDirModes::apply
+#[derive(Default)]
+pub(crate) struct DeferredDirModes(Vec<DirMode>);
+
+impl DeferredDirModes {
+    /// 폴더 `path` 에 나중에 줄 모드 `mode`(Unix 권한 비트)를 기록한다. `shown` 은 오류 표시용 이름.
+    pub(crate) fn push(&mut self, path: PathBuf, mode: u32, shown: String) {
+        self.0.push(DirMode { path, mode, shown });
     }
-    Ok(())
+
+    /// 기록한 권한을 **깊은 것부터** 적용한다(위 폴더를 먼저 잠그면 아래를 못 바꾼다).
+    /// 같은 폴더가 여러 번 나오면 나중 것이 이긴다(안정 정렬 + 순서대로 적용).
+    /// 적용 직전에 lstat 로 아직 폴더인지 본다(링크면 따라가 바깥 권한을 바꾸지 않는다).
+    pub(crate) fn apply(mut self) -> Result<(), DuetError> {
+        self.0
+            .sort_by_key(|d| std::cmp::Reverse(d.path.components().count()));
+        for d in self.0 {
+            let Ok(meta) = std::fs::symlink_metadata(&d.path) else {
+                continue;
+            };
+            if !meta.is_dir() {
+                continue;
+            }
+            if let Some(perm) = dir_permissions(meta.permissions(), d.mode) {
+                std::fs::set_permissions(&d.path, perm).map_err(|e| write_error(&d.shown, &e))?;
+            }
+        }
+        Ok(())
+    }
 }
 
 /// tar 헤더 모드 → 적용할 폴더 권한 (tar crate 의 `set_perms` 와 같은 규칙).
@@ -176,7 +188,7 @@ fn dir_permissions(current: std::fs::Permissions, mode: u32) -> Option<std::fs::
 
 /// tar 경로 바이트(항상 `/` 구분) → `dest` 기준 상대 경로. `..` 가 있으면 None, 빈 경로도 None.
 /// 두 번째 값은 이 OS 에서 쓸 수 없는 이름을 바꿨는지.
-fn safe_relative(raw: &[u8]) -> Option<(PathBuf, bool)> {
+pub(crate) fn safe_relative(raw: &[u8]) -> Option<(PathBuf, bool)> {
     let text = String::from_utf8_lossy(raw);
     let mut rel = PathBuf::new();
     let mut renamed = false;
@@ -210,7 +222,7 @@ fn link_target(raw: &[u8]) -> PathBuf {
 
 /// `rel` 의 상위 폴더 중 이미 링크인 것이 있으면 거부 — 앞 항목이 만든 링크를 거쳐
 /// 대상 폴더 밖에 쓰는 공격(`a -> /etc` 다음 `a/passwd`)을 막는다.
-fn refuse_through_link(dest: &Path, rel: &Path) -> Result<(), DuetError> {
+pub(crate) fn refuse_through_link(dest: &Path, rel: &Path) -> Result<(), DuetError> {
     let mut cur = dest.to_path_buf();
     let mut parts = rel.components().peekable();
     while let Some(part) = parts.next() {
@@ -253,22 +265,47 @@ fn place_hard_link(src: &Path, dst: &Path) -> io::Result<HardLink> {
     if same_file(&src_meta, dst) {
         return Ok(HardLink::Placed); // 같은 링크가 다시 나옴 — 이미 그 파일이다.
     }
-    let mut outcome = HardLink::Placed;
-    create_replacing(dst, |at| match std::fs::hard_link(src, at) {
-        Ok(()) => Ok(true),
-        Err(e) if !hard_link_unsupported(&e) => Err(e),
-        Err(_) if src_meta.file_type().is_symlink() => {
-            outcome = HardLink::SkippedSymlink;
-            Ok(false)
-        }
-        Err(e) if !src_meta.is_file() => Err(e),
-        Err(_) => copy_new(src, at).map(|()| true),
+    let linked = create_replacing(dst, |at| match std::fs::hard_link(src, at) {
+        Ok(()) => Ok(Some(())),
+        Err(e) if hard_link_unsupported(&e) => Ok(None), // 아래에서 복사로 대신한다.
+        Err(e) => Err(e),
     })?;
-    Ok(outcome)
+    if linked.is_some() {
+        return Ok(HardLink::Placed);
+    }
+    if src_meta.file_type().is_symlink() {
+        return Ok(HardLink::SkippedSymlink);
+    }
+    if !src_meta.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "this drive cannot make hard links and the target is not a regular file",
+        ));
+    }
+    let mut from = std::fs::File::open(src)?;
+    let to = write_new_file(dst, &mut from)?;
+    to.set_permissions(from.metadata()?.permissions())
+        .map(|()| HardLink::Placed)
+}
+
+/// `dst` 자리에 새 일반 파일을 만들어 `content` 로 채우고 열린 파일을 돌려준다(권한·시각 설정용).
+/// 기존 파일·심볼릭 링크는 따라가지 않고 그 자리를 교체하고, 폴더면 오류다
+/// ([`create_replacing`] 규칙). 파일은 `create_new`(O_EXCL)로 만든다 — 끊어진 링크 자리라도
+/// 따라가 폴더 밖에 만들지 않는다. `dst` 의 상위 폴더 검사는 호출자 몫([`refuse_through_link`]).
+pub(crate) fn write_new_file(dst: &Path, content: &mut impl Read) -> io::Result<std::fs::File> {
+    let made = create_replacing(dst, |at| {
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(at)?;
+        io::copy(content, &mut f)?;
+        Ok(Some(f))
+    })?;
+    made.ok_or_else(|| io::Error::other("file was not created"))
 }
 
 /// `dst` 자리에 `make` 로 새 항목을 만든다. `make` 는 **비어 있는** 경로를 받아 그 자리에
-/// 만들고, 만들었으면 true 를 돌려준다(false = 아무것도 안 만듦, `dst` 는 그대로 둔다).
+/// 만들고 `Some` 을 돌려준다(`None` = 아무것도 안 만듦, `dst` 는 그대로 둔다).
 ///
 /// - `dst` 가 없으면 바로 거기에 만든다.
 /// - `dst` 가 폴더면 오류(폴더를 파일로 갈아끼우지 않는다).
@@ -279,7 +316,10 @@ fn place_hard_link(src: &Path, dst: &Path) -> io::Result<HardLink> {
 ///   `MoveFileExW(MOVEFILE_REPLACE_EXISTING)` 이고 "to must not be a directory" 외 제약이
 ///   없다(<https://doc.rust-lang.org/std/fs/fn.rename.html>).
 ///   `rename` 이 실패하면 임시 항목이 해제 폴더 안에 남는다(폴더 밖 노출은 없음).
-fn create_replacing(dst: &Path, make: impl FnOnce(&Path) -> io::Result<bool>) -> io::Result<bool> {
+fn create_replacing<T>(
+    dst: &Path,
+    make: impl FnOnce(&Path) -> io::Result<Option<T>>,
+) -> io::Result<Option<T>> {
     match std::fs::symlink_metadata(dst) {
         Err(e) if e.kind() == io::ErrorKind::NotFound => make(dst),
         Err(e) => Err(e),
@@ -289,11 +329,11 @@ fn create_replacing(dst: &Path, make: impl FnOnce(&Path) -> io::Result<bool>) ->
         )),
         Ok(_) => {
             let tmp = sibling_temp(dst)?;
-            let created = make(&tmp)?;
-            if created {
+            let made = make(&tmp)?;
+            if made.is_some() {
                 std::fs::rename(&tmp, dst)?;
             }
-            Ok(created)
+            Ok(made)
         }
     }
 }
@@ -350,18 +390,6 @@ fn hard_link_unsupported(e: &io::Error) -> bool {
     ) || e.raw_os_error().is_some_and(|c| CODES.contains(&c))
 }
 
-/// 일반 파일 `src` 의 내용·권한을 **새 파일** `at` 에 복사한다(`create_new` = O_EXCL —
-/// `at` 자리에 무엇이든, 끊어진 링크라도 있으면 실패하고 따라가지 않는다).
-fn copy_new(src: &Path, at: &Path) -> io::Result<()> {
-    let mut from = std::fs::File::open(src)?;
-    let mut to = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(at)?;
-    io::copy(&mut from, &mut to)?;
-    to.set_permissions(from.metadata()?.permissions())
-}
-
 /// 오류 사슬의 가장 안쪽(실제 OS 원인)까지 이어 한 줄로. tar 는 원인을 Display 에서 빼고
 /// `source()` 로만 들고 있다. "(os error N)" 은 남긴다 — 프론트가 번호로 쉬운 설명을 고른다.
 pub(crate) fn describe_io(e: &io::Error) -> String {
@@ -391,7 +419,7 @@ fn root_kind(e: &io::Error) -> io::ErrorKind {
     kind
 }
 
-fn write_error(entry: &str, e: &io::Error) -> DuetError {
+pub(crate) fn write_error(entry: &str, e: &io::Error) -> DuetError {
     let msg = format!("{entry}: {}", describe_io(e));
     match root_kind(e) {
         io::ErrorKind::PermissionDenied => DuetError::PermissionDenied(msg),
@@ -612,48 +640,44 @@ mod tests {
         }
     }
 
-    /// 복사 폴백 경로(macOS 에선 실제로 일으키기 어렵다)를 직접 — 대상 자리의 링크를
-    /// 따라가지 않고 링크 자체를 새 파일로 교체한다.
+    /// 복사 폴백이 쓰는 `write_new_file`(macOS 에선 폴백을 실제로 일으키기 어렵다)을 직접 —
+    /// 대상 자리의 링크(살아 있든 끊어졌든)를 따라가지 않고 링크 자체를 새 파일로 교체한다.
     #[cfg(unix)]
     #[test]
-    fn copy_fallback_replaces_destination_link_without_following() {
+    fn write_new_file_replaces_destination_link_without_following() {
         let outside = tempfile::tempdir().unwrap();
         let victim = outside.path().join("victim");
         std::fs::write(&victim, b"ORIGINAL").unwrap();
         let dest = tempfile::tempdir().unwrap();
-        let src = dest.path().join("s");
-        std::fs::write(&src, b"PAYLOAD").unwrap();
         let dst = dest.path().join("h");
         std::os::unix::fs::symlink(&victim, &dst).unwrap();
         let dangling = dest.path().join("d");
         std::os::unix::fs::symlink(outside.path().join("new"), &dangling).unwrap();
+        let fresh = dest.path().join("f");
 
-        assert!(create_replacing(&dst, |at| copy_new(&src, at).map(|()| true)).unwrap());
-        assert!(create_replacing(&dangling, |at| copy_new(&src, at).map(|()| true)).unwrap());
+        for p in [&dst, &dangling, &fresh] {
+            write_new_file(p, &mut &b"PAYLOAD"[..]).unwrap();
+        }
 
         assert_eq!(std::fs::read(&victim).unwrap(), b"ORIGINAL");
         assert!(!outside.path().join("new").exists());
-        for p in [&dst, &dangling] {
+        for p in [&dst, &dangling, &fresh] {
             let m = std::fs::symlink_metadata(p).unwrap();
             assert!(m.is_file(), "{p:?} 가 일반 파일이 아니다");
             assert_eq!(std::fs::read(p).unwrap(), b"PAYLOAD");
         }
-        assert_eq!(names(dest.path()), ["d", "h", "s"]);
+        assert_eq!(names(dest.path()), ["d", "f", "h"], "임시 이름이 남았다");
     }
 
-    /// `create_new` 는 끊어진 링크 자리에서도 실패한다(따라가 바깥에 만들지 않음).
-    #[cfg(unix)]
     #[test]
-    fn copy_new_never_follows_a_link() {
-        let outside = tempfile::tempdir().unwrap();
+    fn write_new_file_refuses_a_folder() {
         let dest = tempfile::tempdir().unwrap();
-        let src = dest.path().join("s");
-        std::fs::write(&src, b"x").unwrap();
-        let at = dest.path().join("l");
-        std::os::unix::fs::symlink(outside.path().join("new"), &at).unwrap();
-        let err = copy_new(&src, &at).unwrap_err();
+        let dir = dest.path().join("d");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("keep"), b"k").unwrap();
+        let err = write_new_file(&dir, &mut &b"x"[..]).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
-        assert!(!outside.path().join("new").exists());
+        assert_eq!(std::fs::read(dir.join("keep")).unwrap(), b"k");
     }
 
     /// 모드를 지정해 tar 를 만든다 (폴더 권한 테스트용).
