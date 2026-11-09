@@ -23,6 +23,7 @@ import { useReorderable } from "@/hooks/useReorderable";
 import { useAppIcon } from "@/stores/appIcons";
 import { useContextMenu, type MenuEntry } from "@/stores/contextMenu";
 import { useUIDialogs } from "@/stores/ui-dialogs";
+import { isImeComposing } from "@/lib/keyEvent";
 
 /**
  * 상단 툴바 앱 런처 스트립 — 등록한 앱 원클릭 실행(Dock). 드래그: 가장자리=재정렬,
@@ -332,7 +333,8 @@ function FolderFlyout({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      // 조합 중 Esc 는 IME 조합 취소다 — 플라이아웃을 닫지 않는다.
+      if (e.key === "Escape" && !isImeComposing(e)) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -357,6 +359,8 @@ function FolderFlyout({
             onChange={(e) => setDraft(e.target.value)}
             onBlur={commitName}
             onKeyDown={(e) => {
+              // 한글 조합 중 Enter/Esc 는 조합 확정·취소 — 저장·편집 취소가 아니다.
+              if (isImeComposing(e)) return;
               if (e.key === "Enter") {
                 e.preventDefault();
                 commitName();

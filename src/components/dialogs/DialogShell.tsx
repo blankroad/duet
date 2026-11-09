@@ -2,6 +2,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import clsx from "clsx";
 import type { LucideIcon } from "lucide-react";
 import type { KeyboardEvent, ReactNode, RefObject } from "react";
+import { isImeComposing } from "@/lib/keyEvent";
 
 export type DialogIconTone = "muted" | "accent" | "danger";
 export type DialogWidth = "sm" | "md" | "lg" | "xl" | "2xl";
@@ -107,6 +108,11 @@ export function DialogShell({
         <Dialog.Overlay className={clsx("fixed inset-0 bg-black/50", z)} />
         <Dialog.Content
           onKeyDown={onKeyDown}
+          onEscapeKeyDown={(e) => {
+            // Radix 는 document capture 단계에서 Esc 를 처리해 입력칸의 가드보다 먼저
+            // 닫는다. 한글 조합 중 Esc 는 조합 취소이므로 대화상자를 닫지 않는다.
+            if (isImeComposing(e)) e.preventDefault();
+          }}
           onOpenAutoFocus={(e) => {
             if (!initialFocus) return;
             e.preventDefault();

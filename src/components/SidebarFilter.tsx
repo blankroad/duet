@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Search, X } from "lucide-react";
 import { useSidebarFilter, matchRange } from "@/stores/sidebarFilter";
+import { isImeComposing } from "@/lib/keyEvent";
 
 /** 키보드 이동(↑/↓)·필터 ↓/Enter 대상인 사이드바 행 표식 속성. */
 export const SIDEBAR_ROW = "data-sidebar-row";
@@ -46,6 +47,8 @@ export function SidebarFilter() {
           placeholder={t("filter.placeholder")}
           onChange={(e) => set(e.target.value)}
           onKeyDown={(e) => {
+            // 한글 조합 중 Enter 는 조합 확정, Esc 는 조합 취소 — 필터 동작이 아니다.
+            if (isImeComposing(e)) return;
             if (e.key === "Escape") {
               e.preventDefault();
               clear();

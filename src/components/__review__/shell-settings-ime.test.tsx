@@ -45,33 +45,27 @@ function editLauncherName() {
 }
 
 describe("shell-settings-05: 다른 이름 입력의 IME", () => {
-  it.fails(
-    "shell-settings-05: 런처 폴더 조합 Enter는 이름 저장을 실행하지 않는다",
-    async () => {
-      const input = editLauncherName();
-      await act(async () => {
-        fireEvent.keyDown(input, {
-          key: "Enter",
-          keyCode: 229,
-          isComposing: true,
-        });
-      });
-      expect(cmd.appsRename).not.toHaveBeenCalled();
-    },
-  );
-
-  it.fails(
-    "shell-settings-05: 런처 폴더 조합 Escape는 이름 편집기를 닫지 않는다",
-    () => {
-      const input = editLauncherName();
+  it("shell-settings-05: 런처 폴더 조합 Enter는 이름 저장을 실행하지 않는다", async () => {
+    const input = editLauncherName();
+    await act(async () => {
       fireEvent.keyDown(input, {
-        key: "Escape",
+        key: "Enter",
         keyCode: 229,
         isComposing: true,
       });
-      expect(screen.queryByRole("textbox")).not.toBeNull();
-    },
-  );
+    });
+    expect(cmd.appsRename).not.toHaveBeenCalled();
+  });
+
+  it("shell-settings-05: 런처 폴더 조합 Escape는 이름 편집기를 닫지 않는다", () => {
+    const input = editLauncherName();
+    fireEvent.keyDown(input, {
+      key: "Escape",
+      keyCode: 229,
+      isComposing: true,
+    });
+    expect(screen.queryByRole("textbox")).not.toBeNull();
+  });
 
   it("런처 폴더 조합이 끝난 Enter는 이름을 저장한다", async () => {
     const input = editLauncherName();
@@ -81,21 +75,18 @@ describe("shell-settings-05: 다른 이름 입력의 IME", () => {
     expect(cmd.appsRename).toHaveBeenCalledWith("folder", "업무 문");
   });
 
-  it.fails(
-    "shell-settings-05: 사이드바 공통 이름 프롬프트의 조합 Escape는 대화상자를 닫지 않는다",
-    () => {
-      render(<PromptDialogHost />);
-      act(() => {
-        void promptText({ title: "별명", initial: "업무 문" });
-      });
-      fireEvent.keyDown(screen.getByRole("textbox"), {
-        key: "Escape",
-        keyCode: 229,
-        isComposing: true,
-      });
-      expect(usePromptDialog.getState().req).not.toBeNull();
-    },
-  );
+  it("shell-settings-05: 사이드바 공통 이름 프롬프트의 조합 Escape는 대화상자를 닫지 않는다", () => {
+    render(<PromptDialogHost />);
+    act(() => {
+      void promptText({ title: "별명", initial: "업무 문" });
+    });
+    fireEvent.keyDown(screen.getByRole("textbox"), {
+      key: "Escape",
+      keyCode: 229,
+      isComposing: true,
+    });
+    expect(usePromptDialog.getState().req).not.toBeNull();
+  });
 
   it("사이드바 공통 이름 프롬프트는 조합 Enter를 제출하지 않는다", () => {
     render(<PromptDialogHost />);

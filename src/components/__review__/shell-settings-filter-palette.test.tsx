@@ -26,27 +26,25 @@ function renderFilterWithRow(onOpen: () => void) {
 }
 
 describe("C-08 sidebar filter + IME", () => {
-  it.fails(
-    "shell-settings-05: 한글 조합을 끝내려고 누른 Enter 로 첫 결과가 열리지 않는다",
-    () => {
-      const onOpen = vi.fn();
-      const input = renderFilterWithRow(onOpen);
-      fireEvent.change(input, { target: { value: "문" } });
-      // 조합 중 Enter (Chromium/WebView2: isComposing=true, keyCode 229)
-      fireEvent.keyDown(input, { key: "Enter", keyCode: 229, isComposing: true });
-      expect(onOpen).not.toHaveBeenCalled();
-    },
-  );
+  it("shell-settings-05: 한글 조합을 끝내려고 누른 Enter 로 첫 결과가 열리지 않는다", () => {
+    const onOpen = vi.fn();
+    const input = renderFilterWithRow(onOpen);
+    fireEvent.change(input, { target: { value: "문" } });
+    // 조합 중 Enter (Chromium/WebView2: isComposing=true, keyCode 229)
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229, isComposing: true });
+    expect(onOpen).not.toHaveBeenCalled();
+  });
 
-  it.fails(
-    "shell-settings-05: 한글 조합 중 Esc 는 조합 취소 — 입력한 필터 전체를 지우지 않는다",
-    () => {
-      const input = renderFilterWithRow(vi.fn());
-      fireEvent.change(input, { target: { value: "프로젝트 문" } });
-      fireEvent.keyDown(input, { key: "Escape", keyCode: 229, isComposing: true });
-      expect(useSidebarFilter.getState().q).toBe("프로젝트 문");
-    },
-  );
+  it("shell-settings-05: 한글 조합 중 Esc 는 조합 취소 — 입력한 필터 전체를 지우지 않는다", () => {
+    const input = renderFilterWithRow(vi.fn());
+    fireEvent.change(input, { target: { value: "프로젝트 문" } });
+    fireEvent.keyDown(input, {
+      key: "Escape",
+      keyCode: 229,
+      isComposing: true,
+    });
+    expect(useSidebarFilter.getState().q).toBe("프로젝트 문");
+  });
 
   it("조합이 끝난 Enter 는 첫 결과를 연다(대조군)", () => {
     const onOpen = vi.fn();
