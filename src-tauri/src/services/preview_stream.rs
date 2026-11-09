@@ -199,7 +199,13 @@ pub async fn respond(
         let bytes = fs.read_range(path, start, want).await.ok()?;
         let actual_end = match content_range_end(start, bytes.len()) {
             Some(e) => e,
-            None => start, // 빈 read — 본문 빔(언더플로 회피)
+            None => {
+                return Response::builder()
+                    .status(StatusCode::RANGE_NOT_SATISFIABLE)
+                    .header(header::CONTENT_RANGE, format!("bytes */{total}"))
+                    .body(Vec::new())
+                    .ok();
+            }
         };
         return Response::builder()
             .status(StatusCode::PARTIAL_CONTENT)
@@ -305,6 +311,87 @@ mod tests {
 #[cfg(test)]
 mod review_browse {
     use super::*;
+
+    use crate::types::{DuetError, Entry, EntryMeta, TrashLocation};
+    use std::pin::Pin;
+
+    /// A file truncated after stat: metadata is stale, reads use the empty fixture.
+    struct StaleMetadataFs;
+
+    #[async_trait::async_trait]
+    impl FileSystem for StaleMetadataFs {
+        fn source_id(&self) -> SourceId {
+            SourceId::Local
+        }
+        async fn list(&self, _: &Path) -> Result<Vec<Entry>, DuetError> {
+            unreachable!()
+        }
+        async fn metadata(&self, path: &Path) -> Result<EntryMeta, DuetError> {
+            let mut meta = LocalFs.metadata(path).await?;
+            meta.size = Some(1024);
+            Ok(meta)
+        }
+        async fn rename(&self, _: &Path, _: &Path) -> Result<(), DuetError> {
+            unreachable!()
+        }
+        async fn mkdir(&self, _: &Path) -> Result<(), DuetError> {
+            unreachable!()
+        }
+        async fn trash(&self, _: &Path, _: &str) -> Result<TrashLocation, DuetError> {
+            unreachable!()
+        }
+        async fn remove(&self, _: &Path) -> Result<(), DuetError> {
+            unreachable!()
+        }
+        async fn restore_from_trash(&self, _: &TrashLocation, _: &Path) -> Result<(), DuetError> {
+            unreachable!()
+        }
+        async fn read_range(
+            &self,
+            path: &Path,
+            offset: u64,
+            len: usize,
+        ) -> Result<Vec<u8>, DuetError> {
+            LocalFs.read_range(path, offset, len).await
+        }
+        async fn read_full(&self, _: &Path) -> Result<Vec<u8>, DuetError> {
+            unreachable!()
+        }
+        async fn write_full(&self, _: &Path, _: &[u8]) -> Result<(), DuetError> {
+            unreachable!()
+        }
+        async fn open_read(
+            &self,
+            path: &Path,
+            offset: u64,
+        ) -> Result<Pin<Box<dyn tokio::io::AsyncRead + Send>>, DuetError> {
+            LocalFs.open_read(path, offset).await
+        }
+        async fn open_write(
+            &self,
+            _: &Path,
+            _: u64,
+        ) -> Result<Pin<Box<dyn tokio::io::AsyncWrite + Send>>, DuetError> {
+            unreachable!()
+        }
+    }
+
+    #[tokio::test]
+    async fn empty_range_read_after_stale_metadata_is_unsatisfiable() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("truncated.mp4");
+        std::fs::write(&path, b"").unwrap();
+        for range in ["bytes=0-99", "bytes=100-", "bytes=-100"] {
+            let response = respond(&StaleMetadataFs, &path, Some(range)).await.unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::RANGE_NOT_SATISFIABLE,
+                "{range}"
+            );
+            assert_eq!(response.headers()[header::CONTENT_RANGE], "bytes */1024");
+            assert!(response.body().is_empty());
+        }
+    }
 
     #[tokio::test]
     async fn open_ended_range_is_capped() {
