@@ -120,7 +120,7 @@ function HistoryRow({
     <li
       className={clsx(
         "flex items-baseline gap-2 py-1.5 text-base",
-        entry.undone && !entry.stale && "text-fg-muted line-through opacity-60",
+        entry.undone && "text-fg-muted line-through opacity-60",
       )}
     >
       <span className="min-w-0 flex-1 truncate">{opLabel(entry.op, t)}</span>

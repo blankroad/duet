@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import "@/i18n";
+import i18n from "@/i18n";
+import type { JournalEntry } from "@/types/bindings";
 import { useJournal } from "@/stores/journal";
 import { useKeymap } from "@/stores/keymap";
 import { useCommands } from "@/stores/commands";
@@ -57,3 +58,30 @@ describe("HistoryDialog", () => {
     expect(triggerUndo).toHaveBeenCalledTimes(1);
   });
 });
+
+it.each([false, true])(
+  "stale History rows retain their undone=%s styling and skipped badge",
+  async (undone) => {
+    const source = { kind: "local" as const };
+    const entry: JournalEntry = {
+      id: "stale",
+      timestamp: "2026-11-08T10:00:00Z",
+      undone,
+      stale: true,
+      op: { kind: "mkdir", source, path: "/work/stale-folder" },
+      undo: { kind: "undo_mkdir", source, path: "/work/stale-folder" },
+    };
+    useJournal.getState().setHistory([entry]);
+    for (const language of ["en", "ko"]) {
+      await i18n.changeLanguage(language);
+      render(<HistoryDialog onClose={() => {}} />);
+      const row = screen
+        .getByText(language === "en" ? "Skipped" : "건너뜀")
+        .closest("li");
+      expect(row?.textContent).toContain("stale-folder");
+      expect(row?.classList.contains("line-through")).toBe(undone);
+      cleanup();
+    }
+    await i18n.changeLanguage("en");
+  },
+);
