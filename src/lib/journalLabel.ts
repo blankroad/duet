@@ -1,5 +1,6 @@
 import type { TFunction } from "i18next";
-import type { Location, OpKind } from "@/types/bindings";
+import type { Location, OpKind, UndoOutcome } from "@/types/bindings";
+import type { ToastKind } from "@/stores/toast";
 import { basename } from "@/lib/paths";
 
 /** 작업 위치의 표시용 짧은 이름. */
@@ -59,4 +60,58 @@ export function opLabel(op: OpKind, t: TFunction): string {
     default:
       return (op as { kind: string }).kind.replace(/_/g, " ");
   }
+}
+
+/** 구조화된 undo/redo 결과를 사용자 문구로 표시하고 원문은 오류 상세로만 보존한다. */
+export function undoToast(
+  outcome: UndoOutcome,
+  direction: "undo" | "redo",
+  t: TFunction,
+): { message: string; kind: ToastKind; detail?: string } {
+  const op = outcome.op ? opLabel(outcome.op, t) : t("undo.unknownOperation");
+  const first = outcome.skipped[0];
+  const reasonCode = outcome.reason ?? first?.reason ?? "failed";
+  const reason = t(`undo.reason.${reasonCode}`);
+  let message: string;
+  switch (outcome.kind) {
+    case "ok":
+      message = t(`undo.${direction}.ok`, { op });
+      break;
+    case "partial":
+      message = t(`undo.${direction}.partial`, {
+        op,
+        count: outcome.skipped.length,
+        reason,
+        item: first ? t("undo.item", { name: basename(first.path) }) : "",
+      });
+      break;
+    case "stale":
+      message = t(`undo.${direction}.stale`, { op, reason });
+      break;
+    case "irreversible":
+      message = t("undo.irreversible", { op });
+      break;
+    case "skipped":
+      if (reasonCode === "nothing_to_undo" || reasonCode === "nothing_to_redo")
+        message = reason;
+      else if (reasonCode === "redo_unsupported")
+        message = t("undo.redoUnsupported", { op });
+      else message = t(`undo.${direction}.skipped`, { op, reason });
+      break;
+    case "error":
+      message = t(`undo.${direction}.error`, { op, reason });
+      break;
+  }
+  return {
+    message,
+    kind:
+      outcome.kind === "ok"
+        ? "success"
+        : outcome.kind === "error"
+          ? "error"
+          : "info",
+    ...(outcome.kind === "error" && outcome.message
+      ? { detail: outcome.message }
+      : {}),
+  };
 }

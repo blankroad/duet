@@ -436,6 +436,38 @@
       "editFailed": "파일은 생성했지만 편집기를 열지 못했습니다: {{err}}"
     }
   },
+  "undo": {
+    "unknownOperation": "작업",
+    "undo": {
+      "ok": "되돌림: {{op}}",
+      "partial": "일부만 되돌림: {{op}} — {{count}}개 건너뜀 ({{reason}}){{item}}",
+      "stale": "되돌릴 수 없어 건너뜀: {{op}} — {{reason}}. 다음 되돌리기는 그 이전 작업입니다",
+      "skipped": "되돌리기 건너뜀: {{op}} — {{reason}}",
+      "error": "되돌리기 실패: {{op}} — {{reason}}"
+    },
+    "redo": {
+      "ok": "다시 실행: {{op}}",
+      "partial": "일부만 다시 실행: {{op}} — {{count}}개 건너뜀 ({{reason}}){{item}}",
+      "stale": "다시 실행할 수 없어 건너뜀: {{op}} — {{reason}}",
+      "skipped": "다시 실행 건너뜀: {{op}} — {{reason}}",
+      "error": "다시 실행 실패: {{op}} — {{reason}}"
+    },
+    "irreversible": "되돌릴 수 없는 작업입니다: {{op}}",
+    "redoUnsupported": "이 작업은 다시 실행할 수 없습니다: {{op}}",
+    "item": " — {{name}}",
+    "reason": {
+      "nothing_to_undo": "되돌릴 작업이 없습니다",
+      "nothing_to_redo": "다시 실행할 작업이 없습니다",
+      "redo_unsupported": "이 작업은 다시 실행할 수 없습니다",
+      "changed": "그 뒤 내용이 바뀜",
+      "gone": "대상이 없어짐",
+      "occupied": "그 자리에 다른 항목이 있음",
+      "unverifiable": "이전 버전 기록이라 바뀌었는지 확인할 수 없음",
+      "trash_restore_unsupported": "휴지통에서 직접 복원하세요(Finder)",
+      "unreachable": "연결할 수 없음",
+      "failed": "오류"
+    }
+  },
   "history": {
     "title": "작업 히스토리",
     "empty": "기록된 작업이 없습니다",
@@ -782,10 +814,7 @@
     "dirSizeFailed": "폴더 크기 계산 실패: {{err}}",
     "renameSelectOne": "이름 변경: 항목을 하나만 선택하세요",
     "batchRenameSelectOne": "일괄 이름변경: 항목을 하나 이상 선택하세요",
-    "undone": "되돌림 ({{kind}})",
     "undoFailed": "되돌리기 실패: {{err}}",
-    "redone": "다시 실행됨",
-    "redoKind": "다시 실행 {{kind}}",
     "redoFailed": "다시 실행 실패: {{err}}",
     "labelPath": "경로",
     "labelName": "이름",

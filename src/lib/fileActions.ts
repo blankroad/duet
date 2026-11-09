@@ -27,6 +27,7 @@ import { showError } from "@/lib/errorToast";
 import { isVirtualTrash } from "@/lib/trashView";
 import { rememberExtract } from "@/lib/extractPending";
 import { basename } from "@/lib/paths";
+import { undoToast } from "@/lib/journalLabel";
 import { useClipboard } from "@/stores/clipboard";
 import { useShelf, shelfSectionItems } from "@/stores/shelf";
 import { useUI } from "@/stores/ui";
@@ -100,17 +101,15 @@ export function triggerRenameSmart(open: OpenFn, showToast: ToastFn): void {
 /** Ctrl+Z — 마지막 파괴적 작업 되돌리기 (다이얼로그 없이 toast). */
 export async function triggerUndo(showToast: ToastFn): Promise<void> {
   const r = await commands.undoLast();
-  if (r.status === "ok")
-    showToast(
-      r.data.message ?? i18n.t("toast.undone", { kind: r.data.kind }),
-      r.data.kind === "ok"
-        ? "success"
-        : r.data.kind === "error"
-          ? "error"
-          : "info",
-    );
-  else
-    showToast(i18n.t("toast.undoFailed", { err: formatErr(r.error) }), "error");
+  if (r.status === "ok") {
+    const toast = undoToast(r.data, "undo", i18n.t);
+    showToast(toast.message, toast.kind, { detail: toast.detail });
+  } else {
+    const why = explainError(r.error);
+    showToast(i18n.t("toast.undoFailed", { err: why.text }), "error", {
+      detail: why.detail,
+    });
+  }
 }
 
 /** Ctrl+Shift+Z — 마지막으로 되돌린 작업 다시 실행. 미지원 op 는 백엔드가
@@ -118,15 +117,13 @@ export async function triggerUndo(showToast: ToastFn): Promise<void> {
 export async function triggerRedo(showToast: ToastFn): Promise<void> {
   const r = await commands.redoLast();
   if (r.status === "ok") {
-    if (r.data.kind === "ok")
-      showToast(r.data.message ?? i18n.t("toast.redone"), "success");
-    else
-      showToast(
-        r.data.message ?? i18n.t("toast.redoKind", { kind: r.data.kind }),
-        r.data.kind === "error" ? "error" : "info",
-      );
+    const toast = undoToast(r.data, "redo", i18n.t);
+    showToast(toast.message, toast.kind, { detail: toast.detail });
   } else {
-    showToast(i18n.t("toast.redoFailed", { err: formatErr(r.error) }), "error");
+    const why = explainError(r.error);
+    showToast(i18n.t("toast.redoFailed", { err: why.text }), "error", {
+      detail: why.detail,
+    });
   }
 }
 

@@ -439,6 +439,38 @@
       "editFailed": "The file was created, but the editor could not open: {{err}}"
     }
   },
+  "undo": {
+    "unknownOperation": "Operation",
+    "undo": {
+      "ok": "Undone: {{op}}",
+      "partial": "Partially undone: {{op}} — skipped {{count}} item(s) ({{reason}}){{item}}",
+      "stale": "Cannot undo; skipped: {{op}} — {{reason}}. The next undo targets the preceding operation.",
+      "skipped": "Undo skipped: {{op}} — {{reason}}",
+      "error": "Undo failed: {{op}} — {{reason}}"
+    },
+    "redo": {
+      "ok": "Redone: {{op}}",
+      "partial": "Partially redone: {{op}} — skipped {{count}} item(s) ({{reason}}){{item}}",
+      "stale": "Cannot redo; skipped: {{op}} — {{reason}}",
+      "skipped": "Redo skipped: {{op}} — {{reason}}",
+      "error": "Redo failed: {{op}} — {{reason}}"
+    },
+    "irreversible": "This operation cannot be undone: {{op}}",
+    "redoUnsupported": "This operation cannot be redone: {{op}}",
+    "item": " — {{name}}",
+    "reason": {
+      "nothing_to_undo": "Nothing to undo",
+      "nothing_to_redo": "Nothing to redo",
+      "redo_unsupported": "This operation cannot be redone",
+      "changed": "contents changed since the operation",
+      "gone": "the item no longer exists",
+      "occupied": "another item occupies that location",
+      "unverifiable": "this older record cannot verify whether the item changed",
+      "trash_restore_unsupported": "restore it manually from Trash in Finder",
+      "unreachable": "cannot connect",
+      "failed": "an error occurred"
+    }
+  },
   "history": {
     "title": "Operation history",
     "empty": "No operations recorded yet",
@@ -787,10 +819,7 @@
     "dirSizeFailed": "Calculate folder size failed: {{err}}",
     "renameSelectOne": "Rename: select exactly one item",
     "batchRenameSelectOne": "Batch rename: select at least one item",
-    "undone": "Undone ({{kind}})",
     "undoFailed": "Undo failed: {{err}}",
-    "redone": "Redone",
-    "redoKind": "Redo {{kind}}",
     "redoFailed": "Redo failed: {{err}}",
     "labelPath": "Path",
     "labelName": "Name",
