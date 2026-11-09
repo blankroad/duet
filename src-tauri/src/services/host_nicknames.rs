@@ -18,6 +18,8 @@ pub struct HostNicknamesStore {
     inner: RwLock<HashMap<String, String>>,
     /// 시작 시 손상 파일을 보존하고 기본값으로 복구한 내역.
     load_notice: Option<StartupNotice>,
+    /// 시작 때 읽지 못한 원본을 덮어쓰지 않도록 저장을 막는 원인.
+    read_failed: Option<String>,
 }
 
 impl HostNicknamesStore {
@@ -41,20 +43,22 @@ impl HostNicknamesStore {
             HashMap::new,
         )
         .await;
-        let (value, load_notice) = match loaded {
+        let (value, load_notice, read_failed) = match loaded {
             Ok(loaded) => (
                 loaded.value,
                 loaded.quarantined.as_ref().map(StartupNotice::from),
+                None,
             ),
             Err(error) => {
                 tracing::warn!("host nicknames load failed: {error}");
-                (HashMap::new(), None)
+                (HashMap::new(), None, Some(error.to_string()))
             }
         };
         Ok(Arc::new(Self {
             path: path.to_path_buf(),
             inner: RwLock::new(value),
             load_notice,
+            read_failed,
         }))
     }
 
@@ -99,6 +103,11 @@ impl HostNicknamesStore {
     }
 
     async fn write_to_disk(&self, map: &HashMap<String, String>) -> Result<(), DuetError> {
+        if let Some(reason) = &self.read_failed {
+            return Err(DuetError::Io(format!(
+                "host-nicknames.json could not be read at startup ({reason}); not overwriting it"
+            )));
+        }
         let text = serde_json::to_string_pretty(map)
             .map_err(|e| DuetError::Io(format!("host nicknames serialize: {e}")))?;
         persist::write_atomic(&self.path, text.as_bytes()).await
@@ -109,6 +118,49 @@ impl HostNicknamesStore {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn unreadable_file_is_never_overwritten_by_empty_fallback() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("store.json");
+        let original = r#"{"existing":"Kept"}"#;
+        std::fs::write(&path, original).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let read_error = match std::fs::read(&path) {
+            Ok(_) => {
+                // root처럼 권한과 무관하게 읽을 수 있으면 이 재현을 건너뛴다.
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+                return;
+            }
+            Err(error) => error.to_string(),
+        };
+        let loaded = HostNicknamesStore::load_from(&path).await;
+        if loaded.is_err() {
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        let store = loaded.unwrap();
+        let set_result = store.set("new".into(), "New".into()).await;
+        let clear_result = store.set("existing".into(), String::new()).await;
+        let remove_result = store.remove("new").await;
+        let memory = store.list().await;
+        // 실패한 코드에서도 assertion 전에 권한을 복원한다.
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+
+        let error = set_result.expect_err("an unreadable original must not be overwritten");
+        assert!(error.to_string().contains("could not be read at startup"));
+        assert!(error.to_string().contains(&read_error));
+        assert!(memory.is_empty());
+        assert_eq!(on_disk, original);
+        assert!(clear_result.is_err());
+        assert!(remove_result.is_err());
+        let reloaded = HostNicknamesStore::load_from(&path).await.unwrap();
+        let saved = reloaded.set("new".into(), "New".into()).await.unwrap();
+        assert_eq!(saved.get("existing").map(String::as_str), Some("Kept"));
+    }
 
     #[tokio::test]
     async fn failed_saves_keep_memory_unchanged() {
@@ -156,6 +208,8 @@ mod tests {
             })
             .collect();
         assert_eq!(backups.len(), 1);
+        assert_eq!(std::fs::read(&backups[0]).unwrap(), broken);
+        store.set("recovered".into(), "New".into()).await.unwrap();
         assert_eq!(std::fs::read(&backups[0]).unwrap(), broken);
     }
 
