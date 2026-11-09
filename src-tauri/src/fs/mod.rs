@@ -4,6 +4,7 @@
 //! 모든 메서드는 `async` — Tauri tokio runtime 위에서 동작.
 
 pub mod local;
+pub mod persist;
 pub mod ssh;
 #[cfg(test)]
 pub(crate) mod testing;

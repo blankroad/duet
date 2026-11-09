@@ -14,6 +14,7 @@ pub mod saved_hosts;
 pub mod search;
 pub mod secret_vault;
 pub mod settings;
+pub mod startup;
 pub mod system;
 pub mod tags;
 pub mod tasks;

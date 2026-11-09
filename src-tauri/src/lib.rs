@@ -170,6 +170,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::apps::apps_reorder_in_folder,
             commands::apps::app_launch,
             commands::system::file_icon,
+            commands::startup::startup_notices_take,
         ])
         .events(collect_events![
             services::archive_events::ArchiveNoticeEvent,
@@ -178,6 +179,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             services::fs_events::FsChangedEvent,
             services::journal_events::JournalChangedEvent,
             services::keymap_events::KeymapChangedEvent,
+            services::keymap_events::KeymapLoadFailedEvent,
             services::task_events::TaskEvent,
             services::index_events::IndexProgressEvent,
             services::open_path_events::OpenPathEvent,
@@ -368,6 +370,7 @@ pub fn run() {
         .manage(frecency)
         .manage(host_nicknames)
         .manage(tags)
+        .manage(services::startup_notices::StartupNotices::default())
         .manage(platform::ShellMenuRegistry::new())
         .invoke_handler(specta_builder.invoke_handler())
         .setup(move |app| {
