@@ -40,6 +40,11 @@ pub enum DuetError {
     CrossDevice(String),
     #[error("ssh: {0}")]
     Ssh(String),
+    /// 폴더를 자기 자신이나 자기 하위로 복사·이동·동기화·병합·압축하려 함 — 끝없는 자기 복제나
+    /// (삭제 전파 시) 원본 손실로 이어지므로 시작 전에 거부한다. 메시지는 어느 경로가 어느 경로
+    /// 안에 있는지(`core::path_guard`).
+    #[error("cannot put a folder inside itself: {0}")]
+    IntoItself(String),
     /// 서버 호스트키가 `~/.ssh/known_hosts` 와 불일치 — 미지(TOFU 필요) 또는 변경(MITM 경고).
     /// frontend 가 fingerprint 를 보여주고 사용자 신뢰 결정을 받는다.
     #[error("unverified host key for {} ({})", .0.host, .0.fingerprint)]

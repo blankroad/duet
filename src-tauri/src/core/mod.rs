@@ -6,6 +6,7 @@ pub mod copy_progress;
 pub mod copy_strategy;
 pub mod elevate;
 pub mod ops;
+pub mod path_guard;
 pub mod search;
 pub mod stamp;
 pub mod sudo;
