@@ -21,7 +21,6 @@ fn op() -> OpKind {
 }
 
 #[tokio::test]
-#[ignore = "shell-settings-01 repro"]
 async fn journal_survives_append_interrupted_before_newline() {
     let d = tempdir().unwrap();
     let p = d.path().join("journal.jsonl");

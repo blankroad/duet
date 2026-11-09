@@ -3,7 +3,9 @@
 //! `<config_dir>/duet/journal.jsonl` append-only. 세션 시작 시 tail N 로드해
 //! 메모리 캐시 (VecDeque) 복원. push/pop 은 메모리 우선 + 디스크 동기.
 
+use crate::fs::persist;
 use crate::services::settings::duet_config_dir;
+use crate::services::startup_notices::{StartupNotice, StartupNoticeKind};
 use crate::types::{DuetError, Location, SourceId};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -310,6 +312,18 @@ enum JsonlRecord {
 pub struct Journal {
     path: PathBuf,
     inner: Mutex<VecDeque<JournalEntry>>,
+    /// 파일 append 직렬화(fileops-01) — 동시 push 의 줄이 섞이지 않게 한 번에 하나만 쓴다.
+    writer: Mutex<AppendState>,
+    /// 시작 로드 때 깨진 줄을 건너뛰었으면 그 내역(사용자 알림용).
+    load_notice: Option<StartupNotice>,
+}
+
+/// append 잠금이 지키는 파일 끝 상태.
+struct AppendState {
+    /// 다음 기록 앞에 `\n` 이 필요한가 — 마지막 줄이 줄바꿈 없이 끝났거나(쓰다 끊김)
+    /// 지난 쓰기가 중간에 실패해 일부만 남았을 수 있을 때. 빈 줄은 로드 때 무시되므로
+    /// 필요 없을 때 하나 더 써도 무해하다.
+    needs_newline: bool,
 }
 
 impl Journal {
@@ -318,16 +332,24 @@ impl Journal {
         Self::load_from(&path).await
     }
 
+    /// 파일을 읽어 마지막 [`TAIL_LOAD_LIMIT`] 개를 메모리에 올린다. 없으면 빈 journal.
+    ///
+    /// 깨진 줄은 건너뛰고 나머지를 살린다(시작 불가 방지, fileops-01). 읽기 IO 오류만 `Err`.
     pub async fn load_from(path: &Path) -> Result<Arc<Self>, DuetError> {
-        let entries = if path.exists() {
-            read_tail(path, TAIL_LOAD_LIMIT).await?
-        } else {
-            VecDeque::new()
-        };
+        let loaded = load_file(path, TAIL_LOAD_LIMIT).await?;
         Ok(Arc::new(Self {
             path: path.to_path_buf(),
-            inner: Mutex::new(entries),
+            inner: Mutex::new(loaded.entries),
+            writer: Mutex::new(AppendState {
+                needs_newline: loaded.needs_newline,
+            }),
+            load_notice: loaded.notice,
         }))
+    }
+
+    /// 시작 로드 때 깨진 줄을 건너뛰었으면 그 알림. 정상이면 `None`.
+    pub fn load_notice(&self) -> Option<StartupNotice> {
+        self.load_notice.clone()
     }
 
     /// 새 entry 추가 — 메모리 + 디스크.
@@ -408,57 +430,216 @@ impl Journal {
         lock.iter().rev().take(limit).cloned().collect()
     }
 
+    /// 기록 한 줄을 파일 끝에 붙인다.
+    ///
+    /// 잠금 안에서 본문과 `\n` 을 한 버퍼로 한 번에 쓰고 `sync_data` 한다 — 동시 push 가
+    /// 줄을 섞거나, 본문만 쓰고 끊겨 다음 기록이 같은 줄에 붙는 일을 막는다(fileops-01).
     async fn append(&self, record: JsonlRecord) -> Result<(), DuetError> {
-        if let Some(parent) = self.path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(DuetError::from)?;
-        }
         let line = serde_json::to_string(&record)
             .map_err(|e| DuetError::Io(format!("journal serialize: {e}")))?;
-        let mut file = tokio::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.path)
-            .await
-            .map_err(DuetError::from)?;
-        file.write_all(line.as_bytes())
-            .await
-            .map_err(DuetError::from)?;
-        file.write_all(b"\n").await.map_err(DuetError::from)?;
-        file.flush().await.map_err(DuetError::from)?;
+        let mut state = self.writer.lock().await;
+        let mut buf = Vec::with_capacity(line.len() + 2);
+        if state.needs_newline {
+            buf.push(b'\n');
+        }
+        buf.extend_from_slice(line.as_bytes());
+        buf.push(b'\n');
+        // 실패하면 일부만 써졌을 수 있다 → 그때는 다음 기록을 줄바꿈부터 시작.
+        state.needs_newline = true;
+        append_bytes(&self.path, &buf).await?;
+        state.needs_newline = false;
         Ok(())
     }
 }
 
-/// jsonl 파일을 처음부터 읽어 push/markundone 을 replay 후 마지막 limit 개 반환.
-async fn read_tail(path: &Path, limit: usize) -> Result<VecDeque<JournalEntry>, DuetError> {
-    let text = tokio::fs::read_to_string(path)
+async fn append_bytes(path: &Path, buf: &[u8]) -> Result<(), DuetError> {
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(DuetError::from)?;
+    }
+    let mut file = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
         .await
         .map_err(DuetError::from)?;
-    let mut entries: Vec<JournalEntry> = Vec::new();
+    file.write_all(buf).await.map_err(DuetError::from)?;
+    file.sync_data().await.map_err(DuetError::from)?;
+    Ok(())
+}
+
+/// [`load_file`] 결과.
+struct LoadedJournal {
+    entries: VecDeque<JournalEntry>,
+    needs_newline: bool,
+    notice: Option<StartupNotice>,
+}
+
+/// 줄 단위 해석 결과 — 파일에 남길 기록을 원래 순서대로.
+#[derive(Default)]
+struct Scan {
+    /// (원문, 해석). 해석이 `None` 이면 이 버전이 모르는 기록 — 재생은 안 하고 파일엔 보존.
+    kept: Vec<(String, Option<JsonlRecord>)>,
+    /// 읽을 수 없어 버린 조각 수.
+    dropped: u32,
+    /// 한 줄에 붙어 있던 기록(`{…}{…}`)을 나눈 줄 수.
+    split: u32,
+    /// 첫 번째 깨진 조각의 오류(알림 "자세히"용).
+    first_error: Option<String>,
+}
+
+/// journal 파일 읽기 — 깨진 줄은 건너뛰고, 있으면 원본 사본을 남긴 뒤 살린 줄로 다시 쓴다.
+///
+/// 정책: 깨진 줄은 버린다. 그 줄이 `MarkUndone` 이었다면 해당 항목은 "안 되돌림"으로
+/// 보이게 되지만, 파일 전체를 못 읽어 앞의 정상 기록까지 잃는 것보다 낫다.
+/// 다시 쓰는 이유는 같은 알림이 매 부팅 반복되지 않게 하기 위해서다.
+async fn load_file(path: &Path, limit: usize) -> Result<LoadedJournal, DuetError> {
+    let bytes = match tokio::fs::read(path).await {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(LoadedJournal {
+                entries: VecDeque::new(),
+                needs_newline: false,
+                notice: None,
+            })
+        }
+        Err(e) => return Err(DuetError::from(e)),
+    };
+    let mut needs_newline = bytes.last().is_some_and(|b| *b != b'\n');
+    let text = String::from_utf8_lossy(&bytes);
+    let lossy = matches!(text, std::borrow::Cow::Owned(_));
+    let scan = scan_lines(&text);
+    let entries = replay(&scan, limit);
+
+    let mut notice = None;
+    if scan.dropped > 0 || scan.split > 0 {
+        // 버리는 내용이 있으면(또는 원문 바이트가 바뀌면) 원본 사본부터. 사본을 못 남기면
+        // 원본을 다시 쓰지 않는다 — 깨진 줄은 다음 로드 때도 건너뛰니 동작엔 문제없다.
+        let mut backup = None;
+        let mut can_rewrite = true;
+        if scan.dropped > 0 || lossy {
+            match persist::backup_copy(path).await {
+                Ok(b) => backup = Some(b),
+                Err(e) => {
+                    tracing::warn!("journal backup failed, leaving file as is: {e}");
+                    can_rewrite = false;
+                }
+            }
+        }
+        if can_rewrite {
+            let mut out = String::new();
+            for (raw, _) in &scan.kept {
+                out.push_str(raw);
+                out.push('\n');
+            }
+            match persist::write_atomic(path, out.as_bytes()).await {
+                Ok(()) => needs_newline = false,
+                Err(e) => tracing::warn!("journal rewrite failed: {e}"),
+            }
+        }
+        if scan.dropped > 0 {
+            tracing::warn!(
+                "journal: skipped {} unreadable record(s) in {}",
+                scan.dropped,
+                path.display()
+            );
+            notice = Some(StartupNotice {
+                file: path.to_path_buf(),
+                action: StartupNoticeKind::SkippedLines {
+                    count: scan.dropped,
+                    backup,
+                },
+                detail: scan.first_error.clone().unwrap_or_default(),
+            });
+        }
+    }
+    Ok(LoadedJournal {
+        entries,
+        needs_newline,
+        notice,
+    })
+}
+
+/// 줄마다: 아는 기록 → 재생 대상, 모르는 JSON 객체 → 보존만, 그 밖 → 버림(개수 셈).
+/// 한 줄에 기록이 붙어 있으면(`{…}{…}`) 나눠서 살린다.
+fn scan_lines(text: &str) -> Scan {
+    let mut scan = Scan::default();
     for (i, line) in text.lines().enumerate() {
-        if line.trim().is_empty() {
+        let line = line.trim();
+        if line.is_empty() {
             continue;
         }
-        let rec: JsonlRecord = serde_json::from_str(line)
-            .map_err(|e| DuetError::Io(format!("journal line {} parse: {e}", i + 1)))?;
+        if let Ok(rec) = serde_json::from_str::<JsonlRecord>(line) {
+            scan.kept.push((line.to_string(), Some(rec)));
+            continue;
+        }
+        let mut stream = serde_json::Deserializer::from_str(line).into_iter::<serde_json::Value>();
+        let mut start = 0;
+        let mut pieces = 0u32;
+        while let Some(next) = stream.next() {
+            match next {
+                Ok(value) => {
+                    let end = stream.byte_offset();
+                    let raw = line.get(start..end).unwrap_or("").trim().to_string();
+                    start = end;
+                    pieces += 1;
+                    if !value.is_object() {
+                        scan.drop_piece(i, "not a journal record");
+                        continue;
+                    }
+                    match serde_json::from_value::<JsonlRecord>(value) {
+                        Ok(rec) => scan.kept.push((raw, Some(rec))),
+                        Err(e) => {
+                            // 정상 JSON 객체인데 모르는 형식 — 새 버전이 쓴 기록일 수 있어
+                            // 지우지 않는다(다운그레이드 후 다시 올렸을 때 살아 있게).
+                            tracing::warn!("journal line {}: unknown record kept: {e}", i + 1);
+                            scan.kept.push((raw, None));
+                        }
+                    }
+                }
+                Err(e) => {
+                    scan.drop_piece(i, &e.to_string());
+                    break;
+                }
+            }
+        }
+        if pieces > 1 {
+            scan.split += 1;
+        }
+    }
+    scan
+}
+
+impl Scan {
+    fn drop_piece(&mut self, line_idx: usize, why: &str) {
+        self.dropped += 1;
+        if self.first_error.is_none() {
+            self.first_error = Some(format!("line {}: {why}", line_idx + 1));
+        }
+    }
+}
+
+/// 살린 기록을 처음부터 재생(push / undone 토글) 후 마지막 `limit` 개.
+fn replay(scan: &Scan, limit: usize) -> VecDeque<JournalEntry> {
+    let mut entries: Vec<JournalEntry> = Vec::new();
+    for rec in scan.kept.iter().filter_map(|(_, r)| r.as_ref()) {
         match rec {
-            JsonlRecord::Push(e) => entries.push(*e),
+            JsonlRecord::Push(e) => entries.push((**e).clone()),
             JsonlRecord::MarkUndone { id } => {
-                if let Some(found) = entries.iter_mut().find(|e| e.id == id) {
+                if let Some(found) = entries.iter_mut().find(|e| e.id == *id) {
                     found.undone = true;
                 }
             }
             JsonlRecord::MarkRedone { id } => {
-                if let Some(found) = entries.iter_mut().find(|e| e.id == id) {
+                if let Some(found) = entries.iter_mut().find(|e| e.id == *id) {
                     found.undone = false;
                 }
             }
         }
     }
     let start = entries.len().saturating_sub(limit);
-    Ok(entries.drain(start..).collect())
+    entries.drain(start..).collect()
 }
 
 #[cfg(test)]
@@ -620,6 +801,155 @@ mod tests {
     }
 }
 
+/// 깨진·이어붙은·모르는 줄이 있는 journal 로드(fileops-01, shell-settings-01).
+#[cfg(test)]
+mod load_recovery {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn op() -> OpKind {
+        OpKind::PermanentDelete {
+            count: 1,
+            location: Location {
+                source: SourceId::Local,
+                path: PathBuf::from("/tmp"),
+            },
+        }
+    }
+
+    /// 정상 기록 n 개를 쓴 journal 파일 경로와 그 줄들.
+    async fn journal_with(dir: &Path, n: usize) -> (PathBuf, Vec<String>) {
+        let path = dir.join("journal.jsonl");
+        let j = Journal::load_from(&path).await.unwrap();
+        for _ in 0..n {
+            j.push(op(), UndoAction::Irreversible).await.unwrap();
+        }
+        let text = std::fs::read_to_string(&path).unwrap();
+        (path, text.lines().map(str::to_string).collect())
+    }
+
+    fn all_lines_parse(path: &Path) -> usize {
+        let text = std::fs::read_to_string(path).unwrap();
+        for l in text.lines() {
+            serde_json::from_str::<serde_json::Value>(l)
+                .unwrap_or_else(|e| panic!("bad line {l:?}: {e}"));
+        }
+        text.lines().count()
+    }
+
+    #[tokio::test]
+    async fn merged_records_on_one_line_are_split_and_kept() {
+        let d = tempdir().unwrap();
+        let (path, lines) = journal_with(d.path(), 2).await;
+        std::fs::write(&path, format!("{}{}\n", lines[0], lines[1])).unwrap();
+        let j = Journal::load_from(&path).await.unwrap();
+        assert_eq!(j.history(10).await.len(), 2);
+        // 잃은 것이 없으니 알림도 없다. 파일은 두 줄로 고쳐진다.
+        assert!(j.load_notice().is_none());
+        assert_eq!(all_lines_parse(&path), 2);
+    }
+
+    #[tokio::test]
+    async fn corrupt_line_is_backed_up_reported_once_and_rewritten() {
+        let d = tempdir().unwrap();
+        let (path, lines) = journal_with(d.path(), 2).await;
+        let original = format!("{}\ngarbage{{\n{}\n", lines[0], lines[1]);
+        std::fs::write(&path, &original).unwrap();
+
+        let j = Journal::load_from(&path).await.unwrap();
+        assert_eq!(j.history(10).await.len(), 2);
+        let notice = j.load_notice().expect("notice");
+        assert_eq!(notice.file, path);
+        let StartupNoticeKind::SkippedLines { count, backup } = notice.action else {
+            panic!("expected SkippedLines");
+        };
+        assert_eq!(count, 1);
+        assert!(notice.detail.starts_with("line 2:"), "{}", notice.detail);
+        let backup = backup.expect("backup copy");
+        assert_eq!(std::fs::read_to_string(backup).unwrap(), original);
+        assert_eq!(all_lines_parse(&path), 2);
+
+        // 다시 쓴 뒤라 다음 부팅은 조용하다.
+        let again = Journal::load_from(&path).await.unwrap();
+        assert!(again.load_notice().is_none());
+        assert_eq!(again.history(10).await.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn unknown_records_are_kept_in_file_even_when_rewritten() {
+        let d = tempdir().unwrap();
+        let (path, lines) = journal_with(d.path(), 1).await;
+        let future = r#"{"type":"SomethingNew","id":"x"}"#;
+        // 새 버전이 쓴 op 종류(아는 type 이지만 모르는 내용)도 보존 대상.
+        let future_push = r#"{"type":"Push","id":"0192","op":{"kind":"teleport"}}"#;
+        std::fs::write(
+            &path,
+            format!("{}\n{future}\n{future_push}\n{{torn\n", lines[0]),
+        )
+        .unwrap();
+
+        let j = Journal::load_from(&path).await.unwrap();
+        assert_eq!(j.history(10).await.len(), 1);
+        // 버린 것은 잘린 줄 하나뿐.
+        match j.load_notice().map(|n| n.action) {
+            Some(StartupNoticeKind::SkippedLines { count: 1, .. }) => {}
+            other => panic!("unexpected notice {other:?}"),
+        }
+        j.push(op(), UndoAction::Irreversible).await.unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.lines().any(|l| l == future), "{text}");
+        assert!(text.lines().any(|l| l == future_push), "{text}");
+        assert!(!text.contains("torn"));
+
+        let again = Journal::load_from(&path).await.unwrap();
+        assert_eq!(again.history(10).await.len(), 2);
+        assert!(again.load_notice().is_none());
+    }
+
+    #[tokio::test]
+    async fn append_after_missing_trailing_newline_starts_a_new_line() {
+        let d = tempdir().unwrap();
+        let (path, lines) = journal_with(d.path(), 1).await;
+        std::fs::write(&path, &lines[0]).unwrap();
+        let j = Journal::load_from(&path).await.unwrap();
+        assert!(j.load_notice().is_none());
+        j.push(op(), UndoAction::Irreversible).await.unwrap();
+        assert_eq!(all_lines_parse(&path), 2);
+    }
+
+    #[tokio::test]
+    async fn non_utf8_line_is_skipped() {
+        let d = tempdir().unwrap();
+        let (path, lines) = journal_with(d.path(), 1).await;
+        let mut bytes = format!("{}\n", lines[0]).into_bytes();
+        bytes.extend_from_slice(&[0xff, 0xfe, b'\n']);
+        std::fs::write(&path, &bytes).unwrap();
+        let j = Journal::load_from(&path).await.unwrap();
+        assert_eq!(j.history(10).await.len(), 1);
+        let Some(StartupNoticeKind::SkippedLines { count: 1, backup }) =
+            j.load_notice().map(|n| n.action)
+        else {
+            panic!("expected one skipped line");
+        };
+        assert_eq!(std::fs::read(backup.unwrap()).unwrap(), bytes);
+    }
+
+    #[tokio::test]
+    async fn healthy_journal_has_no_notice_and_is_not_rewritten() {
+        let d = tempdir().unwrap();
+        let (path, _) = journal_with(d.path(), 2).await;
+        let before = std::fs::read(&path).unwrap();
+        let j = Journal::load_from(&path).await.unwrap();
+        assert!(j.load_notice().is_none());
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        let names: Vec<_> = std::fs::read_dir(d.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names.len(), 1, "no backup expected: {names:?}");
+    }
+}
+
 /// fileops 점검(2026-11-08, opus) 재현 — journal.jsonl 손상 시 앱 시작 불가.
 /// `lib.rs` 는 `Journal::load_default().await.expect("journal load")` 라서 load 실패 = 패닉.
 #[cfg(test)]
@@ -640,7 +970,6 @@ mod review_fileops_opus {
     /// 마지막 줄이 잘린 journal(쓰는 도중 강제 종료·전원 차단) — 앞의 정상 기록은 살리고
     /// 로드돼야 한다. 지금은 Err → 시작 시 panic.
     #[tokio::test]
-    #[ignore = "fileops-01 repro"]
     async fn truncated_last_line_must_not_fail_load() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("journal.jsonl");
@@ -665,7 +994,6 @@ mod review_fileops_opus {
 
     /// 새 버전이 쓴 모르는 op 종류(다운그레이드) 한 줄 때문에 전체 로드가 실패하면 안 된다.
     #[tokio::test]
-    #[ignore = "fileops-01 repro"]
     async fn unknown_record_kind_must_not_fail_load() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("journal.jsonl");
@@ -683,7 +1011,6 @@ mod review_fileops_opus {
     /// `append` 는 잠금 없이 줄 본문과 `\n` 을 **따로** write 한다. 동시에 끝난 작업
     /// 둘(호스트별 worker 는 병렬)이 push 하면 줄이 섞일 수 있다 → 다음 시작 때 load 실패.
     #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-    #[ignore = "fileops-01 repro"]
     async fn concurrent_pushes_keep_every_line_parseable() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("journal.jsonl");
@@ -717,7 +1044,6 @@ mod review_fileops_opus {
     /// 현실적인 경우 — 작업 **두 개**가 거의 동시에 끝남(로컬 worker + 원격 worker).
     /// 200회 반복해 한 번이라도 줄이 섞이면 다음 시작이 패닉한다.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[ignore = "fileops-01 repro"]
     async fn two_concurrent_pushes_keep_journal_loadable() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("journal.jsonl");
