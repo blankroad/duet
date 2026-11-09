@@ -140,15 +140,14 @@ impl FrecencyStore {
 
     /// 부분문자열(경로, 대소문자 무시) 필터 후 score 내림차순 상위 `limit` 개.
     pub async fn query(&self, q: &str, limit: usize, now_ms: i64) -> Vec<FrecencyEntry> {
-        let ql = q.trim().to_lowercase();
+        // 경로·질의를 NFC 로 맞춘 뒤 비교(G-14) — macOS 에서 기록된 NFD 한글 경로도 찾게.
+        let ql = crate::core::search::nfc_key(q.trim()).to_lowercase();
         let v = self.inner.read().await;
         let mut matched: Vec<FrecencyEntry> = v
             .iter()
             .filter(|e| {
                 ql.is_empty()
-                    || e.location
-                        .path
-                        .to_string_lossy()
+                    || crate::core::search::nfc_key(&e.location.path.to_string_lossy())
                         .to_lowercase()
                         .contains(&ql)
             })
@@ -348,7 +347,6 @@ mod review_sync_compare_opus_frecency {
     }
 
     #[tokio::test]
-    #[ignore = "sync-compare repro: NFD 로 저장된 한글 경로(macOS 유래)는 NFC 질의로 안 잡힘"]
     async fn nfc_query_matches_nfd_korean_path() {
         let dir = tempdir().unwrap();
         let s = FrecencyStore::load_from(&dir.path().join("f.json"))

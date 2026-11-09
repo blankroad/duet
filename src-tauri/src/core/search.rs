@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::path::{Path, PathBuf};
 use tokio_util::sync::CancellationToken;
+use unicode_normalization::UnicodeNormalization;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct SearchOpts {
@@ -152,7 +153,7 @@ impl SearchBackend for LocalFilenameSearch {
                     Some(n) => n.to_string(),
                     None => continue,
                 };
-                if !matches_substring(&name, &pattern, opts.case_sensitive) {
+                if !name_matches(&name, &pattern, opts.case_sensitive) {
                     continue;
                 }
                 let parent = match path.parent() {
@@ -193,6 +194,32 @@ impl SearchBackend for LocalFilenameSearch {
         .await
         .map_err(|e| DuetError::Io(format!("search join: {e}")))?
     }
+}
+
+/// 이름 비교 키 — 유니코드 NFC 정규화(G-14). macOS 가 만든 한글 이름(NFD, 자모 분해)과
+/// 키보드 입력·Windows·Linux 의 한글(NFC)을 같은 이름으로 본다. 표시 이름은 원본 그대로 둔다.
+pub fn nfc_key(s: &str) -> String {
+    s.nfc().collect()
+}
+
+/// 검색어의 정규화 형태 — NFC, 그리고 NFD 가 다르면 NFD 도. 이름을 매번 정규화하지 않고
+/// (색인 수백만 건·원격 `find`) 검색어 쪽 두 형태로 찾는다. 한 이름 안에 두 형태가 섞인
+/// 경우는 다루지 않는다(실제로 거의 없음).
+pub fn pattern_forms(pattern: &str) -> Vec<String> {
+    let nfc: String = pattern.nfc().collect();
+    let nfd: String = pattern.nfd().collect();
+    if nfc == nfd {
+        vec![nfc]
+    } else {
+        vec![nfc, nfd]
+    }
+}
+
+/// 파일 이름이 검색어를 포함하는지 — 정규화 형태(NFC/NFD) 차이는 무시한다.
+fn name_matches(name: &str, pattern: &str, case_sensitive: bool) -> bool {
+    pattern_forms(pattern)
+        .iter()
+        .any(|p| matches_substring(name, p, case_sensitive))
 }
 
 fn matches_substring(name: &str, pattern: &str, case_sensitive: bool) -> bool {
@@ -387,6 +414,21 @@ impl SearchBackend for SshContentSearch {
     }
 }
 
+/// `find` 의 이름 조건 — 검색어의 NFC·NFD 형태 중 하나라도 맞으면 통과(G-14: 서버에
+/// macOS 에서 올린 NFD 한글 이름이 흔하다). 각 형태는 single-quote 안에 안전하게 넣는다.
+fn find_name_clause(pattern: &str, case_sensitive: bool) -> String {
+    let flag = if case_sensitive { "-name" } else { "-iname" };
+    let parts: Vec<String> = pattern_forms(pattern)
+        .iter()
+        .map(|p| format!("{flag} '*{}*'", sq_escape(p)))
+        .collect();
+    if parts.len() == 1 {
+        parts.concat()
+    } else {
+        format!("\\( {} \\)", parts.join(" -o "))
+    }
+}
+
 /// SSH 호스트의 `find` 명령으로 파일명 검색.
 /// pattern 은 shell-escape 후 `-iname '*<p>*'` 로 사용.
 pub struct SshFilenameSearch {
@@ -408,12 +450,6 @@ impl SearchBackend for SshFilenameSearch {
         let root_arg = shell_escape_path(root)?;
         // POSIX single-quote 안에서는 backslash 이스케이프가 무효(작은따옴표가 항상
         // 문자열을 종료) — 내용검색과 동일한 `sq_escape`(`'` → `'\''`)로 안전하게 임베드.
-        let pat_escaped = sq_escape(pattern);
-        let name_flag = if opts.case_sensitive {
-            "-name"
-        } else {
-            "-iname"
-        };
         let hidden_clause = if opts.include_hidden {
             ""
         } else {
@@ -439,8 +475,9 @@ impl SearchBackend for SshFilenameSearch {
         if let Some(before) = opts.modified_before_ms {
             extra.push_str(&format!(" ! -newermt '@{}'", before / 1000));
         }
+        let name_clause = find_name_clause(pattern, opts.case_sensitive);
         let cmd = format!(
-            "find {root_arg} {hidden_clause} {type_clause}{extra} {name_flag} '*{pat_escaped}*' 2>/dev/null | head -n {max}",
+            "find {root_arg} {hidden_clause} {type_clause}{extra} {name_clause} 2>/dev/null | head -n {max}",
             max = opts.max_results
         );
 
@@ -544,6 +581,48 @@ mod tests {
 
     fn write_file(dir: &Path, name: &str) {
         fs::write(dir.join(name), b"x").unwrap();
+    }
+
+    /// G-14: macOS 가 만든 NFD 한글 이름을 NFC 입력으로(그리고 반대로) 찾는다.
+    #[tokio::test]
+    async fn local_filename_ignores_nfc_nfd_difference() {
+        let dir = tempdir().unwrap();
+        let nfd: String = "회의록.txt".nfd().collect();
+        let nfc_name: String = "보고서.txt".nfc().collect();
+        write_file(dir.path(), &nfd);
+        write_file(dir.path(), &nfc_name);
+        for case_sensitive in [false, true] {
+            let opts = SearchOpts {
+                case_sensitive,
+                ..Default::default()
+            };
+            let q_nfc: String = "회의".nfc().collect();
+            let hits = LocalFilenameSearch
+                .search(dir.path(), &q_nfc, &opts, CancellationToken::new())
+                .await
+                .unwrap();
+            assert_eq!(hits.len(), 1, "NFC query → NFD name (cs={case_sensitive})");
+            // 표시 이름은 디스크의 원본 그대로.
+            assert_eq!(hits[0].name, nfd);
+            let q_nfd: String = "보고".nfd().collect();
+            let hits = LocalFilenameSearch
+                .search(dir.path(), &q_nfd, &opts, CancellationToken::new())
+                .await
+                .unwrap();
+            assert_eq!(hits.len(), 1, "NFD query → NFC name (cs={case_sensitive})");
+        }
+    }
+
+    #[test]
+    fn find_name_clause_includes_both_normalization_forms() {
+        assert_eq!(find_name_clause("abc", false), "-iname '*abc*'");
+        assert_eq!(find_name_clause("it's", true), "-name '*it'\\''s*'");
+        let nfc: String = "문서".nfc().collect();
+        let nfd: String = "문서".nfd().collect();
+        assert_eq!(
+            find_name_clause(&nfc, false),
+            format!("\\( -iname '*{nfc}*' -o -iname '*{nfd}*' \\)")
+        );
     }
 
     #[tokio::test]

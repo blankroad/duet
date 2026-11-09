@@ -105,7 +105,8 @@ impl CompactBuilder {
         let name_lower = p
             .path
             .file_name()
-            .map(|n| n.to_string_lossy().to_lowercase())
+            // NFC 로 정규화 후 소문자(G-14) — macOS NFD 한글 이름도 NFC 입력으로 찾게.
+            .map(|n| crate::core::search::nfc_key(&n.to_string_lossy()).to_lowercase())
             .unwrap_or_default();
         self.names_lower.push_str(&name_lower);
         self.name_off.push(self.names_lower.len() as u32);
@@ -409,7 +410,10 @@ fn run_query(
     pattern: &str,
     opts: &SearchOpts,
 ) -> Vec<SearchHit> {
-    let pat_lower = pattern.to_lowercase();
+    // 검색어의 NFC·NFD 두 형태로 찾는다(G-14). NFD 형태는 정규화 전에 만든 디스크 캐시
+    // (이름이 원본 그대로 소문자)와 대소문자 구분 모드(원본 이름)를 위한 것이다.
+    let forms = crate::core::search::pattern_forms(pattern);
+    let forms_lower: Vec<String> = forms.iter().map(|p| p.to_lowercase()).collect();
     let mut hits = Vec::new();
     let n = idx.count();
     for i in 0..n {
@@ -417,10 +421,10 @@ fn run_query(
         let matched = if opts.case_sensitive {
             // 대소문자 구분: 원본 파일명(경로 마지막 컴포넌트)으로 매칭.
             let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
-            name.contains(pattern)
+            forms.iter().any(|p| name.contains(p.as_str()))
         } else {
             let nl = &idx.names_lower[idx.name_off[i] as usize..idx.name_off[i + 1] as usize];
-            nl.contains(&pat_lower)
+            forms_lower.iter().any(|p| nl.contains(p.as_str()))
         };
         if !matched {
             continue;
@@ -577,6 +581,32 @@ mod tests {
         );
         assert_eq!(a, b);
         assert_ne!(a, local);
+    }
+
+    /// G-14: 색인 검색도 NFC/NFD 차이를 무시한다(대소문자 무시·구분 모두). 표시 이름은 원본.
+    #[tokio::test]
+    async fn query_ignores_nfc_nfd_difference() {
+        use unicode_normalization::UnicodeNormalization;
+        let dir = tempdir().unwrap();
+        let nfd: String = "회의록.txt".nfd().collect();
+        std::fs::write(dir.path().join(&nfd), b"x").unwrap();
+        let cache = tempdir().unwrap();
+        let idx = FileIndex::new(cache.path().to_path_buf());
+        idx.build_local(dir.path()).await.unwrap();
+        for case_sensitive in [false, true] {
+            let opts = SearchOpts {
+                case_sensitive,
+                ..Default::default()
+            };
+            let q: String = "회의".nfc().collect();
+            let hits = idx
+                .query(&SourceId::Local, dir.path(), &q, &opts)
+                .await
+                .unwrap()
+                .expect("indexed");
+            assert_eq!(hits.len(), 1, "cs={case_sensitive}");
+            assert_eq!(hits[0].name, nfd);
+        }
     }
 
     #[tokio::test]
