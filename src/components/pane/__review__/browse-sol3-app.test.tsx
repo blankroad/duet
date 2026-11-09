@@ -84,11 +84,12 @@ it("R3 control: startup local path succeeds when the restored tab is local", asy
   setStartupSession();
   startup.path = "/r3-startup-local";
   render(<App />);
-  // 시작 경로는 로컬 새 탭으로 열린다 — 탭이 먼저 생기고 목록은 그다음에 온다.
+  // 시작 경로는 로컬 새 탭으로 열린다. 스토어는 테스트 사이에 공유되므로(앞 테스트가 같은
+  // 경로 탭을 남김) 이번 실행의 목록 요청(beforeEach 에서 비움)을 기다린다.
+  await waitFor(() => expect(listCalls).toContain("local:/r3-startup-local"));
   await waitFor(() =>
     expect(tabL().entries.map((e) => e.name)).toContain("startup-target.txt"),
   );
-  expect(listCalls).toContain("local:/r3-startup-local");
   expect(tabL().location.path).toBe("/r3-startup-local");
   expect(tabL().location.source.kind).toBe("local");
 });
