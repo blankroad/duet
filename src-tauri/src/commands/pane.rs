@@ -56,3 +56,10 @@ pub async fn pane_watch_set(
         .await;
     Ok(())
 }
+
+/// 경로 입력칸·대화상자에 넣은 경로 문자열을 정리한다(따옴표·Windows 레지스트리 인자 보정).
+#[tauri::command]
+#[specta::specta]
+pub async fn path_parse_input(input: String, local: bool) -> Result<String, DuetError> {
+    Ok(crate::platform::parse_path_input(&input, local))
+}

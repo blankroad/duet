@@ -779,10 +779,11 @@ pub async fn open_in_duet_set(enabled: bool) -> Result<bool, DuetError> {
 /// 존재하지 않으면 None. cold start(`startup_open_path`)와 single-instance forward
 /// (`lib.rs` 의 플러그인 콜백)가 공유한다.
 pub(crate) fn resolve_open_path(arg: &str) -> Option<String> {
-    let p = PathBuf::from(arg);
+    let arg = crate::platform::parse_path_input(arg, true);
+    let p = PathBuf::from(&arg);
     let meta = std::fs::metadata(&p).ok()?;
     if meta.is_dir() {
-        Some(arg.to_string())
+        Some(arg)
     } else {
         p.parent().and_then(|x| x.to_str()).map(str::to_owned)
     }
@@ -900,10 +901,13 @@ mod review_shell_settings {
     }
 
     #[test]
-    fn already_parsed_argv_must_not_have_wrapping_quotes() {
+    fn quoted_startup_directory_resolves() {
         let temp = tempfile::tempdir().unwrap();
         let quoted = format!("\"{}\"", temp.path().display());
-        assert_eq!(resolve_open_path(&quoted), None);
+        assert_eq!(
+            resolve_open_path(&quoted),
+            Some(temp.path().to_string_lossy().into_owned())
+        );
         assert_eq!(resolve_open_path("C:\\a b\""), None);
         assert_eq!(resolve_open_path("C:\\a b\\\""), None);
     }

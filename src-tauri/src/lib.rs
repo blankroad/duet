@@ -35,6 +35,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::bookmarks::bookmarks_rename,
             commands::bookmarks::bookmarks_reorder,
             commands::pane::list_directory,
+            commands::pane::path_parse_input,
             commands::pane::pane_watch_set,
             commands::system::home_directory,
             commands::system::ssh_home_directory,
