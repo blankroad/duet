@@ -68,6 +68,35 @@ impl ShellMenuRegistry {
     }
 }
 
+/// 사용자가 입력·붙여넣기했거나 OS가 넘겨 준 경로 문자열을 정리한다.
+pub fn parse_path_input(input: &str, local: bool) -> String {
+    parse_path_input_for(input, local, cfg!(windows))
+}
+
+pub(crate) fn parse_path_input_for(input: &str, local: bool, windows: bool) -> String {
+    let input = input.trim();
+    if let Some(inner) = input.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
+        // 인용 안의 공백은 파일 이름의 일부일 수 있으므로 다시 trim 하지 않는다.
+        return inner.to_owned();
+    }
+    if local && windows && !input.starts_with('"') {
+        if let Some(prefix) = input.strip_suffix('"') {
+            // 레지스트리 인자의 끝 \\"가 argv에서 따옴표로 바뀐 경우 구분자를 복원한다.
+            return format!("{prefix}\\");
+        }
+    }
+    input.to_owned()
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn strip_verbatim_prefix(s: &str) -> String {
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else {
+        s.strip_prefix(r"\\?\").unwrap_or(s).to_owned()
+    }
+}
+
 /// 로컬 절대경로 보정 — Windows 에서 드라이브 접두(`C:`)가 없는 경로(`\Users\x` 등)를
 /// 현재 드라이브 기준 절대경로로 만든다. 이미 절대(드라이브 포함)면 no-op, 비-Windows 도 그대로.
 ///
@@ -79,10 +108,9 @@ pub fn local_abs(p: std::path::PathBuf) -> std::path::PathBuf {
     {
         if !p.is_absolute() {
             if let Ok(abs) = std::fs::canonicalize(&p) {
-                // canonicalize 는 `\\?\C:\...` verbatim 접두를 붙이므로 제거해 일반 경로로.
-                let s = abs.to_string_lossy();
-                if let Some(rest) = s.strip_prefix(r"\\?\") {
-                    return std::path::PathBuf::from(rest);
+                // 드라이브와 UNC verbatim 접두를 각각 일반 절대경로로 복원한다.
+                if let Some(s) = abs.to_str() {
+                    return std::path::PathBuf::from(strip_verbatim_prefix(s));
                 }
                 return abs;
             }
@@ -885,6 +913,48 @@ mod tests {
     use super::*;
 
     #[test]
+    fn pasted_paths_strip_one_pair_without_trimming_the_name() {
+        for (input, expected) in [
+            (
+                r#"  "C:\한글 폴더\space name"  "#,
+                r"C:\한글 폴더\space name",
+            ),
+            (r#""/srv/a b""#, "/srv/a b"),
+            ("   ", ""),
+            (r#""""#, ""),
+            (r#""abc"#, r#""abc"#),
+            (r#"" a ""#, " a "),
+            (r#""a"b""#, r#"a"b"#),
+        ] {
+            assert_eq!(parse_path_input_for(input, false, false), expected);
+        }
+    }
+
+    #[test]
+    fn registry_trailing_quote_restores_a_separator_only_on_local_windows() {
+        for (input, expected) in [
+            (r#"C:""#, r"C:\"),
+            (r#"C:\a b""#, r"C:\a b\"),
+            (r#"\\server\share""#, r"\\server\share\"),
+        ] {
+            assert_eq!(parse_path_input_for(input, true, true), expected);
+            assert_eq!(parse_path_input_for(input, true, false), input);
+            assert_eq!(parse_path_input_for(input, false, true), input);
+        }
+    }
+
+    #[test]
+    fn verbatim_prefix_preserves_unc_root() {
+        assert_eq!(
+            strip_verbatim_prefix(r"\\?\UNC\srv\share\x"),
+            r"\\srv\share\x"
+        );
+        assert_eq!(strip_verbatim_prefix(r"\\?\C:\x"), r"C:\x");
+        assert_eq!(strip_verbatim_prefix(r"\\srv\share\x"), r"\\srv\share\x");
+        assert_eq!(strip_verbatim_prefix("/tmp/x"), "/tmp/x");
+    }
+
+    #[test]
     fn windows_drive_token_extracts_letter() {
         assert_eq!(
             windows_drive_token(Path::new("E:\\")).as_deref(),
@@ -972,6 +1042,17 @@ mod review_shell_settings {
             r"relative\dir",
         ] {
             assert_eq!(parse_registered_argument(path), path);
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn registered_paths_are_restored_by_path_input_parser() {
+        for path in ["C:\\", "C:\\a b\\", "\\\\server\\share\\"] {
+            assert_eq!(
+                super::parse_path_input(&parse_registered_argument(path), true),
+                path
+            );
         }
     }
 
