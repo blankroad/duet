@@ -23,6 +23,7 @@ import { rememberElevatable } from "@/lib/elevatePending";
 import i18n from "@/i18n";
 import { childLocation, sameLocation, sourceKey } from "@/lib/entryDnd";
 import { explainError, formatErr } from "@/lib/error";
+import { showError } from "@/lib/errorToast";
 import { isVirtualTrash } from "@/lib/trashView";
 import { rememberExtract } from "@/lib/extractPending";
 import { basename } from "@/lib/paths";
@@ -294,10 +295,7 @@ export async function triggerCompare(
   if (r.status === "error") {
     // 취소는 조용히 닫기, 그 외는 토스트.
     if (r.error.kind !== "Cancelled")
-      showToast(
-        i18n.t("toast.compareError", { err: formatErr(r.error) }),
-        "error",
-      );
+      showError("toast.compareError", r.error, { toast: showToast });
     open({ kind: "none" });
     return;
   }
@@ -321,10 +319,7 @@ export async function triggerThreeWay(
   const baseLoc: Location = { source: left.source, path: input.trim() };
   const r = await commands.fsCompareThreeWay(baseLoc, left, right);
   if (r.status === "error") {
-    showToast(
-      i18n.t("toast.threeWayError", { err: formatErr(r.error) }),
-      "error",
-    );
+    showError("toast.threeWayError", r.error, { toast: showToast });
     return;
   }
   open({ kind: "three-way", plan: r.data });
@@ -341,7 +336,7 @@ export async function triggerSync(
   const dst = activeTab(state, opposite).location;
   const r = await commands.fsSyncPlan(src, dst);
   if (r.status === "error") {
-    showToast(i18n.t("toast.syncError", { err: formatErr(r.error) }), "error");
+    showError("toast.syncError", r.error, { toast: showToast });
     return;
   }
   const label = (loc: Location) => basename(String(loc.path));
@@ -443,11 +438,10 @@ export async function executeTransfer(
       ? await commands.fsMoveExecute(plan as MovePlan, policy)
       : await commands.fsCopyExecute(plan as CopyPlan, policy);
   if (r.status !== "ok") {
-    showToast(
-      i18n.t(mode === "move" ? "toast.moveFailed" : "toast.copyFailed", {
-        err: formatErr(r.error),
-      }),
-      "error",
+    showError(
+      mode === "move" ? "toast.moveFailed" : "toast.copyFailed",
+      r.error,
+      { toast: showToast },
     );
     return;
   }
@@ -499,10 +493,10 @@ export async function planTransferTo(
     if (mode === "move") {
       const r = await commands.fsMovePlan(targets, dst);
       if (r.status !== "ok") {
-        showToast(
-          i18n.t("toast.movePlanFailed", { err: formatErr(r.error) }),
-          "error",
-        );
+        showError("toast.movePlanFailed", r.error, {
+          path: targets.length === 1 ? targets[0]!.name : null,
+          toast: showToast,
+        });
         return;
       }
       if (needsTransferConfirm(r.data.conflicts.length > 0))
@@ -519,10 +513,10 @@ export async function planTransferTo(
     } else {
       const r = await commands.fsCopyPlan(targets, dst);
       if (r.status !== "ok") {
-        showToast(
-          i18n.t("toast.copyPlanFailed", { err: formatErr(r.error) }),
-          "error",
-        );
+        showError("toast.copyPlanFailed", r.error, {
+          path: targets.length === 1 ? targets[0]!.name : null,
+          toast: showToast,
+        });
         return;
       }
       if (needsTransferConfirm(r.data.conflicts.length > 0))
@@ -709,10 +703,10 @@ export async function triggerDelete(
   }
   const r = await commands.fsDeletePlan(targets, mode);
   if (r.status !== "ok") {
-    showToast(
-      i18n.t("toast.deletePlanFailed", { err: formatErr(r.error) }),
-      "error",
-    );
+    showError("toast.deletePlanFailed", r.error, {
+      path: targets.length === 1 ? targets[0]!.name : null,
+      toast: showToast,
+    });
     return;
   }
   // 휴지통 삭제는 Ctrl+Z 로 되돌아오므로 확인을 끌 수 있다(설정). 영구 삭제는
@@ -726,10 +720,10 @@ export async function triggerDelete(
         confirmWord: "",
       });
     else
-      showToast(
-        i18n.t("toast.deleteFailed", { err: formatErr(exec.error) }),
-        "error",
-      );
+      showError("toast.deleteFailed", exec.error, {
+        path: targets.length === 1 ? targets[0]!.name : null,
+        toast: showToast,
+      });
     return;
   }
   open({
