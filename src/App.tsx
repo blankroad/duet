@@ -1992,9 +1992,13 @@ function App() {
         try {
           r = await quickReconnect(alias);
         } catch (e) {
+          // 원문을 그대로 넘긴다 — 여기서 쉬운 문장으로 바꾸면 알림 "자세히"에 원문이 없다.
           r = {
             kind: "failed",
-            error: { kind: "ConnectionFailed", message: formatErr(e) },
+            error: {
+              kind: "ConnectionFailed",
+              message: explainError(e).detail || formatErr(e),
+            },
           };
         }
         if (r.kind === "ok") {
