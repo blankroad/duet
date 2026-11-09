@@ -1874,30 +1874,28 @@ fn binary_preview(total_size: u64) -> PreviewData {
     }
 }
 
-/// 바이너리 휴리스틱 — NUL 바이트(SQLite 등 텍스트 헤더 가진 바이너리)나
-/// 비텍스트 제어문자 비율이 높으면 true. 빈 입력은 false(빈 텍스트로 표시).
-fn looks_binary(bytes: &[u8]) -> bool {
-    if bytes.is_empty() {
-        return false;
-    }
-    // 실제 텍스트 파일엔 NUL 이 거의 없음 — 강한 신호.
-    if bytes.contains(&0) {
+/// 바이너리 휴리스틱 — 전체 입력의 NUL이나 첫 8192자 중 비텍스트 C0 제어문자
+/// 30% 초과면 true. BOM 없는 바이트는 값 그대로 문자에 대응시킨다. 빈 입력은 false.
+fn looks_binary(chars: impl Iterator<Item = char> + Clone) -> bool {
+    if chars.clone().any(|c| c == '\0') {
         return true;
     }
-    // \t\n\r 외 C0 제어문자 비율이 과하면 바이너리.
-    let sample = &bytes[..bytes.len().min(8192)];
-    let ctrl = sample
-        .iter()
-        .filter(|&&b| b < 0x20 && b != b'\t' && b != b'\n' && b != b'\r')
-        .count();
-    ctrl * 100 / sample.len() > 30
+    let (len, ctrl) = chars.take(8192).fold((0, 0), |(len, ctrl), c| {
+        let control = c < '\u{20}' && !matches!(c, '\t' | '\n' | '\r');
+        (len + 1, ctrl + usize::from(control))
+    });
+    ctrl * 100 > len * 30
 }
 
 /// BOM을 우선 처리하고 UTF-8/CP949를 시도한다. 디코딩 실패 시에도 본문을 버리지 않는다.
 fn decode_text(bytes: &[u8], truncated: bool, total_size: u64) -> PreviewData {
     let text = if let Some((encoding, bom_len)) = encoding_rs::Encoding::for_bom(bytes) {
-        decode_bom_text(&bytes[bom_len..], encoding, truncated)
-    } else if looks_binary(bytes) {
+        let text = decode_bom_text(&bytes[bom_len..], encoding, truncated);
+        if looks_binary(text.chars()) {
+            return binary_preview(total_size);
+        }
+        text
+    } else if looks_binary(bytes.iter().copied().map(char::from)) {
         return binary_preview(total_size);
     } else {
         decode_unmarked_text(bytes, truncated)
@@ -2039,6 +2037,59 @@ mod preview_tests {
         let d = decode_text(&bytes, false, 4096);
         assert_eq!(d.kind, PreviewKind::Binary);
         assert!(d.text.is_none());
+    }
+
+    #[test]
+    fn bom_prefixed_binary_data_is_binary() {
+        for text in ["a\0b", "\u{01}\u{02}\u{07}\u{1b}\u{1f}abc"] {
+            let mut little_endian = vec![0xFF, 0xFE];
+            let mut big_endian = vec![0xFE, 0xFF];
+            for unit in text.encode_utf16() {
+                little_endian.extend_from_slice(&unit.to_le_bytes());
+                big_endian.extend_from_slice(&unit.to_be_bytes());
+            }
+            let mut utf8 = vec![0xEF, 0xBB, 0xBF];
+            utf8.extend_from_slice(text.as_bytes());
+            for bytes in [little_endian, big_endian, utf8] {
+                for truncated in [false, true] {
+                    let d = decode_text(&bytes, truncated, 4096);
+                    assert_eq!(d.kind, PreviewKind::Binary, "bytes={bytes:?}");
+                    assert!(d.text.is_none());
+                    assert_eq!(d.total_size, 4096);
+                    assert!(!d.truncated);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bom_text_binary_threshold_counts_decoded_characters() {
+        for (text, expected) in [
+            (
+                format!("{}{}", "가".repeat(70), "\u{01}".repeat(30)),
+                PreviewKind::Text,
+            ),
+            (
+                format!("{}{}", "가".repeat(70), "\u{01}".repeat(31)),
+                PreviewKind::Binary,
+            ),
+            (
+                format!("{}{}", "가".repeat(8192), "\u{01}".repeat(8192)),
+                PreviewKind::Text,
+            ),
+            (format!("{}\0", "가".repeat(8192)), PreviewKind::Binary),
+            ("한글\t\n\r".repeat(30), PreviewKind::Text),
+        ] {
+            let mut bytes = vec![0xFF, 0xFE];
+            for unit in text.encode_utf16() {
+                bytes.extend_from_slice(&unit.to_le_bytes());
+            }
+            let d = decode_text(&bytes, false, bytes.len() as u64);
+            assert_eq!(d.kind, expected);
+            if expected == PreviewKind::Text {
+                assert_eq!(d.text.as_deref(), Some(text.as_str()));
+            }
+        }
     }
 
     #[test]
