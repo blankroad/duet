@@ -62,7 +62,8 @@ pub fn unpack<R: Read>(reader: R, dest: &Path) -> Result<UnpackReport, DuetError
                 .link_name_bytes()
                 .map(|b| link_target(&b))
                 .ok_or_else(|| DuetError::Io(format!("{shown}: link has no target")))?;
-            match links::create_symlink(&target, &dst) {
+            let is_dir = link_target_is_dir(dest, &rel, &target);
+            match links::create_symlink(&target, &dst, is_dir) {
                 Ok(()) => {}
                 Err(e) if links::is_link_not_permitted(&e) => report.skipped_links.push(shown),
                 Err(e) => return Err(write_error(&shown, &e)),
@@ -218,6 +219,36 @@ fn link_target(raw: &[u8]) -> PathBuf {
         target.push(part);
     }
     target
+}
+
+/// 링크 `link_rel`(`dest` 기준)이 가리킬 `target` 이 해제 폴더 안에 **이미 풀린 폴더**인지
+/// — Windows 링크 종류(파일/폴더)를 고르는 데 쓴다(archive-33).
+/// `target` 을 링크 위치 기준으로 조각 단위로 풀고(`..` 는 한 단계 위), 절대 경로·해제 폴더
+/// 밖으로 나감·중간이나 끝이 링크인 경우는 들여다보지 않고 false(파일 링크)다. 모두 lstat.
+/// 한계: 대상 폴더가 아카이브에서 링크보다 뒤에 나오면 아직 없어 false 다.
+pub(crate) fn link_target_is_dir(dest: &Path, link_rel: &Path, target: &Path) -> bool {
+    use std::path::Component;
+    let mut rel = link_rel.parent().map(Path::to_path_buf).unwrap_or_default();
+    for part in target.components() {
+        match part {
+            Component::Normal(name) => rel.push(name),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !rel.pop() {
+                    return false; // 해제 폴더 밖.
+                }
+            }
+            Component::RootDir | Component::Prefix(_) => return false,
+        }
+    }
+    let mut cur = dest.to_path_buf();
+    for part in rel.components() {
+        cur.push(part);
+        if !std::fs::symlink_metadata(&cur).is_ok_and(|m| m.is_dir()) {
+            return false; // 없음·파일·링크(따라가지 않는다).
+        }
+    }
+    true // 모든 조각이 폴더(대상이 해제 폴더 자체인 경우 포함).
 }
 
 /// `rel` 의 상위 폴더 중 이미 링크인 것이 있으면 거부 — 앞 항목이 만든 링크를 거쳐
@@ -757,6 +788,37 @@ mod tests {
         let dest = tempfile::tempdir().unwrap();
         assert!(unpack(&tar[..], dest.path()).is_err());
         assert_ne!(mode_of(&dest.path().join("a")) & 0o200, 0);
+    }
+
+    #[test]
+    fn link_target_is_dir_only_for_folders_inside_dest() {
+        let dest = tempfile::tempdir().unwrap();
+        let d = dest.path();
+        std::fs::create_dir_all(d.join("pkg/lib")).unwrap();
+        std::fs::write(d.join("pkg/file.txt"), b"x").unwrap();
+        let at = |link: &str, target: &str| {
+            link_target_is_dir(d, Path::new(link), &link_target(target.as_bytes()))
+        };
+        assert!(at("pkg/l", "lib"));
+        assert!(at("pkg/lib/l", "../lib/."));
+        assert!(at("pkg/l", ".."), "해제 폴더 자체도 폴더");
+        assert!(!at("pkg/l", "file.txt"));
+        assert!(!at("pkg/l", "missing"));
+        assert!(!at("pkg/l", "../.."), "해제 폴더 밖");
+        assert!(!at("l", "/"), "절대 경로는 보지 않는다");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn link_target_is_dir_does_not_follow_links() {
+        let outside = tempfile::tempdir().unwrap();
+        let dest = tempfile::tempdir().unwrap();
+        let d = dest.path();
+        std::fs::create_dir(outside.path().join("sub")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), d.join("out")).unwrap();
+        std::os::unix::fs::symlink(outside.path().join("sub"), d.join("dirlink")).unwrap();
+        assert!(!link_target_is_dir(d, Path::new("l"), Path::new("out/sub")));
+        assert!(!link_target_is_dir(d, Path::new("l"), Path::new("dirlink")));
     }
 
     #[test]
