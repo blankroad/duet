@@ -1,8 +1,7 @@
 import { startDrag } from "@crabnebula/tauri-plugin-drag";
 import { commands } from "@/types/bindings";
 import type { EntryRef } from "@/types/bindings";
-import { useToast } from "@/stores/toast";
-import { formatErr } from "@/lib/error";
+import { showError } from "@/lib/errorToast";
 
 /**
  * duet → OS(탐색기/파인더 등) 파일 드래그-아웃.
@@ -29,7 +28,9 @@ export async function resolveDragPaths(items: EntryRef[]): Promise<string[]> {
   if (items.length === 0) return [];
   const r = await commands.localAbsPaths(items);
   if (r.status !== "ok") {
-    useToast.getState().show(`Drag out: ${formatErr(r.error)}`, "error");
+    showError("toast.dragOutFailed", r.error, {
+      path: items.length === 1 ? items[0]?.name : undefined,
+    });
     return [];
   }
   return r.data;
@@ -42,6 +43,8 @@ export async function resolveDragPaths(items: EntryRef[]): Promise<string[]> {
 export function startDragWithPaths(paths: string[]): void {
   if (paths.length === 0) return;
   void startDrag({ item: paths, icon: DRAG_ICON, mode: "copy" }).catch((e) => {
-    useToast.getState().show(`Drag out failed: ${formatErr(e)}`, "error");
+    showError("toast.dragOutFailed", e, {
+      path: paths.length === 1 ? paths[0] : undefined,
+    });
   });
 }

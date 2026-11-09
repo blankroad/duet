@@ -1,6 +1,5 @@
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { useToast } from "@/stores/toast";
-import { formatErr } from "@/lib/error";
+import { showError } from "@/lib/errorToast";
 import i18n from "@/i18n";
 
 /**
@@ -34,9 +33,9 @@ export async function toggleDropTray(): Promise<void> {
       visibleOnAllWorkspaces: true,
     });
     void w.once("tauri://error", (e) => {
-      useToast.getState().show(`Drop tray: ${formatErr(e.payload)}`, "error");
+      showError("toast.dropTrayFailed", e.payload);
     });
   } catch (e) {
-    useToast.getState().show(`Drop tray: ${formatErr(e)}`, "error");
+    showError("toast.dropTrayFailed", e);
   }
 }

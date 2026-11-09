@@ -7,8 +7,7 @@ import clsx from "clsx";
 import { commands } from "@/types/bindings";
 import { applyTheme } from "@/lib/theme";
 import { basename } from "@/lib/paths";
-import { useToast } from "@/stores/toast";
-import { formatErr } from "@/lib/error";
+import { showError } from "@/lib/errorToast";
 import { Toast } from "@/components/Toast";
 
 /**
@@ -97,7 +96,9 @@ export function DropTray() {
         });
       }
     }).catch((e) => {
-      useToast.getState().show(`Drag out failed: ${formatErr(e)}`, "error");
+      showError("toast.dragOutFailed", e, {
+        path: paths.length === 1 ? paths[0] : undefined,
+      });
     });
   };
 
