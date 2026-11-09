@@ -253,25 +253,33 @@ export function defaultOrderFor(key: SortKey): SortOrder {
   return key === "mtime" || key === "size" ? "desc" : "asc";
 }
 
-const initialTab = (location: Location = home()): TabState => ({
-  id: newTabId(),
-  location,
-  entries: [],
-  cursorIndex: -1,
-  selected: new Set(),
-  loadedAt: 0,
-  sortKey: tabDefaults.sortKey,
-  sortOrder: defaultOrderFor(tabDefaults.sortKey),
-  showHidden: tabDefaults.showHidden,
-  viewMode: tabDefaults.viewMode,
-  gridCols: 1,
-  loading: false,
-  filter: "",
-  filterFocused: false,
-  dirSizes: {},
-  history: { stack: [location], index: 0 },
-  pinned: false,
-});
+/**
+ * 새 탭. 경로는 `setEntries` 와 같은 `normalizePath` 로 저장한다 — 원문(`/a/`,
+ * `C:\a\`, `\\srv\share\`)을 그대로 두면 첫 목록이 정규화된 칸을 히스토리에 한 번 더
+ * 쌓고, 뒤로 성공 시 index 확정 검사가 그 칸을 다른 위치로 봤다(R3-1).
+ */
+const initialTab = (raw: Location = home()): TabState => {
+  const location: Location = { ...raw, path: normalizePath(raw.path) };
+  return {
+    id: newTabId(),
+    location,
+    entries: [],
+    cursorIndex: -1,
+    selected: new Set(),
+    loadedAt: 0,
+    sortKey: tabDefaults.sortKey,
+    sortOrder: defaultOrderFor(tabDefaults.sortKey),
+    showHidden: tabDefaults.showHidden,
+    viewMode: tabDefaults.viewMode,
+    gridCols: 1,
+    loading: false,
+    filter: "",
+    filterFocused: false,
+    dirSizes: {},
+    history: { stack: [location], index: 0 },
+    pinned: false,
+  };
+};
 
 const initialPane = (): PaneState => ({
   tabs: [initialTab()],
@@ -586,7 +594,8 @@ export const usePanes = create<PanesState>((set, get) => ({
         history = { stack: trimmed, index: trimmed.length - 1 };
       } else if (opts?.historyIndex !== undefined) {
         const at = history.stack[opts.historyIndex];
-        if (at && sameLocation(at, loc))
+        // 옛 세션 등 정규화 전에 쌓인 칸도 같은 위치로 본다.
+        if (at && sameLocation({ ...at, path: normalizePath(at.path) }, loc))
           history = { ...history, index: opts.historyIndex };
       }
       // 아카이브/휴지통 루트 밖으로 이동하면 컨텍스트 해제 (내부 하위폴더면 유지).

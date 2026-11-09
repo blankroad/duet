@@ -444,6 +444,68 @@ describe("panes — history", () => {
     expect(t.history.stack.map((l) => l.path)).toEqual(["/", "/a"]);
   });
 
+  describe.each([
+    ["/review/trailing/", "/review/trailing"],
+    ["C:\\review\\trailing\\", "C:\\review\\trailing"],
+    ["\\\\server\\share\\", "\\\\server\\share"],
+  ])("tab opened at %s (R3-1)", (raw, normalized) => {
+    const local = (path: string) => ({
+      source: { kind: "local" as const },
+      path,
+    });
+
+    it("first listing does not push a duplicate history slot", () => {
+      usePanes.getState().openTab("left", local(raw));
+      let t = activeTab(usePanes.getState(), "left");
+      expect(t.location.path).toBe(normalized);
+      usePanes.getState().setEntries("left", local(raw), []);
+      t = activeTab(usePanes.getState(), "left");
+      expect(t.history.stack.map((l) => l.path)).toEqual([normalized]);
+      expect(t.history.index).toBe(0);
+      expect(usePanes.getState().peekHistory("left", -1)).toBeNull();
+    });
+
+    it("back to the opening slot commits the index", () => {
+      usePanes.getState().openTab("left", local(raw));
+      usePanes.getState().setEntries("left", local(raw), []);
+      usePanes.getState().setEntries("left", local("/elsewhere"), []);
+      const step = usePanes.getState().peekHistory("left", -1)!;
+      expect(step.index).toBe(0);
+      usePanes.getState().setEntries("left", step.location, [], {
+        tabId: step.tabId,
+        pushHistory: false,
+        historyIndex: step.index,
+      });
+      const t = activeTab(usePanes.getState(), "left");
+      expect(t.history.index).toBe(0);
+      expect(t.location.path).toBe(normalized);
+    });
+
+    it("commit accepts a slot stored before normalization", () => {
+      const tab = activeTab(usePanes.getState(), "left");
+      usePanes.setState((s) => ({
+        panes: {
+          ...s.panes,
+          left: {
+            activeTabIndex: 0,
+            tabs: [
+              {
+                ...tab,
+                location: local("/elsewhere"),
+                history: { stack: [local(raw), local("/elsewhere")], index: 1 },
+              },
+            ],
+          },
+        },
+      }));
+      usePanes.getState().setEntries("left", local(raw), [], {
+        pushHistory: false,
+        historyIndex: 0,
+      });
+      expect(activeTab(usePanes.getState(), "left").history.index).toBe(0);
+    });
+  });
+
   it("peekHistory(-1) returns the previous location without moving the index", () => {
     usePanes
       .getState()
