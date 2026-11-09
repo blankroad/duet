@@ -1280,7 +1280,6 @@ fn opus2_cp949_zip(path: &Path) {
 
 /// 해제 + browse 모두.
 #[tokio::test]
-#[ignore = "archive-04 repro"]
 async fn opus2_zip_cp949_names_extract_and_browse() {
     let root = tempfile::tempdir().unwrap();
     let work = root.path().join("work");
@@ -1455,7 +1454,6 @@ fn opus2_sevenz_case_collision_not_silent() {
 /// 픽스처 opus-zipcrypto-link.zip: Info-ZIP `zip -y -P s3cret` — run.sh(0755) + link -> run.sh.
 #[cfg(unix)]
 #[test]
-#[ignore = "archive-18 repro"]
 fn opus2_zipcrypto_preserves_link_and_exec() {
     use std::os::unix::fs::PermissionsExt;
     let d = tempfile::tempdir().unwrap();

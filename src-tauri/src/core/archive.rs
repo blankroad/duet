@@ -11,6 +11,7 @@
 use crate::core::copy_strategy::{shell_escape_path, shell_escape_str};
 use crate::core::ops::{self, OpCtx};
 use crate::core::tar_unpack::{self, UnpackReport};
+use crate::core::zip_unpack;
 use crate::fs::{FileSystem, SshFs};
 use crate::services::connection_pool::ConnectionPool;
 use crate::services::journal::{BackupRestore, JournalEntry, OpKind, UndoAction};
@@ -354,23 +355,10 @@ fn extract_local_blocking(
         std::fs::File::open(archive).map_err(|e| DuetError::Io(format!("open archive: {e}")))?;
     let mut report = UnpackReport::default();
     match fmt.layout() {
-        Layout::Zip => {
-            let mut zip =
-                zip::ZipArchive::new(file).map_err(|e| DuetError::Io(format!("zip open: {e}")))?;
-            // 암호화 항목이 하나라도 있으면(by_index_raw=복호화 안 함) 암호 경로로.
-            let encrypted =
-                (0..zip.len()).any(|i| zip.by_index_raw(i).map(|e| e.encrypted()).unwrap_or(false));
-            if encrypted {
-                let pw = password.ok_or(DuetError::NeedPassword)?;
-                extract_zip_with_password(&mut zip, dest, pw)?;
-            } else {
-                // zip crate 의 extract 는 enclosed_name 으로 zip-slip 방지.
-                zip.extract(dest)
-                    .map_err(|e| DuetError::Io(format!("zip extract: {e}")))?;
-            }
-        }
-        // 항목 단위로 직접 푼다 — Windows 의 링크 권한·쓸 수 없는 이름·canonicalize 실패에도
-        // 전체가 실패하지 않게 (core::tar_unpack 참조).
+        // zip·7z·tar 모두 항목 단위로 직접 푼다 — Windows 의 링크 권한·쓸 수 없는 이름·
+        // canonicalize 실패에도 전체가 실패하지 않게 (core::tar_unpack·core::zip_unpack 참조).
+        // zip·7z 는 경로 기반 — 위에서 연 file 은 존재/읽기 가능 검증만 겸한다.
+        Layout::Zip => report = zip_unpack::unpack_zip(archive, dest, password)?,
         Layout::Tar(codec) => report = tar_unpack::unpack(decode_reader(file, codec)?, dest)?,
         Layout::Single(codec) => {
             // 단일 파일 → dest/<압축 확장자 뗀 이름>.
@@ -385,8 +373,7 @@ fn extract_local_blocking(
             std::io::copy(&mut reader, &mut out)
                 .map_err(|e| DuetError::Io(format!("decompress: {e}")))?;
         }
-        // 경로 기반 API — 위에서 연 file 은 사용 안 함(존재/읽기 가능 검증만 겸함).
-        Layout::SevenZ => extract_sevenz(archive, dest, password)?,
+        Layout::SevenZ => report = extract_sevenz(archive, dest, password)?,
         Layout::Rar => extract_rar(archive, dest, password)?,
     }
     Ok(report)
@@ -443,21 +430,14 @@ impl<R: BufRead> Read for ZstdFrames<R> {
     }
 }
 
-/// 7z 해제 — sevenz-rust2 (순수 Rust). 암호 아카이브인데 password 없으면 NeedPassword.
-fn extract_sevenz(archive: &Path, dest: &Path, password: Option<&str>) -> Result<(), DuetError> {
-    let result = match password {
-        Some(pw) => sevenz_rust2::decompress_file_with_password(archive, dest, pw.into()),
-        None => sevenz_rust2::decompress_file(archive, dest),
-    };
-    result.map_err(|e| {
-        let msg = e.to_string();
-        // 라이브러리가 암호 필요/오류를 별도 variant 로 항상 안 주므로 메시지로 판정.
-        if msg.to_ascii_lowercase().contains("password") {
-            DuetError::NeedPassword
-        } else {
-            DuetError::Io(format!("7z extract: {msg}"))
-        }
-    })
+/// 7z 해제 — sevenz-rust2 로 항목 단위(core::zip_unpack). 암호 아카이브인데 password 없거나
+/// 틀리면 NeedPassword. `dest` 가 없으면 만든다.
+fn extract_sevenz(
+    archive: &Path,
+    dest: &Path,
+    password: Option<&str>,
+) -> Result<UnpackReport, DuetError> {
+    zip_unpack::unpack_sevenz(archive, dest, password)
 }
 
 /// rar 해제 — 공식 unrar 라이브러리 래퍼(읽기 전용).
@@ -511,38 +491,6 @@ fn map_rar_err(e: unrar::error::UnrarError) -> DuetError {
         Code::MissingPassword | Code::BadPassword => DuetError::NeedPassword,
         _ => DuetError::Io(format!("rar: {e}")),
     }
-}
-
-/// 암호 zip 해제 — 각 항목을 by_index_decrypt 로 복호화해 zip-slip 안전하게 dest 에 쓴다.
-/// (zip crate 의 extract() 는 암호를 못 받으므로 수동.) 암호 틀림은 NeedPassword.
-fn extract_zip_with_password(
-    zip: &mut zip::ZipArchive<std::fs::File>,
-    dest: &Path,
-    password: &str,
-) -> Result<(), DuetError> {
-    for i in 0..zip.len() {
-        let mut entry = match zip.by_index_decrypt(i, password.as_bytes()) {
-            Ok(e) => e,
-            Err(zip::result::ZipError::InvalidPassword) => return Err(DuetError::NeedPassword),
-            Err(e) => return Err(DuetError::Io(format!("zip decrypt: {e}"))),
-        };
-        // enclosed_name = zip-slip 안전 상대경로(.. 탈출 시 None → 건너뜀).
-        let out = match entry.enclosed_name() {
-            Some(rel) => dest.join(rel),
-            None => continue,
-        };
-        if entry.is_dir() {
-            std::fs::create_dir_all(&out).map_err(|e| DuetError::Io(format!("mkdir: {e}")))?;
-        } else {
-            if let Some(p) = out.parent() {
-                std::fs::create_dir_all(p).map_err(|e| DuetError::Io(format!("mkdir: {e}")))?;
-            }
-            let mut f =
-                std::fs::File::create(&out).map_err(|e| DuetError::Io(format!("create: {e}")))?;
-            std::io::copy(&mut entry, &mut f).map_err(|e| DuetError::Io(format!("write: {e}")))?;
-        }
-    }
-    Ok(())
 }
 
 /// 호스트의 unzip/tar 해제 명령 문자열 (인자 shell-escape). 원격은 zip·tar 계열만.

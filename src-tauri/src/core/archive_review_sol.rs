@@ -85,7 +85,6 @@ fn names(d: &Path) -> Vec<String> {
     names
 }
 #[test]
-#[ignore = "archive-04 repro"]
 fn sol_zip_cp949_names() {
     let (d, r) = fixture_extract("sol-cp949.zip");
     r.unwrap();
@@ -98,7 +97,7 @@ fn sol_zip_cp949_names() {
     assert!(d.path().join("폴더/문서.txt").exists());
 }
 #[test]
-#[ignore = "archive-04 repro"]
+#[ignore = "archive-04: Shift-JIS 는 CP949 와 구분 불가 — 범위 밖 (core/zip_names.rs 모듈 설명)"]
 fn sol_zip_sjis_names() {
     let (d, r) = fixture_extract("sol-sjis.zip");
     r.unwrap();
@@ -135,7 +134,6 @@ fn zip_file(path: &Path, encrypted: bool, entries: &[(&str, &[u8])], symlink: bo
 }
 #[cfg(unix)]
 #[test]
-#[ignore = "archive-18 repro"]
 fn sol_zip_encrypted_preserves_symlink() {
     let d = tempfile::tempdir().unwrap();
     for encrypted in [false, true] {
@@ -155,7 +153,6 @@ fn sol_zip_encrypted_preserves_symlink() {
 }
 #[cfg(unix)]
 #[test]
-#[ignore = "archive-18 repro"]
 fn sol_zip_encrypted_preserves_executable() {
     use std::os::unix::fs::PermissionsExt;
     let d = tempfile::tempdir().unwrap();
