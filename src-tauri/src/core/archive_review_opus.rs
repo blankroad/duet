@@ -1050,7 +1050,6 @@ fn opus2_make_writable(p: &Path) {
 /// (sol 은 기존 파일 덮어쓰기·절대 경로. 여기선 피해 파일이 없어도 되는 생성 + 상대 경로 + 하위 폴더.)
 #[cfg(unix)]
 #[test]
-#[ignore = "archive-01 repro"]
 fn opus2_hardlink_dst_dangling_symlink_creates_outside_file() {
     let outside = tempfile::tempdir().unwrap();
     let dest = tempfile::tempdir().unwrap();
@@ -1078,7 +1077,6 @@ fn opus2_hardlink_dst_dangling_symlink_creates_outside_file() {
 /// 앱 경로 그대로(extract_plan → extract_execute, tar.gz) — 바깥 기존 파일 덮어쓰기.
 #[cfg(unix)]
 #[tokio::test]
-#[ignore = "archive-01 repro"]
 async fn opus2_hardlink_dst_symlink_overwrites_outside_via_extract_execute() {
     let outside = tempfile::tempdir().unwrap();
     let victim = outside.path().join("notes.txt");
@@ -1113,7 +1111,6 @@ async fn opus2_hardlink_dst_symlink_overwrites_outside_via_extract_execute() {
 /// 앱 경로 그대로 — 소스가 바깥을 가리키는 상대 링크 + 대상 이름 선점 → 바깥 내용이 안으로 복사.
 #[cfg(unix)]
 #[tokio::test]
-#[ignore = "archive-01 repro"]
 async fn opus2_hardlink_src_symlink_leaks_outside_via_extract_execute() {
     let outside = tempfile::tempdir().unwrap();
     let secret = outside.path().join("id_secret");
@@ -1197,7 +1194,6 @@ fn opus2_hardlink_success_on_symlink_src() {
 /// token 폴더는 지우지 않고 경로만 출력한다 (앱 시작 시 reap).
 #[cfg(unix)]
 #[tokio::test]
-#[ignore = "archive-01 repro"]
 async fn opus2_browse_hardlink_attack_writes_outside() {
     let outside = tempfile::tempdir().unwrap();
     let planted = outside.path().join("planted-by-browse.txt");

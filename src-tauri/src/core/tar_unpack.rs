@@ -6,7 +6,8 @@
 //! - `unpack` 은 항목마다 `canonicalize` 로 경로를 검증하는데, RAM 디스크나 일부
 //!   네트워크·가상 드라이브에선 `canonicalize` 자체가 실패한다. 여기선 경로 조각 검사와
 //!   "이미 만든 링크를 거쳐 쓰지 않기" 검사로 같은 보호(zip-slip 차단)를 한다.
-//! - 하드링크를 지원하지 않는 드라이브(exFAT 등)에선 복사로 대신한다.
+//! - 하드링크를 지원하지 않는 드라이브(exFAT 등)에선 복사로 대신한다. 이때도 링크는
+//!   따라가지 않는다(원본이 일반 파일일 때만 복사, 대상 자리는 새 파일로 교체 — archive-01).
 //! - 실패 메시지에 OS 원인을 남긴다. tar 의 오류 문구는 원인을 빼고
 //!   "failed to unpack …" 만 보여 줘서 사용자가 이유를 알 수 없었다.
 
@@ -74,10 +75,13 @@ pub fn unpack<R: Read>(reader: R, dest: &Path) -> Result<UnpackReport, DuetError
                     DuetError::Io(format!("{shown}: hard link points outside the archive"))
                 })?;
             refuse_through_link(dest, &src_rel)?;
+            if src_rel == rel {
+                continue; // 자기 자신을 가리키는 하드링크 — 이미 그 자리에 있다.
+            }
             let src = dest.join(&src_rel);
-            if std::fs::hard_link(&src, &dst).is_err() {
-                // 하드링크를 지원하지 않는 드라이브 — 내용을 복사해 같은 파일을 만든다.
-                std::fs::copy(&src, &dst).map_err(|e| write_error(&shown, &e))?;
+            match place_hard_link(&src, &dst).map_err(|e| write_error(&shown, &e))? {
+                HardLink::Placed => {}
+                HardLink::SkippedSymlink => report.skipped_links.push(shown),
             }
         } else {
             // 파일·폴더·그 밖(POSIX 상 미지의 종류는 일반 파일). 권한·수정 시각 처리는 tar 에 맡긴다.
@@ -139,6 +143,143 @@ fn refuse_through_link(dest: &Path, rel: &Path) -> Result<(), DuetError> {
         }
     }
     Ok(())
+}
+
+/// 하드링크 항목을 놓은 결과.
+#[derive(Debug, PartialEq, Eq)]
+enum HardLink {
+    /// 하드링크 또는 (하드링크 미지원 드라이브에서) 내용 복사본을 만들었다.
+    Placed,
+    /// 원본이 심볼릭 링크인데 이 드라이브는 하드링크를 못 만든다 — 링크를 따라 복사하지
+    /// 않고 건너뛴다(사용자에게는 "건너뛴 링크" 로 알린다).
+    SkippedSymlink,
+}
+
+/// `dst` 자리에 `src`(해제 폴더 안, 부모는 이미 검사됨)의 하드링크를 놓는다.
+///
+/// 링크는 따라가지 않는다(G-15, archive-01):
+/// - `src`·`dst` 모두 마지막 조각까지 lstat 으로 본다.
+/// - 복사 폴백은 "하드링크 미지원" 오류일 때만, 원본이 일반 파일일 때만 한다.
+///   원본이 심볼릭 링크면 복사하지 않는다(복사는 링크를 따라 바깥 내용을 읽는다).
+/// - `dst` 에 이미 파일·링크가 있으면 그것을 따라가지 않고 그 자리를 교체한다.
+fn place_hard_link(src: &Path, dst: &Path) -> io::Result<HardLink> {
+    let src_meta = std::fs::symlink_metadata(src)?;
+    if src_meta.is_dir() {
+        return Err(io::Error::other("hard link points to a folder"));
+    }
+    if same_file(&src_meta, dst) {
+        return Ok(HardLink::Placed); // 같은 링크가 다시 나옴 — 이미 그 파일이다.
+    }
+    let mut outcome = HardLink::Placed;
+    create_replacing(dst, |at| match std::fs::hard_link(src, at) {
+        Ok(()) => Ok(true),
+        Err(e) if !hard_link_unsupported(&e) => Err(e),
+        Err(_) if src_meta.file_type().is_symlink() => {
+            outcome = HardLink::SkippedSymlink;
+            Ok(false)
+        }
+        Err(e) if !src_meta.is_file() => Err(e),
+        Err(_) => copy_new(src, at).map(|()| true),
+    })?;
+    Ok(outcome)
+}
+
+/// `dst` 자리에 `make` 로 새 항목을 만든다. `make` 는 **비어 있는** 경로를 받아 그 자리에
+/// 만들고, 만들었으면 true 를 돌려준다(false = 아무것도 안 만듦, `dst` 는 그대로 둔다).
+///
+/// - `dst` 가 없으면 바로 거기에 만든다.
+/// - `dst` 가 폴더면 오류(폴더를 파일로 갈아끼우지 않는다).
+/// - `dst` 가 파일·심볼릭 링크 등이면 같은 폴더의 고유 임시 이름에 만든 뒤 `rename` 으로
+///   교체한다. 지우기(`remove_*`)를 쓰지 않는다(CLAUDE.md §3). `rename` 은 마지막 조각을
+///   따라가지 않고 그 이름(링크 자체)을 바꾼다 — Unix 는 POSIX `rename`, Windows 는
+///   std 문서상 10 1607+ 에서 `FileRenameInfoEx` 로 Unix 와 같은 의미, 그 밖에선
+///   `MoveFileExW(MOVEFILE_REPLACE_EXISTING)` 이고 "to must not be a directory" 외 제약이
+///   없다(<https://doc.rust-lang.org/std/fs/fn.rename.html>).
+///   `rename` 이 실패하면 임시 항목이 해제 폴더 안에 남는다(폴더 밖 노출은 없음).
+fn create_replacing(
+    dst: &Path,
+    make: impl FnOnce(&Path) -> io::Result<bool>,
+) -> io::Result<bool> {
+    match std::fs::symlink_metadata(dst) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => make(dst),
+        Err(e) => Err(e),
+        Ok(m) if m.is_dir() => Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "a folder with this name already exists",
+        )),
+        Ok(_) => {
+            let tmp = sibling_temp(dst)?;
+            let created = make(&tmp)?;
+            if created {
+                std::fs::rename(&tmp, dst)?;
+            }
+            Ok(created)
+        }
+    }
+}
+
+/// `dst` 와 같은 폴더의 고유 임시 이름. 이름은 `dst` 와 무관하게 짧게(긴 이름 한도 회피).
+fn sibling_temp(dst: &Path) -> io::Result<PathBuf> {
+    let parent = dst
+        .parent()
+        .ok_or_else(|| io::Error::other("entry has no parent folder"))?;
+    Ok(parent.join(format!(".duet-link-{}", uuid::Uuid::new_v4().simple())))
+}
+
+/// `src`(lstat 정보)와 `dst` 가 이미 같은 파일(하드링크)인지. 같은 하드링크 항목이 다시
+/// 나오면 POSIX `rename` 은 "둘이 같은 파일이면 아무것도 안 하고 성공" 이라 임시 이름이
+/// 남는다 — 그 전에 걸러낸다. Windows 는 파일 번호를 std 안정 API 로 못 읽어 검사하지 않는다.
+fn same_file(src_meta: &std::fs::Metadata, dst: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        std::fs::symlink_metadata(dst)
+            .is_ok_and(|d| d.dev() == src_meta.dev() && d.ino() == src_meta.ino())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (src_meta, dst);
+        false
+    }
+}
+
+/// 하드링크 실패가 "이 드라이브·파일시스템은 하드링크를 못 만든다" 때문인지 —
+/// 이때만 복사로 대신한다. 이미 있음(EEXIST)·권한(EACCES) 등은 폴백하지 않는다.
+/// - 공통: `CrossesDevices`(Unix EXDEV, Windows ERROR_NOT_SAME_DEVICE),
+///   `Unsupported`(std 매핑: Unix ENOSYS·EOPNOTSUPP, Windows ERROR_CALL_NOT_IMPLEMENTED).
+/// - Unix EPERM(1): Linux link(2) "filesystem … does not support the creation of hard links"
+///   (FAT 계열). 원본이 폴더여도 EPERM 이지만 폴더는 호출 전에 걸렀다.
+/// - macOS ENOTSUP(45): link(2) "The underlying file system does not support this call".
+///   macOS 는 ENOTSUP(45) ≠ EOPNOTSUPP(102) 라 std 가 `Unsupported` 로 올리지 않는다.
+/// - Windows ERROR_INVALID_FUNCTION(1)·ERROR_NOT_SUPPORTED(50): CreateHardLinkW 는
+///   "only supported on the NTFS file system" 이고, 기능을 구현하지 않은 파일시스템의
+///   STATUS_INVALID_DEVICE_REQUEST·STATUS_NOT_SUPPORTED 가 이 두 번호로 바뀐다
+///   (NTSTATUS→Win32 매핑). FAT/exFAT 실기 확인 필요.
+fn hard_link_unsupported(e: &io::Error) -> bool {
+    #[cfg(target_vendor = "apple")]
+    const CODES: &[i32] = &[1, 45];
+    #[cfg(all(unix, not(target_vendor = "apple")))]
+    const CODES: &[i32] = &[1];
+    #[cfg(windows)]
+    const CODES: &[i32] = &[1, 50];
+    #[cfg(not(any(unix, windows)))]
+    const CODES: &[i32] = &[];
+    matches!(
+        e.kind(),
+        io::ErrorKind::CrossesDevices | io::ErrorKind::Unsupported
+    ) || e.raw_os_error().is_some_and(|c| CODES.contains(&c))
+}
+
+/// 일반 파일 `src` 의 내용·권한을 **새 파일** `at` 에 복사한다(`create_new` = O_EXCL —
+/// `at` 자리에 무엇이든, 끊어진 링크라도 있으면 실패하고 따라가지 않는다).
+fn copy_new(src: &Path, at: &Path) -> io::Result<()> {
+    let mut from = std::fs::File::open(src)?;
+    let mut to = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(at)?;
+    io::copy(&mut from, &mut to)?;
+    to.set_permissions(from.metadata()?.permissions())
 }
 
 /// 오류 사슬의 가장 안쪽(실제 OS 원인)까지 이어 한 줄로. tar 는 원인을 Display 에서 빼고
@@ -308,6 +449,131 @@ mod tests {
         fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
             Some(&self.0)
         }
+    }
+
+    /// 해제 폴더 안 이름 목록(정렬).
+    fn names(dir: &Path) -> Vec<String> {
+        let mut v: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn same_name_regular_then_hard_link_replaces_it() {
+        use tar::EntryType as T;
+        // tar 갱신(append) 에서 흔한 모양 — 같은 이름이 다시 나오면 마지막 것이 이긴다.
+        let tar = build(&[
+            ("a.txt", T::Regular, b"new"),
+            ("b.txt", T::Regular, b"old"),
+            ("b.txt", T::Link, b"a.txt"),
+        ]);
+        let dest = tempfile::tempdir().unwrap();
+        unpack(&tar[..], dest.path()).unwrap();
+        assert_eq!(std::fs::read(dest.path().join("b.txt")).unwrap(), b"new");
+        assert_eq!(names(dest.path()), ["a.txt", "b.txt"], "임시 이름이 남았다");
+    }
+
+    #[test]
+    fn repeated_and_self_hard_links_leave_no_temp() {
+        use tar::EntryType as T;
+        let tar = build(&[
+            ("a.txt", T::Regular, b"x"),
+            ("b.txt", T::Link, b"a.txt"),
+            ("b.txt", T::Link, b"a.txt"),
+            ("a.txt", T::Link, b"a.txt"),
+        ]);
+        let dest = tempfile::tempdir().unwrap();
+        unpack(&tar[..], dest.path()).unwrap();
+        assert_eq!(std::fs::read(dest.path().join("b.txt")).unwrap(), b"x");
+        assert_eq!(names(dest.path()), ["a.txt", "b.txt"]);
+    }
+
+    #[test]
+    fn hard_link_over_folder_is_an_error() {
+        use tar::EntryType as T;
+        let tar = build(&[
+            ("a.txt", T::Regular, b"x"),
+            ("d/", T::Directory, b""),
+            ("d/keep", T::Regular, b"k"),
+            ("d", T::Link, b"a.txt"),
+        ]);
+        let dest = tempfile::tempdir().unwrap();
+        assert!(unpack(&tar[..], dest.path()).is_err());
+        assert_eq!(std::fs::read(dest.path().join("d/keep")).unwrap(), b"k");
+    }
+
+    #[test]
+    fn only_unsupported_errors_fall_back_to_copy() {
+        use io::ErrorKind as K;
+        assert!(!hard_link_unsupported(&io::Error::from(K::AlreadyExists)));
+        assert!(!hard_link_unsupported(&io::Error::from(K::NotFound)));
+        assert!(hard_link_unsupported(&io::Error::from(K::CrossesDevices)));
+        assert!(hard_link_unsupported(&io::Error::from(K::Unsupported)));
+        #[cfg(unix)]
+        {
+            // EEXIST(17)·EACCES(13) 는 폴백 아님, EPERM(1)·EXDEV(18) 은 폴백.
+            assert!(!hard_link_unsupported(&io::Error::from_raw_os_error(17)));
+            assert!(!hard_link_unsupported(&io::Error::from_raw_os_error(13)));
+            assert!(hard_link_unsupported(&io::Error::from_raw_os_error(1)));
+            assert!(hard_link_unsupported(&io::Error::from_raw_os_error(18)));
+        }
+        #[cfg(target_vendor = "apple")]
+        assert!(hard_link_unsupported(&io::Error::from_raw_os_error(45)));
+        #[cfg(windows)]
+        {
+            // ERROR_ALREADY_EXISTS(183)·ERROR_ACCESS_DENIED(5) 는 폴백 아님.
+            assert!(!hard_link_unsupported(&io::Error::from_raw_os_error(183)));
+            assert!(!hard_link_unsupported(&io::Error::from_raw_os_error(5)));
+            assert!(hard_link_unsupported(&io::Error::from_raw_os_error(1)));
+            assert!(hard_link_unsupported(&io::Error::from_raw_os_error(17)));
+        }
+    }
+
+    /// 복사 폴백 경로(macOS 에선 실제로 일으키기 어렵다)를 직접 — 대상 자리의 링크를
+    /// 따라가지 않고 링크 자체를 새 파일로 교체한다.
+    #[cfg(unix)]
+    #[test]
+    fn copy_fallback_replaces_destination_link_without_following() {
+        let outside = tempfile::tempdir().unwrap();
+        let victim = outside.path().join("victim");
+        std::fs::write(&victim, b"ORIGINAL").unwrap();
+        let dest = tempfile::tempdir().unwrap();
+        let src = dest.path().join("s");
+        std::fs::write(&src, b"PAYLOAD").unwrap();
+        let dst = dest.path().join("h");
+        std::os::unix::fs::symlink(&victim, &dst).unwrap();
+        let dangling = dest.path().join("d");
+        std::os::unix::fs::symlink(outside.path().join("new"), &dangling).unwrap();
+
+        assert!(create_replacing(&dst, |at| copy_new(&src, at).map(|()| true)).unwrap());
+        assert!(create_replacing(&dangling, |at| copy_new(&src, at).map(|()| true)).unwrap());
+
+        assert_eq!(std::fs::read(&victim).unwrap(), b"ORIGINAL");
+        assert!(!outside.path().join("new").exists());
+        for p in [&dst, &dangling] {
+            let m = std::fs::symlink_metadata(p).unwrap();
+            assert!(m.is_file(), "{p:?} 가 일반 파일이 아니다");
+            assert_eq!(std::fs::read(p).unwrap(), b"PAYLOAD");
+        }
+        assert_eq!(names(dest.path()), ["d", "h", "s"]);
+    }
+
+    /// `create_new` 는 끊어진 링크 자리에서도 실패한다(따라가 바깥에 만들지 않음).
+    #[cfg(unix)]
+    #[test]
+    fn copy_new_never_follows_a_link() {
+        let outside = tempfile::tempdir().unwrap();
+        let dest = tempfile::tempdir().unwrap();
+        let src = dest.path().join("s");
+        std::fs::write(&src, b"x").unwrap();
+        let at = dest.path().join("l");
+        std::os::unix::fs::symlink(outside.path().join("new"), &at).unwrap();
+        let err = copy_new(&src, &at).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
+        assert!(!outside.path().join("new").exists());
     }
 
     #[test]

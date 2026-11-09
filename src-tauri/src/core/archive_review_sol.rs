@@ -293,7 +293,6 @@ fn sol_tar_hardlink_source_symlink_no_copy() {
 }
 #[cfg(unix)]
 #[test]
-#[ignore = "archive-01 repro"]
 fn sol_tar_hardlink_destination_symlink_cannot_overwrite_outside() {
     let outside = tempfile::tempdir().unwrap();
     let victim = outside.path().join("victim");
@@ -506,7 +505,6 @@ fn sol_sevenz_corrupt_error() {
 
 #[cfg(unix)]
 #[test]
-#[ignore = "archive-01 repro"]
 fn sol_tar_hardlink_fallback_cannot_copy_outside_source() {
     let outside = tempfile::tempdir().unwrap();
     let secret = outside.path().join("secret");
@@ -520,8 +518,16 @@ fn sol_tar_hardlink_fallback_cannot_copy_outside_source() {
     ]);
     let r = tar_unpack::unpack(&bytes[..], d.path());
     eprintln!("hardlink source fallback: {r:?}");
+    let h = d.path().join("h");
+    // 하드링크가 링크 자체를 가리키면(h 가 심볼릭 링크) 내용 복사는 없다 —
+    // `sol_tar_hardlink_source_symlink_no_copy` 와 같은 기준. read 는 링크를 따라가므로 lstat 로 먼저 본다.
     assert!(
-        r.is_err() || std::fs::read(d.path().join("h")).unwrap() != b"OUTSIDE SECRET",
+        r.is_err()
+            || std::fs::symlink_metadata(&h)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+            || std::fs::read(&h).unwrap() != b"OUTSIDE SECRET",
         "outside secret copied into extracted regular file: {r:?}"
     );
 }
