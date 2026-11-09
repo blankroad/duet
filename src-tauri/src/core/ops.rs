@@ -5091,8 +5091,8 @@ mod tests {
         );
 
         // undo: 새로 만든 파일 제거 + 덮어쓴 파일 복원.
-        let pool = Arc::new(crate::services::connection_pool::ConnectionPool::new());
-        let outcome = crate::core::undo::execute_undo(&entry, &pool).await;
+        // 휴지통은 임시 폴더 fixture (OS 휴지통 금지).
+        let outcome = crate::core::undo::undo_with_fixture(&entry).await;
         assert!(matches!(outcome.kind, crate::core::undo::UndoKind::Ok));
         assert!(
             !dst.join("new.txt").exists(),
@@ -5157,8 +5157,7 @@ mod tests {
         assert_eq!(std::fs::read(r.join("conf.txt")).unwrap(), b"RIGHT");
 
         // undo — 새로 복사된 것만 제거, 원본/충돌 그대로.
-        let pool = Arc::new(crate::services::connection_pool::ConnectionPool::new());
-        let outcome = crate::core::undo::execute_undo(&entry, &pool).await;
+        let outcome = crate::core::undo::undo_with_fixture(&entry).await;
         assert!(matches!(outcome.kind, crate::core::undo::UndoKind::Ok));
         assert!(!r.join("only_l.txt").exists());
         assert!(!l.join("only_r.txt").exists());
@@ -5405,8 +5404,7 @@ mod tests {
         }
 
         // undo — 생성분 제거 + 덮어쓴 백업 복원.
-        let pool = Arc::new(crate::services::connection_pool::ConnectionPool::new());
-        let outcome = crate::core::undo::execute_undo(&entry, &pool).await;
+        let outcome = crate::core::undo::undo_with_fixture(&entry).await;
         assert!(matches!(outcome.kind, crate::core::undo::UndoKind::Ok));
         assert!(!r.join("only_l.txt").exists(), "생성분 제거");
         assert!(!l.join("only_r.txt").exists(), "생성분 제거");
@@ -6078,11 +6076,7 @@ mod review_fileops_sol {
         )
         .await
         .unwrap();
-        let out = crate::core::undo::execute_undo(
-            &e,
-            &crate::services::connection_pool::ConnectionPool::new(),
-        )
-        .await;
+        let out = crate::core::undo::undo_with_fixture(&e).await;
         assert!(
             matches!(out.kind, crate::core::undo::UndoKind::Ok),
             "{out:?}"
@@ -6645,11 +6639,7 @@ mod review_fileops_sol {
         let h = c.journal.history(10).await;
         assert_eq!(h.len(), 1);
         assert!(matches!(&h[0].undo,UndoAction::UndoCopy{copied,..} if copied==&vec![d.join("a")]));
-        let out = crate::core::undo::execute_undo(
-            &h[0],
-            &crate::services::connection_pool::ConnectionPool::new(),
-        )
-        .await;
+        let out = crate::core::undo::undo_with_fixture(&h[0]).await;
         assert!(matches!(out.kind, crate::core::undo::UndoKind::Ok));
         assert!(!d.join("a").exists());
         assert!(d.join("b.duet-part").exists());

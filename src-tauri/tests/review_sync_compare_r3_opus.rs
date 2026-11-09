@@ -1,10 +1,12 @@
 //! sync-compare R3(opus-3) — SC-31 동기화 undo 가 새로 만든 폴더를 남기는지. TempDir 안에서만.
 //! 실행: `cargo test --manifest-path src-tauri/Cargo.toml --test review_sync_compare_r3_opus -- --include-ignored`
 
+#[path = "support/undo_fixture.rs"]
+mod undo_fixture;
+
 use duet_lib::core::ops::{sync_execute, sync_plan, OpCtx};
-use duet_lib::core::undo::{execute_undo, UndoKind};
+use duet_lib::core::undo::UndoKind;
 use duet_lib::fs::LocalFs;
-use duet_lib::services::connection_pool::ConnectionPool;
 use duet_lib::services::journal::Journal;
 use duet_lib::services::settings::SettingsStore;
 use duet_lib::types::{Location, SourceId};
@@ -22,7 +24,6 @@ fn loc(p: &Path) -> Location {
 /// src 에만 있는 폴더 트리(newdir/sub/x.txt)를 동기화 → Ctrl+Z.
 /// 기대: 동기화 전 상태(dst 비어 있음)로 돌아간다. 현재: 파일만 지워지고 빈 폴더 트리가 남는다.
 #[tokio::test]
-#[ignore = "sync-compare repro: SC-31 sync undo leaves the folders the sync created"]
 async fn sync_undo_removes_folders_it_created() {
     let t = TempDir::new().unwrap();
     let (src, dst, c) = (
@@ -55,7 +56,7 @@ async fn sync_undo_removes_folders_it_created() {
     .await
     .unwrap();
     assert!(dst.join("newdir/sub/x.txt").exists());
-    let out = execute_undo(&entry, &ConnectionPool::new()).await;
+    let out = undo_fixture::undo_tmp(&entry).await;
     assert!(matches!(out.kind, UndoKind::Ok), "undo kind {:?}", out.kind);
     assert!(
         !dst.join("newdir/sub/x.txt").exists(),

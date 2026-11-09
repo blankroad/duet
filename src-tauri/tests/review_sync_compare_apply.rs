@@ -6,14 +6,16 @@
 //! 현재 코드에서 실패한다(결함 재현). 실행:
 //! `cargo test --manifest-path src-tauri/Cargo.toml --test review_sync_compare_apply -- --include-ignored`
 
+#[path = "support/undo_fixture.rs"]
+mod undo_fixture;
+
 use std::path::Path;
 
 use duet_lib::core::compare::{compare_dirs_progress, CompareRules, CompareStatus};
 use duet_lib::core::ops::{apply_compare, merge_bidir, ApplyDecision, ApplyDirection, OpCtx};
 use duet_lib::core::three_way::{compare_three_way, ThreeWayStatus};
-use duet_lib::core::undo::{execute_undo, UndoKind};
+use duet_lib::core::undo::UndoKind;
 use duet_lib::fs::LocalFs;
-use duet_lib::services::connection_pool::ConnectionPool;
 use duet_lib::services::journal::{Journal, UndoAction};
 use duet_lib::services::settings::SettingsStore;
 use duet_lib::types::{ConnectionId, Location, SourceId};
@@ -137,8 +139,7 @@ async fn apply_compare_missing_source_is_recoverable_by_undo() {
         .await
         .unwrap()
         .expect("journaled");
-    let pool = ConnectionPool::new();
-    let out = execute_undo(&entry, &pool).await;
+    let out = undo_fixture::undo_tmp(&entry).await;
     assert!(matches!(out.kind, UndoKind::Ok));
     assert_eq!(std::fs::read(r.join("a.txt")).unwrap(), b"keep-me");
 }
@@ -176,7 +177,7 @@ async fn apply_compare_partial_failure_journals_and_undo_restores() {
         .await
         .unwrap()
         .expect("journaled");
-    let out = execute_undo(&entry, &ConnectionPool::new()).await;
+    let out = undo_fixture::undo_tmp(&entry).await;
     assert!(matches!(out.kind, UndoKind::Ok));
     assert_eq!(std::fs::read(r.join("a.txt")).unwrap(), b"R-a");
     assert!(!r.join("b-missing.txt").exists());
@@ -204,7 +205,7 @@ async fn apply_compare_type_mismatch_roundtrip() {
     .await
     .unwrap();
     assert_eq!(std::fs::read(r.join("x/inner.txt")).unwrap(), b"in");
-    let out = execute_undo(&entry, &ConnectionPool::new()).await;
+    let out = undo_fixture::undo_tmp(&entry).await;
     assert!(matches!(out.kind, UndoKind::Ok));
     assert_eq!(std::fs::read(r.join("x")).unwrap(), b"i-am-a-file");
 }
@@ -213,7 +214,6 @@ async fn apply_compare_type_mismatch_roundtrip() {
 /// 기대: 사용자가 만든 파일은 남는다(건너뛰거나 휴지통). 현재: `fs.remove` →
 /// `remove_dir_all` 로 폴더째 **영구 삭제**(CLAUDE.md §3·§4).
 #[tokio::test]
-#[ignore = "sync-compare repro: compare-apply undo permanently deletes files added into a created folder"]
 async fn apply_compare_undo_keeps_user_files_added_into_created_folder() {
     let (dir, l, r) = sides();
     std::fs::create_dir_all(l.join("d")).unwrap();
@@ -234,7 +234,7 @@ async fn apply_compare_undo_keeps_user_files_added_into_created_folder() {
     .unwrap();
     // 사용자가 적용 후 그 폴더에서 작업.
     std::fs::write(r.join("d/my-notes.txt"), b"precious").unwrap();
-    let _ = execute_undo(&entry, &ConnectionPool::new()).await;
+    let _ = undo_fixture::undo_tmp(&entry).await;
     assert!(
         r.join("d/my-notes.txt").exists(),
         "file the user created after apply was permanently deleted by undo"
@@ -243,7 +243,6 @@ async fn apply_compare_undo_keeps_user_files_added_into_created_folder() {
 
 /// 덮어쓴 파일을 사용자가 이어서 편집한 뒤 Ctrl+Z — 편집분이 휴지통/백업 없이 사라짐.
 #[tokio::test]
-#[ignore = "sync-compare repro: compare-apply undo discards later edits of an overwritten file"]
 async fn apply_compare_undo_does_not_silently_drop_later_edits() {
     let (dir, l, r) = sides();
     std::fs::write(l.join("b.txt"), b"left").unwrap();
@@ -263,7 +262,7 @@ async fn apply_compare_undo_does_not_silently_drop_later_edits() {
     .await
     .unwrap();
     std::fs::write(r.join("b.txt"), b"left + edits made after apply").unwrap();
-    let out = execute_undo(&entry, &ConnectionPool::new()).await;
+    let out = undo_fixture::undo_tmp(&entry).await;
     let now = std::fs::read(r.join("b.txt")).unwrap();
     let edits_survive = std::fs::read_dir(&r)
         .unwrap()
@@ -331,7 +330,6 @@ async fn merge_respects_ignore_globs_shown_in_compare_dialog() {
 
 /// 머지로 생긴 폴더에 사용자가 파일을 넣은 뒤 Ctrl+Z → 폴더째 영구 삭제.
 #[tokio::test]
-#[ignore = "sync-compare repro: merge undo permanently deletes files added into a merged folder"]
 async fn merge_undo_keeps_user_files_added_into_created_folder() {
     let (dir, l, r) = sides();
     std::fs::create_dir_all(l.join("d")).unwrap();
@@ -351,7 +349,7 @@ async fn merge_undo_keeps_user_files_added_into_created_folder() {
     .await
     .unwrap();
     std::fs::write(r.join("d/my-notes.txt"), b"precious").unwrap();
-    let _ = execute_undo(&entry, &ConnectionPool::new()).await;
+    let _ = undo_fixture::undo_tmp(&entry).await;
     assert!(
         r.join("d/my-notes.txt").exists(),
         "file the user created after merge was permanently deleted by undo"
@@ -362,7 +360,6 @@ async fn merge_undo_keeps_user_files_added_into_created_folder() {
 /// journal 이 "되돌림"으로 확정된다(commands/undo.rs:32) → 다시 시도할 수 없다.
 /// 비교 적용(UndoCompareApply)은 같은 상황에서 Error 를 돌려 재시도가 가능하다.
 #[tokio::test]
-#[ignore = "sync-compare repro: UndoBidirMerge reports Ok when a side is unreachable"]
 async fn merge_undo_with_unreachable_side_must_not_report_ok() {
     let (dir, l, r) = sides();
     std::fs::write(l.join("only_l.txt"), b"L").unwrap();
@@ -390,7 +387,7 @@ async fn merge_undo_with_unreachable_side_must_not_report_ok() {
     } else {
         panic!("expected UndoBidirMerge");
     }
-    let out = execute_undo(&entry, &ConnectionPool::new()).await;
+    let out = undo_fixture::undo_tmp(&entry).await;
     assert!(r.join("only_l.txt").exists(), "nothing was undone");
     assert!(
         !matches!(out.kind, UndoKind::Ok),
@@ -426,7 +423,7 @@ async fn compare_apply_undo_with_unreachable_side_reports_error() {
     } else {
         panic!("expected UndoCompareApply");
     }
-    let out = execute_undo(&entry, &ConnectionPool::new()).await;
+    let out = undo_fixture::undo_tmp(&entry).await;
     assert!(matches!(out.kind, UndoKind::Error));
 }
 
@@ -550,7 +547,7 @@ async fn three_way_apply_change_and_add_then_undo() {
     .unwrap();
     assert_eq!(std::fs::read(r.join("c.txt")).unwrap(), b"left-changed");
     assert_eq!(std::fs::read(r.join("added.txt")).unwrap(), b"new");
-    let out = execute_undo(&entry, &ConnectionPool::new()).await;
+    let out = undo_fixture::undo_tmp(&entry).await;
     assert!(matches!(out.kind, UndoKind::Ok));
     assert_eq!(std::fs::read(r.join("c.txt")).unwrap(), b"base");
     assert!(!r.join("added.txt").exists());

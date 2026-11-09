@@ -1,14 +1,16 @@
 //! R3 final checks. All I/O stays in TempDir; no real SSH or OS trash.
+#[cfg(target_os = "macos")]
+#[path = "support/undo_fixture.rs"]
+mod undo_fixture;
+
 use async_trait::async_trait;
 use duet_lib::core::compare::{compare_dirs, CompareStatus};
 use duet_lib::core::ops::{apply_compare, ApplyDecision, ApplyDirection, OpCtx};
 #[cfg(unix)]
 use duet_lib::core::ops::{sync_execute, sync_plan};
 #[cfg(target_os = "macos")]
-use duet_lib::core::undo::{execute_undo, UndoKind};
+use duet_lib::core::undo::UndoKind;
 use duet_lib::fs::{FileSystem, LocalFs};
-#[cfg(target_os = "macos")]
-use duet_lib::services::connection_pool::ConnectionPool;
 use duet_lib::services::journal::Journal;
 #[cfg(target_os = "macos")]
 use duet_lib::services::journal::UndoAction;
@@ -238,7 +240,7 @@ async fn sc17_apfs_paired_row_overwrite_keeps_backup_and_undo_restores() {
         std::fs::read(l.join(nfc)).unwrap(),
         std::fs::read(r.join(&nfd)).unwrap()
     );
-    let out = execute_undo(&e, &ConnectionPool::new()).await;
+    let out = undo_fixture::undo_tmp(&e).await;
     assert!(matches!(out.kind, UndoKind::Ok));
     assert_eq!(std::fs::read(l.join(nfc)).unwrap(), b"left original");
     assert_eq!(

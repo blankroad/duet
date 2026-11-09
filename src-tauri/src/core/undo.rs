@@ -17,6 +17,11 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+mod cleanup;
+#[cfg(test)]
+pub(crate) use cleanup::testing::undo_with_fixture;
+pub use cleanup::{undo_cleanup, FsResolver, PoolFs};
+
 /// undo/redo 한 번의 결과.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct UndoOutcome {
@@ -430,39 +435,16 @@ pub async fn execute_undo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
             }
             ok_with_locs(source, refresh)
         }
-        UndoAction::UndoCopy {
-            target_source,
-            copied,
-            backups_to_restore,
-            ..
-        } => {
-            let fs = match fs_for(target_source, pool).await {
-                Ok(f) => f,
-                Err(e) => return error("source unreachable", e),
-            };
-            // 1) 새로 만든 파일들 삭제 (영구) — undo 본질
-            for p in copied {
-                if fs.metadata(p).await.is_ok() {
-                    if let Err(e) = fs.remove(p).await {
-                        return error("remove copied", e);
-                    }
-                }
+        UndoAction::UndoCopy { .. }
+        | UndoAction::UndoSync { .. }
+        | UndoAction::UndoBidirMerge { .. }
+        | UndoAction::UndoCompareApply { .. }
+        | UndoAction::UndoThreeWayApply { .. } => {
+            // 생성분 정리 계열 — 지문이 같을 때만 휴지통으로 (cleanup.rs, G-01).
+            match cleanup::undo_cleanup(entry, &PoolFs(pool)).await {
+                Some(out) => out,
+                None => nothing(UndoReason::NothingToUndo),
             }
-            // 2) backup → 원래 자리로 mv
-            for b in backups_to_restore {
-                if fs.metadata(&b.backup_path).await.is_ok() {
-                    if let Err(e) = fs.rename(&b.backup_path, &b.original_path).await {
-                        return error("restore backup", e);
-                    }
-                }
-            }
-            let mut refresh = std::collections::HashSet::<PathBuf>::new();
-            for p in copied {
-                if let Some(par) = p.parent() {
-                    refresh.insert(par.to_path_buf());
-                }
-            }
-            ok_with_locs(target_source, refresh)
         }
         UndoAction::UndoMove {
             src_source,
@@ -561,224 +543,6 @@ pub async fn execute_undo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
                 Err(e) => return error("source unreachable", e),
             };
             undo_new_dir(&*fs, source, path).await
-        }
-        UndoAction::UndoBidirMerge {
-            left_source,
-            left_created,
-            right_source,
-            right_created,
-            ..
-        } => {
-            // 양쪽에 새로 복사된 것만 제거(충돌은 안 건드렸으니 복원할 백업 없음).
-            let mut refresh = std::collections::HashSet::<(SourceId, PathBuf)>::new();
-            for (source, created) in [(left_source, left_created), (right_source, right_created)] {
-                if let Ok(fs) = fs_for(source, pool).await {
-                    for p in created {
-                        let _ = fs.remove(p).await;
-                        if let Some(par) = p.parent() {
-                            refresh.insert((source.clone(), par.to_path_buf()));
-                        }
-                    }
-                }
-            }
-            ok_multi(refresh)
-        }
-        UndoAction::UndoSync {
-            dst_source,
-            created,
-            backups_to_restore,
-            pruned,
-            ..
-        } => {
-            let fs = match fs_for(dst_source, pool).await {
-                Ok(f) => f,
-                Err(e) => return error("source unreachable", e),
-            };
-            // 1) 새로 복사한 파일 제거.
-            for p in created {
-                if fs.metadata(p).await.is_ok() {
-                    if let Err(e) = fs.remove(p).await {
-                        return error("remove copied", e);
-                    }
-                }
-            }
-            // 2) 덮어쓴 백업 복원. original_path 에는 rsync 가 덮어쓴 *새* 내용이 있으므로
-            //    먼저 제거 후 rename — SFTP 는 rename-over-existing 이 실패하기 때문.
-            for b in backups_to_restore {
-                if fs.metadata(&b.backup_path).await.is_ok() {
-                    if fs.metadata(&b.original_path).await.is_ok() {
-                        if let Err(e) = fs.remove(&b.original_path).await {
-                            return error("remove synced before restore", e);
-                        }
-                    }
-                    if let Err(e) = fs.rename(&b.backup_path, &b.original_path).await {
-                        return error("restore backup", e);
-                    }
-                }
-            }
-            // 3) prune 로 휴지통 보낸 항목 복원 — best-effort(macOS 로컬은 NotSupported).
-            let mut prune_failed = false;
-            let mut refresh = std::collections::HashSet::<PathBuf>::new();
-            for item in pruned {
-                let loc = match dst_source {
-                    SourceId::Local => TrashLocation::Local {
-                        trash_id: item.trash_path.clone(),
-                    },
-                    SourceId::Ssh { .. } => TrashLocation::Remote {
-                        trash_path: PathBuf::from(&item.trash_path),
-                    },
-                };
-                if fs
-                    .restore_from_trash(&loc, &item.original_path)
-                    .await
-                    .is_err()
-                {
-                    prune_failed = true;
-                }
-                if let Some(par) = item.original_path.parent() {
-                    refresh.insert(par.to_path_buf());
-                }
-            }
-            for p in created {
-                if let Some(par) = p.parent() {
-                    refresh.insert(par.to_path_buf());
-                }
-            }
-            UndoOutcome {
-                message: if prune_failed {
-                    Some("일부 삭제 항목은 휴지통에서 수동 복원 필요 (macOS).".into())
-                } else {
-                    None
-                },
-                ..ok_with_locs(dst_source, refresh)
-            }
-        }
-        UndoAction::UndoCompareApply {
-            left_source,
-            right_source,
-            left_created,
-            right_created,
-            left_backups,
-            right_backups,
-            ..
-        } => {
-            let mut refresh = std::collections::HashSet::<(SourceId, PathBuf)>::new();
-            for (source, created, backups) in [
-                (left_source, left_created, left_backups),
-                (right_source, right_created, right_backups),
-            ] {
-                let fs = match fs_for(source, pool).await {
-                    Ok(f) => f,
-                    Err(e) => return error("source unreachable", e),
-                };
-                // 1) 새로 생성분 제거.
-                for p in created {
-                    if fs.metadata(p).await.is_ok() {
-                        if let Err(e) = fs.remove(p).await {
-                            return error("remove created", e);
-                        }
-                    }
-                    if let Some(par) = p.parent() {
-                        refresh.insert((source.clone(), par.to_path_buf()));
-                    }
-                }
-                // 2) 덮어쓴 백업 복원 — remove-then-rename(SFTP rename-over-existing 회피).
-                for b in backups {
-                    if fs.metadata(&b.backup_path).await.is_ok() {
-                        if fs.metadata(&b.original_path).await.is_ok() {
-                            if let Err(e) = fs.remove(&b.original_path).await {
-                                return error("remove applied before restore", e);
-                            }
-                        }
-                        if let Err(e) = fs.rename(&b.backup_path, &b.original_path).await {
-                            return error("restore backup", e);
-                        }
-                    }
-                    if let Some(par) = b.original_path.parent() {
-                        refresh.insert((source.clone(), par.to_path_buf()));
-                    }
-                }
-            }
-            ok_multi(refresh)
-        }
-        UndoAction::UndoThreeWayApply {
-            left_source,
-            right_source,
-            left_created,
-            right_created,
-            left_backups,
-            right_backups,
-            trashed_left,
-            trashed_right,
-            ..
-        } => {
-            let mut refresh = std::collections::HashSet::<(SourceId, PathBuf)>::new();
-            let mut trash_failed = false;
-            for (source, created, backups, trashed) in [
-                (left_source, left_created, left_backups, trashed_left),
-                (right_source, right_created, right_backups, trashed_right),
-            ] {
-                let fs = match fs_for(source, pool).await {
-                    Ok(f) => f,
-                    Err(e) => return error("source unreachable", e),
-                };
-                // 1) 생성분 제거.
-                for p in created {
-                    if fs.metadata(p).await.is_ok() {
-                        if let Err(e) = fs.remove(p).await {
-                            return error("remove created", e);
-                        }
-                    }
-                    if let Some(par) = p.parent() {
-                        refresh.insert((source.clone(), par.to_path_buf()));
-                    }
-                }
-                // 2) 덮어쓴 백업 복원 — remove-then-rename.
-                for b in backups {
-                    if fs.metadata(&b.backup_path).await.is_ok() {
-                        if fs.metadata(&b.original_path).await.is_ok() {
-                            if let Err(e) = fs.remove(&b.original_path).await {
-                                return error("remove applied before restore", e);
-                            }
-                        }
-                        if let Err(e) = fs.rename(&b.backup_path, &b.original_path).await {
-                            return error("restore backup", e);
-                        }
-                    }
-                    if let Some(par) = b.original_path.parent() {
-                        refresh.insert((source.clone(), par.to_path_buf()));
-                    }
-                }
-                // 3) 삭제(휴지통)분 복원 — best-effort(macOS 로컬은 NotSupported).
-                for item in trashed {
-                    let loc = match source {
-                        SourceId::Local => TrashLocation::Local {
-                            trash_id: item.trash_path.clone(),
-                        },
-                        SourceId::Ssh { .. } => TrashLocation::Remote {
-                            trash_path: PathBuf::from(&item.trash_path),
-                        },
-                    };
-                    if fs
-                        .restore_from_trash(&loc, &item.original_path)
-                        .await
-                        .is_err()
-                    {
-                        trash_failed = true;
-                    }
-                    if let Some(par) = item.original_path.parent() {
-                        refresh.insert((source.clone(), par.to_path_buf()));
-                    }
-                }
-            }
-            UndoOutcome {
-                message: if trash_failed {
-                    Some("일부 삭제 항목은 휴지통에서 수동 복원 필요 (macOS).".into())
-                } else {
-                    None
-                },
-                ..ok_multi(refresh)
-            }
         }
     }
 }
@@ -1663,7 +1427,6 @@ mod review_fileops_opus {
     /// F-opus: 폴더 복사 후 사본 폴더 안에서 작업한 파일이, 복사 Ctrl+Z 로 **영구 삭제**된다
     /// (UndoCopy 는 `fs.remove` = remove_dir_all, 휴지통 아님 — CLAUDE.md §3).
     #[tokio::test]
-    #[ignore = "fileops-02 repro"]
     async fn undo_copy_must_not_permanently_delete_work_added_inside_copied_folder() {
         let (ctx, _keep) = mk_ctx().await;
         let dir = TempDir::new().unwrap();
@@ -1703,6 +1466,9 @@ mod review_fileops_opus {
             outcome.kind,
             outcome.message
         );
+        // 바뀐 사본은 건너뛰고(휴지통도 부르지 않음) 이유를 알린다.
+        assert_eq!(outcome.kind, UndoKind::Stale);
+        assert_eq!(outcome.reason, Some(UndoReason::Changed));
     }
 
     /// F-opus: 파일을 Replace 로 덮어쓴 복사를 Ctrl+Z 하면, 옛 버전은 (설계상) 이미 없고

@@ -1,4 +1,7 @@
 //! R2 independent cross-checks. Only TempDir files; never OS trash or live SSH.
+#[path = "support/undo_fixture.rs"]
+mod undo_fixture;
+
 use async_trait::async_trait;
 use duet_lib::core::compare::{compare_dirs, compare_dirs_progress, CompareRules, CompareStatus};
 use duet_lib::core::copy_progress::parse_rsync_itemize_created_file;
@@ -181,7 +184,6 @@ async fn sc01_cancel_after_first_completed_file_keeps_journal() {
 }
 
 #[tokio::test]
-#[ignore = "sync-compare repro: SC-04 independently confirmed in sol-2"]
 async fn sc04_sync_undo_preserves_edits_saved_after_sync() {
     let (t, l, r) = trees();
     std::fs::write(l.join("a"), b"source").unwrap();
@@ -193,7 +195,7 @@ async fn sc04_sync_undo_preserves_edits_saved_after_sync() {
         .await
         .unwrap();
     std::fs::write(r.join("a"), b"edited after sync").unwrap();
-    let out = execute_undo(&e, &ConnectionPool::new()).await;
+    let out = undo_fixture::undo_tmp(&e).await;
     assert!(
         !matches!(out.kind, UndoKind::Ok)
             || std::fs::read(r.join("a")).ok().as_deref() == Some(&b"edited after sync"[..]),
@@ -202,7 +204,6 @@ async fn sc04_sync_undo_preserves_edits_saved_after_sync() {
 }
 
 #[tokio::test]
-#[ignore = "sync-compare repro: SC-04 independently confirmed in sol-2"]
 async fn sc04_copy_undo_preserves_edits_saved_after_copy() {
     let (t, l, r) = trees();
     let src = l.join("a");
@@ -232,7 +233,7 @@ async fn sc04_copy_undo_preserves_edits_saved_after_copy() {
         .await
         .unwrap();
     std::fs::write(&dst, b"editor save").unwrap();
-    let out = execute_undo(&e, &ConnectionPool::new()).await;
+    let out = undo_fixture::undo_tmp(&e).await;
     assert!(
         !matches!(out.kind, UndoKind::Ok) || dst.exists(),
         "SC-04: copy undo deletes a later editor save without trash"
@@ -377,8 +378,7 @@ async fn sc08_missing_reverse_nested_source_keeps_destination() {
 }
 
 #[tokio::test]
-#[ignore = "sync-compare repro: SC-09 independently confirmed in sol-2"]
-async fn sc09_partial_merge_undo_must_report_unreachable_left() {
+async fn sc09_merge_undo_with_unreachable_left_changes_nothing() {
     let (t, l, r) = trees();
     std::fs::write(l.join("left"), b"L").unwrap();
     std::fs::write(r.join("right"), b"R").unwrap();
@@ -403,15 +403,18 @@ async fn sc09_partial_merge_undo_must_report_unreachable_left() {
     } else {
         panic!("expected merge");
     }
-    let out = execute_undo(&e, &ConnectionPool::new()).await;
+    let out = undo_fixture::undo_tmp(&e).await;
+    // 한쪽에 닿지 못하면 어느 쪽도 건드리지 않고 Error — 재시도로 양쪽을 함께 되돌린다
+    // (한쪽만 되돌린 채 확정하지 않음).
     assert!(l.join("right").exists());
     assert!(
-        !r.join("left").exists(),
-        "reachable half should have been undone"
+        r.join("left").exists(),
+        "nothing is undone while one side is unreachable"
     );
     assert!(
-        !matches!(out.kind, UndoKind::Ok),
-        "SC-09: partially completed undo incorrectly commits success"
+        matches!(out.kind, UndoKind::Error),
+        "SC-09: undo with an unreachable side must stay retryable, got {:?}",
+        out.kind
     );
 }
 

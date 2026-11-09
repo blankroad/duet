@@ -1,4 +1,7 @@
 //! sync-compare R1 backend evidence. All paths and caches stay inside TempDir.
+#[path = "support/undo_fixture.rs"]
+mod undo_fixture;
+
 use async_trait::async_trait;
 use duet_lib::core::compare::{
     compare_dirs, compare_dirs_progress, export_plan, CompareRules, CompareStatus,
@@ -445,11 +448,7 @@ async fn sync_newer_destination_is_backed_up_and_undo_restores_files() {
         }
         _ => panic!("expected UndoSync"),
     }
-    let outcome = duet_lib::core::undo::execute_undo(
-        &e,
-        &duet_lib::services::connection_pool::ConnectionPool::new(),
-    )
-    .await;
+    let outcome = undo_fixture::undo_tmp(&e).await;
     assert!(matches!(outcome.kind, duet_lib::core::undo::UndoKind::Ok));
     assert_eq!(
         std::fs::read(r.join("edit")).unwrap(),

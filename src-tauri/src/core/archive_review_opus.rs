@@ -771,8 +771,8 @@ async fn opus_extract_conflict_then_undo_restores_original() {
     let mid = ls(&work);
     assert!(mid.iter().any(|n| n.starts_with("data.bak.")), "{mid:?}");
 
-    let pool = crate::services::connection_pool::ConnectionPool::new();
-    let out = crate::core::undo::execute_undo(&entry, &pool).await;
+    // 휴지통은 임시 폴더 fixture (OS 휴지통 금지 — undo 는 이제 생성분을 휴지통으로 보낸다).
+    let out = crate::core::undo::undo_with_fixture(&entry).await;
     eprintln!(
         "undo = {:?} {:?}; work = {:?}",
         out.kind,
@@ -784,10 +784,10 @@ async fn opus_extract_conflict_then_undo_restores_original() {
     assert_eq!(ls(&work), vec!["data", "data.zip"]);
 }
 
-/// 해제 후 사용자가 결과 폴더에 파일을 더 넣은 뒤 Ctrl+Z → 그 파일까지 영구 삭제된다
-/// (UndoCopy 가 copied 경로를 fs.remove = remove_dir_all). 현재 동작 기록용.
+/// 해제 후 사용자가 결과 폴더에 파일을 더 넣은 뒤 Ctrl+Z → 바뀐 폴더는 건너뛰고 남긴다
+/// (G-01 수정 전에는 그 파일까지 영구 삭제됐다). 바뀌었으니 휴지통도 부르지 않는다.
 #[tokio::test]
-async fn opus_observe_extract_undo_deletes_later_user_files() {
+async fn opus_extract_undo_keeps_later_user_files() {
     let root = tempfile::tempdir().unwrap();
     let ctx = mk_ctx(root.path()).await;
     let work = root.path().join("work");
@@ -806,7 +806,8 @@ async fn opus_observe_extract_undo_deletes_later_user_files() {
         out.kind,
         work.join("data/my-notes.txt").exists()
     );
-    assert!(!work.join("data/my-notes.txt").exists());
+    assert!(work.join("data/my-notes.txt").exists());
+    assert!(matches!(out.kind, crate::core::undo::UndoKind::Stale));
 }
 
 /// 손상(잘린) tar.gz + 충돌 폴더 → 실패 시 부분 폴더 제거·기존 폴더 복원.
