@@ -1,21 +1,10 @@
-//! Independent R2 range inputs and encoding boundary evidence; no app/server used.
+//! Preview response regressions and independent encoding evidence; no app/server used.
 use duet_lib::fs::{FileSystem, LocalFs};
+use duet_lib::services::preview_stream::respond;
 
-const STREAM_SOURCE: &str = include_str!("../src/services/preview_stream.rs");
 const DECODE_SOURCE: &str = include_str!("../src/commands/fs_ops.rs");
-const CAP: usize = 16 * 1024 * 1024;
-
-fn verified_range_want(total: u64, start: u64, end_opt: Option<u64>) -> usize {
-    assert!(STREAM_SOURCE.contains("let last = total.saturating_sub(1);"));
-    assert!(STREAM_SOURCE.contains("let end = end_opt.unwrap_or(last).min(last);"));
-    assert!(STREAM_SOURCE.contains("let want = (end.saturating_sub(start) + 1) as usize;"));
-    let last = total.saturating_sub(1);
-    let end = end_opt.unwrap_or(last).min(last);
-    (end.saturating_sub(start) + 1) as usize
-}
 
 #[tokio::test]
-#[ignore = "browse-01 cross repro"]
 async fn browse_01_nonzero_open_ended_range_should_be_bounded() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("offset-video.mp4");
@@ -23,50 +12,63 @@ async fn browse_01_nonzero_open_ended_range_should_be_bounded() {
         .unwrap()
         .set_len(24 * 1024 * 1024)
         .unwrap();
-    let total = std::fs::metadata(&path).unwrap().len();
-    let start = 4 * 1024 * 1024;
-    let want = verified_range_want(total, start, None);
-    let bytes = LocalFs::new().read_range(&path, start, want).await.unwrap();
-    assert!(
-        bytes.len() <= CAP,
-        "open range at 4MiB read {} bytes at once",
-        bytes.len()
-    );
-}
-
-#[test]
-fn browse_01_explicit_bounded_range_arithmetic_matches_requested_window() {
+    let response = respond(&LocalFs::new(), &path, Some("bytes=4194304-"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 206);
+    assert_eq!(response.body().len(), 8 * 1024 * 1024);
     assert_eq!(
-        verified_range_want(24 * 1024 * 1024, 1024, Some(2047)),
-        1024
-    );
-    assert_eq!(
-        verified_range_want(24 * 1024 * 1024, 1024, Some(u64::MAX)),
-        24 * 1024 * 1024 - 1024
+        response.headers()["content-range"],
+        "bytes 4194304-12582911/25165824"
     );
 }
 
 #[tokio::test]
-#[ignore = "browse-33 repro (F-sol-201)"]
+async fn browse_01_explicit_bounded_range_arithmetic_matches_requested_window() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("video.mp4");
+    std::fs::File::create(&path)
+        .unwrap()
+        .set_len(24 * 1024 * 1024)
+        .unwrap();
+    let response = respond(&LocalFs::new(), &path, Some("bytes=100-199"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 206);
+    assert_eq!(response.body().len(), 100);
+    assert_eq!(
+        response.headers()["content-range"],
+        "bytes 100-199/25165824"
+    );
+    let response = respond(
+        &LocalFs::new(),
+        &path,
+        Some("bytes=1024-18446744073709551615"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(response.body().len(), 8 * 1024 * 1024);
+}
+
+#[tokio::test]
 async fn sol2_201_large_pdf_without_range_should_not_be_presented_as_a_complete_shorter_file() {
-    assert!(STREAM_SOURCE.contains("let want = (total as usize).min(MAX_FULL);"));
-    assert!(STREAM_SOURCE.contains(".header(header::CONTENT_LENGTH, bytes.len().to_string())"));
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("large-document.pdf");
     std::fs::File::create(&path)
         .unwrap()
         .set_len(20 * 1024 * 1024)
         .unwrap();
-    let total = std::fs::metadata(&path).unwrap().len();
-    let bytes = LocalFs::new()
-        .read_range(&path, 0, (total as usize).min(CAP))
-        .await
-        .unwrap();
-    assert_eq!(
-        bytes.len() as u64,
-        total,
-        "200 response and Content-Length disguise a truncated PDF"
-    );
+    for range in [None, Some("bytes=abc"), Some("bytes=0-1,5-6")] {
+        let response = respond(&LocalFs::new(), &path, range).await.unwrap();
+        assert_eq!(response.status(), 413);
+        assert!(response.body().is_empty());
+        assert_eq!(response.headers()["content-range"], "bytes */20971520");
+        assert_eq!(response.headers()["accept-ranges"], "bytes");
+        assert_eq!(response.headers()["access-control-allow-origin"], "*");
+        assert!(response
+            .headers()
+            .contains_key("access-control-expose-headers"));
+    }
 }
 
 #[test]

@@ -20,6 +20,8 @@ use tauri::{AppHandle, Manager, Runtime};
 /// Range 헤더가 없을 때 한 번에 올릴 최대 크기 (이미지/PDF 보호). 미디어는 브라우저가
 /// Range 로 청크 요청하므로 이 경로를 거의 안 탐.
 const MAX_FULL: usize = 16 * 1024 * 1024;
+/// 열린 범위를 포함해 한 번의 로컬·원격 읽기에 허용하는 최대 바이트 수.
+const MAX_RANGE_CHUNK: u64 = 8 * 1024 * 1024;
 
 fn hex_decode(s: &str) -> Option<Vec<u8>> {
     if !s.len().is_multiple_of(2) {
@@ -140,12 +142,25 @@ async fn try_handle<R: Runtime>(
 ) -> Option<Response<Vec<u8>>> {
     let (source, path) = parse_target(request.uri().path())?;
     let fs = fs_for(app, &source).await?;
-    let meta = fs.metadata(&path).await.ok()?;
+    let range_header = request
+        .headers()
+        .get(header::RANGE)
+        .and_then(|v| v.to_str().ok());
+    respond(fs.as_ref(), &path, range_header).await
+}
+
+/// 파일의 미리보기 응답을 만든다. 앱 핸들 없이 동일한 로컬·원격 읽기 정책을 적용한다.
+pub async fn respond(
+    fs: &dyn FileSystem,
+    path: &Path,
+    range_header: Option<&str>,
+) -> Option<Response<Vec<u8>>> {
+    let meta = fs.metadata(path).await.ok()?;
     if meta.kind != EntryKind::File {
         return Some(err(StatusCode::NOT_FOUND));
     }
     let total = meta.size.unwrap_or(0);
-    let mime = mime_for(&path);
+    let mime = mime_for(path);
 
     // 빈 파일: Range 의미 없음 → 200 빈 본문 (RFC 7233 허용). 아래 Range 산술의
     // start+len-1 언더플로 원천 차단.
@@ -160,14 +175,10 @@ async fn try_handle<R: Runtime>(
             .ok();
     }
 
-    let range = request
-        .headers()
-        .get(header::RANGE)
-        .and_then(|v| v.to_str().ok())
-        .and_then(parse_range);
+    let range = range_header.and_then(parse_range);
 
     if let Some((start, end_opt)) = range {
-        if total > 0 && start >= total {
+        if start >= total || end_opt.is_some_and(|end| end < start) {
             return Response::builder()
                 .status(StatusCode::RANGE_NOT_SATISFIABLE)
                 .header(header::CONTENT_RANGE, format!("bytes */{total}"))
@@ -175,9 +186,12 @@ async fn try_handle<R: Runtime>(
                 .ok();
         }
         let last = total.saturating_sub(1);
-        let end = end_opt.unwrap_or(last).min(last);
+        let end = end_opt
+            .unwrap_or(last)
+            .min(start.saturating_add(MAX_RANGE_CHUNK - 1))
+            .min(last);
         let want = (end.saturating_sub(start) + 1) as usize;
-        let bytes = fs.read_range(&path, start, want).await.ok()?;
+        let bytes = fs.read_range(path, start, want).await.ok()?;
         let actual_end = match content_range_end(start, bytes.len()) {
             Some(e) => e,
             None => start, // 빈 read — 본문 빔(언더플로 회피)
@@ -200,9 +214,23 @@ async fn try_handle<R: Runtime>(
             .ok();
     }
 
-    // Range 없음 → 전체(상한 내) 200.
-    let want = (total as usize).min(MAX_FULL);
-    let bytes = fs.read_range(&path, 0, want).await.ok()?;
+    // 큰 파일의 일부를 완전한 200 응답으로 위장하지 않는다. PDF 전송은 Range로 재요청한다.
+    if total > MAX_FULL as u64 {
+        return Response::builder()
+            .status(StatusCode::PAYLOAD_TOO_LARGE)
+            .header(header::ACCEPT_RANGES, "bytes")
+            .header(header::CONTENT_RANGE, format!("bytes */{total}"))
+            .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+            .header(
+                header::ACCESS_CONTROL_EXPOSE_HEADERS,
+                "Content-Range, Accept-Ranges, Content-Length",
+            )
+            .body(Vec::new())
+            .ok();
+    }
+    // Range 없음 + 상한 이내 → 전체 200.
+    let want = total as usize;
+    let bytes = fs.read_range(path, 0, want).await.ok()?;
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, mime)
@@ -266,33 +294,45 @@ mod tests {
 
 #[cfg(test)]
 mod review_browse {
-    //! browse 점검 재현 — 열린 Range(`bytes=0-`) 응답 크기(C-03).
-    //! `try_handle` 은 AppHandle 이 필요해 직접 못 부른다. 아래는 그 함수의 Range 분기
-    //! 산술(위 `try_handle` 의 `end`/`want` 계산)을 그대로 따라 한 뒤 실제 `LocalFs::read_range`
-    //! 로 읽는다 — Chromium(WebView2) `<video>` 는 첫 요청을 `bytes=0-` 로 보낸다.
     use super::*;
 
     #[tokio::test]
-    #[ignore = "browse-01 repro"]
     async fn open_ended_range_is_capped() {
         let dir = tempfile::tempdir().unwrap();
-        let p = dir.path().join("movie.mp4");
-        // 64 MB 희소 파일 (디스크는 거의 안 씀).
-        let f = std::fs::File::create(&p).unwrap();
-        f.set_len(64 * 1024 * 1024).unwrap();
-        drop(f);
-        let total = std::fs::metadata(&p).unwrap().len();
-
-        let (start, end_opt) = parse_range("bytes=0-").unwrap();
-        let last = total.saturating_sub(1);
-        let end = end_opt.unwrap_or(last).min(last);
-        let want = (end.saturating_sub(start) + 1) as usize;
-        let bytes = LocalFs::new().read_range(&p, start, want).await.unwrap();
-        // 기대: 한 응답은 상한(MAX_FULL = 16MB 등) 이하로 잘라 206 으로 돌려준다.
-        assert!(
-            bytes.len() <= MAX_FULL,
-            "bytes=0- 한 번에 {} MB 를 메모리로 읽음 (파일 전체)",
-            bytes.len() / (1024 * 1024)
+        let path = dir.path().join("movie.mp4");
+        std::fs::File::create(&path)
+            .unwrap()
+            .set_len(64 * 1024 * 1024)
+            .unwrap();
+        let response = respond(&LocalFs::new(), &path, Some("bytes=0-"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+        assert!(response.body().len() <= 8 * 1024 * 1024);
+        assert_eq!(
+            response.headers()[header::CONTENT_RANGE],
+            "bytes 0-8388607/67108864"
         );
+    }
+
+    #[tokio::test]
+    async fn small_full_response_and_invalid_ranges() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("small.pdf");
+        std::fs::write(&path, b"abcdef").unwrap();
+        for range in [None, Some("bytes=abc"), Some("bytes=0-1,5-6")] {
+            let response = respond(&LocalFs::new(), &path, range).await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(response.body(), b"abcdef");
+        }
+        for range in ["bytes=6-", "bytes=5-2"] {
+            let response = respond(&LocalFs::new(), &path, Some(range)).await.unwrap();
+            assert_eq!(response.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+        }
+        let response = respond(&LocalFs::new(), &path, Some("bytes=3-999"))
+            .await
+            .unwrap();
+        assert_eq!(response.body(), b"def");
+        assert_eq!(response.headers()[header::CONTENT_RANGE], "bytes 3-5/6");
     }
 }
