@@ -351,9 +351,12 @@ async fn copy_tree(
     on_bytes: &(dyn Fn(u64) + Send + Sync),
     on_file: &(dyn Fn(&std::path::Path) + Send + Sync),
 ) -> Result<(), DuetError> {
-    // 같은 fs 면 이번 복사의 최상위 대상 경로를 기억해, 원본 트리를 걷다 그 경로를 만나면
-    // 건너뛴다 — 폴더를 자기 하위로 복사할 때 방금 만든 사본을 다시 복사하지 않는 마지막
-    // 방어선(정상 경로는 core::path_guard 가 plan/execute 에서 이미 거부한다).
+    // 보조 방어: 원본과 대상의 SourceId 가 같으면 이번 복사의 최상위 대상 경로를 기억해,
+    // 원본 트리를 걷다 **경로 값이 그것과 똑같은** 자식을 만나면 건너뛴다(방금 만든 사본을
+    // 다시 복사하지 않게). 잡는 것은 "같은 SourceId + 같은 경로 문자열"뿐이다 — 같은 서버의
+    // 다른 연결(SourceId 가 다름), `..`/`.`·표기 차이, 대상 조상이 심볼릭 링크라 다른 경로로
+    // 같은 폴더를 가리키는 경우는 못 잡는다. 자기 하위 복사의 주된 방어는 core::path_guard
+    // (plan/execute 에서 실제 경로로 비교해 거부)다.
     let skip = (src_fs.source_id() == dst_fs.source_id()).then_some(dst);
     copy_tree_inner(
         src_fs, src, dst_fs, dst, skip, resume, cancel, on_bytes, on_file,
