@@ -543,7 +543,7 @@ async fn opus_compress_names_and_empty_dirs() {
     }
 }
 
-/// 파일 심볼릭 링크 — zip 은 링크를 따라가 내용이 복사된다(링크 보존 X). 기록용.
+/// 파일 심볼릭 링크 — zip에 링크 종류와 대상 문자열이 그대로 보존된다.
 #[cfg(unix)]
 #[tokio::test]
 async fn opus_observe_compress_file_symlink() {
@@ -558,14 +558,14 @@ async fn opus_observe_compress_file_symlink() {
     let mut e = z.by_name("ln.txt").unwrap();
     let mut s = String::new();
     std::io::Read::read_to_string(&mut e, &mut s).unwrap();
-    eprintln!("ln.txt symlink={} content={s:?}", e.is_symlink());
+    assert!(e.is_symlink());
+    assert_eq!(s, "real.txt");
 }
 
 /// 폴더 심볼릭 링크가 자기 상위를 가리킬 때 (zip). 순환 → 재귀가 OS 의 링크 해석 한도
 /// (macOS 32 / Linux 40)까지 내려가다 ELOOP 로 실패하는지, 스택 오버플로인지 확인.
 /// 기대: 링크를 따라가지 않고(또는 순환 감지) 성공.
 #[cfg(unix)]
-#[ignore = "archive-10 repro (순환 링크 — 단독 실행)"]
 #[tokio::test]
 async fn opus_compress_zip_symlink_loop() {
     let root = tempfile::tempdir().unwrap();
@@ -582,7 +582,6 @@ async fn opus_compress_zip_symlink_loop() {
 
 /// 같은 순환을 tar.gz 로 (tar::Builder 기본 follow_symlinks=true).
 #[cfg(unix)]
-#[ignore = "archive-10 repro (순환 링크 — 단독 실행)"]
 #[tokio::test]
 async fn opus_compress_targz_symlink_loop() {
     let root = tempfile::tempdir().unwrap();
@@ -601,7 +600,6 @@ async fn opus_compress_targz_symlink_loop() {
 /// 결과(2026-11-08 macOS): 통과. 깊이 우선으로 한 링크가 먼저 ELOOP 에 닿아 압축 전체가
 /// 즉시 실패한다 (hang 아님 → 가설 반박, 대신 opus_compress_zip_symlink_loop 의 실패와 같은 결함).
 #[cfg(unix)]
-#[ignore = "archive-10 관찰 (순환 링크 2개 — 단독 실행)"]
 #[test]
 fn opus_compress_zip_two_symlink_loops_hang() {
     let root = tempfile::tempdir().unwrap();
@@ -620,10 +618,8 @@ fn opus_compress_zip_two_symlink_loops_hang() {
     let got = rx.recv_timeout(std::time::Duration::from_secs(5));
     let size = std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0);
     eprintln!("after 5s: {got:?}; archive size so far = {size} bytes");
-    assert!(
-        got.is_ok(),
-        "5초 안에 끝나지 않음 (크기 {size} 바이트, 계속 증가 중)"
-    );
+    let result = got.expect("5초 안에 끝나지 않음");
+    assert!(result.is_ok(), "{result:?}");
 }
 
 /// 4 GiB 를 넘는 파일 — add_to_zip 은 large_file(true) 를 안 켠다 → zip 2.4.2

@@ -787,7 +787,6 @@ async fn sol2_failed_zip_permission_leaves_openable_partial() {
 
 #[cfg(unix)]
 #[test]
-#[ignore = "archive-10 현재 결함을 관찰(통과=결함 있음) — 수정 시 기대값 반전"]
 fn sol2_file_symlink_and_dangling_both_formats() {
     let d = tempfile::tempdir().unwrap();
     let src = d.path().join("src");
@@ -807,21 +806,95 @@ fn sol2_file_symlink_and_dangling_both_formats() {
         let out = d.path().join(format!("out-{n}"));
         std::fs::create_dir(&out).unwrap();
         extract_local_blocking(&p, &out, a, None).unwrap();
-        for name in ["alias", "nested/alias2"] {
-            assert!(!std::fs::symlink_metadata(out.join(name))
+        for (name, target) in [("alias", "target"), ("nested/alias2", "../target")] {
+            assert!(std::fs::symlink_metadata(out.join(name))
                 .unwrap()
                 .file_type()
                 .is_symlink());
-            assert_eq!(std::fs::read(out.join(name)).unwrap(), b"target bytes");
+            assert_eq!(
+                std::fs::read_link(out.join(name)).unwrap(),
+                Path::new(target)
+            );
         }
-        let r = compress_local_blocking(
+        let dangling_archive = d.path().join(format!("dangling-{n}"));
+        compress_local_blocking(
             &src,
             &["alias".into(), "dangling".into()],
-            &d.path().join(format!("bad-{n}")),
+            &dangling_archive,
             c,
+        )
+        .unwrap();
+        let dangling_out = tempfile::tempdir().unwrap();
+        extract_local_blocking(&dangling_archive, dangling_out.path(), a, None).unwrap();
+        assert!(
+            std::fs::symlink_metadata(dangling_out.path().join("dangling"))
+                .unwrap()
+                .file_type()
+                .is_symlink()
         );
-        eprintln!("{n}: aliases=regular copies; dangling={r:?}");
-        assert!(r.is_err());
+        assert_eq!(
+            std::fs::read_link(dangling_out.path().join("dangling")).unwrap(),
+            Path::new("no-such-target")
+        );
+    }
+}
+
+/// 바깥 파일/폴더 링크는 링크 항목 두 개만 저장하고 외부 본문을 가져오지 않는다.
+#[cfg(unix)]
+#[test]
+fn sol2_file_symlink_and_dangling_both_formats_external_targets() {
+    let d = tempfile::tempdir().unwrap();
+    let src = d.path().join("src");
+    let outside = d.path().join("outside");
+    std::fs::create_dir(&src).unwrap();
+    std::fs::create_dir(&outside).unwrap();
+    let file = outside.join("secret.txt");
+    std::fs::write(&file, b"must not be archived").unwrap();
+    std::os::unix::fs::symlink(&file, src.join("file-link")).unwrap();
+    std::os::unix::fs::symlink(&outside, src.join("dir-link")).unwrap();
+    for (name, format) in [
+        ("external.zip", CompressFormat::Zip),
+        ("external.tar.gz", CompressFormat::TarGz),
+    ] {
+        let path = d.path().join(name);
+        compress_local_blocking(
+            &src,
+            &["file-link".into(), "dir-link".into()],
+            &path,
+            format,
+        )
+        .unwrap();
+        match format {
+            CompressFormat::Zip => {
+                let mut zip = zip::ZipArchive::new(std::fs::File::open(&path).unwrap()).unwrap();
+                assert_eq!(zip.len(), 2);
+                for (member, target) in [("file-link", &file), ("dir-link", &outside)] {
+                    let mut entry = zip.by_name(member).unwrap();
+                    assert!(entry.is_symlink(), "{member}");
+                    let mut body = String::new();
+                    entry.read_to_string(&mut body).unwrap();
+                    assert_eq!(body, target.to_string_lossy());
+                }
+            }
+            CompressFormat::TarGz => {
+                let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(
+                    std::fs::File::open(&path).unwrap(),
+                ));
+                let mut count = 0;
+                for entry in tar.entries().unwrap() {
+                    let entry = entry.unwrap();
+                    assert!(entry.header().entry_type().is_symlink());
+                    let target = if entry.path().unwrap() == Path::new("file-link") {
+                        &file
+                    } else {
+                        &outside
+                    };
+                    assert_eq!(entry.link_name().unwrap().unwrap().as_ref(), target);
+                    count += 1;
+                }
+                assert_eq!(count, 2);
+            }
+        }
     }
 }
 

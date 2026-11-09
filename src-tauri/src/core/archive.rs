@@ -1107,11 +1107,15 @@ fn compress_local_blocking(
         CompressFormat::TarGz => {
             let enc = flate2::write::GzEncoder::new(out, flate2::Compression::default());
             let mut tar = tar::Builder::new(enc);
+            tar.follow_symlinks(false);
             for name in names {
                 let full = src_dir.join(name);
-                let meta = std::fs::metadata(&full)
+                let meta = std::fs::symlink_metadata(&full)
                     .map_err(|e| DuetError::Io(format!("stat {name}: {e}")))?;
-                if meta.is_dir() {
+                if meta.file_type().is_symlink() {
+                    tar.append_path_with_name(&full, name)
+                        .map_err(|e| DuetError::Io(format!("tar add link {name}: {e}")))?;
+                } else if meta.is_dir() {
                     tar.append_dir_all(name, &full)
                         .map_err(|e| DuetError::Io(format!("tar add dir {name}: {e}")))?;
                 } else {
@@ -1140,9 +1144,18 @@ fn add_to_zip<W: std::io::Write + std::io::Seek>(
     opts: &zip::write::FileOptions<()>,
 ) -> Result<(), DuetError> {
     let full = src_dir.join(rel);
-    let meta =
-        std::fs::metadata(&full).map_err(|e| DuetError::Io(format!("stat {rel_str}: {e}")))?;
-    if meta.is_dir() {
+    let meta = std::fs::symlink_metadata(&full)
+        .map_err(|e| DuetError::Io(format!("stat {rel_str}: {e}")))?;
+    if meta.file_type().is_symlink() {
+        let target = std::fs::read_link(&full)
+            .map_err(|e| DuetError::Io(format!("read link {rel_str}: {e}")))?;
+        // 아카이브는 / 구분자. 네이티브 구분자만 변환해 Unix의 \ 이름은 보존한다.
+        let target = target
+            .to_string_lossy()
+            .replace(std::path::MAIN_SEPARATOR, "/");
+        zip.add_symlink(rel_str, target, *opts)
+            .map_err(|e| DuetError::Io(format!("zip add link {rel_str}: {e}")))?;
+    } else if meta.is_dir() {
         zip.add_directory(rel_str, *opts)
             .map_err(|e| DuetError::Io(format!("zip add dir {rel_str}: {e}")))?;
         for entry in std::fs::read_dir(&full)
