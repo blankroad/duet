@@ -196,10 +196,7 @@ fn place_hard_link(src: &Path, dst: &Path) -> io::Result<HardLink> {
 ///   `MoveFileExW(MOVEFILE_REPLACE_EXISTING)` 이고 "to must not be a directory" 외 제약이
 ///   없다(<https://doc.rust-lang.org/std/fs/fn.rename.html>).
 ///   `rename` 이 실패하면 임시 항목이 해제 폴더 안에 남는다(폴더 밖 노출은 없음).
-fn create_replacing(
-    dst: &Path,
-    make: impl FnOnce(&Path) -> io::Result<bool>,
-) -> io::Result<bool> {
+fn create_replacing(dst: &Path, make: impl FnOnce(&Path) -> io::Result<bool>) -> io::Result<bool> {
     match std::fs::symlink_metadata(dst) {
         Err(e) if e.kind() == io::ErrorKind::NotFound => make(dst),
         Err(e) => Err(e),
