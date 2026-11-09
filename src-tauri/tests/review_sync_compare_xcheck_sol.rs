@@ -226,6 +226,7 @@ async fn sc04_copy_undo_preserves_edits_saved_after_copy() {
                 backups_to_restore: vec![],
                 src_source: Some(SourceId::Local),
                 copied_from: vec![src],
+                copied_stamps: vec![],
             },
         )
         .await

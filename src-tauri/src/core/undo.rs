@@ -710,6 +710,7 @@ pub async fn execute_undo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
             right_backups,
             trashed_left,
             trashed_right,
+            ..
         } => {
             let mut refresh = std::collections::HashSet::<(SourceId, PathBuf)>::new();
             let mut trash_failed = false;
@@ -938,6 +939,7 @@ pub async fn execute_redo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
             backups_to_restore,
             src_source,
             copied_from,
+            ..
         } => {
             // 덮어쓰기 동반 복사는 undo 가 백업을 복원했으므로 재복사가 충돌 — 미지원.
             if !backups_to_restore.is_empty() {
@@ -982,6 +984,7 @@ pub async fn execute_redo(entry: &JournalEntry, pool: &Arc<ConnectionPool>) -> U
             pruned,
             src_source,
             created_from,
+            ..
         } => {
             // 순수 추가형(덮어쓰기·prune 없음) sync 만 redo — 그 외는 재실행 시
             // 백업/휴지통 기록이 스테일해짐.
@@ -1326,6 +1329,7 @@ mod tests {
             backups_to_restore: vec![crate::services::journal::BackupRestore {
                 backup_path: dir.path().join("x.bak"),
                 original_path: dir.path().join("x"),
+                applied: None,
             }],
         });
         let outcome = execute_redo(&entry, &pool).await;
@@ -1347,6 +1351,8 @@ mod tests {
             pruned: vec![],
             src_source: Some(SourceId::Local),
             created_from: vec![src.clone()],
+            created_stamps: vec![],
+            created_dirs: vec![],
         });
         let outcome = execute_redo(&entry, &pool).await;
         assert!(
@@ -1366,6 +1372,8 @@ mod tests {
             }],
             src_source: Some(SourceId::Local),
             created_from: vec![src.clone()],
+            created_stamps: vec![],
+            created_dirs: vec![],
         });
         let outcome = execute_redo(&entry, &pool).await;
         assert!(matches!(outcome.kind, UndoKind::Skipped));
@@ -1386,6 +1394,7 @@ mod tests {
             backups_to_restore: vec![],
             src_source: Some(SourceId::Local),
             copied_from: vec![src.clone()],
+            copied_stamps: vec![],
         });
         let outcome = execute_redo(&entry, &pool).await;
         assert!(
@@ -1401,6 +1410,7 @@ mod tests {
             backups_to_restore: vec![],
             src_source: None,
             copied_from: vec![],
+            copied_stamps: vec![],
         });
         let outcome = execute_redo(&entry, &pool).await;
         assert!(matches!(outcome.kind, UndoKind::Skipped));
@@ -1426,6 +1436,8 @@ mod tests {
                 from: left.join("a.txt"),
                 to: right.join("a.txt"),
             }],
+            left_created_stamps: vec![],
+            right_created_stamps: vec![],
         });
         let outcome = execute_redo(&entry, &pool).await;
         assert!(
@@ -1442,6 +1454,8 @@ mod tests {
             right_created: vec![right.join("a.txt")],
             left_pairs: vec![],
             right_pairs: vec![],
+            left_created_stamps: vec![],
+            right_created_stamps: vec![],
         });
         let outcome = execute_redo(&entry, &pool).await;
         assert!(matches!(outcome.kind, UndoKind::Skipped));
@@ -1460,6 +1474,7 @@ mod tests {
             left_backups: vec![crate::services::journal::BackupRestore {
                 backup_path: dir.path().join("x.bak"),
                 original_path: dir.path().join("x"),
+                applied: None,
             }],
             right_backups: vec![],
             left_pairs: vec![crate::services::journal::RedoCopyPair {
@@ -1467,6 +1482,8 @@ mod tests {
                 to: dir.path().join("x"),
             }],
             right_pairs: vec![],
+            left_created_stamps: vec![],
+            right_created_stamps: vec![],
         });
         let outcome = execute_redo(&entry, &pool).await;
         assert!(matches!(outcome.kind, UndoKind::Skipped));
@@ -1957,10 +1974,12 @@ mod review_fileops_sol_r3 {
                         .map(|i| BackupRestore {
                             backup_path: backups[i].clone(),
                             original_path: originals[i].clone(),
+                            applied: None,
                         })
                         .collect(),
                     src_source: Some(SourceId::Local),
                     copied_from: vec![],
+                    copied_stamps: vec![],
                 },
             )
             .await

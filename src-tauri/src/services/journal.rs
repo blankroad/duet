@@ -6,7 +6,7 @@
 use crate::fs::persist;
 use crate::services::settings::duet_config_dir;
 use crate::services::startup_notices::{StartupNotice, StartupNoticeKind};
-use crate::types::{DuetError, Location, SourceId};
+use crate::types::{DuetError, EntryKind, Location, SourceId};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -167,6 +167,10 @@ pub enum UndoAction {
         /// `copied[i]` 의 원본 경로(병렬 배열). 구버전/아카이브 추출은 빈 벡터.
         #[serde(default)]
         copied_from: Vec<PathBuf>,
+        /// `copied[i]` 의 기록 직후 지문(병렬 배열). undo 는 지금과 같을 때만 휴지통으로.
+        /// 구버전 라인은 빈 벡터 → 확인 불가로 건너뜀.
+        #[serde(default)]
+        copied_stamps: Vec<Option<ItemStamp>>,
     },
     UndoMove {
         src_source: SourceId,
@@ -200,6 +204,11 @@ pub enum UndoAction {
         left_pairs: Vec<RedoCopyPair>,
         #[serde(default)]
         right_pairs: Vec<RedoCopyPair>,
+        /// `left_created[i]`·`right_created[i]` 의 기록 직후 지문(병렬). 구버전은 빈 벡터.
+        #[serde(default)]
+        left_created_stamps: Vec<Option<ItemStamp>>,
+        #[serde(default)]
+        right_created_stamps: Vec<Option<ItemStamp>>,
     },
     /// 단방향 sync 되돌리기 — 새로 복사 제거 + 덮어쓴 백업 복원 + prune 삭제분 휴지통 복원.
     /// (휴지통 복원은 best-effort — macOS 로컬은 NotSupported 라 수동 복원 필요.)
@@ -214,6 +223,12 @@ pub enum UndoAction {
         /// `created[i]` 의 원본 경로(병렬 배열). 구버전은 빈 벡터.
         #[serde(default)]
         created_from: Vec<PathBuf>,
+        /// `created[i]` 의 기록 직후 지문(병렬 배열). 구버전은 빈 벡터.
+        #[serde(default)]
+        created_stamps: Vec<Option<ItemStamp>>,
+        /// sync 가 새로 만든 폴더(만든 순서 — 부모가 먼저). undo 는 깊은 것부터 비었을 때만 제거.
+        #[serde(default)]
+        created_dirs: Vec<PathBuf>,
     },
     /// 비교 적용 되돌리기 — 양쪽 각각 새로 생성분 제거 + 덮어쓴 백업 복원.
     /// (방향이 ToLeft/ToRight 혼합이라 양쪽 모두 추적.)
@@ -229,6 +244,11 @@ pub enum UndoAction {
         left_pairs: Vec<RedoCopyPair>,
         #[serde(default)]
         right_pairs: Vec<RedoCopyPair>,
+        /// `left_created[i]`·`right_created[i]` 의 기록 직후 지문(병렬). 구버전은 빈 벡터.
+        #[serde(default)]
+        left_created_stamps: Vec<Option<ItemStamp>>,
+        #[serde(default)]
+        right_created_stamps: Vec<Option<ItemStamp>>,
     },
     /// 3-way 적용 되돌리기 — 생성분 제거 + 덮어쓴 백업 복원 + 삭제(휴지통)분 복원.
     UndoThreeWayApply {
@@ -240,6 +260,11 @@ pub enum UndoAction {
         right_backups: Vec<BackupRestore>,
         trashed_left: Vec<TrashItem>,
         trashed_right: Vec<TrashItem>,
+        /// `left_created[i]`·`right_created[i]` 의 기록 직후 지문(병렬). 구버전은 빈 벡터.
+        #[serde(default)]
+        left_created_stamps: Vec<Option<ItemStamp>>,
+        #[serde(default)]
+        right_created_stamps: Vec<Option<ItemStamp>>,
     },
     /// chmod 되돌리기 — 항목별 이전 mode 재적용 (비재귀 chmod 만 기록됨).
     UndoChmod {
@@ -270,6 +295,23 @@ pub struct TrashItem {
 pub struct BackupRestore {
     pub backup_path: PathBuf,
     pub original_path: PathBuf,
+    /// 덮어쓴 자리(`original_path`)의 적용 직후 지문. undo 는 현재가 이것과 같을 때만
+    /// 현재 내용을 휴지통으로 보내고 백업을 되돌린다. 구버전·미기록은 None(확인 불가).
+    #[serde(default)]
+    pub applied: Option<ItemStamp>,
+}
+
+/// undo 안전 확인용 항목 지문 — 기록 때와 지금이 같은지 비교한다(`core::stamp`).
+///
+/// 파일·링크는 크기·수정시각, 폴더는 하위 트리 digest(폴더 자신의 수정시각은 제외).
+/// 값이 없는 필드(None)는 "확인 불가"로 보고 비교에서 다르다고 본다(안전 쪽).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct ItemStamp {
+    pub kind: EntryKind,
+    pub size: Option<u64>,
+    pub modified_ms: Option<i64>,
+    /// 폴더면 하위 트리의 (상대경로·종류·크기·수정시각) sha256 hex. 파일·링크는 None.
+    pub tree: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -725,6 +767,118 @@ mod tests {
             }
             other => panic!("wrong variant: {other:?}"),
         }
+    }
+
+    /// 지문 필드(`*_stamps`, `applied`, `created_dirs`)가 없는 구버전 undo 줄도 파싱되고,
+    /// 빈 값으로 채워져야 한다(undo 는 "확인 불가"로 건너뛴다).
+    #[test]
+    fn undo_actions_without_stamps_parse_with_empty_defaults() {
+        let br = r#"{"backup_path":"/b/x.bak","original_path":"/b/x"}"#;
+        let copy: UndoAction = serde_json::from_str(&format!(
+            r#"{{"kind":"undo_copy","target_source":{{"kind":"local"}},"copied":["/b/x"],"backups_to_restore":[{br}]}}"#
+        ))
+        .unwrap();
+        let UndoAction::UndoCopy {
+            copied_stamps,
+            backups_to_restore,
+            ..
+        } = copy
+        else {
+            panic!("wrong variant")
+        };
+        assert!(copied_stamps.is_empty());
+        assert!(backups_to_restore[0].applied.is_none());
+
+        let sync: UndoAction = serde_json::from_str(&format!(
+            r#"{{"kind":"undo_sync","dst_source":{{"kind":"local"}},"created":["/d/a"],"backups_to_restore":[{br}],"pruned":[]}}"#
+        ))
+        .unwrap();
+        let UndoAction::UndoSync {
+            created_stamps,
+            created_dirs,
+            ..
+        } = sync
+        else {
+            panic!("wrong variant")
+        };
+        assert!(created_stamps.is_empty() && created_dirs.is_empty());
+
+        let merge: UndoAction = serde_json::from_str(
+            r#"{"kind":"undo_bidir_merge","left_source":{"kind":"local"},"left_created":["/l/a"],"right_source":{"kind":"local"},"right_created":[]}"#,
+        )
+        .unwrap();
+        let UndoAction::UndoBidirMerge {
+            left_created_stamps,
+            right_created_stamps,
+            ..
+        } = merge
+        else {
+            panic!("wrong variant")
+        };
+        assert!(left_created_stamps.is_empty() && right_created_stamps.is_empty());
+
+        let apply: UndoAction = serde_json::from_str(&format!(
+            r#"{{"kind":"undo_compare_apply","left_source":{{"kind":"local"}},"right_source":{{"kind":"local"}},"left_created":["/l/a"],"right_created":[],"left_backups":[{br}],"right_backups":[]}}"#
+        ))
+        .unwrap();
+        let UndoAction::UndoCompareApply {
+            left_created_stamps,
+            left_backups,
+            ..
+        } = apply
+        else {
+            panic!("wrong variant")
+        };
+        assert!(left_created_stamps.is_empty());
+        assert!(left_backups[0].applied.is_none());
+
+        let three: UndoAction = serde_json::from_str(
+            r#"{"kind":"undo_three_way_apply","left_source":{"kind":"local"},"right_source":{"kind":"local"},"left_created":[],"right_created":["/r/a"],"left_backups":[],"right_backups":[],"trashed_left":[],"trashed_right":[]}"#,
+        )
+        .unwrap();
+        let UndoAction::UndoThreeWayApply {
+            right_created_stamps,
+            ..
+        } = three
+        else {
+            panic!("wrong variant")
+        };
+        assert!(right_created_stamps.is_empty());
+    }
+
+    /// 새 지문 필드는 저장 → 읽기 왕복에서 그대로 유지돼야 한다.
+    #[test]
+    fn undo_copy_stamps_roundtrip() {
+        let stamp = ItemStamp {
+            kind: EntryKind::Dir,
+            size: None,
+            modified_ms: None,
+            tree: Some("abc".into()),
+        };
+        let undo = UndoAction::UndoCopy {
+            target_source: SourceId::Local,
+            copied: vec![PathBuf::from("/b/x")],
+            backups_to_restore: vec![BackupRestore {
+                backup_path: PathBuf::from("/b/x.bak"),
+                original_path: PathBuf::from("/b/x"),
+                applied: Some(stamp.clone()),
+            }],
+            src_source: None,
+            copied_from: vec![],
+            copied_stamps: vec![Some(stamp.clone()), None],
+        };
+        let back: UndoAction =
+            serde_json::from_str(&serde_json::to_string(&undo).unwrap()).unwrap();
+        let UndoAction::UndoCopy {
+            copied_stamps,
+            backups_to_restore,
+            ..
+        } = back
+        else {
+            panic!("wrong variant")
+        };
+        assert_eq!(copied_stamps, vec![Some(stamp.clone()), None]);
+        assert_eq!(backups_to_restore[0].applied, Some(stamp));
     }
 
     #[tokio::test]

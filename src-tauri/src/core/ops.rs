@@ -676,6 +676,7 @@ async fn copy_execute_relay(
                             kept_backups.push(BackupRestore {
                                 backup_path: b,
                                 original_path: dst_path.clone(),
+                                applied: None, // 그 자리는 copied 지문이 덮는다
                             });
                         } else {
                             // 복사는 이미 성공 — 백업 정리 실패는 치명적이지 않다(가시적
@@ -732,6 +733,7 @@ async fn copy_execute_relay(
         }
     }
     let count = copied.len() as u32;
+    let copied_stamps = crate::core::stamp::stamp_all(dst_fs, &copied).await;
     let undo = UndoAction::UndoCopy {
         target_source: plan.dst.source.clone(),
         copied,
@@ -740,6 +742,7 @@ async fn copy_execute_relay(
         backups_to_restore: kept_backups,
         src_source: Some(plan.src_source.clone()),
         copied_from,
+        copied_stamps,
     };
     let op = OpKind::Copy {
         count,
@@ -1008,6 +1011,7 @@ pub async fn move_execute(
                             kept_backups.push(BackupRestore {
                                 backup_path: b,
                                 original_path: dst_path.clone(),
+                                applied: None,
                             });
                         } else {
                             // 이동은 이미 성공 — 백업 정리 실패는 치명적이지 않다(가시적
@@ -1185,6 +1189,7 @@ async fn sync_execute_local(
     let mut state = MirrorState {
         created: Vec::new(),
         created_from: Vec::new(),
+        created_dirs: Vec::new(),
         backups: Vec::new(),
         done: 0,
         total,
@@ -1220,6 +1225,8 @@ async fn sync_execute_local(
         src: plan.src.clone(),
         dst: plan.dst.clone(),
     };
+    let created_stamps = crate::core::stamp::stamp_all(dst_fs, &state.created).await;
+    crate::core::stamp::fill_applied(dst_fs, &mut state.backups).await;
     let undo = UndoAction::UndoSync {
         dst_source: plan.dst.source.clone(),
         created: state.created,
@@ -1227,6 +1234,8 @@ async fn sync_execute_local(
         pruned,
         src_source: Some(plan.src.source.clone()),
         created_from: state.created_from,
+        created_stamps,
+        created_dirs: state.created_dirs,
     };
     ctx.journal.push(op, undo).await
 }
@@ -1235,6 +1244,8 @@ struct MirrorState {
     created: Vec<PathBuf>,
     /// `created[i]` 의 원본 경로 — redo 용 (병렬 배열).
     created_from: Vec<PathBuf>,
+    /// 이 sync 가 새로 만든 폴더(부모 먼저) — undo 가 비었을 때만 제거(SC-31).
+    created_dirs: Vec<PathBuf>,
     backups: Vec<BackupRestore>,
     done: u64,
     total: u64,
@@ -1265,6 +1276,7 @@ async fn mirror_dir(
             crate::types::EntryKind::Dir => {
                 if dst_fs.metadata(&d).await.is_err() {
                     dst_fs.mkdir(&d).await?;
+                    state.created_dirs.push(d.clone());
                 }
                 Box::pin(mirror_dir(src_fs, dst_fs, &s, &d, cancel, progress, state)).await?;
             }
@@ -1282,6 +1294,7 @@ async fn mirror_dir(
                         state.backups.push(BackupRestore {
                             backup_path: backup,
                             original_path: d.clone(),
+                            applied: None, // 기록 직전에 채움
                         });
                     } else {
                         state.created.push(d.clone());
@@ -1528,6 +1541,8 @@ async fn sync_execute_same_host(
         src: plan.src.clone(),
         dst: plan.dst.clone(),
     };
+    let created_stamps = crate::core::stamp::stamp_all(&dst_fs, &created).await;
+    crate::core::stamp::fill_applied(&dst_fs, &mut backups).await;
     let undo = UndoAction::UndoSync {
         dst_source: plan.dst.source.clone(),
         created,
@@ -1535,6 +1550,9 @@ async fn sync_execute_same_host(
         pruned: vec![],
         src_source: Some(plan.src.source.clone()),
         created_from,
+        created_stamps,
+        // rsync 가 새로 만든 폴더는 itemize 에서 따로 추리지 않는다(한계 — 빈 폴더가 남을 수 있음).
+        created_dirs: vec![],
     };
     ctx.journal.push(op, undo).await
 }
@@ -1565,6 +1583,7 @@ async fn collect_backup_files(
                 out.push(BackupRestore {
                     backup_path: p.clone(),
                     original_path: original,
+                    applied: None, // 기록 직전에 채움
                 });
             }
         }
@@ -1956,8 +1975,12 @@ fn emit_merge_progress(
 }
 
 /// merge 결과를 journal 에 기록 (relay/same-host 공통).
+///
+/// 생성분 지문은 양쪽 fs 로 잰다(`None` = 그쪽 fs 를 못 얻음 → 지문 없음 = undo 때 건너뜀).
+#[allow(clippy::too_many_arguments)]
 async fn push_merge_journal(
     ctx: &OpCtx,
+    fs: (Option<&dyn FileSystem>, Option<&dyn FileSystem>),
     left: Location,
     right: Location,
     left_created: Vec<PathBuf>,
@@ -1965,6 +1988,8 @@ async fn push_merge_journal(
     left_pairs: Vec<RedoCopyPair>,
     right_pairs: Vec<RedoCopyPair>,
 ) -> Result<JournalEntry, DuetError> {
+    let left_created_stamps = stamp_side(fs.0, &left_created).await;
+    let right_created_stamps = stamp_side(fs.1, &right_created).await;
     let op = OpKind::Merge {
         left: left.clone(),
         right: right.clone(),
@@ -1978,8 +2003,29 @@ async fn push_merge_journal(
         right_created,
         left_pairs,
         right_pairs,
+        left_created_stamps,
+        right_created_stamps,
     };
     ctx.journal.push(op, undo).await
+}
+
+/// 한쪽 생성분 지문 — fs 가 없으면 전부 None(확인 불가).
+async fn stamp_side(
+    fs: Option<&dyn FileSystem>,
+    paths: &[PathBuf],
+) -> Vec<Option<crate::services::journal::ItemStamp>> {
+    match fs {
+        Some(fs) => crate::core::stamp::stamp_all(fs, paths).await,
+        None => vec![None; paths.len()],
+    }
+}
+
+/// same-host 기록용 SshFs — 연결을 못 얻으면 None(지문 없이 기록, undo 는 건너뜀).
+async fn ssh_fs_opt(
+    pool: &Arc<crate::services::connection_pool::ConnectionPool>,
+    conn: &crate::types::ConnectionId,
+) -> Option<crate::fs::SshFs> {
+    pool.get(conn).await.ok().map(crate::fs::SshFs::new)
 }
 
 /// in-Rust 머지 (로컬·cross-host relay) — 본인 PC 를 거쳐 스트림 복사.
@@ -2072,6 +2118,7 @@ async fn merge_relay(
     }
     let entry = push_merge_journal(
         ctx,
+        (Some(left_fs), Some(right_fs)),
         left,
         right,
         left_created,
@@ -2186,8 +2233,14 @@ async fn merge_same_host(
         done += 1;
         emit_merge_progress(&progress, done, total);
     }
+    let left_fs = ssh_fs_opt(pool, left_conn).await;
+    let right_fs = ssh_fs_opt(pool, right_conn).await;
     let entry = push_merge_journal(
         ctx,
+        (
+            left_fs.as_ref().map(|f| f as &dyn FileSystem),
+            right_fs.as_ref().map(|f| f as &dyn FileSystem),
+        ),
         left,
         right,
         left_created,
@@ -2347,12 +2400,16 @@ pub async fn apply_compare(
 }
 
 /// 적용 결과를 journal 에 기록 (relay/same-host 공통).
+///
+/// 생성분·덮어쓴 자리의 지문은 양쪽 fs 로 잰다(`None` = 그쪽 fs 를 못 얻음 → 지문 없음).
 async fn push_compare_apply_journal(
     ctx: &OpCtx,
+    fs: (Option<&dyn FileSystem>, Option<&dyn FileSystem>),
     left: Location,
     right: Location,
-    st: ApplyState,
+    mut st: ApplyState,
 ) -> Result<JournalEntry, DuetError> {
+    let (left_created_stamps, right_created_stamps) = stamp_apply_state(fs, &mut st).await;
     let overwritten = (st.left_backups.len() + st.right_backups.len()) as u32;
     let applied = (st.left_created.len() + st.right_created.len()) as u32 + overwritten;
     let op = OpKind::CompareApply {
@@ -2370,8 +2427,30 @@ async fn push_compare_apply_journal(
         right_backups: st.right_backups,
         left_pairs: st.left_pairs,
         right_pairs: st.right_pairs,
+        left_created_stamps,
+        right_created_stamps,
     };
     ctx.journal.push(op, undo).await
+}
+
+/// `ApplyState` 의 덮어쓴 자리(`applied`)를 채우고 생성분 지문(왼쪽, 오른쪽)을 돌려준다.
+async fn stamp_apply_state(
+    fs: (Option<&dyn FileSystem>, Option<&dyn FileSystem>),
+    st: &mut ApplyState,
+) -> (
+    Vec<Option<crate::services::journal::ItemStamp>>,
+    Vec<Option<crate::services::journal::ItemStamp>>,
+) {
+    if let Some(f) = fs.0 {
+        crate::core::stamp::fill_applied(f, &mut st.left_backups).await;
+    }
+    if let Some(f) = fs.1 {
+        crate::core::stamp::fill_applied(f, &mut st.right_backups).await;
+    }
+    (
+        stamp_side(fs.0, &st.left_created).await,
+        stamp_side(fs.1, &st.right_created).await,
+    )
 }
 
 /// 한 행을 relay 로 적용 — dst 존재면 백업 후 복사, 아니면 생성 기록 후 복사.
@@ -2428,6 +2507,7 @@ async fn apply_one_relay(
         let br = BackupRestore {
             backup_path: backup,
             original_path: dst_path.clone(),
+            applied: None, // 기록 직전에 채움
         };
         if dst_is_left {
             st.left_backups.push(br);
@@ -2490,7 +2570,8 @@ async fn apply_relay(
         done += 1;
         emit_merge_progress(&progress, done, total);
     }
-    let entry = push_compare_apply_journal(ctx, left, right, st).await?;
+    let entry =
+        push_compare_apply_journal(ctx, (Some(left_fs), Some(right_fs)), left, right, st).await?;
     outcome?;
     Ok(entry)
 }
@@ -2544,7 +2625,13 @@ async fn apply_same_host(
         done += 1;
         emit_merge_progress(&progress, done, total);
     }
-    let entry = push_compare_apply_journal(ctx, left, right, st).await?;
+    let left_fs = ssh_fs_opt(pool, left_conn).await;
+    let right_fs = ssh_fs_opt(pool, right_conn).await;
+    let fs = (
+        left_fs.as_ref().map(|f| f as &dyn FileSystem),
+        right_fs.as_ref().map(|f| f as &dyn FileSystem),
+    );
+    let entry = push_compare_apply_journal(ctx, fs, left, right, st).await?;
     outcome?;
     Ok(entry)
 }
@@ -2594,6 +2681,7 @@ async fn apply_one_same_host(
         let br = BackupRestore {
             backup_path: backup,
             original_path: dst_path.clone(),
+            applied: None, // 기록 직전에 채움
         };
         if dst_is_left {
             st.left_backups.push(br);
@@ -2741,6 +2829,8 @@ pub async fn apply_three_way(
         emit_merge_progress(&progress, done, total);
     }
 
+    let (left_created_stamps, right_created_stamps) =
+        stamp_apply_state((Some(left_fs), Some(right_fs)), &mut st).await;
     let op = OpKind::ThreeWayApply {
         base,
         left: left.clone(),
@@ -2757,6 +2847,8 @@ pub async fn apply_three_way(
         right_backups: st.right_backups,
         trashed_left,
         trashed_right,
+        left_created_stamps,
+        right_created_stamps,
     };
     let entry = ctx.journal.push(op, undo).await?;
     outcome?;
@@ -3786,6 +3878,7 @@ async fn copy_execute_same_host(
                         BackupRestore {
                             backup_path: backup,
                             original_path: dst_path,
+                            applied: None, // 기록 직전에 채움(아래)
                         },
                         is_dir,
                     ));
@@ -3956,12 +4049,15 @@ async fn copy_execute_same_host(
         }
     }
     let count = copied.len() as u32;
+    let copied_stamps = crate::core::stamp::stamp_all(&dst_fs, &copied).await;
+    crate::core::stamp::fill_applied_uncovered(&dst_fs, &mut backups, &copied).await;
     let undo = UndoAction::UndoCopy {
         target_source: plan.dst.source.clone(),
         copied,
         backups_to_restore: backups,
         src_source: Some(plan.src_source.clone()),
         copied_from,
+        copied_stamps,
     };
     let op = OpKind::Copy {
         count,
@@ -6864,5 +6960,134 @@ mod review_sync_compare_lead {
             !hist.is_empty(),
             "partial sync (new a_new.txt / overwritten b_changed.txt) left no journal entry → Ctrl+Z impossible"
         );
+    }
+}
+
+/// undo 기록(지문·만든 폴더). TempDir 안에서만,
+/// undo 는 실행하지 않는다(OS 휴지통 미사용).
+#[cfg(test)]
+mod undo_record_tests {
+    use super::*;
+    use crate::fs::LocalFs;
+    use tempfile::TempDir;
+
+    async fn ctx(dir: &std::path::Path) -> OpCtx {
+        OpCtx {
+            settings: crate::services::settings::SettingsStore::load_from(&dir.join("s.toml"))
+                .await
+                .unwrap(),
+            journal: crate::services::journal::Journal::load_from(&dir.join("j.jsonl"))
+                .await
+                .unwrap(),
+            pool: None,
+            app: None,
+        }
+    }
+
+    fn loc(p: &std::path::Path) -> Location {
+        Location {
+            source: SourceId::Local,
+            path: p.to_path_buf(),
+        }
+    }
+
+    /// 왼쪽(L)에만 있는 파일 하나, 오른쪽(R)·base(B)는 비어 있는 트리.
+    fn trees() -> (TempDir, PathBuf, PathBuf, PathBuf) {
+        let t = TempDir::new().unwrap();
+        let (l, r, b) = (t.path().join("L"), t.path().join("R"), t.path().join("B"));
+        for d in [&l, &r, &b] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        std::fs::write(l.join("only_l.txt"), b"L").unwrap();
+        (t, l, r, b)
+    }
+
+    #[tokio::test]
+    async fn merge_and_apply_record_stamps_for_created_items() {
+        let (t, l, r, _b) = trees();
+        std::fs::write(r.join("over.txt"), b"old").unwrap();
+        std::fs::write(l.join("over.txt"), b"newer").unwrap();
+        let c = ctx(t.path()).await;
+        let fs = LocalFs::new();
+
+        let decisions = vec![
+            ApplyDecision {
+                rel: "only_l.txt".into(),
+                direction: ApplyDirection::ToRight,
+            },
+            ApplyDecision {
+                rel: "over.txt".into(),
+                direction: ApplyDirection::ToRight,
+            },
+        ];
+        let e = apply_compare(
+            &fs,
+            loc(&l),
+            &fs,
+            loc(&r),
+            decisions,
+            &c,
+            tokio_util::sync::CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+        let UndoAction::UndoCompareApply {
+            right_created,
+            right_created_stamps,
+            right_backups,
+            ..
+        } = &e.undo
+        else {
+            panic!("wrong variant {:?}", e.undo)
+        };
+        assert_eq!(right_created_stamps.len(), right_created.len());
+        let now = crate::core::stamp::stamp(&fs, &right_created[0])
+            .await
+            .unwrap();
+        assert!(crate::core::stamp::same(
+            right_created_stamps[0].as_ref().unwrap(),
+            &now
+        ));
+        // 덮어쓴 자리는 적용 직후(새 내용) 지문.
+        let applied = right_backups[0].applied.as_ref().expect("applied stamp");
+        assert_eq!(applied.size, Some(5));
+    }
+
+    #[tokio::test]
+    async fn local_sync_records_created_dirs_and_stamps() {
+        let t = TempDir::new().unwrap();
+        let (src, dst) = (t.path().join("src"), t.path().join("dst"));
+        std::fs::create_dir_all(src.join("newdir/sub")).unwrap();
+        std::fs::create_dir_all(&dst).unwrap();
+        std::fs::write(src.join("newdir/sub/x.txt"), b"x").unwrap();
+        let c = ctx(t.path()).await;
+        let fs = LocalFs::new();
+        let plan = sync_plan(&fs, &fs, loc(&src), loc(&dst)).await.unwrap();
+        let e = sync_execute(
+            &fs,
+            &fs,
+            plan,
+            &c,
+            tokio_util::sync::CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+        let UndoAction::UndoSync {
+            created,
+            created_stamps,
+            created_dirs,
+            ..
+        } = &e.undo
+        else {
+            panic!("wrong variant {:?}", e.undo)
+        };
+        assert_eq!(
+            created_dirs,
+            &vec![dst.join("newdir"), dst.join("newdir/sub")]
+        );
+        assert_eq!(created_stamps.len(), created.len());
+        assert!(created_stamps.iter().all(Option::is_some));
     }
 }

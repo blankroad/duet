@@ -250,6 +250,7 @@ pub async fn extract_execute(
         backups.push(BackupRestore {
             backup_path: backup,
             original_path: plan.dest_dir.clone(),
+            applied: None,
         });
     }
 
@@ -315,6 +316,7 @@ pub async fn extract_execute(
         backups_to_restore: backups,
         src_source: None,
         copied_from: Vec::new(),
+        copied_stamps: vec![crate::core::stamp::stamp_opt(fs, &plan.dest_dir).await],
     };
     let op = OpKind::Extract {
         archive: Location {
@@ -907,6 +909,7 @@ pub async fn compress_execute(
         backups.push(BackupRestore {
             backup_path: backup,
             original_path: plan.dest_path.clone(),
+            applied: None,
         });
     }
 
@@ -944,6 +947,7 @@ pub async fn compress_execute(
         backups_to_restore: backups,
         src_source: None,
         copied_from: Vec::new(),
+        copied_stamps: vec![crate::core::stamp::stamp_opt(fs, &plan.dest_path).await],
     };
     let op = OpKind::Compress {
         count: plan.item_names.len() as u32,
