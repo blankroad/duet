@@ -633,7 +633,6 @@ fn sol2_gz(b: &[u8]) -> Vec<u8> {
 }
 
 #[tokio::test]
-#[ignore = "archive-02 현재 결함을 관찰(통과=결함 있음) — 수정 시 기대값 반전"]
 async fn sol2_subfolder_repack_zip_and_targz() {
     let d = tempfile::tempdir().unwrap();
     let src = d.path().join("src");
@@ -642,19 +641,30 @@ async fn sol2_subfolder_repack_zip_and_targz() {
     std::fs::write(src.join("top.txt"), b"top").unwrap();
     let ctx = sol2_ctx(d.path()).await;
     let fs = crate::fs::LocalFs::new();
+    let pool = crate::services::connection_pool::ConnectionPool::new();
     for (n, c, a) in [
         ("a.zip", CompressFormat::Zip, ArchiveFormat::Zip),
         ("a.tar.gz", CompressFormat::TarGz, ArchiveFormat::TarGz),
     ] {
         let p = d.path().join(n);
         compress_local_blocking(&src, &["x".into(), "top.txt".into()], &p, c).unwrap();
-        let browse = d.path().join(format!("browse-{n}"));
-        std::fs::create_dir(&browse).unwrap();
-        extract_local_blocking(&p, &browse, a, None).unwrap();
-        let plan = repack_plan(&fs, sol2_loc(&browse.join("x/y")), sol2_entry(d.path(), n))
+        let (browse, _) = open_for_browse(sol2_entry(d.path(), n), None, &pool)
             .await
             .unwrap();
-        assert_eq!(plan.item_names, ["z.txt"]);
+        std::fs::write(browse.path.join("x/y/z.txt"), b"edited nested").unwrap();
+        let subfolder = repack_plan(
+            &fs,
+            sol2_loc(&browse.path.join("x/y")),
+            sol2_entry(d.path(), n),
+        )
+        .await;
+        assert!(matches!(subfolder, Err(DuetError::Io(ref msg)) if msg.contains("archive root")));
+        let plan = repack_plan(&fs, browse.clone(), sol2_entry(d.path(), n))
+            .await
+            .unwrap();
+        assert_eq!(plan.item_names.len(), 2);
+        assert!(plan.item_names.contains(&"top.txt".into()));
+        assert!(plan.item_names.contains(&"x".into()));
         compress_execute(&fs, plan, &ctx, CancellationToken::new())
             .await
             .unwrap();
@@ -663,11 +673,21 @@ async fn sol2_subfolder_repack_zip_and_targz() {
         } else {
             sol2_tar_names(&p)
         };
-        eprintln!(
-            "{n}: repacked names={list:?}; siblings={:?}",
-            names(d.path())
+        assert!(list.contains(&"top.txt".into()), "{n}: {list:?}");
+        assert!(list.contains(&"x/y/z.txt".into()), "{n}: {list:?}");
+        let restored = tempfile::tempdir().unwrap();
+        extract_local_blocking(&p, restored.path(), a, None).unwrap();
+        assert_eq!(
+            std::fs::read(restored.path().join("top.txt")).unwrap(),
+            b"top"
         );
-        assert_eq!(list, ["z.txt"]);
+        assert_eq!(
+            std::fs::read(restored.path().join("x/y/z.txt")).unwrap(),
+            b"edited nested"
+        );
+        let token_dir = browse.path.parent().unwrap();
+        assert_eq!(token_dir.parent(), Some(local_browse_root().as_path()));
+        std::fs::remove_dir_all(token_dir).unwrap();
     }
 }
 

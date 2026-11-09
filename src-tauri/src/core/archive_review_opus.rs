@@ -133,11 +133,8 @@ async fn repack(
 
 // ---------- C-13 repack ----------
 
-/// C-13 가설 A: browse 중 하위 폴더에서 "Update archive" → App.tsx:1270 이 tab.location(하위
-/// 폴더)을 browse_root 로 보낸다. 백엔드는 그 폴더 내용만으로 원본 아카이브를 다시 만든다.
-/// 기대: 원본의 다른 항목이 그대로 남아야 한다 (또는 하위 폴더 repack 을 거부).
+/// archive-02: 하위 폴더 repack 은 거부하고 루트 repack 은 전체 구조와 편집을 보존한다.
 #[tokio::test]
-#[ignore = "archive-02 repro"]
 async fn opus_repack_from_subfolder_keeps_other_entries() {
     let root = tempfile::tempdir().unwrap();
     let ctx = mk_ctx(root.path()).await;
@@ -154,19 +151,47 @@ async fn opus_repack_from_subfolder_keeps_other_entries() {
             ("docs/sub/b.txt", b"b"),
         ],
     );
-    let content = browse_like(root.path(), &zip_path, ArchiveFormat::Zip, None);
+    let pool = crate::services::connection_pool::ConnectionPool::new();
+    let (content, _) = open_for_browse(eref(&work, "data.zip"), None, &pool)
+        .await
+        .unwrap();
     // 사용자는 docs 폴더로 들어가 a.txt 를 고친 뒤 "아카이브 업데이트" 를 누른다.
-    std::fs::write(content.join("docs/a.txt"), b"edited").unwrap();
-    repack(&ctx, &content.join("docs"), &work, "data.zip")
+    std::fs::write(content.path.join("docs/a.txt"), b"edited").unwrap();
+    let local = LocalFs::new();
+    let subfolder = repack_plan(
+        &local,
+        local_loc(&content.path.join("docs")),
+        eref(&work, "data.zip"),
+    )
+    .await;
+    assert!(matches!(subfolder, Err(DuetError::Io(ref msg)) if msg.contains("archive root")));
+    repack(&ctx, &content.path, &work, "data.zip")
         .await
         .unwrap();
 
-    let names = zip_names(&zip_path);
-    eprintln!("repacked data.zip = {names:?}; work = {:?}", ls(&work));
-    assert!(
-        names.contains(&"readme.txt".to_string()) && names.contains(&"docs/a.txt".to_string()),
-        "하위 폴더 repack 이 원본 구조를 잃었다: {names:?}"
+    assert_eq!(
+        zip_names(&zip_path),
+        [
+            "docs/",
+            "docs/a.txt",
+            "docs/sub/",
+            "docs/sub/b.txt",
+            "readme.txt"
+        ]
     );
+    let mut zip = zip::ZipArchive::new(std::fs::File::open(&zip_path).unwrap()).unwrap();
+    for (name, expected) in [
+        ("readme.txt", &b"top"[..]),
+        ("docs/a.txt", &b"edited"[..]),
+        ("docs/sub/b.txt", &b"b"[..]),
+    ] {
+        let mut bytes = Vec::new();
+        zip.by_name(name).unwrap().read_to_end(&mut bytes).unwrap();
+        assert_eq!(bytes, expected, "{name}");
+    }
+    let token_dir = content.path.parent().unwrap();
+    assert_eq!(token_dir.parent(), Some(local_browse_root().as_path()));
+    std::fs::remove_dir_all(token_dir).unwrap();
 }
 
 /// C-13 가설 B: compress_execute 는 기존 아카이브를 백업 이름으로 옮긴 뒤(958) 압축이

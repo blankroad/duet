@@ -1007,6 +1007,17 @@ pub async fn compress_execute(
     ctx.journal.push(op, undo).await
 }
 
+/// 앱 browse content 루트의 엄격한 하위 경로인지 판정한다 (일반 임시 폴더는 허용).
+fn is_browse_subfolder(path: &Path) -> bool {
+    let local_root = local_browse_root();
+    path.ancestors().skip(1).any(|ancestor| {
+        ancestor.file_name().is_some_and(|name| name == "content")
+            && ancestor.parent().is_some_and(|token_dir| {
+                token_dir.parent() == Some(local_root.as_path()) || is_safe_browse_root(token_dir)
+            })
+    })
+}
+
 /// 아카이브 browse 세션을 원본 아카이브로 다시 묶는 계획 (Phase 3 — repack).
 ///
 /// `browse_root`(임시 추출 폴더)의 top-level 항목들을 원본 아카이브 경로로 재압축
@@ -1025,6 +1036,12 @@ pub async fn repack_plan(
     if browse_root.source != original_archive.location.source {
         return Err(DuetError::Io(
             "repack: browse folder and archive must be on the same source".into(),
+        ));
+    }
+    // 하위 폴더만 다시 묶으면 다른 항목을 잃으므로 목록 조회·실행 전에 거부.
+    if is_browse_subfolder(&browse_root.path) {
+        return Err(DuetError::Io(
+            "repack: run Update archive from the archive root folder".into(),
         ));
     }
     let fmt = detect_format(&original_archive.name)
@@ -1219,6 +1236,45 @@ mod tests {
     fn local_browse_root_is_under_temp() {
         assert!(local_browse_root().ends_with("duet-archive"));
         assert!(local_browse_root().starts_with(std::env::temp_dir()));
+    }
+
+    #[test]
+    fn browse_subfolder_detects_local_descendants_but_allows_root() {
+        let root = local_browse_root().join("token").join("content");
+        assert!(!is_browse_subfolder(&root));
+        assert!(is_browse_subfolder(&root.join("docs")));
+        assert!(is_browse_subfolder(&root.join("docs").join("sub")));
+        assert!(is_browse_subfolder(&root.join("docs").join("content")));
+        assert!(!is_browse_subfolder(root.parent().unwrap()));
+    }
+
+    #[test]
+    fn browse_subfolder_detects_remote_descendants_but_allows_root() {
+        let root = Path::new("/srv/users/u")
+            .join(".duet-tmp")
+            .join("browse-token")
+            .join("content");
+        assert!(!is_browse_subfolder(&root));
+        assert!(is_browse_subfolder(&root.join("docs")));
+        assert!(is_browse_subfolder(&root.join("docs").join("sub")));
+        assert!(!is_browse_subfolder(root.parent().unwrap()));
+    }
+
+    #[test]
+    fn browse_subfolder_allows_unrelated_directories() {
+        for path in [
+            PathBuf::from("/tmp/repack-tests/browse/content/docs"),
+            PathBuf::from("/srv/users/u/.duet-tmp/other/content/docs"),
+            PathBuf::from("/srv/users/u/other/browse-token/content/docs"),
+            local_browse_root().join("content").join("docs"),
+            local_browse_root()
+                .join("token")
+                .join("nested")
+                .join("content")
+                .join("docs"),
+        ] {
+            assert!(!is_browse_subfolder(&path), "{}", path.display());
+        }
     }
 
     #[test]
