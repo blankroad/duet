@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "lucide-react";
-import type { Location } from "@/types/bindings";
+import { commands, type Location } from "@/types/bindings";
 import { DialogShell } from "./DialogShell";
 import { DialogButton } from "./DialogButton";
 import { DialogInput } from "./DialogInput";
@@ -31,7 +31,11 @@ export function SymlinkDialog({
   const canSubmit = name.trim() !== "" && target.trim() !== "";
   const submit = () => {
     if (!canSubmit) return;
-    onSubmit(name.trim(), target.trim());
+    // 대상 경로는 붙여 넣은 따옴표 등을 백엔드 platform 이 정리한다(§7, G-24).
+    const local = parent.source.kind === "local";
+    void commands.pathParseInput(target, local).then((r) => {
+      onSubmit(name.trim(), r.status === "ok" ? r.data : target.trim());
+    });
   };
   const onEnter = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !isImeComposing(e)) submit();

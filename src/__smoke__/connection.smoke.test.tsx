@@ -53,6 +53,9 @@ function installIpc() {
       const h = handlers[cmd];
       if (h) return h(payload as Payload);
       if (cmd === "home_directory") return "/Users/me";
+      // 경로 입력 정리(백엔드 platform) — 이 테스트의 입력은 따옴표가 없어 trim 만.
+      if (cmd === "path_parse_input")
+        return (payload as { input: string }).input.trim();
       if (cmd === "list_directory") return [];
       if (cmd === "ssh_home_directory") return "/home/u";
       if (cmd === "ssh_config_hosts")

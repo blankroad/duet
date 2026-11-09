@@ -17,7 +17,7 @@ import {
   Copy,
 } from "lucide-react";
 import { platform } from "@tauri-apps/plugin-os";
-import type { Location } from "@/types/bindings";
+import { commands, type Location } from "@/types/bindings";
 
 import type { ArchiveBrowse } from "@/stores/panes";
 import {
@@ -115,9 +115,14 @@ export function PathBar({
     if (editing) inputRef.current?.select();
   }, [editing]);
   const submitPath = () => {
-    const p = draft.trim();
+    const raw = draft;
     setEditing(false);
-    if (p) onSegmentClick?.(p);
+    if (!raw.trim()) return;
+    // 붙여 넣은 경로 정리(탐색기 "경로로 복사"의 따옴표 등)는 백엔드 platform 이 한다(§7).
+    void commands.pathParseInput(raw, isLocal).then((r) => {
+      const p = r.status === "ok" ? r.data : raw.trim();
+      if (p) onSegmentClick?.(p);
+    });
   };
 
   // 현재 폴더 경로 복사 — 항목 경로 복사(copyPathsOf)와 같은 형식(`/` 통일).
