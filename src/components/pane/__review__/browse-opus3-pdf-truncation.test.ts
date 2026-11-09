@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -141,7 +142,9 @@ describe("browse-33 large PDF range preview (pdf.js 4.10.38)", () => {
           failed,
         ]);
         const complete = await Promise.race([doc.getData(), failed]);
-        expect(complete.length).toBe(full.length);
+        expect(createHash("sha256").update(complete).digest("hex")).toBe(
+          createHash("sha256").update(full).digest("hex"),
+        );
         expect(requests[0]).toBe("bytes=0-65535");
         expect(requests.length).toBeGreaterThan(2);
       } finally {
