@@ -2633,7 +2633,10 @@ async fn trash_rel(
     batch: &str,
     out: &mut Vec<TrashItem>,
 ) -> Result<(), DuetError> {
-    let p = remote_join(&root.path, rel);
+    let p = remote_join(
+        &root.path,
+        crate::core::compare::resolve_side_rel(fs, &root.path, rel).await,
+    );
     let loc = fs.trash(&p, batch).await?;
     let trash_path = match &loc {
         TrashLocation::Local { trash_id } => trash_id.clone(),
@@ -2805,8 +2808,14 @@ async fn verify_relay(
     let mut out = Vec::with_capacity(rels.len());
     for rel in rels {
         let rel_path = std::path::Path::new(&rel);
-        let lp = remote_join(&left.path, rel_path);
-        let rp = remote_join(&right.path, rel_path);
+        let lp = remote_join(
+            &left.path,
+            crate::core::compare::resolve_side_rel(left_fs, &left.path, rel_path).await,
+        );
+        let rp = remote_join(
+            &right.path,
+            crate::core::compare::resolve_side_rel(right_fs, &right.path, rel_path).await,
+        );
         let equal = match (left_fs.metadata(&lp).await, right_fs.metadata(&rp).await) {
             (Ok(lm), Ok(rm)) => {
                 if lm.size != rm.size {
@@ -3047,7 +3056,13 @@ async fn compute_sigs(
             let sig = if *size > RENAME_SIG_CAP {
                 format!("__big__{rel}") // 고유 — 매칭 안 됨
             } else {
-                match fs.read_full(&remote_join(&root.path, rel)).await {
+                let rel_path = crate::core::compare::resolve_side_rel(
+                    fs,
+                    &root.path,
+                    std::path::Path::new(rel),
+                )
+                .await;
+                match fs.read_full(&remote_join(&root.path, rel_path)).await {
                     Ok(bytes) => {
                         use std::hash::{Hash, Hasher};
                         let mut h = std::collections::hash_map::DefaultHasher::new();

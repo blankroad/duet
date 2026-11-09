@@ -3,7 +3,11 @@
 //! 이름을 바이트 그대로만 찾는 래퍼 FS 로 그 FS 를 흉내 낸다. 모든 경로는 TempDir 안.
 use async_trait::async_trait;
 use duet_lib::core::compare::{compare_dirs, CompareStatus};
-use duet_lib::core::ops::{apply_compare, merge_bidir, ApplyDecision, ApplyDirection, OpCtx};
+use duet_lib::core::ops::{
+    apply_compare, apply_three_way, detect_renames, merge_bidir, verify_compare, ApplyDecision,
+    ApplyDirection, OpCtx,
+};
+use duet_lib::core::three_way::compare_three_way;
 use duet_lib::fs::{FileSystem, LocalFs};
 use duet_lib::services::journal::Journal;
 use duet_lib::services::settings::SettingsStore;
@@ -223,4 +227,79 @@ async fn sc17_merge_into_paired_dir_uses_real_dir_name_on_sensitive_fs() {
         b"fresh"
     );
     assert_eq!(SensitiveFs::names(&r), vec![dd]);
+}
+
+/// R2-1: 3-way 도 NFC 규칙으로 판정한다 — 빈 base 에 왼쪽 NFC·오른쪽 NFD 같은 이름이 각자
+/// 추가되면 "양쪽 추가" 충돌이지, 서로 다른 두 추가(자동 적용)가 아니다. 적용은 충돌을
+/// 건너뛰므로 왼쪽 원본이 몰래 덮이지 않는다.
+#[tokio::test]
+async fn sc17_three_way_treats_nfc_nfd_additions_as_one_conflict() {
+    let t = tempdir().unwrap();
+    let (b, l, r) = (t.path().join("B"), t.path().join("L"), t.path().join("R"));
+    for d in [&b, &l, &r] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    std::fs::write(l.join(nfc("보고서.txt")), b"LEFT").unwrap();
+    std::fs::write(r.join(nfd("보고서.txt")), b"RIGHT").unwrap();
+    let right_fs = SensitiveFs { root: r.clone() };
+    let plan = compare_three_way(&LocalFs, loc(&b), &LocalFs, loc(&l), &right_fs, loc(&r))
+        .await
+        .unwrap();
+    assert_eq!((plan.conflicts, plan.auto), (1, 0), "{:?}", plan.entries);
+    apply_three_way(
+        &LocalFs,
+        loc(&b),
+        &LocalFs,
+        loc(&l),
+        &right_fs,
+        loc(&r),
+        &ctx(t.path()).await,
+        CancellationToken::new(),
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(std::fs::read(l.join(nfc("보고서.txt"))).unwrap(), b"LEFT");
+    assert_eq!(std::fs::read(r.join(nfd("보고서.txt"))).unwrap(), b"RIGHT");
+}
+
+/// R2-3: 내용 검증도 짝지은 행을 각 쪽 실제 이름으로 읽는다.
+#[tokio::test]
+async fn sc17_verify_reads_each_side_real_name() {
+    let t = tempdir().unwrap();
+    let (l, r) = (t.path().join("L"), t.path().join("R"));
+    std::fs::create_dir_all(&l).unwrap();
+    std::fs::create_dir_all(&r).unwrap();
+    std::fs::write(l.join(nfc("보고서.txt")), b"same").unwrap();
+    std::fs::write(r.join(nfd("보고서.txt")), b"same").unwrap();
+    let right_fs = SensitiveFs { root: r.clone() };
+    let plan = compare_dirs(&LocalFs, loc(&l), &right_fs, loc(&r))
+        .await
+        .unwrap();
+    let rels: Vec<String> = plan.entries.iter().map(|e| e.rel.clone()).collect();
+    assert_eq!(rels.len(), 1);
+    let out = verify_compare(&LocalFs, &loc(&l), &right_fs, &loc(&r), rels, None)
+        .await
+        .unwrap();
+    assert_eq!(out[0].equal, Some(true));
+}
+
+/// R2-3: 짝지은 폴더(왼쪽 NFC, 오른쪽 NFD) 안의 이름 바꾸기도 감지한다 — 오른쪽 후보를
+/// 없는 NFC 부모 경로로 읽지 않는다.
+#[tokio::test]
+async fn sc17_detect_rename_under_paired_dir() {
+    let t = tempdir().unwrap();
+    let (l, r) = (t.path().join("L"), t.path().join("R"));
+    std::fs::create_dir_all(l.join(nfc("자료"))).unwrap();
+    std::fs::create_dir_all(r.join(nfd("자료"))).unwrap();
+    std::fs::write(l.join(nfc("자료")).join("old.txt"), b"moved body").unwrap();
+    std::fs::write(r.join(nfd("자료")).join("new.txt"), b"moved body").unwrap();
+    let right_fs = SensitiveFs { root: r.clone() };
+    let mut plan = compare_dirs(&LocalFs, loc(&l), &right_fs, loc(&r))
+        .await
+        .unwrap();
+    detect_renames(&mut plan, &LocalFs, &right_fs, None)
+        .await
+        .unwrap();
+    assert_eq!(plan.moves.len(), 1, "{:?}", plan.entries);
 }

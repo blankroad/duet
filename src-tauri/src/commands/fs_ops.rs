@@ -1834,10 +1834,16 @@ pub async fn fs_compare_pair_preview(
     {
         return Err(DuetError::Io("invalid rel (.. not allowed)".into()));
     }
-    let lp = left.path.join(rel_path);
-    let rp = right.path.join(rel_path);
     let left_fs = fs_for(&left.source, pool.inner()).await?;
     let right_fs = fs_for(&right.source, pool.inner()).await?;
+    // 비교 행 이름은 NFC 로 짝지어 한쪽 실제 이름과 정규화만 다를 수 있다(SC-17) — 각 쪽 실제 이름으로.
+    let resolve = crate::core::compare::resolve_side_rel;
+    let lp = left
+        .path
+        .join(resolve(&*left_fs, &left.path, rel_path).await);
+    let rp = right
+        .path
+        .join(resolve(&*right_fs, &right.path, rel_path).await);
     Ok(ComparePairPreview {
         left: build_preview(&*left_fs, &lp).await?,
         right: build_preview(&*right_fs, &rp).await?,
