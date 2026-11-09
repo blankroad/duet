@@ -206,7 +206,6 @@ async fn compare_case_split_merge_preserves_both_original_contents() {
 }
 
 #[tokio::test]
-#[ignore = "sync-compare repro: F-sol-05 canonically equivalent names split"]
 async fn compare_nfc_nfd_names_are_one_pair() {
     let (_t, l, r) = trees();
     std::fs::write(l.join("한글.txt"), b"same").unwrap();

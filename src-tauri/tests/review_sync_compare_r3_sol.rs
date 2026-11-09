@@ -179,7 +179,7 @@ async fn sc06_prune_nested_directory_link_preserves_external_directory() {
 
 #[cfg(target_os = "macos")]
 #[tokio::test]
-async fn sc17_apfs_unexpected_overwrites_keep_both_backups_and_undo_restores_both() {
+async fn sc17_apfs_paired_row_overwrite_keeps_backup_and_undo_restores() {
     use unicode_normalization::UnicodeNormalization;
     let t = tempdir().unwrap();
     let l = t.path().join("L");
@@ -197,19 +197,16 @@ async fn sc17_apfs_unexpected_overwrites_keep_both_backups_and_undo_restores_bot
     let shown = compare_dirs(&LocalFs, loc(&l), &LocalFs, loc(&r))
         .await
         .unwrap();
-    assert_eq!(shown.entries.len(), 2);
-    let decisions = shown
-        .entries
-        .iter()
-        .map(|e| ApplyDecision {
-            rel: e.rel.clone(),
-            direction: if e.status == CompareStatus::LeftOnly {
-                ApplyDirection::ToRight
-            } else {
-                ApplyDirection::ToLeft
-            },
-        })
-        .collect();
+    // SC-17 수정 후: 정규화만 다른 두 이름은 한 행(차이)으로 보인다 — "생성 2" 가 아니다.
+    assert_eq!(shown.entries.len(), 1);
+    assert!(!matches!(
+        shown.entries[0].status,
+        CompareStatus::LeftOnly | CompareStatus::RightOnly
+    ));
+    let decisions = vec![ApplyDecision {
+        rel: shown.entries[0].rel.clone(),
+        direction: ApplyDirection::ToRight,
+    }];
     let e = apply_compare(
         &LocalFs,
         loc(&l),
@@ -228,11 +225,8 @@ async fn sc17_apfs_unexpected_overwrites_keep_both_backups_and_undo_restores_bot
             right_backups,
             ..
         } => {
-            assert_eq!((left_backups.len(), right_backups.len()), (1, 1));
-            assert_eq!(
-                std::fs::read(&left_backups[0].backup_path).unwrap(),
-                b"left original"
-            );
+            // 덮어쓰기라고 보여 준 그대로 오른쪽 하나만 백업 후 덮어쓴다.
+            assert_eq!((left_backups.len(), right_backups.len()), (0, 1));
             assert_eq!(
                 std::fs::read(&right_backups[0].backup_path).unwrap(),
                 b"right different original"

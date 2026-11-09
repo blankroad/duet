@@ -399,11 +399,11 @@ fn apfs_pair() -> Option<(TempDir, PathBuf, PathBuf, String, String)> {
     Some((t, l, r, nfc, nfd))
 }
 
-/// 비교창은 두 행(왼쪽만 / 오른쪽만)으로 보여 주고 푸터는 "생성 2 · 덮어쓰기 0".
-/// 기본 방향 그대로 적용하면 실제로는 덮어쓰기가 일어나, 왼쪽 원래 내용이 제자리에서 사라진다.
+/// 수정 전: 비교창이 두 행(왼쪽만 / 오른쪽만, "생성 2 · 덮어쓰기 0")으로 보여 주고 기본 방향
+/// 그대로 적용하면 실제로는 덮어쓰기가 일어났다. 수정 후(SC-17): 한 행(차이)이라 기본 방향이
+/// 건너뛰기 — 아무것도 덮어쓰지 않는다.
 #[cfg(target_os = "macos")]
 #[tokio::test]
-#[ignore = "sync-compare repro: SC-17 NFC/NFD rows shown as 'create' overwrite the other side on APFS"]
 async fn apfs_nfc_nfd_rows_applied_as_creates_do_not_overwrite() {
     use duet_lib::core::compare::{compare_dirs, CompareStatus};
     use duet_lib::core::ops::{apply_compare, ApplyDecision, ApplyDirection};
@@ -413,7 +413,7 @@ async fn apfs_nfc_nfd_rows_applied_as_creates_do_not_overwrite() {
     let fs = LocalFs::new();
     let plan = compare_dirs(&fs, loc(&l), &fs, loc(&r)).await.unwrap();
     let st: Vec<_> = plan.entries.iter().map(|e| e.status).collect();
-    assert_eq!(st.len(), 2, "two rows for one visible name: {st:?}");
+    assert_eq!(st.len(), 1, "one row for one visible name: {st:?}");
     // FE 기본 방향(compareView.tsx:129-141): left_only→to_right, right_only→to_left.
     let decisions = plan
         .entries

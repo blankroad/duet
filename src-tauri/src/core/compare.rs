@@ -4,6 +4,7 @@
 //! 결과는 IPC 로 노출돼 비교 다이얼로그가 보여주고, 안전한 양방향 머지의 입력이 된다.
 
 use crate::core::copy_strategy::{decide, CopyStrategy};
+use crate::core::search::nfc_key;
 use crate::fs::FileSystem;
 use crate::types::{DuetError, Entry, EntryKind, Location};
 use serde::{Deserialize, Serialize};
@@ -246,6 +247,79 @@ pub async fn compare_dirs_progress(
     })
 }
 
+/// 목록을 NFC 키로 묶는다. 한쪽에 정규화만 다른 이름이 둘 이상 있으면(정규화를 구분하는
+/// Linux·NTFS 에서 가능) 그 이름들은 합치지 않고 원본 이름을 키로 쓴다 — 서로 다른 파일을
+/// 한 행으로 뭉개지 않게.
+fn keyed_by_nfc(entries: Vec<Entry>) -> std::collections::BTreeMap<String, Entry> {
+    use std::collections::{BTreeMap, HashMap};
+    let mut count: HashMap<String, usize> = HashMap::new();
+    for e in &entries {
+        *count.entry(nfc_key(&e.name)).or_default() += 1;
+    }
+    let mut out = BTreeMap::new();
+    for e in entries {
+        let key = nfc_key(&e.name);
+        let key = if count.get(&key).copied().unwrap_or(0) > 1 {
+            e.name.clone()
+        } else {
+            key
+        };
+        out.insert(key, e);
+    }
+    out
+}
+
+/// 비교 행의 상대경로(`rel`, 한쪽 원본 이름 기준)를 `root` 쪽 **실제 이름**으로 바꾼다.
+///
+/// 비교는 NFC 키로 짝을 지으므로 행 이름이 반대쪽 실제 이름과 정규화 형태만 다를 수 있다.
+/// 정규화를 무시하는 FS(macOS APFS)는 어느 형태든 같은 파일이지만, 구분하는 FS(Linux·NTFS)
+/// 에서는 다른 형태로 열면 "없음"이거나 옆에 새 파일이 생긴다. 그래서 적용·병합이 경로를
+/// 만들기 전에 이 함수를 거친다.
+///
+/// - 정규화 형태가 하나뿐인 이름(ASCII 등)이거나 `root/rel` 이 있으면 I/O 없이(또는 한 번만) 그대로.
+/// - 아니면 조각마다: 그대로 있으면 유지, 없으면 부모 목록에서 NFC 가 같은 이름이 **하나**일 때
+///   그 이름으로. 없으면 새로 만들 조각이라 이후 조각은 그대로 둔다.
+/// - 목록 읽기 실패는 원래 `rel` 을 돌려준다 — 오류를 삼켜 엉뚱한 파일로 가지 않게.
+pub async fn resolve_side_rel(
+    fs: &dyn FileSystem,
+    root: &std::path::Path,
+    rel: &std::path::Path,
+) -> std::path::PathBuf {
+    use unicode_normalization::UnicodeNormalization;
+    let rel_str = rel.to_string_lossy();
+    if rel_str.nfc().eq(rel_str.nfd()) {
+        return rel.to_path_buf();
+    }
+    let parts: Vec<&str> = rel_str.split('/').filter(|p| !p.is_empty()).collect();
+    let full = parts
+        .iter()
+        .fold(root.to_path_buf(), |acc, p| fs.join(&acc, p));
+    if fs.metadata(&full).await.is_ok() {
+        return rel.to_path_buf();
+    }
+    let mut cur = root.to_path_buf();
+    let mut out: Vec<String> = Vec::with_capacity(parts.len());
+    let mut lookup = true;
+    for part in parts {
+        let mut name = part.to_string();
+        if lookup && fs.metadata(&fs.join(&cur, part)).await.is_err() {
+            let Ok(entries) = fs.list(&cur).await else {
+                return rel.to_path_buf();
+            };
+            let key = nfc_key(part);
+            let mut found = entries.iter().filter(|e| nfc_key(&e.name) == key);
+            match (found.next(), found.next()) {
+                (Some(e), None) => name = e.name.clone(),
+                // 없음 = 새로 만들 조각. 둘 이상 = 고를 수 없음. 둘 다 이후는 그대로.
+                _ => lookup = false,
+            }
+        }
+        cur = fs.join(&cur, &name);
+        out.push(name);
+    }
+    std::path::PathBuf::from(out.join("/"))
+}
+
 fn join_rel(rel: &str, name: &str) -> String {
     if rel.is_empty() {
         name.to_string()
@@ -292,7 +366,6 @@ async fn compare_into(
     cancel: &tokio_util::sync::CancellationToken,
     on_progress: &(dyn Fn(u64) + Send + Sync),
 ) -> Result<(), DuetError> {
-    use std::collections::BTreeMap;
     if cancel.is_cancelled() {
         return Err(DuetError::Cancelled);
     }
@@ -324,21 +397,24 @@ async fn compare_into(
                 return Ok(());
             }
         };
-    let left: BTreeMap<String, Entry> = left_entries
-        .into_iter()
-        .map(|e| (e.name.clone(), e))
-        .collect();
-    let right: BTreeMap<String, Entry> = right_entries
-        .into_iter()
-        .map(|e| (e.name.clone(), e))
-        .collect();
+    // 짝짓기 키는 NFC 정규화 이름(G-14/SC-17) — macOS 가 만든 NFD 한글 이름과 NFC 이름이
+    // 한 행이 된다. 행 이름(rel)은 왼쪽 원본 이름(없으면 오른쪽)이고, 실제 파일 경로는 각 쪽
+    // 원본 이름으로 만든다. 적용·병합은 `resolve_side_rel` 로 각 쪽 실제 이름을 되찾는다.
+    let left = keyed_by_nfc(left_entries);
+    let right = keyed_by_nfc(right_entries);
 
     // 합집합(정렬 — BTreeMap 키 순회).
-    let mut names: Vec<&String> = left.keys().chain(right.keys()).collect();
-    names.sort();
-    names.dedup();
+    let mut keys: Vec<&String> = left.keys().chain(right.keys()).collect();
+    keys.sort();
+    keys.dedup();
 
-    for name in names {
+    for key in keys {
+        let (l_entry, r_entry) = (left.get(key), right.get(key));
+        let name: &str = match (l_entry, r_entry) {
+            (Some(l), _) => &l.name,
+            (None, Some(r)) => &r.name,
+            (None, None) => unreachable!(),
+        };
         if cancel.is_cancelled() {
             return Err(DuetError::Cancelled);
         }
@@ -352,7 +428,7 @@ async fn compare_into(
         }
         on_progress(out.len() as u64);
         let rel_name = join_rel(rel, name);
-        match (left.get(name), right.get(name)) {
+        match (l_entry, r_entry) {
             (Some(l), None) => out.push(CompareEntry::one_side(
                 rel_name,
                 l,
@@ -372,9 +448,9 @@ async fn compare_into(
                         left_fs,
                         // 각 fs 의 구분자 규칙으로 결합 — 원격은 POSIX. PathBuf::join 은
                         // Windows 클라이언트에서 `\` 를 섞어 SFTP list 가 깨진다(§7).
-                        &left_fs.join(lpath, name),
+                        &left_fs.join(lpath, &l.name),
                         right_fs,
-                        &right_fs.join(rpath, name),
+                        &right_fs.join(rpath, &r.name),
                         &rel_name,
                         out,
                         truncated,
@@ -700,16 +776,31 @@ mod tests {
             }
             Ok(self.entries.get(path).cloned().unwrap_or_default())
         }
+        /// 이름을 바이트 그대로 찾는다(정규화를 구분하는 Linux·NTFS 처럼). 목록 키(디렉토리)
+        /// 이거나 부모 목록에 있는 이름만 존재한다.
         async fn metadata(
             &self,
-            _path: &std::path::Path,
+            path: &std::path::Path,
         ) -> Result<crate::types::EntryMeta, DuetError> {
-            Ok(crate::types::EntryMeta {
-                kind: EntryKind::Dir,
+            let meta = |kind| crate::types::EntryMeta {
+                kind,
                 size: None,
                 modified_ms: None,
                 permissions: None,
-            })
+            };
+            if self.entries.contains_key(path) {
+                return Ok(meta(EntryKind::Dir));
+            }
+            let hit = path.parent().zip(path.file_name()).and_then(|(p, n)| {
+                self.entries
+                    .get(p)?
+                    .iter()
+                    .find(|e| std::ffi::OsStr::new(&e.name) == n)
+            });
+            match hit {
+                Some(e) => Ok(meta(e.kind)),
+                None => Err(DuetError::NotFound(path.display().to_string())),
+            }
         }
         async fn rename(&self, _: &std::path::Path, _: &std::path::Path) -> Result<(), DuetError> {
             unimplemented!()
@@ -813,5 +904,151 @@ mod tests {
         // sub/x 가 RightOnly 로 새지 않아야 함(나열 실패를 빈 폴더로 오인 금지).
         assert!(plan.entries.iter().all(|e| e.rel != "sub/x"));
         assert_eq!(plan.right_only, 0);
+    }
+
+    // ─── SC-17 / G-14: NFC·NFD 이름 짝짓기 ───────────────────────────────
+
+    fn nfc(s: &str) -> String {
+        use unicode_normalization::UnicodeNormalization;
+        s.nfc().collect()
+    }
+    fn nfd(s: &str) -> String {
+        use unicode_normalization::UnicodeNormalization;
+        s.nfd().collect()
+    }
+    fn ent(name: &str, kind: EntryKind, size: u64, mtime: i64) -> Entry {
+        Entry {
+            name: name.into(),
+            kind,
+            size: if kind == EntryKind::File {
+                Some(size)
+            } else {
+                None
+            },
+            modified_ms: Some(mtime),
+            permissions: None,
+            hidden: false,
+        }
+    }
+    fn mock(dirs: Vec<(&str, Vec<Entry>)>) -> MockFs {
+        MockFs {
+            entries: dirs
+                .into_iter()
+                .map(|(p, v)| (std::path::PathBuf::from(p), v))
+                .collect(),
+            fail: std::collections::HashSet::new(),
+        }
+    }
+    fn at(p: &str) -> Location {
+        Location {
+            source: crate::types::SourceId::Local,
+            path: p.into(),
+        }
+    }
+
+    /// 정규화만 다른 이름(왼쪽 NFC, 오른쪽 NFD)은 "왼쪽만/오른쪽만" 두 행이 아니라 한 행.
+    #[tokio::test]
+    async fn sc17_nfc_and_nfd_names_form_one_row() {
+        let l = mock(vec![(
+            "/L",
+            vec![ent(&nfc("보고서.txt"), EntryKind::File, 1, 1)],
+        )]);
+        let r = mock(vec![(
+            "/R",
+            vec![ent(&nfd("보고서.txt"), EntryKind::File, 2, 2)],
+        )]);
+        let plan = compare_dirs(&l, at("/L"), &r, at("/R")).await.unwrap();
+        assert_eq!(plan.entries.len(), 1, "{:?}", plan.entries);
+        assert_eq!(plan.entries[0].rel, nfc("보고서.txt"));
+        assert_eq!(plan.entries[0].status, CompareStatus::NewerRight);
+        assert_eq!((plan.left_only, plan.right_only), (0, 0));
+    }
+
+    /// 짝지은 폴더는 각 쪽 실제 이름으로 내려가 읽는다(오른쪽을 왼쪽 이름으로 읽으면 빈 폴더).
+    #[tokio::test]
+    async fn sc17_paired_dirs_recurse_with_each_side_real_name() {
+        let (dn, dd) = (nfc("자료"), nfd("자료"));
+        let l = mock(vec![
+            ("/L", vec![ent(&dn, EntryKind::Dir, 0, 1)]),
+            (
+                &format!("/L/{dn}"),
+                vec![ent("a.txt", EntryKind::File, 1, 1)],
+            ),
+        ]);
+        let r = mock(vec![
+            ("/R", vec![ent(&dd, EntryKind::Dir, 0, 1)]),
+            (
+                &format!("/R/{dd}"),
+                vec![ent("a.txt", EntryKind::File, 1, 1)],
+            ),
+        ]);
+        let plan = compare_dirs(&l, at("/L"), &r, at("/R")).await.unwrap();
+        assert_eq!(plan.entries.len(), 1, "{:?}", plan.entries);
+        assert_eq!(plan.entries[0].rel, format!("{dn}/a.txt"));
+        assert_eq!(plan.entries[0].status, CompareStatus::Same);
+    }
+
+    /// 한쪽에 정규화만 다른 두 이름이 함께 있으면(정규화 구분 FS) 서로 다른 파일 — 합치지 않는다.
+    #[tokio::test]
+    async fn sc17_two_forms_on_one_side_are_not_merged() {
+        let l = mock(vec![(
+            "/L",
+            vec![
+                ent(&nfc("메모"), EntryKind::File, 1, 1),
+                ent(&nfd("메모"), EntryKind::File, 1, 1),
+            ],
+        )]);
+        let r = mock(vec![("/R", vec![ent(&nfc("메모"), EntryKind::File, 1, 1)])]);
+        let plan = compare_dirs(&l, at("/L"), &r, at("/R")).await.unwrap();
+        let mut st: Vec<_> = plan
+            .entries
+            .iter()
+            .map(|e| (e.rel.clone(), e.status))
+            .collect();
+        st.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut want = vec![
+            (nfc("메모"), CompareStatus::Same),
+            (nfd("메모"), CompareStatus::LeftOnly),
+        ];
+        want.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(st, want);
+    }
+
+    #[tokio::test]
+    async fn sc17_resolve_side_rel_finds_real_names_on_sensitive_fs() {
+        use std::path::{Path, PathBuf};
+        let (dd, fd) = (nfd("자료"), nfd("보고서.txt"));
+        let r = mock(vec![
+            ("/R", vec![ent(&dd, EntryKind::Dir, 0, 1)]),
+            (&format!("/R/{dd}"), vec![ent(&fd, EntryKind::File, 1, 1)]),
+        ]);
+        let root = Path::new("/R");
+        // 있는 파일 — 각 조각을 실제(NFD) 이름으로.
+        let rel = PathBuf::from(format!("{}/{}", nfc("자료"), nfc("보고서.txt")));
+        assert_eq!(
+            resolve_side_rel(&r, root, &rel).await,
+            PathBuf::from(format!("{dd}/{fd}"))
+        );
+        // 새로 만들 파일 — 부모만 실제 이름, 마지막 조각은 그대로.
+        let rel = PathBuf::from(format!("{}/{}", nfc("자료"), nfc("새 파일")));
+        assert_eq!(
+            resolve_side_rel(&r, root, &rel).await,
+            PathBuf::from(format!("{dd}/{}", nfc("새 파일")))
+        );
+        // 이미 맞는 경로는 그대로.
+        let rel = PathBuf::from(format!("{dd}/{fd}"));
+        assert_eq!(resolve_side_rel(&r, root, &rel).await, rel);
+    }
+
+    /// 정규화 형태가 하나뿐인 이름은 I/O 없이 그대로, 목록 실패는 원래 rel 로(엉뚱한 파일 금지).
+    #[tokio::test]
+    async fn sc17_resolve_side_rel_fast_path_and_list_failure() {
+        use std::path::{Path, PathBuf};
+        let mut r = mock(vec![]);
+        r.fail.insert(PathBuf::from("/R"));
+        let rel = PathBuf::from("src/main.rs");
+        assert_eq!(resolve_side_rel(&r, Path::new("/R"), &rel).await, rel);
+        let rel = PathBuf::from(nfc("자료/보고서.txt"));
+        assert_eq!(resolve_side_rel(&r, Path::new("/R"), &rel).await, rel);
     }
 }
