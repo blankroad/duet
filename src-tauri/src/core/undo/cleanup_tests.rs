@@ -362,3 +362,75 @@ async fn prune_restore_unsupported_is_reported() {
     assert_eq!(out.reason, Some(UndoReason::TrashRestoreUnsupported));
     assert!(out.message.unwrap_or_default().contains("manually"));
 }
+
+fn sync_entry(dst: &Path, created_dirs: Vec<PathBuf>, pruned: Vec<TrashItem>) -> UndoAction {
+    UndoAction::UndoSync {
+        dst_source: SourceId::Local,
+        created: vec![],
+        backups_to_restore: vec![],
+        pruned,
+        src_source: None,
+        created_from: vec![],
+        created_stamps: vec![],
+        created_dirs: created_dirs.into_iter().map(|d| dst.join(d)).collect(),
+    }
+}
+
+async fn push(env: &Env, dst: &Path, undo: UndoAction) -> JournalEntry {
+    env.ctx
+        .journal
+        .push(
+            crate::services::journal::OpKind::Sync {
+                count: 0,
+                pruned: 0,
+                src: loc(dst),
+                dst: loc(dst),
+            },
+            undo,
+        )
+        .await
+        .unwrap()
+}
+
+/// R2-sol-03: 만든 폴더를 못 지운 일시 오류(권한·연결)는 Error — "되돌림"으로 확정하지 않는다.
+#[tokio::test]
+async fn created_dir_cleanup_error_stays_retryable() {
+    let env = Env::new().await;
+    let dst = env.dir("dst");
+    std::fs::create_dir(dst.join("made")).unwrap();
+    *env.trash.fail_rmdir.lock().unwrap() = Some(dst.join("made"));
+    let e = push(&env, &dst, sync_entry(&dst, vec!["made".into()], vec![])).await;
+    let out = env.undo(&e).await;
+    assert_eq!(out.kind, UndoKind::Error, "{out:?}");
+    assert!(dst.join("made").exists());
+}
+
+/// 만든 폴더에 사용자 파일이 남아 있으면 조용히 둔다(오류 아님).
+#[tokio::test]
+async fn created_dir_with_user_files_is_left_quietly() {
+    let env = Env::new().await;
+    let dst = env.dir("dst");
+    std::fs::create_dir(dst.join("made")).unwrap();
+    std::fs::write(dst.join("made/mine.txt"), b"mine").unwrap();
+    let e = push(&env, &dst, sync_entry(&dst, vec!["made".into()], vec![])).await;
+    let out = env.undo(&e).await;
+    assert_eq!(out.kind, UndoKind::Ok, "{out:?}");
+    assert!(dst.join("made/mine.txt").exists());
+}
+
+/// R2-sol-04: 휴지통 쪽 항목이 영구히 없어졌으면(휴지통 비움) Error 로 스택을 막지 않고
+/// Gone 으로 건너뛴다.
+#[tokio::test]
+async fn missing_trashed_item_is_gone_not_a_blocking_error() {
+    let env = Env::new().await;
+    let dst = env.dir("dst");
+    let emptied = env.trash.trash_dir.join("emptied-long-ago");
+    let pruned = vec![TrashItem {
+        trash_path: emptied.to_string_lossy().into_owned(),
+        original_path: dst.join("pruned.txt"),
+    }];
+    let e = push(&env, &dst, sync_entry(&dst, vec![], pruned)).await;
+    let out = env.undo(&e).await;
+    assert_eq!(out.kind, UndoKind::Stale, "{out:?}");
+    assert_eq!(out.reason, Some(UndoReason::Gone));
+}

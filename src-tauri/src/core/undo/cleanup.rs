@@ -195,7 +195,7 @@ async fn run_side(
         let step = trash_if_unchanged(fs, p, side.stamp_at(i), batch).await?;
         t.record(step, side.source, p);
     }
-    remove_created_dirs(t, fs, side.source, side.created_dirs).await;
+    remove_created_dirs(t, fs, side.source, side.created_dirs).await?;
     for b in side.backups {
         match restore_overwritten(fs, b, side.unknown_applied, batch).await? {
             None => {}
@@ -269,20 +269,35 @@ async fn restore_overwritten(
     restore_backup(fs, &b.backup_path, &b.original_path).await
 }
 
-/// 동기화가 만든 폴더를 깊은 것부터, 비어 있을 때만 지운다(SC-31). 안 비었거나 못 지우면
-/// 그대로 둔다 — 그 안에 남은 항목은 이미 건너뜀으로 보고됐다.
+/// 동기화가 만든 폴더를 깊은 것부터, 비어 있을 때만 지운다(SC-31). 이미 없거나 안 비었으면
+/// 조용히 둔다(그 안에 남은 항목은 이미 건너뜀으로 보고됨). 빈 폴더인데 못 지운 경우
+/// (권한·연결·I/O)는 `Err` — 재시도할 수 있게 확정하지 않는다.
 async fn remove_created_dirs(
     t: &mut Tally,
     fs: &dyn FileSystem,
     source: &SourceId,
     dirs: &[PathBuf],
-) {
+) -> Result<(), DuetError> {
     for d in dirs.iter().rev() {
-        match fs.remove_empty_dir(d).await {
-            Ok(()) => t.refresh_parent(source, d),
-            Err(e) => tracing::debug!("undo: keep created dir {}: {e}", d.display()),
+        let err = match fs.remove_empty_dir(d).await {
+            Ok(()) => {
+                t.refresh_parent(source, d);
+                continue;
+            }
+            Err(DuetError::NotFound(_)) => continue,
+            // 이 fs 가 빈 폴더 제거를 못 함 — 예전처럼 폴더를 남긴다.
+            Err(DuetError::NotSupported(_)) => continue,
+            Err(e) => e,
+        };
+        // "비어 있지 않음"은 fs 마다 오류 종류가 달라(로컬은 일반 Io) 다시 나열해 판정한다.
+        match fs.list(d).await {
+            Ok(children) if !children.is_empty() => {}
+            Err(DuetError::NotFound(_)) => {}
+            Ok(_) => return Err(err),
+            Err(e) => return Err(e),
         }
     }
+    Ok(())
 }
 
 /// 휴지통으로 보냈던 항목 복원(prune·3-way 삭제 전파). 자리가 차 있으면 건너뜀(점유),
@@ -317,13 +332,54 @@ async fn restore_trashed(
                 t.skip(&item.original_path, UndoReason::TrashRestoreUnsupported);
                 manual = true;
             }
-            Err(e) => return Err(e),
+            Err(e) => {
+                if trash_item_gone(fs, &loc, &item.original_path, &e).await? {
+                    // 휴지통을 비운 등 — 다시 해도 복원할 것이 없다(스택을 막지 않음).
+                    t.skip(&item.original_path, UndoReason::Gone);
+                } else {
+                    return Err(e);
+                }
+            }
         }
     }
     if manual {
         t.note("Some deleted items must be restored from the Trash manually (Finder).");
     }
     Ok(())
+}
+
+/// 휴지통 복원 실패가 "휴지통 쪽 항목이 영구히 없어짐" 때문인지 확인한다(그 외는 일시 오류).
+///
+/// - 원격: 휴지통 경로를 직접 lstat — 없음이면 true.
+/// - 로컬: 복원이 NotFound 를 냈고 원래 부모 폴더가 있으면(= 도착지 문제가 아님) true.
+///   OS 휴지통 crate 경로(Windows/Linux)는 "목록에 없음"을 일반 Io 문자열로만 알려 구분할 수
+///   없어 false(Error 유지) — `fs/local.rs` 쪽 오류 종류가 정리되면 여기서 함께 처리한다.
+async fn trash_item_gone(
+    fs: &dyn FileSystem,
+    loc: &TrashLocation,
+    original: &Path,
+    err: &DuetError,
+) -> Result<bool, DuetError> {
+    match loc {
+        TrashLocation::Remote { trash_path } => match fs.symlink_metadata(trash_path).await {
+            Ok(_) => Ok(false),
+            Err(DuetError::NotFound(_)) => Ok(true),
+            Err(e) => Err(e),
+        },
+        TrashLocation::Local { .. } => {
+            if !matches!(err, DuetError::NotFound(_)) {
+                return Ok(false);
+            }
+            let Some(parent) = original.parent() else {
+                return Ok(false);
+            };
+            match fs.symlink_metadata(parent).await {
+                Ok(_) => Ok(true),
+                Err(DuetError::NotFound(_)) => Ok(false),
+                Err(e) => Err(e),
+            }
+        }
+    }
 }
 
 /// 테스트용 — OS 휴지통 대신 임시 폴더 안의 `trash_dir` 로 옮기는 fs 와 그 resolver.
@@ -347,6 +403,8 @@ pub(crate) mod testing {
         pub fail_trash: Arc<AtomicBool>,
         /// true 면 restore_from_trash 가 NotSupported (macOS 흉내).
         pub restore_unsupported: Arc<AtomicBool>,
+        /// 이 경로의 remove_empty_dir 는 권한 오류 (일시 오류 전파 확인용).
+        pub fail_rmdir: Arc<std::sync::Mutex<Option<PathBuf>>>,
     }
 
     impl TrashDirFs {
@@ -357,6 +415,7 @@ pub(crate) mod testing {
                 n: Arc::default(),
                 fail_trash: Arc::default(),
                 restore_unsupported: Arc::default(),
+                fail_rmdir: Arc::default(),
             }
         }
 
@@ -384,6 +443,10 @@ pub(crate) mod testing {
             LocalFs.mkdir(p).await
         }
         async fn remove_empty_dir(&self, p: &Path) -> Result<(), DuetError> {
+            let blocked = self.fail_rmdir.lock().ok().and_then(|g| g.clone());
+            if blocked.as_deref() == Some(p) {
+                return Err(DuetError::PermissionDenied("fixture rmdir refused".into()));
+            }
             LocalFs.remove_empty_dir(p).await
         }
         async fn trash(&self, p: &Path, _: &str) -> Result<TrashLocation, DuetError> {
