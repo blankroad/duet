@@ -61,13 +61,10 @@ describe("sync-compare C-26: 이 영역 오류의 사용자 문장 (ko)", () => 
     ]);
   });
 
-  it(
-    "sync-compare: relay 동기화 거부가 한국어로 '왜 안 되는지·대안'을 말해야 한다",
-    () => {
-      const t = explainError(SYNC_RELAY_REFUSED, "unix").text;
-      expect(t).not.toMatch(/sync supports|follow-up/);
-    },
-  );
+  it("sync-compare: relay 동기화 거부가 한국어로 '왜 안 되는지·대안'을 말해야 한다", () => {
+    const t = explainError(SYNC_RELAY_REFUSED, "unix").text;
+    expect(t).not.toMatch(/sync supports|follow-up/);
+  });
 
   it.fails(
     "sync-compare: '병합 거부(비교 잘림)'는 입출력 오류가 아니라 범위를 좁히라는 안내여야 한다",
