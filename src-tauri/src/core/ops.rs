@@ -3105,6 +3105,29 @@ async fn verify_relay(
     Ok(out)
 }
 
+/// Build the hash command used by same-host verify and rename signatures.
+fn same_host_hash_command(paths: &[PathBuf]) -> Result<String, DuetError> {
+    let inputs = paths
+        .iter()
+        .map(|path| crate::core::copy_strategy::shell_escape_path(path))
+        .collect::<Result<Vec<_>, _>>()?;
+    if inputs.is_empty() {
+        return Ok(":".into());
+    }
+    let sequence = |tool: &str| {
+        inputs
+            .iter()
+            .map(|input| format!("LC_ALL=C {tool} < {input}"))
+            .collect::<Vec<_>>()
+            .join(" && ")
+    };
+    let gnu = sequence("sha256sum");
+    let bsd = sequence("shasum -a 256");
+    Ok(format!(
+        "if command -v sha256sum >/dev/null 2>&1; then {gnu}; else {bsd}; fi"
+    ))
+}
+
 /// host-side sha256(없으면 shasum -a 256)으로 양쪽 해시 비교 — PC 다운로드 0.
 async fn verify_same_host(
     left: &Location,
@@ -3112,7 +3135,6 @@ async fn verify_same_host(
     rels: Vec<String>,
     pool: &Arc<crate::services::connection_pool::ConnectionPool>,
 ) -> Result<Vec<VerifyResult>, DuetError> {
-    use crate::core::copy_strategy::shell_escape_path;
     use crate::ssh::remote_exec::exec;
     let SourceId::Ssh {
         connection_id: left_conn,
@@ -3130,13 +3152,11 @@ async fn verify_same_host(
     let mut out = Vec::with_capacity(rels.len());
     for rel in rels {
         let rel_path = std::path::Path::new(&rel);
-        let lp = shell_escape_path(&remote_join(&left.path, rel_path))?;
-        let rp = shell_escape_path(&remote_join(&right.path, rel_path))?;
-        // 두 파일을 한 exec 로 해시 → 정확히 2개 해시 라인이면 비교, 아니면 None.
-        let cmd = format!(
-            "if command -v sha256sum >/dev/null 2>&1; then sha256sum -- {lp} {rp}; \
-             else shasum -a 256 -- {lp} {rp}; fi"
-        );
+        // Two stdin digests in one exec, in left/right order.
+        let cmd = same_host_hash_command(&[
+            remote_join(&left.path, rel_path),
+            remote_join(&right.path, rel_path),
+        ])?;
         let res = {
             let handle = session_mutex.lock().await;
             exec(&handle, &cmd).await
@@ -3356,7 +3376,6 @@ async fn sigs_same_host(
     cands: &[(String, u64)],
     pool: &Arc<crate::services::connection_pool::ConnectionPool>,
 ) -> Result<Vec<(String, String)>, DuetError> {
-    use crate::core::copy_strategy::shell_escape_path;
     use crate::ssh::remote_exec::exec;
     let SourceId::Ssh { connection_id, .. } = &root.source else {
         return Err(DuetError::Io("same-host rename on non-ssh".into()));
@@ -3366,15 +3385,12 @@ async fn sigs_same_host(
         .session
         .as_ref()
         .ok_or_else(|| DuetError::ConnectionFailed("no live session".into()))?;
-    // 인자 순서대로 출력 → order-based 매핑(경로 공백 안전). args 순서 == cands 순서.
-    let mut args = String::new();
-    for (rel, _) in cands {
-        args.push(' ');
-        args.push_str(&shell_escape_path(&remote_join(&root.path, rel))?);
-    }
-    let cmd = format!(
-        "if command -v sha256sum >/dev/null 2>&1; then sha256sum --{args}; else shasum -a 256 --{args}; fi"
-    );
+    // Keep candidate order for the digest-to-relative-path mapping.
+    let paths: Vec<PathBuf> = cands
+        .iter()
+        .map(|(rel, _)| remote_join(&root.path, rel))
+        .collect();
+    let cmd = same_host_hash_command(&paths)?;
     let out = {
         let handle = session_mutex.lock().await;
         exec(&handle, &cmd).await?
@@ -7612,3 +7628,29 @@ mod batch_rename_name_validation {
 #[cfg(test)]
 #[path = "ops_paths_tests.rs"]
 mod ops_paths_tests;
+
+#[cfg(test)]
+mod same_host_hash_tests {
+    //! Commands hash stdin so names cannot change the digest token or output line count.
+    use super::*;
+
+    #[test]
+    fn r3_paths_same_host_hashes_each_input_via_stdin() {
+        let paths = [
+            PathBuf::from(r"/srv/a\b"),
+            PathBuf::from("/srv/line\nbreak"),
+            PathBuf::from("/srv/it's"),
+        ];
+        let cmd = same_host_hash_command(&paths).unwrap();
+        for tool in ["sha256sum", "shasum -a 256"] {
+            for quoted in [r"'/srv/a\b'", "'/srv/line\nbreak'", r"'/srv/it'\''s'"] {
+                assert!(
+                    cmd.contains(&format!("LC_ALL=C {tool} < {quoted}")),
+                    "{cmd:?}"
+                );
+            }
+        }
+        assert!(cmd.contains(" && "));
+        assert!(!cmd.contains("sha256sum --"));
+    }
+}
