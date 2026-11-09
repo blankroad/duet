@@ -842,7 +842,11 @@ mod review_fileops_opus_r3 {
             out.first().map(|b| *b as char)
         );
         assert!(r.is_ok());
-        assert_eq!(out, vec![b'B'; N / 4], "stale part finalized instead of the source");
+        assert_eq!(
+            out,
+            vec![b'B'; N / 4],
+            "stale part finalized instead of the source"
+        );
     }
 
     /// (기준) 원본이 그대로면 재개는 올바른 결과를 만든다 — 메커니즘 자체는 동작.
@@ -880,7 +884,10 @@ mod review_fileops_opus_r3 {
             "R3 fileops-35: result={r:?} display={explained:?} b_done={}",
             dst.join("b.txt").exists()
         );
-        assert!(r.is_ok(), "folder resume fails at mkdir of the existing destination");
+        assert!(
+            r.is_ok(),
+            "folder resume fails at mkdir of the existing destination"
+        );
         assert!(dst.join("b.txt").exists());
     }
 }

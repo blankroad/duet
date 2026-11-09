@@ -5608,7 +5608,6 @@ mod tests {
     }
 }
 
-
 #[cfg(test)]
 mod review_fileops_sol {
     use super::*;
@@ -6529,7 +6528,9 @@ mod review_fileops_opus_r2 {
 
     async fn mk_ctx(p: &std::path::Path) -> OpCtx {
         OpCtx {
-            journal: Journal::load_from(&p.join("r2-journal.jsonl")).await.unwrap(),
+            journal: Journal::load_from(&p.join("r2-journal.jsonl"))
+                .await
+                .unwrap(),
             settings: SettingsStore::load_from(&p.join("r2-settings.toml"))
                 .await
                 .unwrap(),
@@ -6579,7 +6580,10 @@ mod review_fileops_opus_r2 {
             v.sort_by_key(|e| e.name.to_lowercase());
             Ok(v)
         }
-        async fn metadata(&self, p: &std::path::Path) -> Result<crate::types::EntryMeta, DuetError> {
+        async fn metadata(
+            &self,
+            p: &std::path::Path,
+        ) -> Result<crate::types::EntryMeta, DuetError> {
             LocalFs.metadata(p).await
         }
         async fn rename(&self, a: &std::path::Path, b: &std::path::Path) -> Result<(), DuetError> {
@@ -6660,7 +6664,8 @@ mod review_fileops_opus_r2 {
         eprintln!(
             "R2 fileops-04 name-order: result={:?} files={files} bytes_before={before} \
              bytes_after={after} amplification=x{} journal={journal}",
-            r.as_ref().map(|x| x.as_ref().map(|_| ()).map_err(|e| e.to_string())),
+            r.as_ref()
+                .map(|x| x.as_ref().map(|_| ()).map_err(|e| e.to_string())),
             after / before.max(1)
         );
         assert!(
@@ -6716,7 +6721,6 @@ mod review_fileops_opus_r2 {
         assert!(!escaped, "rename moved the file out of its folder");
     }
 }
-
 
 /// sync-compare 점검 라운드(2026-11-08) 재현 테스트 — lead. 제품 코드 변경 없음.
 // chmod 로 읽기 실패를 만드는 unix 전용 재현.

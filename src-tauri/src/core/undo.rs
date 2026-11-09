@@ -1371,10 +1371,17 @@ mod review_fileops_opus {
     async fn undo_rename_must_not_overwrite_file_recreated_at_original_name() {
         let (ctx, _keep) = mk_ctx().await;
         let dir = TempDir::new().unwrap();
-        tokio::fs::write(dir.path().join("a.txt"), b"v1").await.unwrap();
-        let entry = ops::rename(&LocalFs::new(), eref(dir.path(), "a.txt"), "b.txt".into(), &ctx)
+        tokio::fs::write(dir.path().join("a.txt"), b"v1")
             .await
             .unwrap();
+        let entry = ops::rename(
+            &LocalFs::new(),
+            eref(dir.path(), "a.txt"),
+            "b.txt".into(),
+            &ctx,
+        )
+        .await
+        .unwrap();
         // 사용자가 그사이 같은 이름으로 새 작업 파일을 만든다.
         tokio::fs::write(dir.path().join("a.txt"), b"new work")
             .await
@@ -1385,11 +1392,9 @@ mod review_fileops_opus {
 
         let a = tokio::fs::read(dir.path().join("a.txt")).await.unwrap();
         assert_eq!(
-            a,
-            b"new work",
+            a, b"new work",
             "undo overwrote the new a.txt (outcome={:?}, msg={:?})",
-            outcome.kind,
-            outcome.message
+            outcome.kind, outcome.message
         );
     }
 
@@ -1419,18 +1424,18 @@ mod review_fileops_opus {
         )
         .await
         .unwrap();
-        tokio::fs::write(src.join("x.txt"), b"new work").await.unwrap();
+        tokio::fs::write(src.join("x.txt"), b"new work")
+            .await
+            .unwrap();
 
         let pool = ConnectionPool::new();
         let outcome = execute_undo(&entry, &pool).await;
 
         let x = tokio::fs::read(src.join("x.txt")).await.unwrap();
         assert_eq!(
-            x,
-            b"new work",
+            x, b"new work",
             "undo overwrote the new src/x.txt (outcome={:?}, msg={:?})",
-            outcome.kind,
-            outcome.message
+            outcome.kind, outcome.message
         );
     }
 
@@ -1445,7 +1450,9 @@ mod review_fileops_opus {
         let dst = dir.path().join("dst");
         tokio::fs::create_dir_all(src.join("proj")).await.unwrap();
         tokio::fs::create_dir(&dst).await.unwrap();
-        tokio::fs::write(src.join("proj").join("a.txt"), b"a").await.unwrap();
+        tokio::fs::write(src.join("proj").join("a.txt"), b"a")
+            .await
+            .unwrap();
         let fs = LocalFs::new();
         let plan = ops::copy_plan(&fs, &fs, vec![eref(&src, "proj")], loc(&dst))
             .await
@@ -1599,7 +1606,10 @@ mod review_fileops_opus {
             undone: false,
         };
         let outcome = execute_undo(&entry, &pool).await;
-        eprintln!("macOS trash undo -> {:?} {:?}", outcome.kind, outcome.message);
+        eprintln!(
+            "macOS trash undo -> {:?} {:?}",
+            outcome.kind, outcome.message
+        );
         // 기대: 되돌릴 수 없으면 Irreversible/Skipped 로 종결돼 다음 Ctrl+Z 가 이전 작업으로
         // 넘어가야 한다. Error 는 entry 를 그대로 남긴다.
         assert!(
