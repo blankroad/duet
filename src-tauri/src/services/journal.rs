@@ -42,6 +42,11 @@ pub struct JournalEntry {
     pub op: OpKind,
     pub undo: UndoAction,
     pub undone: bool,
+    /// undo/redo 를 시도했지만 더 이상 할 수 없다고 판정됨(대상 사라짐·바뀜 등) — 스택에서
+    /// 건너뛴다. **메모리 전용 표시**: 디스크엔 기록하지 않아(jsonl 형식 불변) 재시작 후 다시
+    /// 한 번 판정한다 — 그 판정은 아무것도 바꾸지 않으므로 안전하다.
+    #[serde(default)]
+    pub stale: bool,
 }
 
 /// 표시용 op 요약.
@@ -360,6 +365,7 @@ impl Journal {
             op,
             undo,
             undone: false,
+            stale: false,
         };
         self.append(JsonlRecord::Push(Box::new(entry.clone())))
             .await?;
@@ -379,8 +385,21 @@ impl Journal {
         let lock = self.inner.lock().await;
         Ok(lock
             .iter()
-            .rposition(|e| !e.undone)
+            .rposition(|e| !e.undone && !e.stale)
             .map(|i| lock[i].clone()))
+    }
+
+    /// undo/redo 가 더 이상 불가(stale)로 판정된 entry 를 스택에서 건너뛰게 표시 — 메모리만.
+    /// 반환값: 새로 표시했으면 true (이미 stale 이거나 캐시에 없으면 false).
+    pub async fn mark_stale(&self, id: JournalId) -> bool {
+        let mut lock = self.inner.lock().await;
+        match lock.iter_mut().find(|e| e.id == id) {
+            Some(e) if !e.stale => {
+                e.stale = true;
+                true
+            }
+            _ => false,
+        }
     }
 
     /// undo 실행 성공(또는 비가역 종결) 후 호출 — 메모리 + 디스크에 undone 확정. 멱등.
@@ -400,10 +419,14 @@ impl Journal {
     ///
     /// undo 가 B→A 순서로 진행됐다면 redo 는 A→B 순서. 마지막 entry 가 undone 이
     /// 아니면(새 작업이 이후에 push 됨) redo 불가 — 표준 undo/redo 스택 관례.
+    /// stale entry 는 투명하게 건너뛴다(후보도 아니고 구간을 끊지도 않음).
     pub async fn peek_redoable(&self) -> Result<Option<JournalEntry>, DuetError> {
         let lock = self.inner.lock().await;
         let mut candidate = None;
         for e in lock.iter().rev() {
+            if e.stale {
+                continue;
+            }
             if e.undone {
                 candidate = Some(e.clone());
             } else {
@@ -778,6 +801,31 @@ mod tests {
         j.commit_undone(a.id).await.unwrap();
     }
 
+    /// U-11: stale 로 표시된 entry 는 undo·redo 둘 다 건너뛰고, 디스크엔 남지 않는다.
+    #[tokio::test]
+    async fn stale_entry_is_skipped_by_undo_and_redo_and_not_persisted() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("j.jsonl");
+        let j = Journal::load_from(&path).await.unwrap();
+        let a = j.push(mk_op(), mk_undo()).await.unwrap();
+        let b = j.push(mk_op(), mk_undo()).await.unwrap();
+        assert!(j.mark_stale(b.id).await);
+        assert!(!j.mark_stale(b.id).await, "두 번째 표시는 no-op");
+        // 맨 위 b 가 막지 않는다 — 다음 Ctrl+Z 는 a.
+        assert_eq!(j.peek_undoable().await.unwrap().unwrap().id, a.id);
+        j.commit_undone(a.id).await.unwrap();
+        assert!(j.peek_undoable().await.unwrap().is_none());
+        // redo 는 꼬리의 stale b 를 투명하게 넘어 a 를 고른다.
+        assert_eq!(j.peek_redoable().await.unwrap().unwrap().id, a.id);
+        j.commit_redone(a.id).await.unwrap();
+        assert!(j.peek_redoable().await.unwrap().is_none());
+        // 재시작하면 stale 은 풀린다(다시 한 번 판정) — 형식 불변.
+        let j2 = Journal::load_from(&path).await.unwrap();
+        let hist = j2.history(10).await;
+        assert!(hist.iter().all(|e| !e.stale));
+        assert_eq!(j2.peek_undoable().await.unwrap().unwrap().id, b.id);
+    }
+
     #[tokio::test]
     async fn persists_across_load() {
         let dir = tempdir().unwrap();
@@ -1130,6 +1178,7 @@ mod review_fileops_sol_r2 {
                 pairs: vec![RenamePair { current, original }],
             },
             undone: false,
+            stale: false,
         }
     }
 

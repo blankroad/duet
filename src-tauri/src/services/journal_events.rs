@@ -8,6 +8,6 @@ use tauri_specta::Event;
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct JournalChangedEvent {
     pub entry: JournalEntry,
-    /// "push" | "undone"
+    /// "push" | "undone" | "redone" | "stale" (stale = 더 이상 undo/redo 불가로 건너뜀, 메모리 전용)
     pub change: String,
 }
