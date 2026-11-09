@@ -1416,7 +1416,6 @@ async fn opus2_extract_rollback_failure_strands_backup() {
 // ---------- archive-17: 7z 대소문자 충돌 ----------
 
 #[test]
-#[ignore = "archive-17 repro"]
 fn opus2_sevenz_case_collision_not_silent() {
     use sevenz_rust2::{ArchiveEntry, ArchiveWriter};
     let d = tempfile::tempdir().unwrap();

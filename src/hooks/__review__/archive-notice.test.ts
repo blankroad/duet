@@ -56,7 +56,7 @@ describe("archive-opus C-15: describeArchiveNotice", () => {
       renamed: names(20, "n"),
       renamed_count: 21,
     });
-    expect(many.message).toMatch(/21 names had characters/);
+    expect(many.message).toMatch(/21 names couldn't be used as-is/);
     expect(many.detail).toMatch(/… and 1 more/);
   });
 

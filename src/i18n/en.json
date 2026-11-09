@@ -894,8 +894,8 @@
     "archiveNotice": "{{name}}: {{details}}",
     "archiveLinksSkipped_one": "{{count}} link couldn't be created on this PC and was skipped (on Windows, turn on Developer Mode to allow links).",
     "archiveLinksSkipped_other": "{{count}} links couldn't be created on this PC and were skipped (on Windows, turn on Developer Mode to allow links).",
-    "archiveRenamed_one": "{{count}} name had characters this OS can't use (: ? etc.) and was extracted with _ instead.",
-    "archiveRenamed_other": "{{count}} names had characters this OS can't use (: ? etc.) and were extracted with _ instead."
+    "archiveRenamed_one": "{{count}} name couldn't be used as-is (characters like : ?, or the same name differing only in case) and was extracted under a changed name.",
+    "archiveRenamed_other": "{{count}} names couldn't be used as-is (characters like : ?, or the same name differing only in case) and were extracted under changed names."
   },
   "sidebar": {
     "tasks": "Tasks",

@@ -14,7 +14,7 @@
 
 use crate::core::tar_unpack::{
     link_target, link_target_is_dir, make_dir, permissions_from_mode, refuse_through_link,
-    relative_path, write_error, write_new_file, DeferredDirModes, UnpackReport,
+    relative_path, write_error, write_new_file, DeferredDirModes, NameGuard, UnpackReport,
 };
 use crate::core::zip_names;
 use crate::platform::{entry_name, links};
@@ -278,6 +278,7 @@ struct Output<'d> {
     dest: &'d Path,
     report: UnpackReport,
     dir_modes: DeferredDirModes,
+    names: NameGuard,
 }
 
 impl<'d> Output<'d> {
@@ -286,24 +287,30 @@ impl<'d> Output<'d> {
             dest,
             report: UnpackReport::default(),
             dir_modes: DeferredDirModes::default(),
+            names: NameGuard::default(),
         }
     }
 
     /// 항목을 쓸 자리를 준비한다 — 링크 경유 거부, 상위 폴더 생성, 바꾼 이름 보고.
+    /// 이름이 겹치면(대소문자만 다름 등) `이름 (2)` 로 옮긴다([`NameGuard`]). 실제 상대 경로와
+    /// 절대 경로를 돌려준다.
     fn prepare(
         &mut self,
         shown: &str,
         (rel, renamed): (PathBuf, bool),
-    ) -> Result<PathBuf, DuetError> {
+        is_dir: bool,
+    ) -> Result<(PathBuf, PathBuf), DuetError> {
+        refuse_through_link(self.dest, &rel)?;
+        let (rel, kept_both) = self.names.place(self.dest, rel, shown, is_dir);
         refuse_through_link(self.dest, &rel)?;
         let dst = self.dest.join(&rel);
         if let Some(parent) = dst.parent() {
             std::fs::create_dir_all(parent).map_err(|e| write_error(shown, &e))?;
         }
-        if renamed {
+        if renamed || kept_both {
             self.report.renamed.push(shown.to_string());
         }
-        Ok(dst)
+        Ok((rel, dst))
     }
 
     fn dir(
@@ -312,7 +319,7 @@ impl<'d> Output<'d> {
         path: (PathBuf, bool),
         mode: Option<u32>,
     ) -> Result<(), DuetError> {
-        let dst = self.prepare(shown, path)?;
+        let (_, dst) = self.prepare(shown, path, true)?;
         make_dir(&dst).map_err(|e| write_error(shown, &e))?;
         if let Some(mode) = mode {
             self.dir_modes.push(dst, mode, shown.to_string());
@@ -342,7 +349,7 @@ impl<'d> Output<'d> {
         content: &mut impl Read,
         mode: Option<u32>,
     ) -> Result<std::fs::File, FileError> {
-        let dst = self.prepare(shown, path).map_err(FileError::Duet)?;
+        let (_, dst) = self.prepare(shown, path, false).map_err(FileError::Duet)?;
         let file = write_new_file(&dst, content).map_err(FileError::Io)?;
         if let Some(mode) = mode {
             let current = file.metadata().map_err(FileError::Io)?.permissions();
@@ -360,8 +367,7 @@ impl<'d> Output<'d> {
         path: (PathBuf, bool),
         target: &[u8],
     ) -> Result<(), DuetError> {
-        let rel = path.0.clone();
-        let dst = self.prepare(shown, path)?;
+        let (rel, dst) = self.prepare(shown, path, false)?;
         let target = link_target(target);
         let is_dir = link_target_is_dir(self.dest, &rel, &target);
         match links::create_symlink(&target, &dst, is_dir) {
@@ -536,6 +542,21 @@ mod tests {
         assert_eq!(names(&out), ["ok.txt"]);
         assert!(!d.path().join("evil.txt").exists());
         assert!(!d.path().join("evil2.txt").exists());
+    }
+
+    /// Windows 치환 뒤 같아지는 이름(`a:b.txt` → `a_b.txt`)이 앞 항목을 덮지 않는다(archive-17).
+    #[test]
+    fn names_equal_after_sanitizing_keep_both() {
+        let d = tempfile::tempdir().unwrap();
+        let zp = d.path().join("c.zip");
+        zip_with(&zp, &[("a_b.txt", b"FIRST"), ("a:b.txt", b"SECOND")], &[]);
+        let out = d.path().join("out");
+        std::fs::create_dir(&out).unwrap();
+        let r = unpack_zip_with(&zp, &out, None, windows).unwrap();
+        assert_eq!(names(&out), ["a_b (2).txt", "a_b.txt"]);
+        assert_eq!(std::fs::read(out.join("a_b.txt")).unwrap(), b"FIRST");
+        assert_eq!(std::fs::read(out.join("a_b (2).txt")).unwrap(), b"SECOND");
+        assert_eq!(r.renamed, ["a:b.txt"]);
     }
 
     fn sevenz_with(path: &Path, files: &[(&str, &[u8])]) {

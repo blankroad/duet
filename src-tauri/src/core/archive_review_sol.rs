@@ -202,7 +202,6 @@ fn sol_zip_traversal_both_paths() {
     }
 }
 #[test]
-#[ignore = "archive-17 repro"]
 fn sol_zip_case_collision_not_silent() {
     let d = tempfile::tempdir().unwrap();
     let p = d.path().join("case.zip");
@@ -384,7 +383,6 @@ fn sol_tar_special_files_longname_pax_absolute() {
     assert_eq!(std::fs::read(d.path().join("abs/x")).unwrap(), b"abs");
 }
 #[test]
-#[ignore = "archive-17 repro"]
 fn sol_tar_case_collision_not_silent() {
     let d = tempfile::tempdir().unwrap();
     let bytes = tar_bytes(&[

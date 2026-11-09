@@ -18,7 +18,8 @@ pub struct ArchiveNoticeEvent {
     /// 만들 수 없어 건너뛴 심볼릭 링크 — 앞쪽 최대 20개.
     pub skipped_links: Vec<String>,
     pub skipped_links_count: u32,
-    /// 이 OS 에서 쓸 수 없는 이름이라 `_` 로 바꿔 푼 항목 — 앞쪽 최대 20개.
+    /// 이름을 바꿔 푼 항목(원래 이름) — 이 OS 에서 쓸 수 없는 글자를 `_` 로 바꿨거나, 앞 항목과
+    /// 이름이 겹쳐(대소문자만 다름 등) `이름 (2)` 로 둘 다 남긴 경우. 앞쪽 최대 20개.
     pub renamed: Vec<String>,
     pub renamed_count: u32,
 }

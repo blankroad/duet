@@ -8,11 +8,14 @@
 //!   "이미 만든 링크를 거쳐 쓰지 않기" 검사로 같은 보호(zip-slip 차단)를 한다.
 //! - 하드링크를 지원하지 않는 드라이브(exFAT 등)에선 복사로 대신한다. 이때도 링크는
 //!   따라가지 않는다(원본이 일반 파일일 때만 복사, 대상 자리는 새 파일로 교체 — archive-01).
+//! - 대소문자만 다른 이름(대소문자 무시 파일시스템)이나 Windows 치환 뒤 같아진 이름이
+//!   앞 항목을 조용히 덮지 않게 `이름 (2).ext` 로 둘 다 남기고 보고한다(archive-17, [`NameGuard`]).
 //! - 실패 메시지에 OS 원인을 남긴다. tar 의 오류 문구는 원인을 빼고
 //!   "failed to unpack …" 만 보여 줘서 사용자가 이유를 알 수 없었다.
 
 use crate::platform::{entry_name, links};
 use crate::types::DuetError;
+use std::collections::HashMap;
 use std::error::Error as _;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
@@ -22,7 +25,8 @@ use std::path::{Path, PathBuf};
 pub struct UnpackReport {
     /// 이 OS·드라이브에서 만들 수 없어 건너뛴 심볼릭 링크.
     pub skipped_links: Vec<String>,
-    /// 이 OS 에서 쓸 수 없는 이름이라 바꿔서 푼 항목.
+    /// 이름을 바꿔서 푼 항목 — 이 OS 에서 쓸 수 없는 글자, 또는 앞 항목과 이름이 겹쳐
+    /// (대소문자만 다름 등) `이름 (2)` 로 둘 다 남긴 경우.
     pub renamed: Vec<String>,
 }
 
@@ -31,6 +35,7 @@ pub fn unpack<R: Read>(reader: R, dest: &Path) -> Result<UnpackReport, DuetError
     let mut archive = tar::Archive::new(reader);
     let mut report = UnpackReport::default();
     let mut dir_modes = DeferredDirModes::default();
+    let mut names = NameGuard::default();
     let entries = archive.entries().map_err(|e| read_error(&e))?;
     for entry in entries {
         let mut entry = entry.map_err(|e| read_error(&e))?;
@@ -49,11 +54,13 @@ pub fn unpack<R: Read>(reader: R, dest: &Path) -> Result<UnpackReport, DuetError
             continue;
         };
         refuse_through_link(dest, &rel)?;
+        let (rel, kept_both) = names.place(dest, rel, &shown, is_dir_entry(&entry, &raw));
+        refuse_through_link(dest, &rel)?;
         let dst = dest.join(&rel);
         if let Some(parent) = dst.parent() {
             std::fs::create_dir_all(parent).map_err(|e| write_error(&shown, &e))?;
         }
-        if renamed {
+        if renamed || kept_both {
             report.renamed.push(shown.clone());
         }
 
@@ -69,10 +76,9 @@ pub fn unpack<R: Read>(reader: R, dest: &Path) -> Result<UnpackReport, DuetError
                 Err(e) => return Err(write_error(&shown, &e)),
             }
         } else if kind.is_hard_link() {
-            let src_rel = entry
-                .link_name_bytes()
-                .and_then(|b| safe_relative(&b))
-                .map(|(p, _)| p)
+            let link_name = entry.link_name_bytes().unwrap_or_default().into_owned();
+            let src_rel = safe_relative(&link_name)
+                .map(|(p, _)| names.lookup(p, &String::from_utf8_lossy(&link_name)))
                 .ok_or_else(|| {
                     DuetError::Io(format!("{shown}: hard link points outside the archive"))
                 })?;
@@ -98,6 +104,117 @@ pub fn unpack<R: Read>(reader: R, dest: &Path) -> Result<UnpackReport, DuetError
     }
     dir_modes.apply()?;
     Ok(report)
+}
+
+/// 해제 중 이름 충돌 감시(archive-17). 해제는 항상 새 폴더에 하므로, 항목을 놓을 자리에
+/// 이미 무언가 있는데 **같은 이름의 앞 항목이 만든 것이 아니면** 충돌이다 — 대소문자 무시
+/// 파일시스템의 `A.txt`/`a.txt`, Windows 치환 뒤 같아진 `a:b`/`a_b` 등. 이때 덮지 않고
+/// `이름 (2).ext`(폴더는 `이름 (2)`)로 둘 다 남긴다. 같은 이름이 다시 나오면(tar 갱신 append)
+/// 예전처럼 덮어쓴다. 폴더끼리 겹치면 합친다(잃는 것이 없다). 대소문자 구분 파일시스템에선
+/// 충돌이 생기지 않아 동작이 같다.
+#[derive(Default)]
+pub(crate) struct NameGuard {
+    /// 이번 해제에서 만든 상대 경로 → 만든 항목의 이름 키(빈 문자열 = 상위 폴더로 자동 생성).
+    made: HashMap<PathBuf, String>,
+    /// 충돌로 옮긴 항목의 이름 키 → 실제 상대 경로.
+    moved: HashMap<String, PathBuf>,
+    /// 충돌로 옮긴 폴더 (원래 상대 경로, 실제 상대 경로) — 그 안 항목도 따라 옮긴다.
+    moved_dirs: Vec<(PathBuf, PathBuf)>,
+}
+
+impl NameGuard {
+    /// 항목(`rel` = 정리된 상대 경로, `shown` = 아카이브 안 이름)을 놓을 실제 상대 경로와
+    /// "충돌이라 이름을 바꿨는지". 결과를 기록한다. 경로 검사(`refuse_through_link`)는 호출자 몫.
+    pub(crate) fn place(
+        &mut self,
+        dest: &Path,
+        rel: PathBuf,
+        shown: &str,
+        is_dir: bool,
+    ) -> (PathBuf, bool) {
+        let key = name_key(shown);
+        if let Some(prev) = self.moved.get(&key) {
+            return (prev.clone(), false); // 옮겨 둔 항목이 다시 나옴 — 그 자리를 덮는다.
+        }
+        let rel = self.remap(rel);
+        if self.made.get(&rel) == Some(&key) {
+            return (rel, false); // 같은 이름 재등장.
+        }
+        let actual = match std::fs::symlink_metadata(dest.join(&rel)) {
+            Err(_) => rel.clone(),
+            Ok(m) if is_dir && m.is_dir() => rel.clone(),
+            Ok(_) => self.free_name(dest, &rel, is_dir),
+        };
+        let kept_both = actual != rel;
+        if kept_both {
+            self.moved.insert(key.clone(), actual.clone());
+            if is_dir {
+                self.moved_dirs.push((rel, actual.clone()));
+            }
+        }
+        for parent in actual.ancestors().skip(1) {
+            if parent.as_os_str().is_empty() {
+                break;
+            }
+            self.made.entry(parent.to_path_buf()).or_default();
+        }
+        self.made.insert(actual.clone(), key);
+        (actual, kept_both)
+    }
+
+    /// 앞 항목을 가리키는 이름(하드링크 원본)의 실제 상대 경로 — 기록하지 않는다.
+    pub(crate) fn lookup(&self, rel: PathBuf, shown: &str) -> PathBuf {
+        match self.moved.get(&name_key(shown)) {
+            Some(prev) => prev.clone(),
+            None => self.remap(rel),
+        }
+    }
+
+    /// 옮긴 폴더 아래 경로면 옮긴 자리로.
+    fn remap(&self, rel: PathBuf) -> PathBuf {
+        for (from, to) in self.moved_dirs.iter().rev() {
+            if let Ok(rest) = rel.strip_prefix(from) {
+                if !rest.as_os_str().is_empty() {
+                    return to.join(rest);
+                }
+            }
+        }
+        rel
+    }
+
+    /// `rel` 옆의 비어 있는 `이름 (n).ext`(폴더는 `이름 (n)`), n = 2.. — 탐색기 KeepBoth 와 같은 모양.
+    fn free_name(&self, dest: &Path, rel: &Path, is_dir: bool) -> PathBuf {
+        let name = rel
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let (stem, ext) = match name.rfind('.') {
+            // 선두 dot(.bashrc)·끝 dot 은 확장자로 안 본다(core::ops KeepBoth 와 같음).
+            Some(i) if !is_dir && i > 0 && i < name.len() - 1 => (&name[..i], &name[i..]),
+            _ => (name.as_str(), ""),
+        };
+        let parent = rel.parent().unwrap_or(Path::new(""));
+        let free = |cand: &PathBuf| {
+            !self.made.contains_key(cand) && std::fs::symlink_metadata(dest.join(cand)).is_err()
+        };
+        for n in 2..=9999 {
+            let cand = parent.join(crate::fs::suffixed_name(stem, &format!(" ({n}){ext}")));
+            if free(&cand) {
+                return cand;
+            }
+        }
+        let tag = uuid::Uuid::new_v4().simple().to_string();
+        parent.join(crate::fs::suffixed_name(stem, &format!(" ({tag}){ext}")))
+    }
+}
+
+/// 아카이브 안 이름의 비교용 키 — 구분자(`/`·`\`)·빈 조각·`.` 차이를 없앤다.
+fn name_key(shown: &str) -> String {
+    shown
+        .split(['/', '\\'])
+        .filter(|p| !p.is_empty() && *p != ".")
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 /// 폴더 항목인지 — tar 의 `unpack` 과 같은 기준(폴더 종류, 또는 옛 BSD tar 처럼 ustar 가
@@ -833,6 +950,76 @@ mod tests {
         std::os::unix::fs::symlink(outside.path().join("sub"), d.join("dirlink")).unwrap();
         assert!(!link_target_is_dir(d, Path::new("l"), Path::new("out/sub")));
         assert!(!link_target_is_dir(d, Path::new("l"), Path::new("dirlink")));
+    }
+
+    /// 해제 폴더에 이미 있는(앞 항목이 만들지 않은) 이름 = 충돌 → `이름 (2).ext`.
+    /// 대소문자 무시 여부와 상관없이 같은 판정이 되도록, 겹치는 자리를 직접 만들어 둔다.
+    #[test]
+    fn name_guard_keeps_both_on_foreign_names() {
+        let dest = tempfile::tempdir().unwrap();
+        let d = dest.path();
+        std::fs::write(d.join("a.txt"), b"x").unwrap();
+        std::fs::create_dir(d.join("dir")).unwrap();
+        std::fs::write(d.join("f"), b"x").unwrap();
+        let mut g = NameGuard::default();
+        let p = |s: &str| PathBuf::from(s);
+        assert_eq!(
+            g.place(d, p("a.txt"), "a.txt", false),
+            (p("a (2).txt"), true)
+        );
+        // 옮긴 항목이 다시 나오면 옮긴 자리로(덮어쓰기 의미 유지).
+        assert_eq!(
+            g.place(d, p("a.txt"), "a.txt", false),
+            (p("a (2).txt"), false)
+        );
+        // 폴더끼리는 합친다.
+        assert_eq!(g.place(d, p("dir"), "dir/", true), (p("dir"), false));
+        // 파일 자리에 폴더 → 폴더를 옮기고, 그 안 항목도 따라간다.
+        assert_eq!(g.place(d, p("f"), "f/", true), (p("f (2)"), true));
+        assert_eq!(
+            g.place(d, p("f").join("in.txt"), "f/in.txt", false),
+            (p("f (2)").join("in.txt"), false)
+        );
+        assert_eq!(g.lookup(p("a.txt"), "a.txt"), p("a (2).txt"));
+        assert_eq!(
+            g.lookup(p("f").join("in.txt"), "f/in.txt"),
+            p("f (2)").join("in.txt")
+        );
+    }
+
+    #[test]
+    fn name_guard_same_name_again_is_not_a_collision() {
+        let dest = tempfile::tempdir().unwrap();
+        let d = dest.path();
+        let mut g = NameGuard::default();
+        let p = |s: &str| PathBuf::from(s);
+        assert_eq!(
+            g.place(d, p("x/y.txt"), "x/y.txt", false),
+            (p("x/y.txt"), false)
+        );
+        std::fs::create_dir_all(d.join("x")).unwrap();
+        std::fs::write(d.join("x/y.txt"), b"1").unwrap();
+        assert_eq!(
+            g.place(d, p("x/y.txt"), "./x//y.txt", false),
+            (p("x/y.txt"), false)
+        );
+        // 상위 폴더로 자동 생성된 x 에 폴더 항목 x/ 가 와도 합친다.
+        assert_eq!(g.place(d, p("x"), "x/", true), (p("x"), false));
+    }
+
+    /// 실제 tar 경로: 같은 이름 재등장은 지금처럼 덮어쓴다(대소문자 무시 FS 여도 같은 이름이면).
+    #[test]
+    fn tar_same_name_again_still_overwrites() {
+        use tar::EntryType as T;
+        let tar = build(&[
+            ("Same.txt", T::Regular, b"old"),
+            ("Same.txt", T::Regular, b"new"),
+        ]);
+        let dest = tempfile::tempdir().unwrap();
+        let r = unpack(&tar[..], dest.path()).unwrap();
+        assert!(r.renamed.is_empty());
+        assert_eq!(names(dest.path()), ["Same.txt"]);
+        assert_eq!(std::fs::read(dest.path().join("Same.txt")).unwrap(), b"new");
     }
 
     #[test]

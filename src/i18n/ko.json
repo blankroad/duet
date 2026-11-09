@@ -888,7 +888,7 @@
     "taskFailedOp": "{{op}} 실패 — {{msg}}",
     "archiveNotice": "{{name}}: {{details}}",
     "archiveLinksSkipped_other": "링크 {{count}}개는 이 PC에서 만들 수 없어 건너뛰었습니다 (Windows는 개발자 모드를 켜면 만들 수 있습니다).",
-    "archiveRenamed_other": "이름 {{count}}개는 쓸 수 없는 글자(: ? 등)를 _ 로 바꿔 풀었습니다."
+    "archiveRenamed_other": "이름 {{count}}개는 그대로 쓸 수 없어(: ? 같은 글자, 대소문자만 다른 같은 이름 등) 바꾼 이름으로 풀었습니다."
   },
   "sidebar": {
     "tasks": "작업",
