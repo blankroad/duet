@@ -867,6 +867,7 @@
     "removeBookmarkFailed": "Could not remove the bookmark: {{err}}",
     "removeFavoriteFailed": "Could not remove the favorite: {{err}}",
     "removeHostFailed": "Could not remove the host: {{err}}",
+    "bookmarksMigrateFailed": "Couldn't move {{count}} SSH bookmark(s) to host favorites — they were kept and will be retried next launch",
     "bookmarksMigrated": "Moved {{count}} SSH bookmark(s) to host favorites",
     "noActiveConnection": "No active connection for this folder",
     "bookmarkedOnHost": "Bookmarked on {{host}}: {{name}}",

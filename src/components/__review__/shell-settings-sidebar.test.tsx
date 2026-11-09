@@ -67,7 +67,7 @@ describe("C-03 bookmarks", () => {
     },
   );
 
-  it.fails(
+  it(
     "shell-settings-03: 레거시 SSH 북마크 이전은 즐겨찾기 추가가 실패하면 원본 북마크를 지우지 않는다",
     async () => {
       const legacy: Bookmark = { id: "b1", name: "logs", location: sshLoc("/var/log") };

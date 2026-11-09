@@ -34,6 +34,7 @@ async function migrateSshBookmarks(items: Bookmark[]): Promise<void> {
   const sshBms = items.filter((b) => b.location.source.kind === "ssh");
   if (sshBms.length === 0) return;
   let moved = 0;
+  let failed = 0;
   for (const b of sshBms) {
     if (b.location.source.kind !== "ssh") continue;
     const alias = aliasFromConnectionId(b.location.source.connection_id);
@@ -42,7 +43,11 @@ async function migrateSshBookmarks(items: Bookmark[]): Promise<void> {
     const exists = useHostFavorites
       .getState()
       .items.some((f) => f.host_alias === alias && String(f.path) === path);
-    if (!exists) await addHostFavorite(alias, b.name, path);
+    // 즐겨찾기 저장이 실패하면 원본 북마크를 지우지 않는다 — 다음 실행 때 다시 시도.
+    if (!exists && !(await addHostFavorite(alias, b.name, path))) {
+      failed += 1;
+      continue;
+    }
     await removeBookmark(b.id);
     moved += 1;
   }
@@ -50,6 +55,13 @@ async function migrateSshBookmarks(items: Bookmark[]): Promise<void> {
     useToast
       .getState()
       .show(i18n.t("toast.bookmarksMigrated", { count: moved }));
+  if (failed > 0)
+    useToast
+      .getState()
+      .show(
+        i18n.t("toast.bookmarksMigrateFailed", { count: failed }),
+        "warning",
+      );
 }
 
 export async function addBookmark(
