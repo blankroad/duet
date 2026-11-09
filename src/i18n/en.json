@@ -472,6 +472,7 @@
     }
   },
   "history": {
+    "stale": "Skipped",
     "title": "Operation history",
     "empty": "No operations recorded yet",
     "redoNote": "Redo re-applies the last undone operation. Overwrites, archives and deletes can't be redone.",

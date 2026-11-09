@@ -5,7 +5,13 @@
 // 그 배열을 그대로 `setHistory` 에 넣고, store 는 "최신이 마지막"(stores/journal.ts)으로
 // 가정한다 → HistoryDialog 의 정렬·"다음 Ctrl+Z" 배지·hasRedoable 이 뒤집힌다.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, renderHook, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  render,
+  renderHook,
+  screen,
+} from "@testing-library/react";
 import "@/i18n";
 import { useJournal } from "@/stores/journal";
 import { useKeymap } from "@/stores/keymap";
@@ -59,7 +65,9 @@ describe("fileops-opus: 재시작 후 작업 기록", () => {
     const rows = screen.getAllByRole("listitem");
     // 맨 위 행 = 최신, 배지도 그 행.
     expect(rows[0]!.textContent).toContain("newest");
-    const badgeRow = rows.find((r) => /Next undo|next/.test(r.textContent ?? ""));
+    const badgeRow = rows.find((r) =>
+      /Next undo|next/.test(r.textContent ?? ""),
+    );
     expect(badgeRow?.textContent).toContain("newest");
   });
 

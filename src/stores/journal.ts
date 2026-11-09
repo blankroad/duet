@@ -4,18 +4,19 @@ import type { JournalEntry } from "@/types/bindings";
 interface State {
   entries: JournalEntry[]; // tail, 최신이 마지막
   hasUndoable: boolean;
-  /** 마지막 entry 가 undone 이면 redo 가능 (LIFO — 백엔드 peek_redoable 과 동일 규칙). */
+  /** stale 을 건너뛴 마지막 entry 가 undone 이면 redo 가능 (백엔드와 동일). */
   hasRedoable: boolean;
   pushed: (e: JournalEntry) => void;
   markUndone: (id: string) => void;
   markRedone: (id: string) => void;
+  markStale: (id: string) => void;
   setHistory: (es: JournalEntry[]) => void;
 }
 
 const computeUndoable = (entries: JournalEntry[]) =>
-  entries.some((e) => !e.undone);
+  entries.some((e) => !e.undone && !e.stale);
 const computeRedoable = (entries: JournalEntry[]) =>
-  entries.length > 0 && entries[entries.length - 1]!.undone;
+  [...entries].reverse().find((e) => !e.stale)?.undone ?? false;
 
 const derive = (entries: JournalEntry[]) => ({
   entries,
@@ -35,6 +36,10 @@ export const useJournal = create<State>((set) => ({
   markRedone: (id) =>
     set((s) =>
       derive(s.entries.map((e) => (e.id === id ? { ...e, undone: false } : e))),
+    ),
+  markStale: (id) =>
+    set((s) =>
+      derive(s.entries.map((e) => (e.id === id ? { ...e, stale: true } : e))),
     ),
   setHistory: (es) => set(derive(es)),
 }));

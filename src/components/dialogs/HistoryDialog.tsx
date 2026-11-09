@@ -33,7 +33,9 @@ export function HistoryDialog({ onClose }: { onClose: () => void }) {
   const all = useAllCommands();
 
   // 최신이 위. "다음 Ctrl+Z 대상" = 아직 안 되돌린 것 중 가장 최근.
-  const nextUndoId = [...entries].reverse().find((e) => !e.undone)?.id;
+  const nextUndoId = [...entries]
+    .reverse()
+    .find((e) => !e.undone && !e.stale)?.id;
   const newestFirst = [...entries].reverse();
 
   return (
@@ -118,10 +120,15 @@ function HistoryRow({
     <li
       className={clsx(
         "flex items-baseline gap-2 py-1.5 text-base",
-        entry.undone && "text-fg-muted line-through opacity-60",
+        entry.undone && !entry.stale && "text-fg-muted line-through opacity-60",
       )}
     >
       <span className="min-w-0 flex-1 truncate">{opLabel(entry.op, t)}</span>
+      {entry.stale && (
+        <span className="shrink-0 rounded bg-subtle px-1.5 py-0.5 text-meta text-fg-muted">
+          {t("history.stale")}
+        </span>
+      )}
       {isNext && (
         <span className="shrink-0 rounded bg-subtle px-1.5 py-0.5 text-meta text-accent">
           {undoKey
