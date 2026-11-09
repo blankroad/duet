@@ -97,7 +97,14 @@ pub async fn load_or_quarantine<T>(
 ) -> Result<Loaded<T>, DuetError> {
     let bytes = match tokio::fs::read(path).await {
         Ok(b) => b,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+        // 부모 경로가 일반 파일이면(NotADirectory) 그 아래 파일은 있을 수 없다 — 없는 것과 같다.
+        // 저장은 나중에 그 자리에서 실패하므로 덮어쓸 원본도 없다.
+        Err(e)
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+            ) =>
+        {
             return Ok(Loaded {
                 value: default(),
                 quarantined: None,
@@ -273,6 +280,19 @@ mod tests {
             .unwrap();
         assert_eq!(l.value, 7);
         assert!(l.quarantined.is_none());
+    }
+
+    #[tokio::test]
+    async fn load_under_a_regular_file_gives_default() {
+        let d = tempdir().unwrap();
+        let blocker = d.path().join("blocker");
+        std::fs::write(&blocker, b"x").unwrap();
+        let l = load_or_quarantine(&blocker.join("x.json"), parse_num, || 7)
+            .await
+            .unwrap();
+        assert_eq!(l.value, 7);
+        assert!(l.quarantined.is_none());
+        assert_eq!(std::fs::read(&blocker).unwrap(), b"x");
     }
 
     #[tokio::test]
