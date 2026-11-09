@@ -395,6 +395,8 @@ async fn plan_transfer(
             return Err(DuetError::Io("items must share source".into()));
         }
     }
+    // 폴더를 자기 자신/하위로 — 끝없는 자기 복제를 시작 전에 거부(fileops-04).
+    ensure_items_not_into_dst(src_fs, &src_source, &items, &dst).await?;
 
     let mut conflicts = Vec::new();
     let mut total = 0u64;
@@ -436,6 +438,21 @@ async fn plan_transfer(
         total_size_bytes: total,
         strategy,
     })
+}
+
+/// copy/move 항목 중 받는 폴더가 그 항목 자신이거나 하위인 것이 있으면 `IntoItself`.
+/// plan 과 execute 진입부 둘 다 부른다 — plan 이후 프론트가 다른 plan 을 보낼 수 있으므로.
+async fn ensure_items_not_into_dst(
+    src_fs: &dyn FileSystem,
+    src_source: &SourceId,
+    items: &[EntryRef],
+    dst: &Location,
+) -> Result<(), DuetError> {
+    let paths: Vec<PathBuf> = items
+        .iter()
+        .map(|it| src_fs.join(&it.location.path, &it.name))
+        .collect();
+    crate::core::path_guard::ensure_not_into_itself(src_source, &paths, dst).await
 }
 
 /// 항목별 실패들을 **하나의** 에러로 묶는다.
@@ -481,6 +498,7 @@ pub async fn copy_execute(
     cancel_token: tokio_util::sync::CancellationToken,
     progress: Option<crate::services::task_queue::ProgressEmitter>,
 ) -> Result<JournalEntry, DuetError> {
+    ensure_items_not_into_dst(src_fs, &plan.src_source, &plan.items, &plan.dst).await?;
     match plan.strategy {
         CopyStrategy::LocalToLocal | CopyStrategy::Relay => {
             copy_execute_relay(src_fs, dst_fs, plan, policy, ctx, cancel_token, progress).await
@@ -807,6 +825,7 @@ pub async fn move_execute(
     if plan.items.is_empty() {
         return Err(DuetError::Io("plan has no items".into()));
     }
+    ensure_items_not_into_dst(src_fs, &plan.src_source, &plan.items, &plan.dst).await?;
     // same-host SSH move: **같은 연결**(= 같은 SourceId, is_same_fs) 이면 SFTP rename
     // 한 번으로 서버 안에서 끝난다 — 원격 서버 정리에서 가장 흔한 작업이라 지원한다.
     // 서로 다른 연결(같은 머신이지만 다른 세션/유저)은 아직 막는다: rename 을 어느 쪽
@@ -6132,13 +6151,25 @@ mod review_fileops_sol {
         std::fs::write(s.join("file"), b"payload").unwrap();
         let c = ctx(t.path()).await;
         let plan = copy_plan(&LocalFs, &LocalFs, vec![target(t.path(), "a")], loc(&d)).await;
-        assert!(plan.is_ok(), "repro currently reaches execution");
+        assert!(
+            matches!(plan, Err(DuetError::IntoItself(_))),
+            "plan must reject a destination inside the source: {plan:?}"
+        );
+        // execute 진입부도 재검사 — plan 단계를 거치지 않은(위조된) plan 도 거부해야 한다.
+        let forged = CopyPlan {
+            src_source: SourceId::Local,
+            dst: loc(&d),
+            items: vec![target(t.path(), "a")],
+            conflicts: Vec::new(),
+            total_size_bytes: 0,
+            strategy: CopyStrategy::LocalToLocal,
+        };
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(2),
             copy_execute(
                 &LocalFs,
                 &LocalFs,
-                plan.unwrap(),
+                forged,
                 ConflictPolicy::Skip,
                 &c,
                 CancellationToken::new(),
@@ -6161,6 +6192,11 @@ mod review_fileops_sol {
             "C02 dst={dst_inside:?} result={result:?} nested_depth={depth} journal_entries={}",
             hist.len()
         );
+        assert!(
+            matches!(result, Ok(Err(DuetError::IntoItself(_)))),
+            "execute must reject a forged plan: {result:?}"
+        );
+        assert!(hist.is_empty());
         assert_eq!(std::fs::read(s.join("file")).unwrap(), b"payload");
         assert_eq!(
             depth, 0,
@@ -6168,12 +6204,10 @@ mod review_fileops_sol {
         );
     }
     #[tokio::test]
-    #[ignore = "fileops-04 repro"]
     async fn c02_reject_copy_into_child() {
         descendant_copy("sub").await;
     }
     #[tokio::test]
-    #[ignore = "fileops-04 repro"]
     async fn c02_reject_copy_into_itself() {
         descendant_copy("").await;
     }
@@ -6226,7 +6260,7 @@ mod review_fileops_sol {
         )
         .await;
         eprintln!("C02 move-descendant: {r:?}");
-        assert!(r.is_err());
+        assert!(matches!(r, Err(DuetError::IntoItself(_))), "{r:?}");
         assert_eq!(std::fs::read(t.path().join("a/file")).unwrap(), b"safe");
         assert!(c.journal.history(10).await.is_empty());
     }
@@ -6826,7 +6860,6 @@ mod review_fileops_opus_r2 {
     /// fileops-04 (NTFS 이름순 열거): 폴더 `a`(파일 3개 768 KiB + 하위 `zz-sub`)를 `a/zz-sub`
     /// 로 복사하면, 이름순으로 하위 폴더보다 앞에 오는 항목이 단계마다 복제된다.
     #[tokio::test]
-    #[ignore = "fileops-04 repro"]
     async fn r2_copy_into_child_amplifies_with_name_order_listing() {
         let t = tempfile::tempdir().unwrap();
         let ctx = mk_ctx(t.path()).await;
@@ -6857,6 +6890,10 @@ mod review_fileops_opus_r2 {
         .await;
         let (files, after) = tree_bytes(&a);
         let journal = ctx.journal.history(10).await.len();
+        assert!(
+            matches!(r, Ok(Err(DuetError::IntoItself(_)))),
+            "copy into own child must be rejected up front: {r:?}"
+        );
         eprintln!(
             "R2 fileops-04 name-order: result={:?} files={files} bytes_before={before} \
              bytes_after={after} amplification=x{} journal={journal}",
@@ -7224,5 +7261,109 @@ mod undo_record_tests {
         );
         assert_eq!(created_stamps.len(), created.len());
         assert!(created_stamps.iter().all(Option::is_some));
+    }
+}
+
+/// U-04: 폴더를 자기 자신/하위로 옮기는 이동 진입부 가드 + 정상 복사(부모·형제)는 허용.
+/// 모든 파일은 TempDir 안. 가드가 막는 경로만 실행하므로 OS 휴지통은 부르지 않는다.
+#[cfg(test)]
+mod nested_roots_guard {
+    use super::*;
+    use crate::fs::LocalFs;
+    use std::path::Path;
+    use tokio_util::sync::CancellationToken;
+
+    async fn mk_ctx(dir: &Path) -> OpCtx {
+        OpCtx {
+            journal: Journal::load_from(&dir.join("g-journal.jsonl"))
+                .await
+                .unwrap(),
+            settings: SettingsStore::load_from(&dir.join("g-settings.toml"))
+                .await
+                .unwrap(),
+            pool: None,
+            app: None,
+        }
+    }
+    fn loc(p: &Path) -> Location {
+        Location {
+            source: SourceId::Local,
+            path: p.to_path_buf(),
+        }
+    }
+    fn eref(p: &Path, name: &str) -> EntryRef {
+        EntryRef {
+            location: loc(p),
+            name: name.into(),
+        }
+    }
+    fn is_into_itself<T: std::fmt::Debug>(r: &Result<T, DuetError>) -> bool {
+        matches!(r, Err(DuetError::IntoItself(_)))
+    }
+    /// t/p/{a.txt, child/{b.txt}}, 컨텍스트는 t/ctx.
+    fn tree() -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let t = tempfile::tempdir().unwrap();
+        let p = t.path().join("p");
+        let child = p.join("child");
+        std::fs::create_dir_all(&child).unwrap();
+        std::fs::create_dir_all(t.path().join("ctx")).unwrap();
+        std::fs::write(p.join("a.txt"), b"a").unwrap();
+        std::fs::write(child.join("b.txt"), b"b").unwrap();
+        (t, p, child)
+    }
+
+    #[tokio::test]
+    async fn move_execute_rejects_forged_plan_into_child() {
+        let (t, p, child) = tree();
+        let c = mk_ctx(&t.path().join("ctx")).await;
+        let forged = MovePlan {
+            src_source: SourceId::Local,
+            dst: loc(&child),
+            items: vec![eref(t.path(), "p")],
+            conflicts: Vec::new(),
+            is_same_fs: true,
+            total_size_bytes: 0,
+            strategy: CopyStrategy::LocalToLocal,
+        };
+        let r = move_execute(
+            &LocalFs,
+            &LocalFs,
+            forged,
+            ConflictPolicy::Replace,
+            &c,
+            CancellationToken::new(),
+            None,
+        )
+        .await;
+        assert!(is_into_itself(&r), "{r:?}");
+        assert_eq!(std::fs::read(p.join("a.txt")).unwrap(), b"a");
+        assert!(c.journal.history(10).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn copy_to_parent_or_sibling_still_allowed() {
+        let (t, p, _child) = tree();
+        std::fs::create_dir_all(t.path().join("sibling")).unwrap();
+        // p/child → p (같은 이름 충돌만 있을 뿐 자기 하위 아님), p → sibling.
+        let up = copy_plan(&LocalFs, &LocalFs, vec![eref(&p, "child")], loc(&p)).await;
+        assert!(up.is_ok(), "{up:?}");
+        let side = copy_plan(
+            &LocalFs,
+            &LocalFs,
+            vec![eref(t.path(), "p")],
+            loc(&t.path().join("sibling")),
+        )
+        .await;
+        assert!(side.is_ok(), "{side:?}");
+        // 이름이 접두사만 같은 형제(p 와 p2)는 하위가 아니다.
+        std::fs::create_dir_all(t.path().join("p2")).unwrap();
+        let prefix = copy_plan(
+            &LocalFs,
+            &LocalFs,
+            vec![eref(t.path(), "p")],
+            loc(&t.path().join("p2")),
+        )
+        .await;
+        assert!(prefix.is_ok(), "{prefix:?}");
     }
 }
