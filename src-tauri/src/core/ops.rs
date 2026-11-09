@@ -3320,9 +3320,9 @@ pub async fn rename(
     new_name: String,
     ctx: &OpCtx,
 ) -> Result<JournalEntry, DuetError> {
-    if new_name.contains('/') || new_name.is_empty() {
-        return Err(DuetError::Io(format!("invalid name: {new_name}")));
-    }
+    // FS 별 이름 규칙(빈 이름, `.`/`..`, `/`·`\`, Windows 예약 이름 등) — `\` 를 거르지 않으면
+    // Windows 에서 `..\x` 가 폴더 밖으로 옮기는 경로가 된다(fileops-19).
+    fs.validate_new_name(&new_name)?;
     let from = fs.join(&target.location.path, &target.name);
     let to = fs.join(&target.location.path, &new_name);
     if fs.metadata(&to).await.is_ok() {
@@ -3513,10 +3513,11 @@ async fn compute_batch_mapping(
         let dup_in_batch = counts.get(new.as_str()).copied().unwrap_or(0) > 1;
         // 다른 선택 항목의 *기존* 이름과 겹치면 단일패스 안전을 위해 차단.
         let overlaps_selected_old = old_set.contains(new.as_str());
-        let collision = if new.is_empty() || new.contains('/') {
+        let collision = if new == old {
+            false // no-op (기존 이름은 이 FS 규칙에 안 맞아도 건드리지 않으니 통과)
+        } else if fs.validate_new_name(new).is_err() {
+            // 경로 구분자·`..`·예약 이름 — 미리보기에서 막고 실행도 거부(fileops-19).
             true
-        } else if new == old {
-            false // no-op
         } else if dup_in_batch || overlaps_selected_old {
             true
         } else {
@@ -6487,7 +6488,6 @@ mod review_fileops_sol {
         assert!(r.is_ok(), "case-only rename rejected as target exists");
     }
     #[tokio::test]
-    #[ignore = "fileops-19 repro"]
     async fn c06_rename_must_use_filesystem_name_validation() {
         let t = tempfile::tempdir().unwrap();
         let c = ctx(t.path()).await;
@@ -6555,7 +6555,6 @@ mod review_fileops_sol {
         );
     }
     #[tokio::test]
-    #[ignore = "fileops-19 repro"]
     async fn c07_batch_preview_must_validate_names() {
         let t = tempfile::tempdir().unwrap();
         std::fs::write(t.path().join("a"), b"safe").unwrap();
@@ -6919,7 +6918,6 @@ mod review_fileops_opus_r2 {
     /// 표시한다. macOS/Linux 에선 `\` 가 이름 문자지만, Windows 에선 `fs.join` 이 경로로 해석한다
     /// (아래 cfg(windows) 테스트). 미리보기는 OS 와 무관하게 FS validator 로 막아야 한다.
     #[tokio::test]
-    #[ignore = "fileops-19 repro"]
     async fn r2_batch_preview_flags_backslash_names() {
         let t = tempfile::tempdir().unwrap();
         std::fs::write(t.path().join("a.txt"), b"a").unwrap();
@@ -6942,7 +6940,6 @@ mod review_fileops_opus_r2 {
     /// 파일이 폴더 밖(상위)으로 옮겨진다. `Path::join` 은 Windows 에서 `\` 를 구분자로 본다.
     #[cfg(windows)]
     #[tokio::test]
-    #[ignore = "fileops-19 repro"]
     async fn r2_windows_rename_with_backslash_stays_in_folder() {
         let t = tempfile::tempdir().unwrap();
         let ctx = mk_ctx(t.path()).await;
@@ -7486,5 +7483,45 @@ mod nested_roots_guard {
             );
         }
         assert!(c.journal.history(10).await.is_empty());
+    }
+}
+
+/// fileops-19: 일괄 이름 바꾸기 실행도 미리보기와 같은 FS 이름 규칙으로 거부한다.
+#[cfg(test)]
+mod batch_rename_name_validation {
+    use super::*;
+    use crate::fs::LocalFs;
+
+    #[tokio::test]
+    async fn execute_refuses_separator_and_keeps_files() {
+        let t = tempfile::tempdir().unwrap();
+        let inner = t.path().join("inner");
+        std::fs::create_dir(&inner).unwrap();
+        std::fs::write(inner.join("a.txt"), b"a").unwrap();
+        let ctx = OpCtx {
+            journal: Journal::load_from(&t.path().join("j.jsonl")).await.unwrap(),
+            settings: SettingsStore::load_from(&t.path().join("s.toml"))
+                .await
+                .unwrap(),
+            pool: None,
+            app: None,
+        };
+        let item = EntryRef {
+            location: Location {
+                source: SourceId::Local,
+                path: inner.clone(),
+            },
+            name: "a.txt".into(),
+        };
+        for prefix in ["..\\", "../", "sub/"] {
+            let rule = RenameRule {
+                prefix: prefix.into(),
+                ..Default::default()
+            };
+            let r = batch_rename_execute(&LocalFs::new(), vec![item.clone()], rule, &ctx).await;
+            assert!(r.is_err(), "{prefix:?}: {r:?}");
+            assert!(inner.join("a.txt").exists());
+        }
+        assert!(ctx.journal.history(10).await.is_empty());
     }
 }
