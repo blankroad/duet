@@ -434,3 +434,24 @@ async fn missing_trashed_item_is_gone_not_a_blocking_error() {
     assert_eq!(out.kind, UndoKind::Stale, "{out:?}");
     assert_eq!(out.reason, Some(UndoReason::Gone));
 }
+
+/// R3(sol-4): 원래 부모가 깨진 심볼릭 링크면 휴지통 항목이 없어진 게 아니라 부모 문제 —
+/// 영구 건너뜀(Stale)으로 확정하지 않고 재시도 가능한 오류로 남긴다.
+#[cfg(unix)]
+#[tokio::test]
+async fn dangling_parent_link_is_not_mistaken_for_an_emptied_trash() {
+    let env = Env::new().await;
+    let dst = env.dir("dst");
+    let parent = dst.join("linked");
+    std::os::unix::fs::symlink(dst.join("not-there"), &parent).unwrap();
+    let kept = env.trash.trash_dir.join("kept.txt");
+    std::fs::write(&kept, b"still in trash").unwrap();
+    let pruned = vec![TrashItem {
+        trash_path: kept.to_string_lossy().into_owned(),
+        original_path: parent.join("pruned.txt"),
+    }];
+    let e = push(&env, &dst, sync_entry(&dst, vec![], pruned)).await;
+    let out = env.undo(&e).await;
+    assert_eq!(out.kind, UndoKind::Error, "{out:?}");
+    assert!(kept.exists(), "trash item must stay for a retry");
+}

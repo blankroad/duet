@@ -373,8 +373,10 @@ async fn trash_item_gone(
             let Some(parent) = original.parent() else {
                 return Ok(false);
             };
+            // 부모가 진짜 폴더일 때만 "휴지통 쪽이 없어짐"으로 본다. 깨진 링크·파일 등 부모가
+            // 문제인 경우는 고치면 복원될 수 있으니 오류로 남겨 재시도하게 한다.
             match fs.symlink_metadata(parent).await {
-                Ok(_) => Ok(true),
+                Ok(m) => Ok(m.kind == crate::types::EntryKind::Dir),
                 Err(DuetError::NotFound(_)) => Ok(false),
                 Err(e) => Err(e),
             }
