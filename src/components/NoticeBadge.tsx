@@ -72,6 +72,12 @@ export function NoticeBadge() {
       setOpen(false);
     };
     const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target;
+      const dialog =
+        target instanceof Element
+          ? target.closest('[role="dialog"], [aria-modal="true"]')
+          : null;
+      if (dialog && dialog !== panelRef.current) return;
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
