@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import i18n from "@/i18n";
 import { explainError, formatErr } from "./error";
 
 // 테스트 환경 언어는 en (jsdom navigator.language).
@@ -100,5 +101,57 @@ describe("explainError — plain-language errors", () => {
     expect(
       formatErr({ kind: "HostKeyUnverified", message: { fingerprint: "x" } }),
     ).toMatch(/host key/i);
+  });
+});
+
+describe("explainError — errno tables per OS (ss-14)", () => {
+  const io = (code: number) => ({
+    kind: "Io",
+    message: `x (os error ${code})`,
+  });
+  const plain = (reason: string) => i18n.t(`errors.reason.${reason}`);
+
+  it("reads numbers that differ between macOS and Linux with the right OS", () => {
+    expect(explainError(io(63), "macos").text).toBe(plain("nameTooLong"));
+    expect(explainError(io(36), "linux").text).toBe(plain("nameTooLong"));
+    expect(explainError(io(69), "macos").text).toBe(plain("diskFull"));
+    expect(explainError(io(122), "linux").text).toBe(plain("diskFull"));
+    // 36 = macOS EINPROGRESS, 63 = Linux ENOSR, 69 = Linux ESRMNT — 원인 없음.
+    expect(explainError(io(36), "macos").text).toBe("I/O error — x");
+    expect(explainError(io(63), "linux").text).toBe("I/O error — x");
+    expect(explainError(io(69), "linux").text).toBe("I/O error — x");
+  });
+
+  it("'unix' only uses numbers that mean the same on both", () => {
+    for (const code of [36, 63, 69, 122])
+      expect(explainError(io(code), "unix").text).toBe("I/O error — x");
+    expect(explainError(io(13), "unix").text).toBe(plain("accessDenied"));
+  });
+
+  it("explains a non-empty folder and an unsupported operation", () => {
+    expect(explainError(io(66), "macos").text).toBe(plain("notEmpty"));
+    expect(explainError(io(39), "linux").text).toBe(plain("notEmpty"));
+    expect(explainError(io(145), "windows").text).toBe(plain("notEmpty"));
+    expect(
+      explainError(
+        { kind: "Ssh", message: "rmdir: Directory not empty" },
+        "windows",
+      ).text,
+    ).toBe(plain("notEmpty"));
+    expect(explainError(io(45), "macos").text).toBe(plain("unsupportedOp"));
+    expect(explainError(io(95), "linux").text).toBe(plain("unsupportedOp"));
+  });
+
+  it("does not read a remote command's errno with this PC's table", () => {
+    // Windows 32 = 공유 위반이지만, 서버(Linux)의 EPIPE 다.
+    expect(
+      explainError(
+        {
+          kind: "Ssh",
+          message: "command failed: Is a directory (os error 32)",
+        },
+        "windows",
+      ).text,
+    ).toBe("SSH error — command failed: Is a directory");
   });
 });

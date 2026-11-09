@@ -11,11 +11,13 @@ import type { DuetError } from "@/types/bindings";
  * 원인을 골라 "무엇이 왜 · 어떻게" 한 문장(`text`)을 만들고, 원문은 `detail` 로 남긴다
  * (알림 목록의 "자세히").
  *
- * OS 오류 번호는 OS 마다 뜻이 다르다(1 = Windows "지원 안 되는 기능" / Unix EPERM).
- * "(os error N)" 은 로컬 Rust io 오류에만 붙으므로 이 PC 의 OS 로 해석한다.
+ * OS 오류 번호는 OS 마다 뜻이 다르다(1 = Windows "지원 안 되는 기능" / Unix EPERM,
+ * 36 = Linux ENAMETOOLONG / macOS EINPROGRESS). "(os error N)" 은 로컬 Rust io 오류에만
+ * 붙으므로 이 PC 의 OS 로 해석한다. 원격 명령(kind `Ssh`)의 번호는 서버 OS 것이라 쓰지 않는다.
  */
 
-export type HostOs = "windows" | "unix";
+/** `unix` = OS 를 특정하지 못한 Unix 계열 — macOS·Linux 에서 뜻이 같은 번호만 해석한다. */
+export type HostOs = "windows" | "macos" | "linux" | "unix";
 
 export interface ExplainedError {
   /** 사용자에게 보일 한 문장 (현재 언어). */
@@ -46,12 +48,25 @@ type Reason =
   | "accessDenied"
   | "notFound"
   | "exists"
+  | "notEmpty"
   | "network"
   | "unsupportedOp"
   | "connection";
 
 /** 원인만으로는 상황이 갈리는 것 — 원문 요약을 뒤에 붙인다. */
 const APPEND_DETAIL = new Set<Reason>(["connection"]);
+
+/** macOS·Linux 에서 뜻이 같은 번호. */
+const UNIX_CODES: Record<number, Reason> = {
+  1: "accessDenied", // EPERM (macOS 보호 폴더 등)
+  2: "notFound",
+  13: "accessDenied",
+  16: "inUse", // EBUSY
+  17: "exists",
+  26: "inUse", // ETXTBSY
+  28: "diskFull",
+  30: "readOnly", // EROFS
+};
 
 /** OS 오류 번호 → 원인. 번호의 뜻이 OS 마다 달라 표를 나눈다. */
 const OS_CODES: Record<HostOs, Record<number, Reason>> = {
@@ -71,24 +86,26 @@ const OS_CODES: Record<HostOs, Record<number, Reason>> = {
     80: "exists",
     112: "diskFull",
     123: "invalidName", // ERROR_INVALID_NAME
+    145: "notEmpty", // ERROR_DIR_NOT_EMPTY
     183: "exists",
     206: "nameTooLong", // ERROR_FILENAME_EXCED_RANGE
     1231: "network",
     1314: "linkPrivilege", // ERROR_PRIVILEGE_NOT_HELD
   },
-  unix: {
-    1: "accessDenied", // EPERM (macOS 보호 폴더 등)
-    2: "notFound",
-    13: "accessDenied",
-    16: "inUse", // EBUSY
-    17: "exists",
-    26: "inUse", // ETXTBSY
-    28: "diskFull",
-    30: "readOnly", // EROFS
-    36: "nameTooLong", // Linux ENAMETOOLONG
-    63: "nameTooLong", // macOS ENAMETOOLONG
-    69: "diskFull", // macOS EDQUOT
-    122: "diskFull", // Linux EDQUOT
+  unix: UNIX_CODES,
+  macos: {
+    ...UNIX_CODES,
+    45: "unsupportedOp", // ENOTSUP
+    63: "nameTooLong", // ENAMETOOLONG
+    66: "notEmpty", // ENOTEMPTY
+    69: "diskFull", // EDQUOT
+  },
+  linux: {
+    ...UNIX_CODES,
+    36: "nameTooLong", // ENAMETOOLONG
+    39: "notEmpty", // ENOTEMPTY
+    95: "unsupportedOp", // EOPNOTSUPP
+    122: "diskFull", // EDQUOT
   },
 };
 
@@ -106,6 +123,7 @@ const PATTERNS: Array<[RegExp, Reason]> = [
   ],
   [/invalid entry name|syntax is incorrect/i, "invalidName"],
   [/name too long/i, "nameTooLong"],
+  [/directory not empty/i, "notEmpty"],
   [/no space left|disk is full|quota exceeded/i, "diskFull"],
   [/being used by another process|resource busy|text file busy/i, "inUse"],
   [/read-only file system|write.protected/i, "readOnly"],
@@ -115,6 +133,7 @@ const PATTERNS: Array<[RegExp, Reason]> = [
   ],
   [/no such file|cannot find the (file|path)/i, "notFound"],
   [/already exists/i, "exists"],
+  [/operation not supported/i, "unsupportedOp"],
 ];
 
 /** kind 만으로 원인이 정해지는 것. */
@@ -136,7 +155,8 @@ const KIND_FALLBACK: Partial<Record<string, Reason>> = {
 
 function hostOs(): HostOs {
   try {
-    return platform() === "windows" ? "windows" : "unix";
+    const p = platform();
+    return p === "windows" || p === "macos" || p === "linux" ? p : "unix";
   } catch {
     return "unix"; // 테스트·웹 미리보기 — Tauri OS 플러그인 없음
   }
@@ -171,7 +191,8 @@ function pickReason(
   // 압축·안전 관련 문구는 번호보다 구체적이다(손상된 gzip 도 io 오류 번호가 없다).
   for (const [re, reason] of PATTERNS.slice(0, 4))
     if (re.test(message)) return { reason };
-  const code = osCode(message);
+  // 원격 명령(Ssh)의 "(os error N)" 은 서버 OS 의 번호 — 이 PC 표로 읽지 않는다.
+  const code = kind === "Ssh" ? undefined : osCode(message);
   const byCode = code === undefined ? undefined : OS_CODES[os][code];
   if (byCode) return { reason: byCode };
   for (const [re, reason] of PATTERNS.slice(4))

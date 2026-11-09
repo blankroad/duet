@@ -1319,6 +1319,7 @@
       "accessDenied": "Permission denied. Check the access rights for this location.",
       "notFound": "The file or folder can't be found. It may have been moved or deleted.",
       "exists": "An item with the same name already exists.",
+      "notEmpty": "The folder isn't empty, so this can't be done.",
       "network": "The network location can't be reached. Check your network connection.",
       "unsupportedOp": "This drive doesn't support the operation. Try another drive.",
       "connection": "Can't connect to the server"
