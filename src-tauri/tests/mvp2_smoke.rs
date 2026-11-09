@@ -125,10 +125,13 @@ async fn smoke_rename_then_undo_restores_name() {
     assert!(!env.dir().join("b.txt").exists());
 }
 
-// === scenario 3: copy with conflict (auto backup) + undo ===
+// === scenario 3: copy with conflict — Replace overwrites (CLAUDE.md §4, 2026-06 exception) ===
+//
+// Replace leaves no `.bak` and is not undoable. Whether Ctrl+Z should skip or explain this
+// entry is still undecided (review D-6), so this test checks only the overwrite itself.
 
 #[tokio::test]
-async fn smoke_copy_with_conflict_creates_backup_and_undo_restores() {
+async fn smoke_copy_with_conflict_replace_overwrites_without_backup() {
     let env = setup().await;
     let local = LocalFs::new();
     tokio::fs::create_dir(env.dir().join("src")).await.unwrap();
@@ -163,33 +166,18 @@ async fn smoke_copy_with_conflict_creates_backup_and_undo_restores() {
     .await
     .unwrap();
 
-    // dst/a.txt = NEW, dst/a.txt.bak.* = OLD
     let new_content = tokio::fs::read(env.dir().join("dst/a.txt")).await.unwrap();
     assert_eq!(new_content, b"NEW");
-    let backups: Vec<_> = std::fs::read_dir(env.dir().join("dst"))
+    let names: Vec<String> = std::fs::read_dir(env.dir().join("dst"))
         .unwrap()
         .filter_map(|e| e.ok())
-        .filter(|e| e.file_name().to_string_lossy().starts_with("a.txt.bak."))
+        .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
-    assert_eq!(backups.len(), 1, "should have one .bak.* file");
-
-    // undo → dst/a.txt 다시 OLD, backup 사라짐
-    let popped = env.journal.peek_undoable().await.unwrap().unwrap();
-    let outcome = execute_undo(&popped, &env.pool).await;
-    env.journal.commit_undone(popped.id).await.unwrap();
-    assert!(
-        matches!(outcome.kind, UndoKind::Ok),
-        "undo failed: {:?}",
-        outcome.message
+    assert_eq!(
+        names,
+        vec!["a.txt".to_string()],
+        "no backup or temp file left"
     );
-    let restored = tokio::fs::read(env.dir().join("dst/a.txt")).await.unwrap();
-    assert_eq!(restored, b"OLD", "backup should be restored");
-    let backups_after: Vec<_> = std::fs::read_dir(env.dir().join("dst"))
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_name().to_string_lossy().starts_with("a.txt.bak."))
-        .collect();
-    assert_eq!(backups_after.len(), 0, "backup should be moved back");
 }
 
 // === scenario 4: move (same fs) + undo ===
