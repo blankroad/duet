@@ -16,6 +16,7 @@ use specta::Type;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use unicode_normalization::UnicodeNormalization;
 
 mod cleanup;
 #[cfg(test)]
@@ -192,7 +193,7 @@ pub(crate) async fn rename_no_replace(
 /// `to` 가 `from` 자신을 다른 철자로 부른 것인지 — 대소문자 무시 볼륨의 `a.txt`↔`A.txt`,
 /// 정규화 무시 볼륨(macOS)의 NFC↔NFD 이름 등.
 ///
-/// 같은 폴더의 다른 이름인데 폴더 목록에 `to` 이름이 **정확히** 없고 `from` 이름은 있으며,
+/// 두 이름이 NFC+소문자로 같고(철자만 다름), 폴더 목록에 `to` 이름이 **정확히** 없고 `from` 이름은 있으며,
 /// `to` 로 본 메타데이터가 `from` 과 같으면(종류·크기·수정시각) 자기 자신으로 본다.
 /// 대소문자·정규화 구분 볼륨에서 둘이 따로 있으면 목록에 둘 다 보여 점유로 판정된다.
 async fn self_alias(fs: &dyn FileSystem, from: &Path, to: &Path) -> Result<bool, DuetError> {
@@ -203,6 +204,12 @@ async fn self_alias(fs: &dyn FileSystem, from: &Path, to: &Path) -> Result<bool,
     };
     let (from_name, to_name) = (from_name.to_string_lossy(), to_name.to_string_lossy());
     if to.parent() != Some(dir) || from_name == to_name {
+        return Ok(false);
+    }
+    // 이름이 대소문자·정규화만 다른 경우로 한정한다 — 메타데이터가 같은 **다른** 파일을
+    // 자기 자신으로 오판해 덮어쓰면 안 된다(별칭을 못 알아보면 "점유"로 끝나 안전).
+    let fold = |s: &str| s.nfc().collect::<String>().to_lowercase();
+    if fold(&from_name) != fold(&to_name) {
         return Ok(false);
     }
     let entries = fs.list(dir).await?;
@@ -1455,6 +1462,40 @@ mod tests {
         }
         let step = rename_no_replace(&LocalFs, &nfd, &nfc).await.unwrap();
         assert_eq!(step, Step::Done);
+    }
+
+    /// R3(opus-4): 메타데이터(크기·시각)가 같은 **다른** 파일이 대소문자·정규화 무시 볼륨에서
+    /// 그 이름을 차지하고 있으면 자기 자신이 아니다 — 점유로 막고 그 파일을 건드리지 않는다.
+    #[tokio::test]
+    async fn different_file_with_same_metadata_is_occupied_not_an_alias() {
+        let dir = TempDir::new().unwrap();
+        let d = dir.path();
+        let set = |p: &Path| {
+            let f = std::fs::File::options().write(true).open(p).unwrap();
+            f.set_modified(
+                std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000),
+            )
+            .unwrap();
+        };
+        for (from, other, to) in [
+            ("x.txt", "Y.txt", "y.txt"),
+            ("x2.txt", "e\u{301}.txt", "\u{e9}.txt"),
+        ] {
+            std::fs::write(d.join(from), b"AAAA").unwrap();
+            std::fs::write(d.join(other), b"BBBB").unwrap();
+            set(&d.join(from));
+            set(&d.join(other));
+            if !d.join(to).exists() {
+                eprintln!("SKIP {to}: volume distinguishes the spelling");
+                continue;
+            }
+            let step = rename_no_replace(&LocalFs, &d.join(from), &d.join(to))
+                .await
+                .unwrap();
+            assert_eq!(step, Step::Skip(UndoReason::Occupied), "{from} -> {to}");
+            assert_eq!(std::fs::read(d.join(other)).unwrap(), b"BBBB");
+            assert_eq!(std::fs::read(d.join(from)).unwrap(), b"AAAA");
+        }
     }
 
     #[tokio::test]
