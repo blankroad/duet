@@ -1011,6 +1011,7 @@ async fn opus_browse_need_password_leaves_no_token_dir() {
 // =====================================================================
 
 /// tar 바이트 (이름, 종류, 내용 또는 링크 대상, mode). sol 의 helper 와 독립으로 작성.
+#[cfg(unix)] // 쓰는 테스트가 모두 cfg(unix) — Windows 타깃 dead_code 방지.
 fn opus2_tar(entries: &[(&str, tar::EntryType, &[u8], u32)]) -> Vec<u8> {
     let mut b = tar::Builder::new(Vec::new());
     for (name, kind, data, mode) in entries {
@@ -1030,6 +1031,7 @@ fn opus2_tar(entries: &[(&str, tar::EntryType, &[u8], u32)]) -> Vec<u8> {
     b.into_inner().unwrap()
 }
 
+#[cfg(unix)] // 쓰는 테스트가 모두 cfg(unix) — Windows 타깃 dead_code 방지.
 fn opus2_targz(path: &Path, entries: &[(&str, tar::EntryType, &[u8], u32)]) {
     let raw = opus2_tar(entries);
     let f = std::fs::File::create(path).unwrap();
@@ -1039,6 +1041,7 @@ fn opus2_targz(path: &Path, entries: &[(&str, tar::EntryType, &[u8], u32)]) {
 }
 
 /// `from_dir` 에서 `to` 로 가는 상대 경로 (`../../.tmpX/f`). 두 tempdir 이 같은 부모 아래라고 가정.
+#[cfg(unix)] // 쓰는 테스트가 모두 cfg(unix) — Windows 타깃 dead_code 방지.
 fn opus2_rel(from_dir: &Path, to: &Path, common: &Path) -> String {
     let up = from_dir.strip_prefix(common).unwrap().components().count();
     let down = to.strip_prefix(common).unwrap();
