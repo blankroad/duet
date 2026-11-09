@@ -34,25 +34,25 @@ DUET_SSH_IT_BYTES=10000000000 DUET_SSH_IT_COUNT=10000 \
 
 ## 컨테이너
 
-| 항목 | 값 |
-|---|---|
-| 베이스 | `alpine:3.20` + `openssh-server` + `rsync` |
-| 포트 | `127.0.0.1:2222 → 22` |
-| 유저 | `duet`/`duetpass` (메인, authorized key 주입), `alt`/`altpass` (옵션) |
-| 인증 | 비밀번호 + 공개키(ed25519) |
+| 항목   | 값                                                                    |
+| ------ | --------------------------------------------------------------------- |
+| 베이스 | `alpine:3.20` + `openssh-server` + `rsync`                            |
+| 포트   | `127.0.0.1:2222 → 22`                                                 |
+| 유저   | `duet`/`duetpass` (메인, authorized key 주입), `alt`/`altpass` (옵션) |
+| 인증   | 비밀번호 + 공개키(ed25519)                                            |
 
 ## 하니스 환경변수 (override)
 
-| 변수 | 기본값 | 의미 |
-|---|---|---|
-| `DUET_SSH_IT` | (미설정) | `1` 이어야 테스트 실행. 아니면 skip |
-| `DUET_SSH_IT_HOST` | `127.0.0.1` | 접속 호스트 |
-| `DUET_SSH_IT_PORT` | `2222` | 접속 포트 |
-| `DUET_SSH_IT_USER` | `duet` | 접속 유저 |
-| `DUET_SSH_IT_PASS` | `duetpass` | 비밀번호 |
-| `DUET_SSH_IT_KEY` | (미설정) | 개인키 경로 — 있으면 키 인증 테스트도 실행 |
-| `DUET_SSH_IT_BYTES` | `268435456` | stress 큰 파일 바이트 수 |
-| `DUET_SSH_IT_COUNT` | `2000` | stress 파일 개수 |
+| 변수                | 기본값      | 의미                                       |
+| ------------------- | ----------- | ------------------------------------------ |
+| `DUET_SSH_IT`       | (미설정)    | `1` 이어야 테스트 실행. 아니면 skip        |
+| `DUET_SSH_IT_HOST`  | `127.0.0.1` | 접속 호스트                                |
+| `DUET_SSH_IT_PORT`  | `2222`      | 접속 포트                                  |
+| `DUET_SSH_IT_USER`  | `duet`      | 접속 유저                                  |
+| `DUET_SSH_IT_PASS`  | `duetpass`  | 비밀번호                                   |
+| `DUET_SSH_IT_KEY`   | (미설정)    | 개인키 경로 — 있으면 키 인증 테스트도 실행 |
+| `DUET_SSH_IT_BYTES` | `268435456` | stress 큰 파일 바이트 수                   |
+| `DUET_SSH_IT_COUNT` | `2000`      | stress 파일 개수                           |
 
 ## 주의
 

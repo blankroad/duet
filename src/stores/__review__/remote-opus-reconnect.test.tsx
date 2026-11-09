@@ -92,29 +92,39 @@ describe("remote-opus C-10: 재연결 뒤 예전 connection_id 잔존", () => {
     expect(src.kind === "ssh" && src.connection_id).toBe("nas:new");
   });
 
-  it.fails("remote-10: 잘라내기(Ctrl+X) 해 둔 원격 항목은 재연결 뒤에도 새 id 로 붙여넣을 수 있어야 한다", () => {
-    // 끊기기 전에 원격 파일을 잘라내기 → 연결 끊김 → 배너 재연결.
-    useClipboard.getState().set([ref("nas:old", "report.pdf")], "move");
-    rebindHostTabs("nas", fresh);
-    pruneDeadConnections("nas");
+  it.fails(
+    "remote-10: 잘라내기(Ctrl+X) 해 둔 원격 항목은 재연결 뒤에도 새 id 로 붙여넣을 수 있어야 한다",
+    () => {
+      // 끊기기 전에 원격 파일을 잘라내기 → 연결 끊김 → 배너 재연결.
+      useClipboard.getState().set([ref("nas:old", "report.pdf")], "move");
+      rebindHostTabs("nas", fresh);
+      pruneDeadConnections("nas");
 
-    const target = useClipboard.getState().entry!.targets[0]!.location.source;
-    // 실제: "nas:old" 그대로 → 붙여넣기 IPC 가 `no connection: nas:old` 로 실패.
-    expect(target.kind === "ssh" && target.connection_id).toBe("nas:new");
-  });
+      const target = useClipboard.getState().entry!.targets[0]!.location.source;
+      // 실제: "nas:old" 그대로 → 붙여넣기 IPC 가 `no connection: nas:old` 로 실패.
+      expect(target.kind === "ssh" && target.connection_id).toBe("nas:new");
+    },
+  );
 
-  it.fails("remote-10: 선반에 담아 둔 원격 항목도 재연결 뒤 새 id 를 가리켜야 한다", () => {
-    useShelf.getState().add([ref("nas:old", "a.log"), ref("nas:old", "b.log")]);
-    rebindHostTabs("nas", fresh);
-    pruneDeadConnections("nas");
-    const ids = useShelf
-      .getState()
-      .sections.flatMap((s) => s.items)
-      .map((i) =>
-        i.location.source.kind === "ssh" ? i.location.source.connection_id : "local",
-      );
-    expect(ids).toEqual(["nas:new", "nas:new"]);
-  });
+  it.fails(
+    "remote-10: 선반에 담아 둔 원격 항목도 재연결 뒤 새 id 를 가리켜야 한다",
+    () => {
+      useShelf
+        .getState()
+        .add([ref("nas:old", "a.log"), ref("nas:old", "b.log")]);
+      rebindHostTabs("nas", fresh);
+      pruneDeadConnections("nas");
+      const ids = useShelf
+        .getState()
+        .sections.flatMap((s) => s.items)
+        .map((i) =>
+          i.location.source.kind === "ssh"
+            ? i.location.source.connection_id
+            : "local",
+        );
+      expect(ids).toEqual(["nas:new", "nas:new"]);
+    },
+  );
 });
 
 describe("remote-opus C-11: 자동 재연결 실패 사유 표시", () => {
@@ -124,7 +134,8 @@ describe("remote-opus C-11: 자동 재연결 실패 사유 표시", () => {
       active: {
         "nas:old": conn("nas:old", "nas", {
           kind: "error",
-          message: "connection failed: tcp connect 10.0.0.1:22: Connection refused (os error 61)",
+          message:
+            "connection failed: tcp connect 10.0.0.1:22: Connection refused (os error 61)",
         }),
       },
     });

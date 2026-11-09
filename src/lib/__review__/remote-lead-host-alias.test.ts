@@ -21,6 +21,10 @@ describe("remote-lead: ad-hoc alias with '@' in the user name", () => {
   });
 
   it("control: plain user still parses", () => {
-    expect(parseAdHocAlias("u@srv.lan:22")).toEqual({ user: "u", host: "srv.lan", port: 22 });
+    expect(parseAdHocAlias("u@srv.lan:22")).toEqual({
+      user: "u",
+      host: "srv.lan",
+      port: 22,
+    });
   });
 });

@@ -53,33 +53,39 @@ afterEach(() => {
 });
 
 describe("fileops-opus: 실행 중 작업 취소", () => {
-  it.fails("fileops-16: 취소 1번에 '취소됨' 토스트가 두 번 뜨지 않는다 (cancel() emit + finalize emit)", async () => {
-    renderHook(() => useTaskEvents());
-    await act(async () => {});
-    send("t1", { kind: "enqueued", task: task("t1") });
-    send("t1", { kind: "started" });
-    // 사용자가 [취소] — TaskQueue::cancel 이 즉시 emit
-    send("t1", { kind: "cancelled" });
-    // 작업 본체가 다음 확인 지점에서 멈춤 — worker finalize 가 또 emit
-    send("t1", { kind: "cancelled" });
-    const cancelToasts = messages().filter((m) => /cancel/i.test(m));
-    expect(cancelToasts, JSON.stringify(messages())).toHaveLength(1);
-  });
+  it.fails(
+    "fileops-16: 취소 1번에 '취소됨' 토스트가 두 번 뜨지 않는다 (cancel() emit + finalize emit)",
+    async () => {
+      renderHook(() => useTaskEvents());
+      await act(async () => {});
+      send("t1", { kind: "enqueued", task: task("t1") });
+      send("t1", { kind: "started" });
+      // 사용자가 [취소] — TaskQueue::cancel 이 즉시 emit
+      send("t1", { kind: "cancelled" });
+      // 작업 본체가 다음 확인 지점에서 멈춤 — worker finalize 가 또 emit
+      send("t1", { kind: "cancelled" });
+      const cancelToasts = messages().filter((m) => /cancel/i.test(m));
+      expect(cancelToasts, JSON.stringify(messages())).toHaveLength(1);
+    },
+  );
 
-  it.fails("fileops-16: '취소됨'을 보여 준 작업이 그 뒤 '완료'로 보고되지 않는다 (확인 지점을 이미 지난 경우)", async () => {
-    renderHook(() => useTaskEvents());
-    await act(async () => {});
-    send("t2", { kind: "enqueued", task: task("t2") });
-    send("t2", { kind: "started" });
-    send("t2", { kind: "cancelled" });
-    // 마지막 확인 지점을 이미 지나 작업이 끝까지 감 → finalize(Completed)
-    send("t2", {
-      kind: "completed",
-      journal_id: "00000000-0000-0000-0000-000000000000",
-    });
-    const all = messages();
-    const saidCancelled = all.some((m) => /cancel/i.test(m));
-    const saidDone = all.some((m) => /complete/i.test(m));
-    expect(saidCancelled && saidDone, JSON.stringify(all)).toBe(false);
-  });
+  it.fails(
+    "fileops-16: '취소됨'을 보여 준 작업이 그 뒤 '완료'로 보고되지 않는다 (확인 지점을 이미 지난 경우)",
+    async () => {
+      renderHook(() => useTaskEvents());
+      await act(async () => {});
+      send("t2", { kind: "enqueued", task: task("t2") });
+      send("t2", { kind: "started" });
+      send("t2", { kind: "cancelled" });
+      // 마지막 확인 지점을 이미 지나 작업이 끝까지 감 → finalize(Completed)
+      send("t2", {
+        kind: "completed",
+        journal_id: "00000000-0000-0000-0000-000000000000",
+      });
+      const all = messages();
+      const saidCancelled = all.some((m) => /cancel/i.test(m));
+      const saidDone = all.some((m) => /complete/i.test(m));
+      expect(saidCancelled && saidDone, JSON.stringify(all)).toBe(false);
+    },
+  );
 });

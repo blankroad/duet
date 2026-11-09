@@ -26,23 +26,32 @@ beforeEach(() => {
 });
 
 describe("localStorage 모양 검증", () => {
-  it.fails("shell-settings-28: recents 가 null 이면 빈 목록으로 시작", async () => {
-    localStorage.setItem("duet.recents", "null");
-    const { useRecents } = await import("@/stores/recents");
-    expect(Array.isArray(useRecents.getState().items)).toBe(true);
-  });
+  it.fails(
+    "shell-settings-28: recents 가 null 이면 빈 목록으로 시작",
+    async () => {
+      localStorage.setItem("duet.recents", "null");
+      const { useRecents } = await import("@/stores/recents");
+      expect(Array.isArray(useRecents.getState().items)).toBe(true);
+    },
+  );
 
-  it.fails("shell-settings-28: 팔레트 최근 명령이 객체면 빈 목록으로 시작", async () => {
-    localStorage.setItem("duet.palette.recent", '{"a":1}');
-    const { usePalette } = await import("@/stores/palette");
-    expect(Array.isArray(usePalette.getState().recent)).toBe(true);
-  });
+  it.fails(
+    "shell-settings-28: 팔레트 최근 명령이 객체면 빈 목록으로 시작",
+    async () => {
+      localStorage.setItem("duet.palette.recent", '{"a":1}');
+      const { usePalette } = await import("@/stores/palette");
+      expect(Array.isArray(usePalette.getState().recent)).toBe(true);
+    },
+  );
 
-  it.fails("shell-settings-28: 사이드바 접힘이 null 이면 토글이 throw 하지 않음", async () => {
-    localStorage.setItem("duet.sidebar.collapsed", "null");
-    const { useUI } = await import("@/stores/ui");
-    expect(() => useUI.getState().collapsed["places"]).not.toThrow();
-  });
+  it.fails(
+    "shell-settings-28: 사이드바 접힘이 null 이면 토글이 throw 하지 않음",
+    async () => {
+      localStorage.setItem("duet.sidebar.collapsed", "null");
+      const { useUI } = await import("@/stores/ui");
+      expect(() => useUI.getState().collapsed["places"]).not.toThrow();
+    },
+  );
 
   it("대조군: 세션 복원은 모양이 틀린 값을 버린다", async () => {
     localStorage.setItem("duet.session.v1", '{"panes":{"left":{"tabs":5}}}');

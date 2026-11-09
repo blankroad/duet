@@ -30,7 +30,9 @@ describe("archive-opus C-15: describeArchiveNotice", () => {
     expect(message).toContain("이름 1개");
     const lines = detail.split("\n");
     expect(lines[0]).toBe("건너뛴 링크:");
-    expect(lines.filter((l) => l.startsWith("  node_modules"))).toHaveLength(20);
+    expect(lines.filter((l) => l.startsWith("  node_modules"))).toHaveLength(
+      20,
+    );
     expect(detail).toContain("… 외 30개");
     expect(detail).toContain("이름을 바꾼 항목 (원래 이름):");
     expect(detail).toContain("  docs/a:b.txt");
@@ -60,15 +62,18 @@ describe("archive-opus C-15: describeArchiveNotice", () => {
     expect(many.detail).toMatch(/… and 1 more/);
   });
 
-  it.fails("archive-26: 바뀐 이름은 '원래 이름' 만 보여 준다 — 풀린 폴더에서 찾을 새 이름(_ 치환)이 없음 (기대: 새 이름도 표시)", async () => {
-    await i18n.changeLanguage("ko");
-    const { detail } = describeArchiveNotice({
-      archive_name: "a.tar",
-      skipped_links: [],
-      skipped_links_count: 0,
-      renamed: ["docs/a:b.txt"],
-      renamed_count: 1,
-    });
-    expect(detail).toContain("a_b.txt");
-  });
+  it.fails(
+    "archive-26: 바뀐 이름은 '원래 이름' 만 보여 준다 — 풀린 폴더에서 찾을 새 이름(_ 치환)이 없음 (기대: 새 이름도 표시)",
+    async () => {
+      await i18n.changeLanguage("ko");
+      const { detail } = describeArchiveNotice({
+        archive_name: "a.tar",
+        skipped_links: [],
+        skipped_links_count: 0,
+        renamed: ["docs/a:b.txt"],
+        renamed_count: 1,
+      });
+      expect(detail).toContain("a_b.txt");
+    },
+  );
 });

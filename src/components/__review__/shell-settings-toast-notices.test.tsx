@@ -76,24 +76,21 @@ describe("C-15 toast auto-dismiss", () => {
 });
 
 describe("C-15 notice badge", () => {
-  it(
-    "shell-settings-25: 기록이 50개로 꽉 찬 뒤엔 목록을 열어 둔 채 새 알림이 와도 읽음 처리되지 않는다",
-    () => {
-      act(() => {
-        for (let i = 0; i < 50; i++)
-          useNotices.getState().add({ kind: "error", message: `e${i}` });
-      });
-      render(<NoticeBadge />);
-      fireEvent.click(screen.getByRole("button"));
-      expect(screen.getByRole("dialog")).toBeTruthy();
-      expect(useNotices.getState().unread).toBe(0);
-      // 목록이 열려 있는 동안 새 오류 — 49개 이하일 땐 바로 읽음 처리된다.
-      act(() =>
-        useNotices.getState().add({ kind: "error", message: "new while open" }),
-      );
-      expect(useNotices.getState().unread).toBe(0);
-    },
-  );
+  it("shell-settings-25: 기록이 50개로 꽉 찬 뒤엔 목록을 열어 둔 채 새 알림이 와도 읽음 처리되지 않는다", () => {
+    act(() => {
+      for (let i = 0; i < 50; i++)
+        useNotices.getState().add({ kind: "error", message: `e${i}` });
+    });
+    render(<NoticeBadge />);
+    fireEvent.click(screen.getByRole("button"));
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(useNotices.getState().unread).toBe(0);
+    // 목록이 열려 있는 동안 새 오류 — 49개 이하일 땐 바로 읽음 처리된다.
+    act(() =>
+      useNotices.getState().add({ kind: "error", message: "new while open" }),
+    );
+    expect(useNotices.getState().unread).toBe(0);
+  });
 
   it("49개 이하일 땐 열어 둔 채 들어온 알림이 바로 읽음 처리된다(대조군)", () => {
     act(() => useNotices.getState().add({ kind: "error", message: "a" }));
@@ -103,45 +100,39 @@ describe("C-15 notice badge", () => {
     expect(useNotices.getState().unread).toBe(0);
   });
 
-  it(
-    "shell-settings-25: 키보드로 '모두 지우기' 를 누르면 포커스가 body 로 떨어지지 않는다",
-    () => {
-      act(() => useNotices.getState().add({ kind: "error", message: "x" }));
-      render(
-        <>
-          <button type="button">pane</button>
-          <NoticeBadge />
-        </>,
-      );
-      fireEvent.click(screen.getByRole("button", { name: /1/ }));
-      const clear = screen.getByRole("button", {
-        name: i18n.t("notices.clear"),
-      });
-      clear.focus();
-      fireEvent.click(clear);
-      // 배지 버튼이 언마운트돼 close() 의 buttonRef.focus() 가 헛돈다.
-      expect(document.activeElement).not.toBe(document.body);
-    },
-  );
+  it("shell-settings-25: 키보드로 '모두 지우기' 를 누르면 포커스가 body 로 떨어지지 않는다", () => {
+    act(() => useNotices.getState().add({ kind: "error", message: "x" }));
+    render(
+      <>
+        <button type="button">pane</button>
+        <NoticeBadge />
+      </>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /1/ }));
+    const clear = screen.getByRole("button", {
+      name: i18n.t("notices.clear"),
+    });
+    clear.focus();
+    fireEvent.click(clear);
+    // 배지 버튼이 언마운트돼 close() 의 buttonRef.focus() 가 헛돈다.
+    expect(document.activeElement).not.toBe(document.body);
+  });
 
-  it(
-    "shell-settings-25: 목록 밖으로 Tab 해 나간 뒤 Esc 로 목록을 닫을 수 있다",
-    () => {
-      act(() => useNotices.getState().add({ kind: "error", message: "x" }));
-      render(
-        <>
-          <button type="button">top bar</button>
-          <NoticeBadge />
-        </>,
-      );
-      fireEvent.click(screen.getByRole("button", { name: /1/ }));
-      const outside = screen.getByRole("button", { name: "top bar" });
-      outside.focus(); // Tab 으로 패널 밖에 나간 상태(포커스 트랩 없음)
-      fireEvent.keyDown(outside, { key: "Escape" });
-      fireEvent.keyDown(window, { key: "Escape" });
-      expect(screen.queryByRole("dialog")).toBeNull();
-    },
-  );
+  it("shell-settings-25: 목록 밖으로 Tab 해 나간 뒤 Esc 로 목록을 닫을 수 있다", () => {
+    act(() => useNotices.getState().add({ kind: "error", message: "x" }));
+    render(
+      <>
+        <button type="button">top bar</button>
+        <NoticeBadge />
+      </>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /1/ }));
+    const outside = screen.getByRole("button", { name: "top bar" });
+    outside.focus(); // Tab 으로 패널 밖에 나간 상태(포커스 트랩 없음)
+    fireEvent.keyDown(outside, { key: "Escape" });
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
 });
 
 describe("C-15 error text keeps which file failed", () => {
@@ -150,14 +141,11 @@ describe("C-15 error text keeps which file failed", () => {
     message: "permission denied: /srv/data/분기보고서 2026.xlsx (os error 13)",
   };
 
-  it(
-    "shell-settings-04: formatErr 결과(토스트 문장)에 실패한 파일 이름이 남는다",
-    () => {
-      const text = formatErr(err);
-      // 현재: "권한이 없습니다. 이 위치의 접근 권한을 확인하세요." — 파일명이 사라짐.
-      expect(text).toContain("분기보고서 2026.xlsx");
-    },
-  );
+  it("shell-settings-04: formatErr 결과(토스트 문장)에 실패한 파일 이름이 남는다", () => {
+    const text = formatErr(err);
+    // 현재: "권한이 없습니다. 이 위치의 접근 권한을 확인하세요." — 파일명이 사라짐.
+    expect(text).toContain("분기보고서 2026.xlsx");
+  });
 
   it("shell-settings-04: 오류 토스트(showError)는 알림 기록 '자세히' 에 원문이 남는다", () => {
     // 예전 호출부 형태 `show(t(..., {err: formatErr(e)}), "error")` 는 원문을 버렸다 —

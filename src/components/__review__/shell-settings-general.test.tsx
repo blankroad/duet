@@ -3,7 +3,13 @@
  * 결함을 재현하는 것은 `it.fails` 로 표시한다.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 
 vi.mock("@tauri-apps/plugin-os", () => ({ platform: () => "macos" }));
 const cmd = vi.hoisted(() => ({
@@ -31,7 +37,10 @@ describe("C-09 editor command input", () => {
         (patch: { editor_command: string }) =>
           new Promise((res) => {
             release = () =>
-              res({ status: "ok", data: { editor_command: patch.editor_command } });
+              res({
+                status: "ok",
+                data: { editor_command: patch.editor_command },
+              });
           }),
       );
       render(<GeneralSection />);

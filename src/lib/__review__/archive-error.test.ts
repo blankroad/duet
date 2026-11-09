@@ -40,12 +40,7 @@ const explained: Case[] = [
     "`unzip` is not installed on the remote host",
     /unzip 프로그램이 없/,
   ],
-  [
-    "unix",
-    "Io",
-    "archive is damaged or not a tar: unexpected EOF",
-    /손상/,
-  ],
+  ["unix", "Io", "archive is damaged or not a tar: unexpected EOF", /손상/],
   ["unix", "Io", "archive writes through a link (a/b)", /폴더 밖/],
   [
     "windows",
@@ -104,20 +99,26 @@ describe("archive-opus C-15: explainError on archive errors (ko)", () => {
     expect(r.text).toMatch(expected);
   });
 
-  it.each(raw)("archive-16: raw English stays: %s %s: %s", (os, kind, message, expected) => {
-    const r = explainError({ kind, message }, os);
-    // 기대: 한국어 설명 문장. 현재: "입출력 오류 — <영어 원문>".
-    expect(r.text).toMatch(expected);
-  });
+  it.each(raw)(
+    "archive-16: raw English stays: %s %s: %s",
+    (os, kind, message, expected) => {
+      const r = explainError({ kind, message }, os);
+      // 기대: 한국어 설명 문장. 현재: "입출력 오류 — <영어 원문>".
+      expect(r.text).toMatch(expected);
+    },
+  );
 
-  it.fails("archive-20: ZipCrypto 틀린 암호가 헤더 검사를 통과(1/256)하면 '파일 손상·다시 받으세요' 로 보인다 — 재입력 기회 없음 (Rust opus_zipcrypto_wrong_password_passing_header_check 의 실제 원문)", () => {
-    const r = explainError(
-      { kind: "Io", message: "write: corrupt deflate stream" },
-      "unix",
-    );
-    // 기대: 암호가 틀렸을 수 있다는 안내.
-    expect(r.text).toMatch(/암호/);
-  });
+  it.fails(
+    "archive-20: ZipCrypto 틀린 암호가 헤더 검사를 통과(1/256)하면 '파일 손상·다시 받으세요' 로 보인다 — 재입력 기회 없음 (Rust opus_zipcrypto_wrong_password_passing_header_check 의 실제 원문)",
+    () => {
+      const r = explainError(
+        { kind: "Io", message: "write: corrupt deflate stream" },
+        "unix",
+      );
+      // 기대: 암호가 틀렸을 수 있다는 안내.
+      expect(r.text).toMatch(/암호/);
+    },
+  );
 
   it("archive-16: 원격 AES zip (unzip exit 81) 은 '압축 방식 미지원 · 7-Zip 으로 푸세요' 로 보인다 — 암호 zip 이라는 사실과 '내 PC 로 복사' 해결책이 빠짐", () => {
     const message =

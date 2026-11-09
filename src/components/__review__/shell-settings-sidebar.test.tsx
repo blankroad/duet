@@ -19,7 +19,11 @@ vi.mock("@/types/bindings", () => ({ commands: cmd }));
 import i18n from "@/i18n";
 import { useToast } from "@/stores/toast";
 import { useNotices } from "@/stores/notices";
-import { useBookmarks, bootstrapBookmarks, removeBookmark } from "@/stores/bookmarks";
+import {
+  useBookmarks,
+  bootstrapBookmarks,
+  removeBookmark,
+} from "@/stores/bookmarks";
 import { useHostFavorites } from "@/stores/hostFavorites";
 import { useTags, bmTagKey } from "@/stores/tags";
 import { TagBar } from "@/components/TagBar";
@@ -31,10 +35,18 @@ import { VIRTUAL_TRASH_PATH } from "@/lib/trashView";
 
 const local = (path: string): Location => ({ source: { kind: "local" }, path });
 const sshLoc = (path: string): Location => ({
-  source: { kind: "ssh", connection_id: "prod:1111", host_ip: "10.0.0.1", user: "u" },
+  source: {
+    kind: "ssh",
+    connection_id: "prod:1111",
+    host_ip: "10.0.0.1",
+    user: "u",
+  },
   path,
 });
-const ref = (location: Location, name: string): EntryRef => ({ location, name });
+const ref = (location: Location, name: string): EntryRef => ({
+  location,
+  name,
+});
 
 function resetShelf() {
   const st = useShelf.getState;
@@ -67,21 +79,22 @@ describe("C-03 bookmarks", () => {
     },
   );
 
-  it(
-    "shell-settings-03: 레거시 SSH 북마크 이전은 즐겨찾기 추가가 실패하면 원본 북마크를 지우지 않는다",
-    async () => {
-      const legacy: Bookmark = { id: "b1", name: "logs", location: sshLoc("/var/log") };
-      cmd.bookmarksList.mockResolvedValue({ status: "ok", data: [legacy] });
-      cmd.hostFavoritesAdd.mockResolvedValue({
-        status: "error",
-        error: { kind: "Io", message: "disk full (os error 28)" },
-      });
-      cmd.bookmarksRemove.mockResolvedValue({ status: "ok", data: [] });
-      await bootstrapBookmarks();
-      // 현재: 추가 실패를 무시하고 remove → 북마크가 어디에도 남지 않는다.
-      expect(cmd.bookmarksRemove).not.toHaveBeenCalled();
-    },
-  );
+  it("shell-settings-03: 레거시 SSH 북마크 이전은 즐겨찾기 추가가 실패하면 원본 북마크를 지우지 않는다", async () => {
+    const legacy: Bookmark = {
+      id: "b1",
+      name: "logs",
+      location: sshLoc("/var/log"),
+    };
+    cmd.bookmarksList.mockResolvedValue({ status: "ok", data: [legacy] });
+    cmd.hostFavoritesAdd.mockResolvedValue({
+      status: "error",
+      error: { kind: "Io", message: "disk full (os error 28)" },
+    });
+    cmd.bookmarksRemove.mockResolvedValue({ status: "ok", data: [] });
+    await bootstrapBookmarks();
+    // 현재: 추가 실패를 무시하고 remove → 북마크가 어디에도 남지 않는다.
+    expect(cmd.bookmarksRemove).not.toHaveBeenCalled();
+  });
 });
 
 describe("C-07 tags", () => {
@@ -148,7 +161,9 @@ describe("C-08 state dot", () => {
     "shell-settings-22: 연결 오류 점에 마우스를 올리면 이유가 보인다(title)",
     () => {
       const { container } = render(
-        <StateDot state={{ kind: "error", message: "authentication failed" }} />,
+        <StateDot
+          state={{ kind: "error", message: "authentication failed" }}
+        />,
       );
       // 현재: aria-label 만 있고 title 이 없어 마우스 사용자는 이유를 볼 곳이 없다
       // (호스트 행 title 은 user@host:port 만).
