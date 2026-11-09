@@ -1320,6 +1320,7 @@
       "accessDenied": "Permission denied. Check the access rights for this location.",
       "notFound": "The file or folder can't be found. It may have been moved or deleted.",
       "exists": "An item with the same name already exists.",
+      "remoteTarCodec": "The server's tar doesn't support this compression ({{codec}}). Copy the archive to this PC and extract it there.",
       "timedOut": "The operation didn't finish in time. If the target is on a network location, check the connection and try again.",
       "syncCrossHost": "Sync between this PC and a server (or two different servers) isn't supported yet. Use Compare, then Apply or Merge.",
       "linkLoop": "A symbolic link loops back on itself, so it can't be followed. Check the links.",

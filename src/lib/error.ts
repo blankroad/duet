@@ -75,6 +75,7 @@ type Reason =
   | "connDns"
   | "connReset"
   | "timedOut"
+  | "remoteTarCodec"
   | "network"
   | "unsupportedOp"
   | "connection";
@@ -207,8 +208,19 @@ const MISSING_PROGRAM: RegExp[] = [
   /`([\w.+-]+)` is not installed on the remote host/i,
   /([\w.+-]+): Cannot exec\b/i, // GNU tar: "tar (child): xz: Cannot exec: No such file…"
   /unable to run program "([\w.+-]+)/i, // bsdtar
-  /unrecognized option '--(zstd)'/i, // zstd 를 모르는 오래된 GNU tar
 ];
+
+/**
+ * 서버 tar 가 압축 옵션 자체를 모름(오래된 GNU tar) — 프로그램 미설치가 아니라 tar 의
+ * 지원 문제라 설치 안내 대신 내 PC 로 복사해 풀기를 권한다. → 코덱 이름.
+ */
+function tarCodecUnsupported(message: string): string | undefined {
+  if (/tar: unrecognized option '--zstd'/i.test(message)) return "zstd";
+  const short = /tar: invalid option -- '([Jj])'/.exec(message)?.[1];
+  if (short === "J") return "xz";
+  if (short === "j") return "bzip2";
+  return undefined;
+}
 
 /** 호스트 명령 실패의 개발자용 앞머리 (`core/archive.rs` `host_failure`). */
 const HOST_FAILURE = /^host command failed \(exit (\d+)\):\s*/i;
@@ -485,6 +497,8 @@ function pickReason(
     const prog = re.exec(message)?.[1];
     if (prog) return { reason: "remoteMissingProgram", vars: { prog } };
   }
+  const codec = tarCodecUnsupported(message);
+  if (codec) return { reason: "remoteTarCodec", vars: { codec } };
   // 압축·안전 관련 문구는 번호보다 구체적이다(손상된 gzip 도 io 오류 번호가 없다).
   for (const [re, reason] of ARCHIVE_PATTERNS)
     if (re.test(message)) return { reason };

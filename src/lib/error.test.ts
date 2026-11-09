@@ -359,11 +359,6 @@ describe("explainError — remote archive commands (archive-32)", () => {
         ),
       ),
     ).toBe(plain("remoteMissingProgram", { prog: "zstd" }));
-    expect(
-      formatErr(
-        ssh("host command failed (exit 64): tar: unrecognized option '--zstd'"),
-      ),
-    ).toBe(plain("remoteMissingProgram", { prog: "zstd" }));
   });
 
   it("an unknown host failure drops the developer prefix", () => {
@@ -559,5 +554,22 @@ describe("explainError — R3 review (sol-3) R3-05", () => {
         "linux",
       ).text,
     ).toBe(plain("network"));
+  });
+});
+
+describe("explainError — R3 review (sol-3) R3-06", () => {
+  const plain = (reason: string, vars?: Record<string, string>) =>
+    i18n.t(`errors.reason.${reason}`, vars ?? {});
+
+  // R3-06: tar 가 --zstd 옵션을 모름 ≠ zstd 미설치.
+
+  it("R3-06 an old tar without --zstd is a tar support problem", () => {
+    expect(
+      formatErr({
+        kind: "Ssh",
+        message:
+          "host command failed (exit 64): tar: unrecognized option '--zstd'",
+      }),
+    ).toBe(plain("remoteTarCodec", { codec: "zstd" }));
   });
 });
