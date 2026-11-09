@@ -51,6 +51,7 @@ type Reason =
   | "damagedArchive"
   | "linkPrivilege"
   | "invalidName"
+  | "intoItself"
   | "nameTooLong"
   | "diskFull"
   | "inUse"
@@ -274,6 +275,7 @@ const KIND_REASON: Partial<Record<string, Reason>> = {
   CrossDevice: "crossDevice",
   HostKeyUnverified: "hostKey",
   NotPermitted: "notPermitted",
+  IntoItself: "intoItself",
 };
 
 /**

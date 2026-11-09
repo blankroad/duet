@@ -1344,6 +1344,7 @@
       "damagedArchive": "The archive is damaged, or its extension doesn't match its real format. Try downloading it again.",
       "linkPrivilege": "Windows doesn't allow creating links without permission. Turn on Developer Mode in Windows Settings, or run as administrator.",
       "invalidName": "The name can't be used on this OS (\\ / : * ? \" < > | or a trailing dot or space).",
+      "intoItself": "A folder can't be copied, moved or synced into itself or one of its subfolders.",
       "nameTooLong": "The path or name is too long. Try again in a shorter location.",
       "diskFull": "The disk is full. Free up space and try again.",
       "inUse": "Another program is using the file. Close it and try again.",

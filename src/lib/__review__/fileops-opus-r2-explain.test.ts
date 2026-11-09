@@ -40,21 +40,22 @@ describe("fileops-09 폴더 Replace 롤백 실패 — 백업 위치가 토스트
 });
 
 describe("fileops-04 자기 하위로 복사·이동 — 원인 안내", () => {
-  it.fails("fileops-04: 복사(경로 한계까지 자기 복제) 오류가 '더 짧은 위치에서 다시' 로 안내되지 않는다", () => {
-    // c02_reject_copy_into_child 실제 출력(macOS).
-    const r = explainError(
-      io("1 item(s) failed — a: io: copy: File name too long (os error 63)"),
-      "unix",
-    );
+  // 수정 후: 백엔드 가드가 복사·이동 전에 `IntoItself` 로 거부한다(core/path_guard).
+  // 점검 당시에는 경로 한계까지 자기 복제한 뒤 "File name too long"(os 63) / "Invalid
+  // argument"(os 22) 로 끝나 "더 짧은 위치에서 다시" 로 안내됐다.
+  const intoItself = {
+    kind: "IntoItself",
+    message: "cannot copy or move a folder into itself: /w/a -> /w/a/b",
+  };
+
+  it("fileops-04: 복사 거부가 '더 짧은 위치에서 다시' 로 안내되지 않는다", () => {
+    const r = explainError(intoItself, "unix");
     expect(r.text, r.text).not.toMatch(/더 짧은 위치/);
+    expect(r.detail).toContain("/w/a/b");
   });
 
-  it.fails("fileops-04: 이동(errno 22) 오류가 이유를 말한다", () => {
-    // c02_move_into_child_preserves_source 실제 출력(macOS).
-    const r = explainError(
-      io("1 item(s) failed — a: io: Invalid argument (os error 22)"),
-      "unix",
-    );
+  it("fileops-04: 이동 거부가 이유(자기 자신·하위)를 말한다", () => {
+    const r = explainError(intoItself, "windows");
     expect(r.text, r.text).toMatch(/하위|자기 자신|안으로/);
   });
 });
@@ -74,7 +75,7 @@ describe("fileops-17 드라이브 간 이동 휴지통 실패 — 사본이 남�
     // trash_many_blocking 의 Io("trash delete: …") (fs/local.rs:503-505).
     const r = explainError(
       io(
-        "1 item(s) failed — a: io: trash delete: Error during a `trash` operation: Os { code: -2147024809, description: \"The parameter is incorrect.\" }",
+        '1 item(s) failed — a: io: trash delete: Error during a `trash` operation: Os { code: -2147024809, description: "The parameter is incorrect." }',
       ),
       "windows",
     );
