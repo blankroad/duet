@@ -82,7 +82,7 @@ pub async fn ensure_not_into_itself(
     let dst_posix = posix_key(&dst.path);
     for item in items {
         let rel = match &dst_local {
-            Some(d) => relate_local(&local_key(item).await, d),
+            Some(d) => relate_local(&local_item_key(item).await, d),
             None => relate(&posix_key(item), &dst_posix),
         };
         // a=항목, b=받는 폴더. 받는 폴더가 항목 자신(Same)이거나 항목 하위(BInsideA)면 거부.
@@ -137,6 +137,23 @@ pub async fn ensure_output_not_in_selection(
         }
     }
     Ok(())
+}
+
+/// 옮길 **항목 자신**의 로컬 비교 키 — 부모만 정규화하고 마지막 이름은 따라가지 않는다(lstat).
+///
+/// 항목이 심볼릭 링크면 복사·이동되는 것은 링크 자체다(copy_tree 는 lstat 로 링크 폴더 안으로
+/// 들어가지 않는다). 링크 대상을 따라가 비교하면 `lnk -> real` 을 `real/sub` 로 옮기는 정상
+/// 작업까지 막는다.
+async fn local_item_key(p: &Path) -> PathBuf {
+    let lex = lexical_local(p);
+    match (lex.parent(), lex.file_name()) {
+        (Some(parent), Some(name)) => {
+            let mut key = local_key(parent).await;
+            key.push(name);
+            key
+        }
+        _ => local_key(&lex).await,
+    }
 }
 
 /// 로컬 경로 비교 키 — canonicalize, 실패하면 lexical 후 존재하는 가장 긴 조상만 canonicalize.
@@ -331,6 +348,32 @@ mod tests {
         std::os::unix::fs::symlink(a.join("sub"), &link).unwrap();
         let r =
             ensure_not_into_itself(&SourceId::Local, std::slice::from_ref(&a), &local(&link)).await;
+        assert!(matches!(r, Err(DuetError::IntoItself(_))), "{r:?}");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn symlink_item_is_compared_as_the_link_not_its_target() {
+        let t = tempfile::tempdir().unwrap();
+        let real = t.path().join("real");
+        std::fs::create_dir_all(real.join("sub")).unwrap();
+        // 옮기는 것은 링크 자체 — 링크 대상(real)의 하위로 옮겨도 자기 안으로가 아니다.
+        let lnk = t.path().join("lnk");
+        std::os::unix::fs::symlink(&real, &lnk).unwrap();
+        let r = ensure_not_into_itself(
+            &SourceId::Local,
+            std::slice::from_ref(&lnk),
+            &local(&real.join("sub")),
+        )
+        .await;
+        assert!(r.is_ok(), "{r:?}");
+        // 진짜 폴더를 자기 하위로는 여전히 거부.
+        let r = ensure_not_into_itself(
+            &SourceId::Local,
+            std::slice::from_ref(&real),
+            &local(&real.join("sub")),
+        )
+        .await;
         assert!(matches!(r, Err(DuetError::IntoItself(_))), "{r:?}");
     }
 
