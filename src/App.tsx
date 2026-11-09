@@ -145,6 +145,7 @@ import { useOsFileDrop } from "@/hooks/useOsFileDrop";
 import { useJournalEvents } from "@/hooks/useJournalEvents";
 import { useArchiveNoticeEvents } from "@/hooks/useArchiveNoticeEvents";
 import { useKeymapEvents } from "@/hooks/useKeymapEvents";
+import { useStartupNotices } from "@/hooks/useStartupNotices";
 import { useTaskEvents } from "@/hooks/useTaskEvents";
 import { useShellWarm } from "@/hooks/useShellWarm";
 import { useIndexProgressEvents } from "@/hooks/useIndexProgressEvents";
@@ -886,6 +887,7 @@ function App() {
   useJournalEvents();
   useArchiveNoticeEvents();
   useKeymapEvents();
+  useStartupNotices();
   useIndexProgressEvents();
 
   const dialog = useUIDialogs((s) => s.dialog);
