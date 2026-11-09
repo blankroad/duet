@@ -262,7 +262,7 @@ async fn sc04_new_empty_file_guard_skips_when_filled() {
         .unwrap();
     std::fs::write(&p, b"later saved text").unwrap();
     let out = execute_undo(&e, &ConnectionPool::new()).await;
-    assert!(matches!(out.kind, UndoKind::Skipped));
+    assert!(matches!(out.kind, UndoKind::Stale));
     assert_eq!(std::fs::read(p).unwrap(), b"later saved text");
 }
 
