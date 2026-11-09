@@ -72,9 +72,9 @@ fn unpack_zip_with(
             continue;
         };
         let mode = entry.unix_mode();
-        if entry.is_dir() {
-            out.dir(&name, path, mode)?;
-        } else if entry.is_symlink() {
+        // 링크가 먼저 — 이름이 `/` 로 끝나는 폴더 링크는 `is_dir()` 도 참이다(zip crate
+        // `extract` 와 같은 순서).
+        if entry.is_symlink() {
             if entry.size() > MAX_LINK_TARGET {
                 return Err(DuetError::Io(format!("{name}: link target is too long")));
             }
@@ -84,6 +84,8 @@ fn unpack_zip_with(
                 .read_to_end(&mut target)
                 .map_err(|e| write_error(&name, &e))?;
             out.symlink(&name, path, &target)?;
+        } else if entry.is_dir() {
+            out.dir(&name, path, mode)?;
         } else {
             out.file(&name, path, &mut entry, mode)?;
         }
@@ -483,6 +485,32 @@ mod tests {
         let err = unpack_zip(&zp, &out, None).unwrap_err();
         assert!(matches!(err, DuetError::Io(m) if m.contains("through a link")));
         assert!(!outside.path().join("pwned.txt").exists());
+    }
+
+    /// 이름이 `/` 로 끝나는 링크 항목(폴더 링크)은 폴더가 아니라 링크다 — zip crate `extract`
+    /// 처럼 링크 판정이 먼저(R2 리뷰 R1).
+    #[cfg(unix)]
+    #[test]
+    fn zip_link_with_trailing_slash_stays_a_link() {
+        let d = tempfile::tempdir().unwrap();
+        let zp = d.path().join("dirlink.zip");
+        let mut w = zip::ZipWriter::new(std::fs::File::create(&zp).unwrap());
+        let o = zip::write::SimpleFileOptions::default();
+        w.add_directory("real/", o).unwrap();
+        w.start_file("real/f.txt", o).unwrap();
+        w.write_all(b"x").unwrap();
+        w.add_symlink("link/", "real", o).unwrap();
+        w.finish().unwrap();
+        let out = d.path().join("out");
+        std::fs::create_dir(&out).unwrap();
+        unpack_zip(&zp, &out, None).unwrap();
+        let link = out.join("link");
+        assert!(std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(std::fs::read_link(&link).unwrap(), Path::new("real"));
+        assert_eq!(std::fs::read(link.join("f.txt")).unwrap(), b"x");
     }
 
     /// 링크 자리에 같은 이름 일반 파일 → 링크를 따라가지 않고 교체, 바깥 파일 불변.
