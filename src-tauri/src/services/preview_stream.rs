@@ -69,10 +69,15 @@ pub(crate) async fn fs_for<R: Runtime>(
     }
 }
 
-/// `Range: bytes=start-end` 파싱 (단일 범위) → (start, Option<end-inclusive>).
-fn parse_range(h: &str) -> Option<(u64, Option<u64>)> {
+/// 단일 Range를 (start, Option<end-inclusive>)로 파싱한다. 접미 범위는 파일 크기로 환산한다.
+fn parse_range(h: &str, total: u64) -> Option<(u64, Option<u64>)> {
     let v = h.strip_prefix("bytes=")?;
     let (a, b) = v.split_once('-')?;
+    if a.trim().is_empty() {
+        let suffix = b.trim().parse::<u64>().ok()?;
+        // -0은 start == total이 되어 아래 응답 경계 검사에서 416으로 처리된다.
+        return Some((total.saturating_sub(suffix), None));
+    }
     let start = a.trim().parse::<u64>().ok()?;
     let end = if b.trim().is_empty() {
         None
@@ -162,8 +167,17 @@ pub async fn respond(
     let total = meta.size.unwrap_or(0);
     let mime = mime_for(path);
 
-    // 빈 파일: Range 의미 없음 → 200 빈 본문 (RFC 7233 허용). 아래 Range 산술의
-    // start+len-1 언더플로 원천 차단.
+    let range = range_header.and_then(|h| parse_range(h, total));
+    if range.is_some_and(|(start, end)| start >= total || end.is_some_and(|end| end < start)) {
+        return Response::builder()
+            .status(StatusCode::RANGE_NOT_SATISFIABLE)
+            .header(header::CONTENT_RANGE, format!("bytes */{total}"))
+            .body(Vec::new())
+            .ok();
+    }
+
+    // 빈 파일의 Range 없는 요청은 200 빈 본문. 유효한 Range(접미 -0 포함)는 위에서
+    // 416으로 처리해 아래 start+len-1 산술을 피한다.
     if total == 0 {
         return Response::builder()
             .status(StatusCode::OK)
@@ -175,16 +189,7 @@ pub async fn respond(
             .ok();
     }
 
-    let range = range_header.and_then(parse_range);
-
     if let Some((start, end_opt)) = range {
-        if start >= total || end_opt.is_some_and(|end| end < start) {
-            return Response::builder()
-                .status(StatusCode::RANGE_NOT_SATISFIABLE)
-                .header(header::CONTENT_RANGE, format!("bytes */{total}"))
-                .body(Vec::new())
-                .ok();
-        }
         let last = total.saturating_sub(1);
         let end = end_opt
             .unwrap_or(last)
@@ -267,10 +272,15 @@ mod tests {
 
     #[test]
     fn parse_range_variants() {
-        assert_eq!(parse_range("bytes=0-99"), Some((0, Some(99))));
-        assert_eq!(parse_range("bytes=200-"), Some((200, None)));
-        assert_eq!(parse_range("bytes=abc"), None);
-        assert_eq!(parse_range("100-200"), None);
+        assert_eq!(parse_range("bytes=0-99", 1000), Some((0, Some(99))));
+        assert_eq!(parse_range("bytes=200-", 1000), Some((200, None)));
+        assert_eq!(parse_range("bytes=abc", 1000), None);
+        assert_eq!(parse_range("100-200", 1000), None);
+        assert_eq!(parse_range("bytes=-500", 1000), Some((500, None)));
+        assert_eq!(parse_range("bytes=-1001", 1000), Some((0, None)));
+        assert_eq!(parse_range("bytes=-0", 1000), Some((1000, None)));
+        assert_eq!(parse_range("bytes=-abc", 1000), None);
+        assert_eq!(parse_range("bytes=-2,0-1", 1000), None);
     }
 
     #[test]
@@ -313,6 +323,81 @@ mod review_browse {
             response.headers()[header::CONTENT_RANGE],
             "bytes 0-8388607/67108864"
         );
+    }
+
+    #[tokio::test]
+    async fn suffix_range_reads_actual_tail_of_large_file() {
+        use std::io::{Seek, SeekFrom, Write};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tail.mp4");
+        let mut file = std::fs::File::create(&path).unwrap();
+        file.set_len(64 * 1024 * 1024).unwrap();
+        file.seek(SeekFrom::End(-500)).unwrap();
+        let tail = vec![42u8; 500];
+        file.write_all(&tail).unwrap();
+        let response = respond(&LocalFs::new(), &path, Some("bytes=-500"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(response.body(), &tail);
+        assert_eq!(
+            response.headers()[header::CONTENT_RANGE],
+            "bytes 67108364-67108863/67108864"
+        );
+    }
+
+    #[tokio::test]
+    async fn suffix_ranges_cover_small_file_and_clamp_to_its_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("small.mp4");
+        std::fs::write(&path, b"abcdef").unwrap();
+        for (range, body, content_range) in [
+            ("bytes=-2", &b"ef"[..], "bytes 4-5/6"),
+            ("bytes=-6", &b"abcdef"[..], "bytes 0-5/6"),
+            ("bytes=-500", &b"abcdef"[..], "bytes 0-5/6"),
+        ] {
+            let response = respond(&LocalFs::new(), &path, Some(range)).await.unwrap();
+            assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+            assert_eq!(response.body(), body);
+            assert_eq!(response.headers()[header::CONTENT_RANGE], content_range);
+        }
+    }
+
+    #[tokio::test]
+    async fn suffix_range_keeps_the_eight_mib_read_cap() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("large.mp4");
+        std::fs::File::create(&path)
+            .unwrap()
+            .set_len(32 * 1024 * 1024)
+            .unwrap();
+        for (range, content_range) in [
+            ("bytes=-16777216", "bytes 16777216-25165823/33554432"),
+            ("bytes=-18446744073709551615", "bytes 0-8388607/33554432"),
+        ] {
+            let response = respond(&LocalFs::new(), &path, Some(range)).await.unwrap();
+            assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+            assert_eq!(response.body().len(), 8 * 1024 * 1024);
+            assert_eq!(response.headers()[header::CONTENT_RANGE], content_range);
+        }
+    }
+
+    #[tokio::test]
+    async fn suffix_zero_is_unsatisfiable_including_empty_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("movie.mp4");
+        for body in [&b"abcdef"[..], &b""[..]] {
+            std::fs::write(&path, body).unwrap();
+            for range in ["bytes=-0", "bytes=-00"] {
+                let response = respond(&LocalFs::new(), &path, Some(range)).await.unwrap();
+                assert_eq!(response.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+                assert!(response.body().is_empty());
+                assert_eq!(
+                    response.headers()[header::CONTENT_RANGE],
+                    format!("bytes */{}", body.len())
+                );
+            }
+        }
     }
 
     #[tokio::test]
