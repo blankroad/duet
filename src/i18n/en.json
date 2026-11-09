@@ -459,6 +459,7 @@
     "redoUnsupported": "This operation cannot be redone: {{op}}",
     "item": " — {{name}}",
     "reason": {
+      "mixed": "several reasons",
       "nothing_to_undo": "Nothing to undo",
       "nothing_to_redo": "Nothing to redo",
       "redo_unsupported": "This operation cannot be redone",

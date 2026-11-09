@@ -71,7 +71,10 @@ export function undoToast(
   const op = outcome.op ? opLabel(outcome.op, t) : t("undo.unknownOperation");
   const first = outcome.skipped[0];
   const reasonCode = outcome.reason ?? first?.reason ?? "failed";
-  const reason = t(`undo.reason.${reasonCode}`);
+  const mixedPartial =
+    outcome.kind === "partial" &&
+    new Set(outcome.skipped.map((item) => item.reason)).size > 1;
+  const reason = t(`undo.reason.${mixedPartial ? "mixed" : reasonCode}`);
   let message: string;
   switch (outcome.kind) {
     case "ok":
@@ -102,9 +105,21 @@ export function undoToast(
       message = t(`undo.${direction}.error`, { op, reason });
       break;
   }
+  const shownSkipped = mixedPartial ? outcome.skipped.slice(0, 5) : [];
+  const skippedDetails = shownSkipped.map(
+    (item) => `${basename(item.path)}: ${t(`undo.reason.${item.reason}`)}`,
+  );
+  const remaining = outcome.skipped.length - shownSkipped.length;
+  if (mixedPartial && remaining > 0)
+    skippedDetails.push(t("notices.more", { count: remaining }));
   const hasWarningNote =
-    Boolean(outcome.message) &&
-    ["partial", "stale", "irreversible"].includes(outcome.kind);
+    mixedPartial ||
+    (Boolean(outcome.message) &&
+      ["partial", "stale", "irreversible"].includes(outcome.kind));
+  const detail =
+    outcome.kind === "error" || hasWarningNote
+      ? [outcome.message, ...skippedDetails].filter(Boolean).join("\n")
+      : "";
   return {
     message,
     kind:
@@ -115,8 +130,6 @@ export function undoToast(
           : hasWarningNote
             ? "warning"
             : "info",
-    ...((outcome.kind === "error" || hasWarningNote) && outcome.message
-      ? { detail: outcome.message }
-      : {}),
+    ...(detail ? { detail } : {}),
   };
 }

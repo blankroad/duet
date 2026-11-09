@@ -158,7 +158,7 @@ for (const [direction, trigger, mock] of [
           expect(show.mock.calls[0]![1]).toBe(severity);
           if (kind === "partial")
             expect(message).toContain(
-              language === "en" ? "contents changed" : "그 뒤 내용이 바뀜",
+              language === "en" ? "several reasons" : "여러 이유",
             );
           if (kind === "stale") {
             expect(message).toContain(
@@ -182,11 +182,84 @@ for (const [direction, trigger, mock] of [
           }
           if (["error", "partial", "stale", "irreversible"].includes(kind))
             expect(show.mock.calls[0]![2]).toEqual({
-              detail: "raw backend detail",
+              detail:
+                kind === "partial"
+                  ? [
+                      "raw backend detail",
+                      language === "en"
+                        ? "changed.txt: contents changed since the operation"
+                        : "changed.txt: 그 뒤 내용이 바뀜",
+                      language === "en"
+                        ? "gone.txt: the item no longer exists"
+                        : "gone.txt: 대상이 없어짐",
+                    ].join("\n")
+                  : "raw backend detail",
             });
         }
       },
     );
+
+    it("mixed partial details show at most five items and the remaining count", async () => {
+      for (const language of ["en", "ko"]) {
+        await i18n.changeLanguage(language);
+        const data: UndoOutcome = {
+          ...outcome("partial", "changed"),
+          message: null,
+          skipped: Array.from({ length: 7 }, (_, index) => ({
+            path: `C:\\work\\item-${index}.txt`,
+            reason: index % 2 === 0 ? "changed" : "gone",
+          })),
+        };
+        mock.mockResolvedValue({ status: "ok", data });
+        const show = vi.fn();
+        await trigger(show);
+        const [message, kind, options] = show.mock.calls[0]!;
+        expect(message).toContain(
+          language === "en" ? "several reasons" : "여러 이유",
+        );
+        expect(message).toContain("7");
+        expect(kind).toBe("warning");
+        const detail: string = options.detail;
+        const lines = detail.split("\n");
+        expect(lines).toHaveLength(6);
+        expect(lines[0]).toBe(
+          language === "en"
+            ? "item-0.txt: contents changed since the operation"
+            : "item-0.txt: 그 뒤 내용이 바뀜",
+        );
+        expect(lines[1]).toBe(
+          language === "en"
+            ? "item-1.txt: the item no longer exists"
+            : "item-1.txt: 대상이 없어짐",
+        );
+        expect(lines[4]).toContain("item-4.txt:");
+        expect(lines[5]).toBe(language === "en" ? "… and 2 more" : "… 외 2개");
+        expect(detail).not.toContain("item-5.txt");
+        expect(detail).not.toContain("C:\\work");
+      }
+    });
+
+    it("partial outcomes with one skip reason retain the specific summary and info severity", async () => {
+      for (const language of ["en", "ko"]) {
+        await i18n.changeLanguage(language);
+        const data: UndoOutcome = {
+          ...outcome("partial", "changed"),
+          message: null,
+          skipped: [
+            { path: "/work/first.txt", reason: "changed" },
+            { path: "/work/second.txt", reason: "changed" },
+          ],
+        };
+        mock.mockResolvedValue({ status: "ok", data });
+        const show = vi.fn();
+        await trigger(show);
+        expect(show.mock.calls[0]![0]).toContain(
+          language === "en" ? "contents changed" : "그 뒤 내용이 바뀜",
+        );
+        expect(show.mock.calls[0]![1]).toBe("info");
+        expect(show.mock.calls[0]![2]).toEqual({ detail: undefined });
+      }
+    });
 
     it.each(["partial", "stale", "irreversible"] as const)(
       "%s without a backend note remains info",

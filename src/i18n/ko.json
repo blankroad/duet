@@ -456,6 +456,7 @@
     "redoUnsupported": "이 작업은 다시 실행할 수 없습니다: {{op}}",
     "item": " — {{name}}",
     "reason": {
+      "mixed": "여러 이유",
       "nothing_to_undo": "되돌릴 작업이 없습니다",
       "nothing_to_redo": "다시 실행할 작업이 없습니다",
       "redo_unsupported": "이 작업은 다시 실행할 수 없습니다",
