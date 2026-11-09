@@ -155,3 +155,33 @@ describe("explainError — errno tables per OS (ss-14)", () => {
     ).toBe("SSH error — command failed: Is a directory");
   });
 });
+
+describe("explainError — Windows-only causes", () => {
+  const io = (code: number) => ({
+    kind: "Io",
+    message: `x (os error ${code})`,
+  });
+  const plain = (reason: string) => i18n.t(`errors.reason.${reason}`);
+
+  it("maps device, network logon, antivirus and cloud file errors", () => {
+    expect(explainError(io(21), "windows").text).toBe(plain("deviceNotReady"));
+    expect(explainError(io(1326), "windows").text).toBe(plain("networkLogon"));
+    expect(explainError(io(225), "windows").text).toBe(plain("virus"));
+    expect(explainError(io(362), "windows").text).toBe(plain("cloudFile"));
+    // 같은 번호라도 다른 OS 에선 다른 뜻.
+    expect(explainError(io(21), "linux").text).toBe("I/O error — x");
+  });
+
+  it("recognises the Windows message text for other cloud file codes", () => {
+    expect(
+      explainError(
+        {
+          kind: "Io",
+          message:
+            "The cloud file provider exited unexpectedly. (os error 9999)",
+        },
+        "windows",
+      ).text,
+    ).toBe(plain("cloudFile"));
+  });
+});

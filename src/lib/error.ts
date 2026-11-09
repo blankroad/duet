@@ -49,6 +49,10 @@ type Reason =
   | "notFound"
   | "exists"
   | "notEmpty"
+  | "deviceNotReady"
+  | "networkLogon"
+  | "virus"
+  | "cloudFile"
   | "network"
   | "unsupportedOp"
   | "connection";
@@ -76,6 +80,7 @@ const OS_CODES: Record<HostOs, Record<number, Reason>> = {
     3: "notFound",
     5: "accessDenied",
     19: "readOnly", // ERROR_WRITE_PROTECT
+    21: "deviceNotReady", // ERROR_NOT_READY (빠진 USB·빈 광학 드라이브)
     32: "inUse", // ERROR_SHARING_VIOLATION
     33: "inUse", // ERROR_LOCK_VIOLATION
     39: "diskFull",
@@ -89,8 +94,11 @@ const OS_CODES: Record<HostOs, Record<number, Reason>> = {
     145: "notEmpty", // ERROR_DIR_NOT_EMPTY
     183: "exists",
     206: "nameTooLong", // ERROR_FILENAME_EXCED_RANGE
+    225: "virus", // ERROR_VIRUS_INFECTED
+    362: "cloudFile", // ERROR_CLOUD_FILE_PROVIDER_NOT_RUNNING (OneDrive 등)
     1231: "network",
     1314: "linkPrivilege", // ERROR_PRIVILEGE_NOT_HELD
+    1326: "networkLogon", // ERROR_LOGON_FAILURE (네트워크 공유 로그인)
   },
   unix: UNIX_CODES,
   macos: {
@@ -133,6 +141,9 @@ const PATTERNS: Array<[RegExp, Reason]> = [
   ],
   [/no such file|cannot find the (file|path)/i, "notFound"],
   [/already exists/i, "exists"],
+  [/device is not ready/i, "deviceNotReady"],
+  [/contains a virus/i, "virus"],
+  [/cloud file provider|cloud operation/i, "cloudFile"],
   [/operation not supported/i, "unsupportedOp"],
 ];
 
