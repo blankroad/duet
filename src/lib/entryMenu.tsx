@@ -41,7 +41,7 @@ import i18n from "@/i18n";
 import { useAppSettings } from "@/stores/settings";
 import { commands } from "@/types/bindings";
 import type { Entry, Location } from "@/types/bindings";
-import { formatErr } from "@/lib/error";
+import { showError } from "@/lib/errorToast";
 import { basename } from "@/lib/paths";
 import { canExtractArchive } from "@/lib/archive";
 import {
@@ -126,21 +126,14 @@ function sshAlias(location: Location): string | null {
 async function revealEntry(target: Location): Promise<void> {
   const r = await commands.revealPath(target);
   if (r.status === "error")
-    useToast
-      .getState()
-      .show(i18n.t("toast.revealFailed", { err: formatErr(r.error) }), "error");
+    showError("toast.revealFailed", r.error, { path: target.path });
 }
 
 /** 해당 폴더에서 OS 터미널 열기 (로컬 전용). */
 async function openTerminalAt(target: Location): Promise<void> {
   const r = await commands.openTerminal(target);
   if (r.status === "error")
-    useToast
-      .getState()
-      .show(
-        i18n.t("toast.openTerminalFailed", { err: formatErr(r.error) }),
-        "error",
-      );
+    showError("toast.openTerminalFailed", r.error, { path: target.path });
 }
 
 /** 원격 파일을 에디터로 열고 변경 시 자동 재업로드(편집 라운드트립). */
@@ -148,10 +141,7 @@ async function editRemoteEntry(target: Location, name: string): Promise<void> {
   const r = await commands.sshEditOpen(target);
   const toast = useToast.getState().show;
   if (r.status === "error")
-    toast(
-      i18n.t("toast.remoteEditFailed", { err: formatErr(r.error) }),
-      "error",
-    );
+    showError("toast.remoteEditFailed", r.error, { path: name, toast });
   else toast(i18n.t("toast.remoteEditing", { name }));
 }
 
