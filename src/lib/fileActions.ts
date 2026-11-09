@@ -22,7 +22,7 @@ import { useAppSettings, initialConflictPolicy } from "@/stores/settings";
 import { rememberElevatable } from "@/lib/elevatePending";
 import i18n from "@/i18n";
 import { childLocation, sameLocation, sourceKey } from "@/lib/entryDnd";
-import { explainError, formatErr } from "@/lib/error";
+import { explainError } from "@/lib/error";
 import { showError } from "@/lib/errorToast";
 import { isVirtualTrash } from "@/lib/trashView";
 import { rememberExtract } from "@/lib/extractPending";
