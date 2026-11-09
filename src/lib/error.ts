@@ -74,6 +74,7 @@ type Reason =
   | "connUnreachable"
   | "connDns"
   | "connReset"
+  | "timedOut"
   | "network"
   | "unsupportedOp"
   | "connection";
@@ -229,6 +230,29 @@ const CONNECTION_PATTERNS: Array<[RegExp, Reason]> = [
   ],
   [/connection reset|broken pipe|forcibly closed/i, "connReset"],
 ];
+
+/** 서버 연결 문맥의 kind — 이때만 연결 원인을 "서버" 문장으로 말한다. kind 없음(원시 문자열)도 포함. */
+const CONNECTION_KINDS = new Set<string | undefined>([
+  "ConnectionFailed",
+  "Ssh",
+  undefined,
+]);
+
+/**
+ * 연결 문맥이 아닌 곳(Io 등 — 예: `fs/mod.rs` 의 "copy read: timed out")의 연결류 원인은
+ * 서버를 단정하지 않는다: 시간 초과는 일반 timeout, 나머지는 네트워크 위치 문구로.
+ */
+function outsideConnection(reason: Reason): Reason {
+  if (reason === "connTimeout") return "timedOut";
+  if (
+    reason === "connRefused" ||
+    reason === "connUnreachable" ||
+    reason === "connDns" ||
+    reason === "connReset"
+  )
+    return "network";
+  return reason;
+}
 
 /** kind 만으로 원인이 정해지는 것. */
 const KIND_REASON: Partial<Record<string, Reason>> = {
@@ -514,6 +538,8 @@ export function explainError(
   let picked =
     (cut > 0 ? pickReason(kind, masked.slice(0, cut), os) : undefined) ??
     pickReason(kind, masked, os);
+  if (picked && !CONNECTION_KINDS.has(kind))
+    picked = { ...picked, reason: outsideConnection(picked.reason) };
   const compatible = kind ? KIND_COMPATIBLE[kind] : undefined;
   if (picked && compatible && !compatible.has(picked.reason))
     picked = kindFallback(kind);

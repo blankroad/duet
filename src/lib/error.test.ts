@@ -527,3 +527,37 @@ describe("explainError — R3 review (sol-3) R3-04", () => {
       );
   });
 });
+
+describe("explainError — R3 review (sol-3) R3-05", () => {
+  const plain = (reason: string, vars?: Record<string, string>) =>
+    i18n.t(`errors.reason.${reason}`, vars ?? {});
+
+  // R3-05: 파일 I/O timeout 은 서버를 단정하지 않는다(fs/mod.rs:525).
+
+  it("R3-05 a file read timeout is not a server timeout", () => {
+    for (const [message, os] of [
+      ["copy read: timed out", "linux"],
+      ["copy read: timed out (os error 110)", "linux"],
+    ] as const)
+      expect(explainError({ kind: "Io", message }, os).text).toBe(
+        plain("timedOut"),
+      );
+    // 연결 문맥(ConnectionFailed·Ssh)은 그대로 서버 문구.
+    expect(
+      explainError({ kind: "Ssh", message: "sftp read: timed out" }, "linux")
+        .text,
+    ).toBe(plain("connTimeout"));
+  });
+
+  it("R3-05 other network causes outside a connection read as a network location", () => {
+    expect(
+      explainError(
+        {
+          kind: "Io",
+          message: "copy: Connection reset by peer (os error 104)",
+        },
+        "linux",
+      ).text,
+    ).toBe(plain("network"));
+  });
+});
