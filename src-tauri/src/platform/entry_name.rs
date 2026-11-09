@@ -28,7 +28,9 @@ pub fn sanitize_local_name(name: &str) -> std::borrow::Cow<'_, str> {
     sanitize_name(name, cfg!(windows))
 }
 
-fn sanitize_name(name: &str, windows: bool) -> std::borrow::Cow<'_, str> {
+/// [`sanitize_local_name`] 의 규칙을 OS 와 무관하게 고른다 — `windows` 면 Windows 규칙.
+/// 다른 OS 에서 Windows 치환 경로를 테스트할 때 쓴다.
+pub(crate) fn sanitize_name(name: &str, windows: bool) -> std::borrow::Cow<'_, str> {
     if !windows || validate_name(name, true).is_ok() {
         return std::borrow::Cow::Borrowed(name);
     }

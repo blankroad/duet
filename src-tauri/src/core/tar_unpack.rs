@@ -160,7 +160,7 @@ impl DeferredDirModes {
             if !meta.is_dir() {
                 continue;
             }
-            if let Some(perm) = dir_permissions(meta.permissions(), d.mode) {
+            if let Some(perm) = permissions_from_mode(meta.permissions(), d.mode) {
                 std::fs::set_permissions(&d.path, perm).map_err(|e| write_error(&d.shown, &e))?;
             }
         }
@@ -168,9 +168,13 @@ impl DeferredDirModes {
     }
 }
 
-/// tar 헤더 모드 → 적용할 폴더 권한 (tar crate 의 `set_perms` 와 같은 규칙).
-/// Unix: 하위 9비트(setuid 등은 버림). Windows: 소유자 쓰기 비트가 없을 때만 읽기 전용.
-fn dir_permissions(current: std::fs::Permissions, mode: u32) -> Option<std::fs::Permissions> {
+/// 아카이브의 Unix 모드 → 적용할 권한 (tar crate 의 `set_perms` 와 같은 규칙, 파일·폴더 공통).
+/// Unix: 하위 9비트(setuid 등은 버림). Windows: 소유자 쓰기 비트가 없을 때만 읽기 전용
+/// (None = 바꿀 것 없음). `current` 는 대상의 지금 권한.
+pub(crate) fn permissions_from_mode(
+    current: std::fs::Permissions,
+    mode: u32,
+) -> Option<std::fs::Permissions> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -191,14 +195,24 @@ fn dir_permissions(current: std::fs::Permissions, mode: u32) -> Option<std::fs::
 /// 두 번째 값은 이 OS 에서 쓸 수 없는 이름을 바꿨는지.
 pub(crate) fn safe_relative(raw: &[u8]) -> Option<(PathBuf, bool)> {
     let text = String::from_utf8_lossy(raw);
+    relative_path(text.split('/'), entry_name::sanitize_local_name)
+}
+
+/// 이미 나눈 이름 조각들 → `dest` 기준 상대 경로. 빈 조각·`.` 은 건너뛰고, `..` 가 있으면 None,
+/// 남는 조각이 없어도 None. 조각마다 `sanitize` 로 이 OS 에서 쓸 수 있게 바꾸고, 두 번째 값은
+/// 바꾼 조각이 있었는지. `sanitize` 는 보통 `entry_name::sanitize_local_name` (테스트는 Windows 규칙).
+pub(crate) fn relative_path<'a>(
+    parts: impl IntoIterator<Item = &'a str>,
+    sanitize: fn(&str) -> std::borrow::Cow<'_, str>,
+) -> Option<(PathBuf, bool)> {
     let mut rel = PathBuf::new();
     let mut renamed = false;
-    for part in text.split('/') {
+    for part in parts {
         match part {
             "" | "." => continue,
             ".." => return None,
             name => {
-                let fixed = entry_name::sanitize_local_name(name);
+                let fixed = sanitize(name);
                 renamed |= fixed != name;
                 rel.push(fixed.as_ref());
             }
@@ -209,7 +223,7 @@ pub(crate) fn safe_relative(raw: &[u8]) -> Option<(PathBuf, bool)> {
 
 /// 심볼릭 링크 대상 바이트 → 경로. `/` 로 나눠 이 OS 의 구분자로 다시 잇는다
 /// (Windows 링크는 `/` 구분 대상을 따라가지 못한다). 해석·검증은 하지 않는다.
-fn link_target(raw: &[u8]) -> PathBuf {
+pub(crate) fn link_target(raw: &[u8]) -> PathBuf {
     let text = String::from_utf8_lossy(raw);
     let mut target = PathBuf::new();
     if text.starts_with('/') {
