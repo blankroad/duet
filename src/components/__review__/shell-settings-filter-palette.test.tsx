@@ -58,17 +58,11 @@ describe("C-08 sidebar filter + IME", () => {
 describe("C-08/C-11 Korean names in NFD (macOS 파일 이름)", () => {
   const nfdName = "회의록".normalize("NFD");
 
-  it.fails(
-    "shell-settings-21: 사이드바 필터가 NFD 이름(macOS 폴더명으로 만든 북마크)을 NFC 입력으로 찾는다",
-    () => {
-      expect(matchesQuery(nfdName, "회의")).toBe(true);
-    },
-  );
+  it("shell-settings-21: 사이드바 필터가 NFD 이름(macOS 폴더명으로 만든 북마크)을 NFC 입력으로 찾는다", () => {
+    expect(matchesQuery(nfdName, "회의")).toBe(true);
+  });
 
-  it.fails(
-    "shell-settings-21: 명령 팔레트가 NFD 북마크 이름을 NFC 입력으로 찾는다",
-    () => {
-      expect(fuzzyScore("회의", `Bookmark: ${nfdName}`)).not.toBeNull();
-    },
-  );
+  it("shell-settings-21: 명령 팔레트가 NFD 북마크 이름을 NFC 입력으로 찾는다", () => {
+    expect(fuzzyScore("회의", `Bookmark: ${nfdName}`)).not.toBeNull();
+  });
 });

@@ -28,6 +28,20 @@ describe("sidebarFilter", () => {
     expect(matchRange("prod", "log")).toBeNull();
   });
 
+  it("G-14: NFD 이름(macOS)도 NFC 입력으로 찾고, 강조는 원문 음절 경계에 맞춘다", () => {
+    const nfd = "내 회의록".normalize("NFD");
+    expect(matchesQuery(nfd, "회의")).toBe(true);
+    const r = matchRange(nfd, "회의");
+    expect(r).not.toBeNull();
+    // 강조 구간을 원문에서 잘라 NFC 로 바꾸면 정확히 "회의" 다(자모 중간에서 끊기지 않음).
+    expect(nfd.slice(r!.start, r!.end).normalize("NFC")).toBe("회의");
+    // NFD 입력 ↔ NFC 이름도 같다.
+    expect(matchRange("내 회의록", "회의".normalize("NFD"))).toEqual({
+      start: 2,
+      end: 4,
+    });
+  });
+
   it("공백은 다듬고 찾는다", () => {
     expect(matchRange("deploy-log", "  log ")).toEqual({ start: 7, end: 10 });
   });

@@ -41,9 +41,32 @@ export const useSidebarFilter = create<State>((set) => ({
  * 퍼지로 하면 관계없는 항목이 잔뜩 남는다 (커맨드 팔레트와 다른 선택).
  */
 export function matchesQuery(text: string, q: string): boolean {
-  const needle = q.trim().toLowerCase();
+  const needle = foldKey(q.trim());
   if (needle === "") return true;
-  return text.toLowerCase().includes(needle);
+  return foldKey(text).includes(needle);
+}
+
+/**
+ * 비교 키 — NFC 정규화 + 소문자. macOS 폴더 이름에서 온 NFD 한글(자모 분해)을 키보드로
+ * 친 NFC 한글과 같은 글자로 본다 (G-14). 표시 문자열은 바꾸지 않는다.
+ */
+function foldKey(s: string): string {
+  return s.normalize("NFC").toLowerCase();
+}
+
+/**
+ * NFC 로 바꾼 문자열의 위치 → 원문(정규화 전) 위치. 원문 앞부분을 NFC 로 바꿨을 때 길이가
+ * `off` 가 되는 **가장 긴** 앞부분의 길이 — 음절 중간(자모 하나)에서 끊기지 않게 한다.
+ * 사이드바 이름은 짧아서 단순 반복으로 충분하다. 못 맞추면 null.
+ */
+function rawOffset(text: string, off: number): number | null {
+  let found: number | null = null;
+  for (let i = 0; i <= text.length; i++) {
+    const n = text.slice(0, i).normalize("NFC").length;
+    if (n === off) found = i;
+    else if (n > off) break;
+  }
+  return found;
 }
 
 /** 매치 구간 `[시작, 끝)` — 없으면 null. 강조 표시용. */
@@ -51,9 +74,15 @@ export function matchRange(
   text: string,
   q: string,
 ): { start: number; end: number } | null {
-  const needle = q.trim().toLowerCase();
+  const needle = foldKey(q.trim());
   if (needle === "") return null;
-  const start = text.toLowerCase().indexOf(needle);
+  const hay = foldKey(text);
+  const start = hay.indexOf(needle);
   if (start < 0) return null;
-  return { start, end: start + needle.length };
+  const end = start + needle.length;
+  // 원문이 이미 NFC 면 위치가 같다. NFD 원문이면 강조 위치를 원문 기준으로 옮긴다.
+  if (text.normalize("NFC") === text) return { start, end };
+  const rs = rawOffset(text, start);
+  const re = rawOffset(text, end);
+  return rs === null || re === null ? null : { start: rs, end: re };
 }

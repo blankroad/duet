@@ -7,10 +7,14 @@
  * - bonus: 연속 매칭 (run length 가 클수록)
  *
  * commands 수가 적어서 (~50) perf 무시.
+ *
+ * 질의·텍스트는 NFC 로 맞춰 비교한다 — macOS 파일 이름에서 온 NFD 한글(자모 분해)도
+ * 키보드로 친 NFC 한글과 같은 글자로 본다 (G-14).
  */
-export function fuzzyScore(query: string, text: string): number | null {
+export function fuzzyScore(query: string, rawText: string): number | null {
   if (query.length === 0) return 0;
-  const q = query.toLowerCase();
+  const text = rawText.normalize("NFC");
+  const q = query.normalize("NFC").toLowerCase();
   const t = text.toLowerCase();
 
   let score = 0;
