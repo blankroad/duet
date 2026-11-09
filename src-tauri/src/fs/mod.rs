@@ -5,6 +5,7 @@
 
 pub mod local;
 pub mod persist;
+pub mod posix_path;
 pub mod ssh;
 #[cfg(test)]
 pub(crate) mod testing;
