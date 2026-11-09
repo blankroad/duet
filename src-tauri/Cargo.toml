@@ -44,9 +44,15 @@ opener = { version = "0.7", features = ["reveal"] }  # 기본 앱으로 열기 /
 # === Archive (로컬 압축/해제 — 원격은 호스트 unzip/tar exec) ===
 # §6(2026-06): aes-crypto 추가 — 암호 걸린 zip(AES) 해독용. ZipCrypto(레거시)는 내장.
 # §6(2026-09): deflate64 추가 — Windows 가 큰 파일에 쓰는 Deflate64 방식 zip 해제용.
-#   deflate64 crate(MIT, 순수 Rust, 의존성 0, total 57M / recent90d 13M dl). zip 2→8
-#   업그레이드(bzip2·LZMA·XZ·PPMd 방식까지)는 API 이전 부담이 커 보류.
-zip = { version = "2", default-features = false, features = ["deflate", "deflate64", "aes-crypto"] }
+#   deflate64 crate(MIT, 순수 Rust, 의존성 0, total 57M / recent90d 13M dl).
+# §6(2026-11, 사용자 승인 D-2): zip 2→9 + bzip2·lzma·xz·ppmd·zstd 방식 — 7-Zip·반디집이
+#   방식을 바꿔 만든 zip 해제(archive-06). lzma·xz 는 순수 Rust lzma-rust2 0.25(7z/xz 용
+#   0.16 과 버전이 갈림), ppmd 는 ppmd-rust, zstd 는 C zstd crate(cc 빌드).
+zip = { version = "9", default-features = false, features = ["deflate", "deflate64", "aes-crypto", "bzip2", "lzma", "xz", "ppmd", "zstd"] }
+# §6(2026-11, 사용자 승인 D-1·D-4): encoding_rs — UTF-8 표시 없는 zip 의 CP949 이름(archive-04)과
+#   미리보기 텍스트의 BOM·CP949 판정(browse-06·SC-21). Firefox 의 인코딩 표준 구현(MIT/Apache,
+#   이미 간접 의존으로 널리 쓰임). 대안 `encoding`(방치) 보다 유지보수·정확성 우위.
+encoding_rs = "0.8"
 tar = "0.4"
 flate2 = "1"
 # === .tar.bz2 / .tar.xz / .tar.zst 로컬 해제 (§6 승인 2026-09, 사용자 선택) ===

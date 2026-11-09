@@ -39,7 +39,7 @@ fn eref(dir: &Path, name: &str) -> EntryRef {
     }
 }
 
-fn deflated() -> zip::write::FileOptions<'static, ()> {
+fn deflated() -> zip::write::FileOptions<'static, 'static, ()> {
     zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated)
 }
 
@@ -62,7 +62,7 @@ fn write_zip(path: &Path, entries: &[(&str, &[u8])]) {
 fn zip_names(path: &Path) -> Vec<String> {
     let mut z = zip::ZipArchive::new(std::fs::File::open(path).unwrap()).unwrap();
     let mut v: Vec<String> = (0..z.len())
-        .map(|i| z.by_index_raw(i).unwrap().name().to_string())
+        .map(|i| z.by_index_raw(i).unwrap().name().unwrap().to_string())
         .collect();
     v.sort();
     v
@@ -284,7 +284,7 @@ async fn opus_repack_encrypted_zip_stays_encrypted() {
     let enc: Vec<(String, bool)> = (0..z.len())
         .map(|i| {
             let e = z.by_index_raw(i).unwrap();
-            (e.name().to_string(), e.encrypted())
+            (e.name().unwrap().to_string(), e.encrypted())
         })
         .collect();
     eprintln!("repacked secret.zip entries (name, encrypted) = {enc:?}");
@@ -308,7 +308,7 @@ async fn opus_observe_repack_zip_roundtrip() {
     {
         let f = std::fs::File::create(&zip_path).unwrap();
         let mut w = zip::ZipWriter::new(f);
-        w.set_comment("original comment");
+        w.set_comment("original comment").unwrap();
         let o = deflated().last_modified_time(mtime);
         w.start_file("run.sh", o.unix_permissions(0o755)).unwrap();
         w.write_all(b"#!/bin/sh\necho hi\n").unwrap();
@@ -331,7 +331,7 @@ async fn opus_observe_repack_zip_roundtrip() {
                 let e = z.by_index_raw(i).unwrap();
                 format!(
                     "{:<11} mode={:<8} mtime={:?} method={:?} symlink={}",
-                    e.name(),
+                    e.name().unwrap(),
                     e.unix_mode().map(|m| format!("{m:o}")).unwrap_or_default(),
                     e.last_modified().map(|d| (d.year(), d.month(), d.day())),
                     e.compression(),

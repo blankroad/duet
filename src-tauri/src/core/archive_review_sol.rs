@@ -573,7 +573,7 @@ fn sol2_entry(p: &Path, n: &str) -> EntryRef {
 fn sol2_zip_names(p: &Path) -> Vec<String> {
     let mut z = zip::ZipArchive::new(std::fs::File::open(p).unwrap()).unwrap();
     (0..z.len())
-        .map(|i| z.by_index_raw(i).unwrap().name().to_owned())
+        .map(|i| z.by_index_raw(i).unwrap().name().unwrap().into_owned())
         .collect()
 }
 fn sol2_tar_names(p: &Path) -> Vec<String> {
