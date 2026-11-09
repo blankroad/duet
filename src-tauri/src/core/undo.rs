@@ -181,9 +181,7 @@ pub(crate) async fn rename_no_replace(
         Err(e) => return Err(e),
     }
     match fs.symlink_metadata(to).await {
-        Ok(_) if !case_only_alias(fs, from, to).await? => {
-            return Ok(Step::Skip(UndoReason::Occupied))
-        }
+        Ok(_) if !self_alias(fs, from, to).await? => return Ok(Step::Skip(UndoReason::Occupied)),
         Ok(_) | Err(DuetError::NotFound(_)) => {}
         Err(e) => return Err(e),
     }
@@ -191,32 +189,39 @@ pub(crate) async fn rename_no_replace(
     Ok(Step::Done)
 }
 
-/// `to` 가 `from` 자신을 대소문자만 다르게 부른 것인지 (대소문자 무시 볼륨의 `a.txt`↔`A.txt`).
+/// `to` 가 `from` 자신을 다른 철자로 부른 것인지 — 대소문자 무시 볼륨의 `a.txt`↔`A.txt`,
+/// 정규화 무시 볼륨(macOS)의 NFC↔NFD 이름 등.
 ///
-/// 같은 폴더·대소문자만 다른 이름일 때 폴더 목록에 `to` 이름이 **정확히** 없으면 자기 자신이다
-/// (대소문자 구분 볼륨에서 둘 다 있으면 목록에 둘 다 보여 점유로 판정).
-async fn case_only_alias(fs: &dyn FileSystem, from: &Path, to: &Path) -> Result<bool, DuetError> {
+/// 같은 폴더의 다른 이름인데 폴더 목록에 `to` 이름이 **정확히** 없고 `from` 이름은 있으며,
+/// `to` 로 본 메타데이터가 `from` 과 같으면(종류·크기·수정시각) 자기 자신으로 본다.
+/// 대소문자·정규화 구분 볼륨에서 둘이 따로 있으면 목록에 둘 다 보여 점유로 판정된다.
+async fn self_alias(fs: &dyn FileSystem, from: &Path, to: &Path) -> Result<bool, DuetError> {
     let (Some(dir), Some(from_name), Some(to_name)) =
         (from.parent(), from.file_name(), to.file_name())
     else {
         return Ok(false);
     };
     let (from_name, to_name) = (from_name.to_string_lossy(), to_name.to_string_lossy());
-    if to.parent() != Some(dir)
-        || from_name == to_name
-        || from_name.to_lowercase() != to_name.to_lowercase()
-    {
+    if to.parent() != Some(dir) || from_name == to_name {
         return Ok(false);
     }
     let entries = fs.list(dir).await?;
-    Ok(!entries.iter().any(|e| e.name == to_name))
+    if entries.iter().any(|e| e.name == to_name) || !entries.iter().any(|e| e.name == from_name) {
+        return Ok(false);
+    }
+    let (a, b) = (
+        fs.symlink_metadata(from).await?,
+        fs.symlink_metadata(to).await?,
+    );
+    Ok(a.kind == b.kind && a.size == b.size && a.modified_ms == b.modified_ms)
 }
 
 /// 항목 하나를 `from` → `to` 로 옮긴다 (undo/redo 의 move 공용). 덮어쓰지 않는다.
 ///
 /// 같은 source 면 no-replace rename. 드라이브가 달라 `CrossDevice` 거나 source 가 다르면
-/// 복사 후 남은 쪽을 **휴지통**으로(원래 move 폴백과 동일) — 복사가 끝난 뒤의 휴지통 실패는
-/// 데이터가 이미 `to` 에 있으므로 Done 으로 치고 남은 사본 위치를 `t` 의 메모로 알린다.
+/// 복사 후 남은 쪽을 **휴지통**으로(원래 move 폴백과 동일). 복사가 끝난 뒤의 휴지통 실패는
+/// 데이터가 이미 `to` 에 있으므로 Done 이지만 남은 사본을 건너뜀(Failed)+메모로 알려
+/// 결과가 Partial 이 되게 한다. 복사 도중 실패면 이번에 만든 부분 사본을 휴지통으로 치운다.
 async fn move_item(
     t: &mut Tally,
     from_fs: &dyn FileSystem,
@@ -241,11 +246,28 @@ async fn move_item(
         Err(DuetError::NotFound(_)) => {}
         Err(e) => return Err(e),
     }
-    copy_relay(from_fs, from, to_fs, to).await?;
+    if let Err(e) = copy_relay(from_fs, from, to_fs, to).await {
+        // 도중 실패로 `to` 에 부분 사본이 남으면 재시도가 영영 "점유"로 막힌다 — 이번 호출이
+        // 만든 것(위에서 없음을 확인)이므로 휴지통으로 치운다. 원본은 `from` 에 그대로 있다.
+        if to_fs.symlink_metadata(to).await.is_ok() {
+            if let Err(te) = to_fs
+                .trash(to, &crate::services::trash::new_batch_id())
+                .await
+            {
+                return Err(DuetError::Io(format!(
+                    "{e}; the partial copy at {} could not be moved to trash: {te}",
+                    to.display()
+                )));
+            }
+        }
+        return Err(e);
+    }
     if let Err(e) = from_fs
         .trash(from, &crate::services::trash::new_batch_id())
         .await
     {
+        // 데이터는 `to` 에 있지만 `from` 에 사본이 하나 더 남았다 — 성공으로 덮지 않고 알린다.
+        t.skip(from, UndoReason::Failed);
         t.note(format!(
             "moved back, but the copy at {} could not be moved to trash: {e}",
             from.display()
@@ -1289,6 +1311,150 @@ mod tests {
             tokio::fs::read(dir.path().join("recovered")).await.unwrap(),
             b"concurrent edit"
         );
+    }
+
+    /// 쓰기·휴지통 실패를 주입하는 fixture — 나머지는 TestFs(휴지통도 임시 폴더 안).
+    struct FaultFs {
+        inner: crate::fs::testing::TestFs,
+        fail_write: bool,
+        fail_trash: bool,
+    }
+
+    #[async_trait::async_trait]
+    impl FileSystem for FaultFs {
+        fn source_id(&self) -> SourceId {
+            SourceId::Local
+        }
+        async fn list(&self, p: &Path) -> Result<Vec<crate::types::Entry>, DuetError> {
+            self.inner.list(p).await
+        }
+        async fn metadata(&self, p: &Path) -> Result<crate::types::EntryMeta, DuetError> {
+            self.inner.metadata(p).await
+        }
+        async fn rename(&self, a: &Path, b: &Path) -> Result<(), DuetError> {
+            self.inner.rename(a, b).await
+        }
+        async fn mkdir(&self, p: &Path) -> Result<(), DuetError> {
+            // 최상위 폴더는 만들고 하위 폴더에서 끊긴다 — 부분 사본이 남는 상황.
+            if self.fail_write && p.file_name().is_some_and(|n| n == "sub") {
+                return Err(DuetError::Ssh("fixture: connection lost".into()));
+            }
+            self.inner.mkdir(p).await
+        }
+        async fn trash(&self, p: &Path, b: &str) -> Result<TrashLocation, DuetError> {
+            if self.fail_trash {
+                return Err(DuetError::PermissionDenied("fixture trash".into()));
+            }
+            self.inner.trash(p, b).await
+        }
+        async fn remove(&self, p: &Path) -> Result<(), DuetError> {
+            self.inner.remove(p).await
+        }
+        async fn restore_from_trash(&self, l: &TrashLocation, o: &Path) -> Result<(), DuetError> {
+            self.inner.restore_from_trash(l, o).await
+        }
+        async fn read_full(&self, p: &Path) -> Result<Vec<u8>, DuetError> {
+            self.inner.read_full(p).await
+        }
+        async fn write_full(&self, p: &Path, b: &[u8]) -> Result<(), DuetError> {
+            self.inner.write_full(p, b).await
+        }
+        async fn open_read(
+            &self,
+            p: &Path,
+            o: u64,
+        ) -> Result<std::pin::Pin<Box<dyn tokio::io::AsyncRead + Send>>, DuetError> {
+            self.inner.open_read(p, o).await
+        }
+        async fn open_write(
+            &self,
+            p: &Path,
+            o: u64,
+        ) -> Result<std::pin::Pin<Box<dyn tokio::io::AsyncWrite + Send>>, DuetError> {
+            if self.fail_write {
+                return Err(DuetError::Ssh("fixture: connection lost".into()));
+            }
+            self.inner.open_write(p, o).await
+        }
+    }
+
+    fn fault(root: &Path, fail_write: bool, fail_trash: bool) -> FaultFs {
+        FaultFs {
+            inner: crate::fs::testing::TestFs::new(root),
+            fail_write,
+            fail_trash,
+        }
+    }
+
+    /// R2(opus-2 #1): 다른 source 로 되돌리는 복사가 도중에 끊기면 이번에 만든 부분 사본을
+    /// 치운다 — 남겨 두면 재시도가 영영 "점유"로 막힌다. 원본은 그대로.
+    #[tokio::test]
+    async fn failed_move_back_clears_its_partial_copy() {
+        let dir = TempDir::new().unwrap();
+        let from = dir.path().join("moved");
+        tokio::fs::create_dir_all(from.join("sub")).await.unwrap();
+        tokio::fs::write(from.join("a.txt"), b"a").await.unwrap();
+        let to = dir.path().join("orig");
+        let src = fault(dir.path(), false, false);
+        let dst = fault(dir.path(), true, false);
+        let mut t = Tally::default();
+        let r = move_item(&mut t, &src, &from, &dst, &to, false).await;
+        assert!(r.is_err(), "{r:?}");
+        assert!(!to.exists(), "partial copy left at the original place");
+        assert!(from.join("a.txt").exists(), "source must stay intact");
+        // 재시도는 다시 시도할 수 있다(점유로 막히지 않음).
+        let mut t = Tally::default();
+        let ok = move_item(
+            &mut t,
+            &src,
+            &from,
+            &fault(dir.path(), false, false),
+            &to,
+            false,
+        )
+        .await
+        .unwrap();
+        assert_eq!(ok, Step::Done);
+    }
+
+    /// R2(opus-2 #2): 복사로 되돌린 뒤 남은 사본을 휴지통에 못 보내면 Ok 로 덮지 않는다.
+    #[tokio::test]
+    async fn leftover_copy_that_cannot_be_trashed_makes_result_partial() {
+        let dir = TempDir::new().unwrap();
+        let from = dir.path().join("moved.txt");
+        tokio::fs::write(&from, b"x").await.unwrap();
+        let to = dir.path().join("orig.txt");
+        let src = fault(dir.path(), false, true);
+        let dst = fault(dir.path(), false, false);
+        let mut t = Tally::default();
+        let step = move_item(&mut t, &src, &from, &dst, &to, false)
+            .await
+            .unwrap();
+        t.record(step, &SourceId::Local, &to);
+        let out = t.finish();
+        assert_eq!(out.kind, UndoKind::Partial, "{out:?}");
+        assert_eq!(out.skipped[0].reason, UndoReason::Failed);
+        assert_eq!(out.skipped[0].path, from);
+        assert!(out
+            .message
+            .unwrap_or_default()
+            .contains("could not be moved to trash"));
+        assert_eq!(tokio::fs::read(&to).await.unwrap(), b"x");
+    }
+
+    /// R2(opus-2 #3): 정규화 무시 볼륨에서 NFD↔NFC 이름만 다른 자기 자신은 점유가 아니다.
+    #[tokio::test]
+    async fn rename_back_across_unicode_normalization_is_not_blocked_by_itself() {
+        let dir = TempDir::new().unwrap();
+        let nfd = dir.path().join("e\u{301}.txt");
+        let nfc = dir.path().join("\u{e9}.txt");
+        tokio::fs::write(&nfd, b"x").await.unwrap();
+        if !nfc.exists() {
+            eprintln!("SKIP: normalization-sensitive volume");
+            return;
+        }
+        let step = rename_no_replace(&LocalFs, &nfd, &nfc).await.unwrap();
+        assert_eq!(step, Step::Done);
     }
 
     #[tokio::test]
