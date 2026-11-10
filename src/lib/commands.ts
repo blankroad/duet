@@ -707,6 +707,15 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
         action: deps.openContextMenu,
       },
       {
+        // F4 = TC·DESIGN.md 키 표의 "Edit". 로컬은 설정의 편집기(비우면 연결 프로그램),
+        // 원격은 편집 라운드트립. 콜백만 있고 커맨드가 빠져 F4 가 아무 일도 안 하던 것(UX-SHL-07).
+        id: "file.edit",
+        label: "Edit file",
+        category: "File",
+        defaultKey: "F4",
+        action: deps.editFile,
+      },
+      {
         id: "help.shortcuts",
         label: "Keyboard shortcuts",
         category: "Help",

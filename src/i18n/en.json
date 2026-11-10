@@ -1275,7 +1275,8 @@
       "copyPath": "Copy path",
       "copyName": "Copy name",
       "calcSize": "Calculate folder size",
-      "contextMenu": "Open context menu"
+      "contextMenu": "Open context menu",
+      "edit": "Edit file"
     },
     "settings": {
       "open": "Open settings"

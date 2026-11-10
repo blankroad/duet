@@ -28,3 +28,22 @@ describe("commands — Windows/Linux 기본 키", () => {
     }
   });
 });
+
+describe("commands — F4 편집 (UX-SHL-07)", () => {
+  it("file.edit 가 F4 로 등록되고 editFile 콜백을 부른다", () => {
+    const editFile = vi.fn();
+    const cmds = buildBuiltins(
+      new Proxy(
+        { permanentDeleteEnabled: true, editFile },
+        {
+          get: (t, k) =>
+            k in t ? (t as Record<string, unknown>)[k as string] : () => {},
+        },
+      ) as Parameters<typeof buildBuiltins>[0],
+    );
+    const edit = cmds.find((c) => c.id === "file.edit");
+    expect(edit?.defaultKey).toBe("F4");
+    edit?.action();
+    expect(editFile).toHaveBeenCalledTimes(1);
+  });
+});

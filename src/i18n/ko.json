@@ -1263,7 +1263,8 @@
       "copyPath": "경로 복사",
       "copyName": "이름 복사",
       "calcSize": "폴더 크기 계산",
-      "contextMenu": "컨텍스트 메뉴 열기"
+      "contextMenu": "컨텍스트 메뉴 열기",
+      "edit": "파일 편집"
     },
     "settings": {
       "open": "설정 열기"
