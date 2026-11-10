@@ -8,6 +8,7 @@
 //! plan/execute 두 단계 (CLAUDE.md §3/§4). execute 는 journal 에 기록하여
 //! Ctrl+Z 되돌리기 가능 — 생성물(해제 디렉토리 / 압축 파일)을 제거하는 형태.
 
+use crate::core::archive_names;
 use crate::core::copy_strategy::{shell_escape_path, shell_escape_str};
 use crate::core::ops::{self, OpCtx};
 use crate::core::tar_unpack::{self, UnpackReport};
@@ -192,6 +193,12 @@ pub struct ExtractPlan {
     pub dest_dir: std::path::PathBuf,
     /// dest_dir 가 이미 존재 (execute 시 backup 후 진행).
     pub conflict: bool,
+    /// true = 무엇도 옮기거나 덮지 않는다("둘 다 유지"). `dest_dir` 는 힌트일 뿐이고, 실행이
+    /// 그 이름 → `<stem> (2)` → `(3)` … 을 원자적으로 예약(`mkdir` / 단일 파일은
+    /// `create_new_file`)해 처음 성공한 곳에 푼다 — 계획 뒤에 생긴 항목도 백업하지 않는다.
+    /// false = 기존 규칙(있으면 `.bak` 으로 옮기고 Ctrl+Z 로 복원). 구버전 호출은 false.
+    #[serde(default)]
+    pub keep_both: bool,
 }
 
 /// 이 아카이브를 이 위치에서 풀 수 있는지 검사하고 포맷을 돌려준다 — 폴더로 풀기
@@ -231,21 +238,50 @@ pub async fn extract_plan(
         format,
         dest_dir,
         conflict,
+        keep_both: false,
     })
+}
+
+/// 이 포맷이 폴더 없이 파일 하나로 풀리는지 (`.gz`/`.bz2`/`.xz`/`.zst`).
+pub(crate) fn extracts_to_single_file(format: ArchiveFormat) -> bool {
+    matches!(format.layout(), Layout::Single(_))
 }
 
 pub async fn extract_execute(
     fs: &dyn FileSystem,
-    plan: ExtractPlan,
+    mut plan: ExtractPlan,
     password: Option<String>,
     ctx: &OpCtx,
     cancel_token: CancellationToken,
 ) -> Result<(JournalEntry, UnpackReport), DuetError> {
     let archive_path = fs.join(&plan.archive_dir.path, &plan.archive_name);
+    let single = matches!(plan.format.layout(), Layout::Single(_));
 
-    // dest 충돌 → backup 으로 mv (undo 시 복원).
     let mut backups = Vec::new();
-    if fs.metadata(&plan.dest_dir).await.is_ok() {
+    if plan.keep_both {
+        // 둘 다 유지 — 받을 자리를 지금 원자적으로 예약한다(계획 이름은 힌트). 계획 뒤에
+        // 그 이름이 생겼어도 옮기거나 덮지 않고 다음 번호로 간다.
+        let hint = match &plan.source {
+            SourceId::Local => plan.dest_dir.file_name().and_then(|n| n.to_str()),
+            SourceId::Ssh { .. } => crate::fs::posix_path::file_name(&plan.dest_dir),
+        }
+        .map(str::to_owned);
+        let kind = if single {
+            archive_names::Reserve::File
+        } else {
+            archive_names::Reserve::Dir
+        };
+        let (reserved, _) = archive_names::reserve_free(
+            fs,
+            &plan.archive_dir.path,
+            &archive_stem(&plan.archive_name),
+            kind,
+            hint.as_deref(),
+        )
+        .await?;
+        plan.dest_dir = reserved;
+    } else if fs.metadata(&plan.dest_dir).await.is_ok() {
+        // dest 충돌 → backup 으로 mv (undo 시 복원).
         let parent = plan
             .dest_dir
             .parent()
@@ -268,9 +304,9 @@ pub async fn extract_execute(
     // 빈/부분 dest 폴더가 남고, 충돌로 옮겨둔 기존 폴더도 backup 이름에 갇힌다.
     // 단일 파일 압축(.gz 등)은 폴더 없이 archive_dir 에 `<stem>` 파일로 바로 푼다
     // (예전엔 `log.txt/log.txt` 처럼 폴더가 한 겹 더 생겼다). 그 경로가 plan.dest_dir.
-    let single = matches!(plan.format.layout(), Layout::Single(_));
     let extracted: Result<UnpackReport, DuetError> = async {
-        if !single {
+        // keep_both 는 위에서 이미 만들어(예약해) 두었다.
+        if !single && !plan.keep_both {
             fs.mkdir(&plan.dest_dir).await?;
         }
 
