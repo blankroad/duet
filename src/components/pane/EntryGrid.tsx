@@ -359,8 +359,11 @@ function Thumb({
   const show = useAppSettings((s) => s.showThumbnails);
   // 파일이 바뀌면(수정 시각·크기) 새 URL 로 다시 요청하고, 이전 실패 표시도 푼다.
   const version = `${entry.modified_ms ?? 0}-${entry.size ?? 0}`;
-  const [failedVersion, setFailedVersion] = useState<string | null>(null);
-  const failed = failedVersion === version;
+  const src = thumbUrl(childLocation(location, entry.name), version);
+  // 실패는 URL 전체(소스·경로·버전)로 기억한다 — 행이 재사용돼 다른 폴더의 같은
+  // 이름·크기·시각 파일이 오면 그건 다른 썸네일이라 다시 요청해야 한다.
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const failed = failedSrc === src;
   if (!show || failed || !isThumbable(entry, location)) {
     return (
       <EntryIcon
@@ -376,11 +379,11 @@ function Thumb({
   }
   return (
     <img
-      src={thumbUrl(childLocation(location, entry.name), version)}
+      src={src}
       loading="lazy"
       decoding="async"
       alt=""
-      onError={() => setFailedVersion(version)}
+      onError={() => setFailedSrc(src)}
       className="shrink-0 rounded object-cover bg-subtle"
       style={{ width: size, height: size }}
     />

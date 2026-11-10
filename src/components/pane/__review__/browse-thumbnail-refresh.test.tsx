@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { EntryGrid } from "@/components/pane/EntryGrid";
 import { usePanes } from "@/stores/panes";
 import { useAppSettings } from "@/stores/settings";
@@ -82,5 +82,23 @@ it("browse-16: a failed thumbnail is retried once the file changes", () => {
   view.rerender(grid(entry));
   expect(view.container.querySelector("img")).toBeNull();
   view.rerender(grid({ ...entry, size: 200, modified_ms: 2000 }));
+  expect(view.container.querySelector("img")).not.toBeNull();
+});
+
+it("review-r1 browse-16 failure in one folder must not suppress a different file with identical metadata", () => {
+  const view = render(grid(entry));
+  fireEvent.error(view.container.querySelector("img")!);
+  expect(view.container.querySelector("img")).toBeNull();
+  act(() => {
+    usePanes
+      .getState()
+      .setEntries(
+        "left",
+        { source: { kind: "local" }, path: "/different-fixture" },
+        [{ ...entry }],
+      );
+  });
+  // Virtual row key and basename stay the same; this is a new file/thumbnail URL.
+  view.rerender(grid({ ...entry }));
   expect(view.container.querySelector("img")).not.toBeNull();
 });
