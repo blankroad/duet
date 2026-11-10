@@ -42,7 +42,12 @@ export interface ArchiveBrowse {
   parent?: ArchiveBrowse | undefined;
 }
 
-/** 탭이 기억하는 아카이브 문맥 수 — 뒤로/앞으로로 임시 폴더에 돌아갈 때 쓴다. */
+/**
+ * 탭이 기억하는 아카이브 문맥 수 — 뒤로/앞으로로 임시 폴더에 돌아갈 때 쓴다.
+ * 배열 길이 상한일 뿐이다: 각 문맥이 바깥 문맥(parent)을 잡고 있으므로 실제로 남는
+ * 문맥 수는 "이 개수 + 중첩 깊이" 까지다(깊이에 선형). parent 는 바깥 문맥 복원과
+ * 세션의 원래 폴더 저장에 필요해 끊지 않는다.
+ */
 const ARCHIVE_TRAIL_MAX = 20;
 
 /** `loc` 이 아카이브 임시 루트(또는 그 하위)인가 — 같은 소스 + 경로 접두(구분자 경계). */
@@ -62,13 +67,28 @@ function archiveFor(
   cur: ArchiveBrowse | undefined,
   trail: ArchiveBrowse[] | undefined,
 ): ArchiveBrowse | undefined {
-  for (let a = cur; a; a = a.parent) if (insideArchive(loc, a)) return a;
-  // 최근에 연 것부터 — 같은 임시 루트를 다시 열었으면 새 문맥이 이긴다.
-  for (let i = (trail?.length ?? 0) - 1; i >= 0; i--) {
-    const a = trail![i]!;
-    if (insideArchive(loc, a)) return a;
-  }
-  return undefined;
+  // 가장 구체적인(루트가 가장 긴) 문맥이 이긴다 — 루트가 겹치면 바깥 문맥으로 Update
+  // 하지 않게. 길이가 같으면 지금 문맥 사슬 → 최근에 연 문맥 순서.
+  let best: ArchiveBrowse | undefined;
+  let bestLen = -1;
+  const consider = (a: ArchiveBrowse) => {
+    if (!insideArchive(loc, a)) return;
+    const len = canonPath(a.root).length;
+    if (len > bestLen) {
+      best = a;
+      bestLen = len;
+    }
+  };
+  for (let a = cur; a; a = a.parent) consider(a);
+  for (let i = (trail?.length ?? 0) - 1; i >= 0; i--) consider(trail![i]!);
+  return best;
+}
+
+/** 아카이브 속 아카이브면 맨 바깥 문맥 — 정리되지 않는 원래 폴더(exitTo)를 가진다. */
+export function outermostArchive(a: ArchiveBrowse): ArchiveBrowse {
+  let o = a;
+  while (o.parent) o = o.parent;
+  return o;
 }
 
 export interface TabState {
@@ -429,8 +449,14 @@ export const usePanes = create<PanesState>((set, get) => ({
       // 위치를 줬어도 같은 아카이브/휴지통 안(예: 아카이브 속 폴더를 Ctrl+↑)이면
       // 문맥을 유지한다.
       const path = String(nt.location.path);
-      if (!location || (cur.archive && path.startsWith(cur.archive.root)))
+      if (
+        !location ||
+        (cur.archive && insideArchive(nt.location, cur.archive))
+      ) {
         nt.archive = cur.archive;
+        // 기억한 문맥도 함께 — 새 탭에서 나갔다가 뒤로 돌아와도 문맥이 되살아나게.
+        nt.archiveTrail = cur.archiveTrail;
+      }
       if (!location || (cur.trashRoot && path.startsWith(cur.trashRoot)))
         nt.trashRoot = cur.trashRoot;
       // 새 탭은 일반 탭 — 핀 구간 안으로는 들어가지 않는다.
@@ -588,7 +614,8 @@ export const usePanes = create<PanesState>((set, get) => ({
       const base = c.tab.archive
         ? {
             ...c.tab,
-            location: c.tab.archive.exitTo,
+            // 아카이브 속 아카이브면 안쪽 exitTo 도 임시 폴더 — 맨 바깥 원래 폴더로.
+            location: outermostArchive(c.tab.archive).exitTo,
             archive: undefined,
             archiveTrail: undefined,
           }
@@ -601,7 +628,7 @@ export const usePanes = create<PanesState>((set, get) => ({
         loading: false,
         cursorIndex: -1,
         history: c.tab.archive
-          ? { stack: [c.tab.archive.exitTo], index: 0 }
+          ? { stack: [outermostArchive(c.tab.archive).exitTo], index: 0 }
           : c.tab.history,
       };
       // 원래 자리 근처로 — 단 핀/일반 구간 경계는 지킨다.
