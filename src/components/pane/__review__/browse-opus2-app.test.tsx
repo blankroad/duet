@@ -265,16 +265,13 @@ describe("browse-13 변경 이벤트 폭주", () => {
 });
 
 describe("browse-09 커서만 둔 폴더 크기 (Shift+Space)", () => {
-  it.fails(
-    "browse-09 (R2 재현): 수정일 정렬(기본값)에서 커서 폴더 'new' 대신 다른 항목을 계산한다",
-    async () => {
-      await boot("/w", "/home", { sortKey: "mtime", sortOrder: "desc" });
-      cursorTo("new"); // 화면: .., new, mid, old, z.txt  / 원본: old, mid, new, z.txt
-      runCommand("file.calcSize");
-      await wait(80);
-      expect(sizeCalls).toEqual(["/w/new"]);
-    },
-  );
+  it("browse-09 (R2 재현): 수정일 정렬(기본값)에서 커서 폴더 'new' 대신 다른 항목을 계산한다", async () => {
+    await boot("/w", "/home", { sortKey: "mtime", sortOrder: "desc" });
+    cursorTo("new"); // 화면: .., new, mid, old, z.txt  / 원본: old, mid, new, z.txt
+    runCommand("file.calcSize");
+    await wait(80);
+    expect(sizeCalls).toEqual(["/w/new"]);
+  });
 
   it("대조: 우클릭 메뉴 경로는 선택을 그 항목으로 바꾸므로 맞는 폴더를 계산한다", async () => {
     await boot("/w", "/home", { sortKey: "mtime", sortOrder: "desc" });

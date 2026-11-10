@@ -1,5 +1,11 @@
 import { commands } from "@/types/bindings";
-import { activeTab, usePanes, type PaneId } from "@/stores/panes";
+import {
+  activeTab,
+  computeDisplayed,
+  isParentEntry,
+  usePanes,
+  type PaneId,
+} from "@/stores/panes";
 import { useToast } from "@/stores/toast";
 import { childLocation } from "@/lib/entryDnd";
 import { formatSize } from "@/lib/format";
@@ -20,7 +26,10 @@ export async function calcDirSizes(
   const tab = activeTab(s, paneId);
   const toast = useToast.getState().show;
 
-  const cursorName = tab.entries[tab.cursorIndex]?.name;
+  // 커서 인덱스는 화면 목록(정렬·필터·".." 행 반영) 기준 — 원본 배열에 쓰면 다른 항목.
+  const cursorEntry = computeDisplayed(tab)[tab.cursorIndex];
+  const cursorName =
+    cursorEntry && !isParentEntry(cursorEntry) ? cursorEntry.name : undefined;
   const candidates =
     names ??
     (tab.selected.size > 0
