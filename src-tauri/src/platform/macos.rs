@@ -205,13 +205,13 @@ mod tests {
         std::fs::write(&a, b"a").expect("write a");
 
         // 우리 표식 그대로면 비운다.
-        set_file_clipboard_on(&board, &[a.clone()], 11).expect("set");
+        set_file_clipboard_on(&board, std::slice::from_ref(&a), 11).expect("set");
         assert!(clear_file_clipboard_if_on(&board, 11).expect("clear"));
         // 비운 뒤엔 표식이 없으니 다시 불러도 그대로.
         assert!(!clear_file_clipboard_if_on(&board, 11).expect("clear again"));
 
         // 그사이 다른 쓰기(다른 표식)가 올라왔으면 건드리지 않는다.
-        set_file_clipboard_on(&board, &[a.clone()], 12).expect("set");
+        set_file_clipboard_on(&board, std::slice::from_ref(&a), 12).expect("set");
         set_file_clipboard_on(&board, &[a], 13).expect("set again");
         assert!(!clear_file_clipboard_if_on(&board, 12).expect("clear stale"));
 
