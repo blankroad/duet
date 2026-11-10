@@ -807,6 +807,8 @@
   "toast": {
     "appLauncherFailed": "연결 프로그램 변경 실패: {{err}}",
     "launchFailed": "실행 실패: {{err}}",
+    "shellMenuFailed": "셸 명령 실패: {{err}}",
+    "shellMenuExpired": "메뉴가 만료됨 — 다시 우클릭해서 실행하세요",
     "removeAliasFailed": "별칭 삭제 실패: {{err}}",
     "setNicknameFailed": "호스트 별명 설정 실패: {{err}}",
     "groupUpdateFailed": "그룹 변경 실패: {{err}}",

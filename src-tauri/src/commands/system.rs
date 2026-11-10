@@ -751,6 +751,9 @@ pub async fn shell_menu_warm(
 }
 
 /// 셸 메뉴에서 선택한 항목 실행(핫 워커가 캐시 중인 IContextMenu 로 InvokeCommand).
+///
+/// 실패는 숨기지 않는다: 메뉴가 만료됐으면(다시 빌드·밀려남) 아무것도 실행하지 않고 `NotFound`,
+/// 셸 명령 실패는 `Io`, 사용자가 명령의 대화상자를 취소했으면 `Cancelled`.
 #[tauri::command]
 #[specta::specta]
 pub async fn shell_menu_invoke(
@@ -759,12 +762,14 @@ pub async fn shell_menu_invoke(
     registry: tauri::State<'_, std::sync::Arc<crate::platform::ShellMenuRegistry>>,
 ) -> Result<(), DuetError> {
     #[cfg(windows)]
-    registry.worker().invoke(token, cmd_id);
+    {
+        registry.worker().invoke(token, cmd_id).await
+    }
     #[cfg(not(windows))]
     {
         let _ = (token, cmd_id, registry);
+        Ok(())
     }
-    Ok(())
 }
 
 /// 탐색기 폴더/드라이브 우클릭 "Open in duet" 등록 여부 (Windows; 그 외 false).

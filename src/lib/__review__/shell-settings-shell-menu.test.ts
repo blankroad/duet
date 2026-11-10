@@ -28,16 +28,13 @@ vi.mock("@/types/bindings", () => ({
 }));
 
 describe("shell-settings: 셸 메뉴 실행 실패 피드백", () => {
-  it.fails(
-    "shell-settings-16: shellMenuInvoke가 실패하면 사용자에게 알린다",
-    async () => {
-      const show = vi.spyOn(useToast.getState(), "show");
-      const menu = await openShellMenu(["C:\\sample.txt"], "file");
-      const entry = menu!.entries[0]!;
-      if ("onSelect" in entry) await entry.onSelect?.();
-      await Promise.resolve();
-      expect(show).toHaveBeenCalled();
-      show.mockRestore();
-    },
-  );
+  it("shell-settings-16: shellMenuInvoke가 실패하면 사용자에게 알린다", async () => {
+    const show = vi.spyOn(useToast.getState(), "show");
+    const menu = await openShellMenu(["C:\\sample.txt"], "file");
+    const entry = menu!.entries[0]!;
+    if ("onSelect" in entry) await entry.onSelect?.();
+    await Promise.resolve();
+    expect(show).toHaveBeenCalled();
+    show.mockRestore();
+  });
 });

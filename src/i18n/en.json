@@ -812,6 +812,8 @@
   "toast": {
     "appLauncherFailed": "App launcher update failed: {{err}}",
     "launchFailed": "Launch failed: {{err}}",
+    "shellMenuFailed": "Shell command failed: {{err}}",
+    "shellMenuExpired": "That menu expired. Right-click again and retry.",
     "removeAliasFailed": "Remove alias failed: {{err}}",
     "setNicknameFailed": "Set host nickname failed: {{err}}",
     "groupUpdateFailed": "Group update failed: {{err}}",

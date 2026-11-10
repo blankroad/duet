@@ -22,16 +22,27 @@ const shellMenuWarm = vi.fn(async (..._a: unknown[]) => ({
   data: null,
 }));
 
+const shellMenuInvoke = vi.fn(
+  async (..._a: unknown[]): Promise<unknown> => ({ status: "ok", data: null }),
+);
+
 vi.mock("@/types/bindings", () => ({
   commands: {
     shellMenuOpen: (...a: unknown[]) => shellMenuOpen(...a),
     shellMenuWarm: (...a: unknown[]) => shellMenuWarm(...a),
-    shellMenuInvoke: vi.fn(async () => ({ status: "ok", data: null })),
+    shellMenuInvoke: (...a: unknown[]) => shellMenuInvoke(...a),
   },
 }));
 
-import { entryMoreOptions, shellMenuTarget, warmShellMenu } from "./shellMenu";
+import {
+  entryMoreOptions,
+  invokeShellItem,
+  shellMenuTarget,
+  warmShellMenu,
+} from "./shellMenu";
 import { VIRTUAL_TRASH_PATH } from "./trashView";
+import { useToast } from "@/stores/toast";
+import i18n from "@/i18n";
 
 const loc: Location = { source: { kind: "local" }, path: "C:\\work" };
 
@@ -138,5 +149,56 @@ describe("entryMoreOptions — 다중 선택 셸 메뉴 (mocked IPC, live 아님
   it("예열은 한 항목을 배열로 보낸다", () => {
     warmShellMenu("C:\\work\\a.zip", "file");
     expect(shellMenuWarm).toHaveBeenCalledWith(["C:\\work\\a.zip"], "file");
+  });
+});
+
+describe("invokeShellItem — 실행 실패 피드백 (UX-SHL-03, mocked IPC)", () => {
+  beforeEach(() => {
+    shellMenuInvoke.mockReset();
+  });
+
+  it("성공이면 토스트 없음", async () => {
+    shellMenuInvoke.mockResolvedValueOnce({ status: "ok", data: null });
+    const show = vi.spyOn(useToast.getState(), "show");
+    await invokeShellItem(7, 3);
+    expect(shellMenuInvoke).toHaveBeenCalledWith(7, 3);
+    expect(show).not.toHaveBeenCalled();
+    show.mockRestore();
+  });
+
+  it("만료된 메뉴(NotFound)면 다시 열라는 오류 토스트", async () => {
+    shellMenuInvoke.mockResolvedValueOnce({
+      status: "error",
+      error: { kind: "NotFound", message: "shell menu expired; open it again" },
+    });
+    const show = vi.spyOn(useToast.getState(), "show");
+    await invokeShellItem(7, 3);
+    expect(show).toHaveBeenCalledTimes(1);
+    expect(show.mock.calls[0]?.[0]).toBe(i18n.t("toast.shellMenuExpired"));
+    expect(show.mock.calls[0]?.[1]).toBe("error");
+    show.mockRestore();
+  });
+
+  it("사용자 취소(Cancelled)면 조용히", async () => {
+    shellMenuInvoke.mockResolvedValueOnce({
+      status: "error",
+      error: { kind: "Cancelled" },
+    });
+    const show = vi.spyOn(useToast.getState(), "show");
+    await invokeShellItem(7, 3);
+    expect(show).not.toHaveBeenCalled();
+    show.mockRestore();
+  });
+
+  it("셸 명령 실패(Io)면 실패 토스트", async () => {
+    shellMenuInvoke.mockResolvedValueOnce({
+      status: "error",
+      error: { kind: "Io", message: "shell command failed: x (0x80004005)" },
+    });
+    const show = vi.spyOn(useToast.getState(), "show");
+    await invokeShellItem(7, 3);
+    expect(show).toHaveBeenCalledTimes(1);
+    expect(show.mock.calls[0]?.[1]).toBe("error");
+    show.mockRestore();
   });
 });

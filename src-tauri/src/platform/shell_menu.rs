@@ -37,8 +37,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     MIIM_SUBMENU, SW_SHOWNORMAL,
 };
 
-use crate::platform::shell_menu_core::SessionCache;
+use crate::platform::shell_menu_core::{invoke_error, stale_menu_error, SessionCache};
 use crate::platform::{ShellMenuItem, ShellScope};
+use crate::types::DuetError;
 
 const ID_FIRST: u32 = 1;
 const ID_LAST: u32 = 0x7FFF;
@@ -69,15 +70,14 @@ enum Req {
         paths: Vec<PathBuf>,
         scope: ShellScope,
     },
+    /// 메뉴 항목 실행 — 결과(만료·실패·취소)를 `reply` 로 돌려준다(프론트가 토스트).
     Invoke {
         token: u64,
         cmd_id: u32,
+        reply: InvokeReply,
     },
     /// 핸들러 예열 — 메뉴를 만들었다 바로 버린다(셸 확장 COM 을 메모리에 로드만). 단일 경로.
-    Prewarm {
-        hwnd: isize,
-        path: PathBuf,
-    },
+    Prewarm { hwnd: isize, path: PathBuf },
 }
 
 /// `SHParseDisplayName` 이 할당한 절대 PIDL 들의 소유자 — Drop 에서 각각 정확히 한 번
@@ -214,8 +214,19 @@ impl Worker {
         });
     }
 
-    pub fn invoke(&self, token: u64, cmd_id: u32) {
-        let _ = self.tx.send(Req::Invoke { token, cmd_id });
+    /// 메뉴 항목 실행. token 이 지금 살아 있는 세션이 아니면 아무것도 실행하지 않고
+    /// `NotFound`(만료), InvokeCommand 실패는 `Io`, 사용자 취소는 `Cancelled`.
+    pub async fn invoke(&self, token: u64, cmd_id: u32) -> Result<(), DuetError> {
+        let stopped = || DuetError::Io("shell menu worker stopped".into());
+        let (reply, rx) = tokio::sync::oneshot::channel();
+        self.tx
+            .send(Req::Invoke {
+                token,
+                cmd_id,
+                reply,
+            })
+            .map_err(|_| stopped())?;
+        rx.await.map_err(|_| stopped())?
     }
 
     /// 시작 시 호출 — 셸 핸들러를 백그라운드로 예열(첫 우클릭도 빠르게).
@@ -326,35 +337,39 @@ impl State {
         }
     }
 
-    /// token 의 세션으로 명령 실행 후 그 엔트리 파기(실행이 상태를 바꿀 수 있음). 실행 직후
-    /// 같은 선택을 다시 예열하도록 (hwnd, key) 를 돌려준다.
+    /// token 의 세션으로 명령 실행 후 그 엔트리 파기(실행이 상태를 바꿀 수 있음). 실행 결과와,
+    /// 실행 직후 같은 선택을 다시 예열하도록 (hwnd, key) 를 돌려준다.
     ///
     /// token 이 지금 살아 있는 세션을 가리키지 않으면(파기·교체·빌드 실패) **아무것도 실행하지
-    /// 않는다** — 같은 선택이 새로 빌드돼 있어도 그 새 메뉴의 명령으로 풀지 않는다.
-    fn invoke(&mut self, token: u64, cmd_id: u32) -> Option<(isize, Key)> {
+    /// 않고** `NotFound` — 같은 선택이 새로 빌드돼 있어도 그 새 메뉴의 명령으로 풀지 않는다.
+    fn invoke(&mut self, token: u64, cmd_id: u32) -> (Result<(), DuetError>, Option<(isize, Key)>) {
         let Some((key, c)) = self.cache.resolve(token) else {
             tracing::warn!(
                 token,
                 cmd_id,
                 "shell menu invoke ignored: stale token (menu rebuilt, evicted or failed)"
             );
-            return None;
+            return (Err(stale_menu_error()), None);
         };
         let (key, hwnd) = (key.clone(), c.hwnd);
-        if (ID_FIRST..=ID_LAST).contains(&cmd_id) {
+        let result = if (ID_FIRST..=ID_LAST).contains(&cmd_id) {
             // SAFETY: cm 은 이 스레드에서 만든 살아있는 IContextMenu. 그 PIDL 들은 세션이 보유.
-            if let Err(e) = unsafe { invoke(&c.session.cm, HWND(c.hwnd as *mut _), cmd_id) } {
+            unsafe { invoke(&c.session.cm, HWND(c.hwnd as *mut _), cmd_id) }.map_err(|e| {
                 tracing::warn!(token, cmd_id, error = %e, "shell menu invoke failed");
-            }
+                invoke_error(e.code().0, &e.message())
+            })
         } else {
             tracing::warn!(
                 token,
                 cmd_id,
                 "shell menu invoke ignored: command id out of range"
             );
-        }
+            Err(DuetError::NotSupported(
+                "shell menu: command id out of range".into(),
+            ))
+        };
         self.drop_entry(&key);
-        Some((hwnd, key))
+        (result, Some((hwnd, key)))
     }
 }
 
@@ -387,7 +402,7 @@ fn worker_loop(rx: mpsc::Receiver<Req>, shared: SharedCache, self_tx: mpsc::Send
 
         let mut opens: Vec<(isize, Key, OpenReply, Instant)> = Vec::new();
         let mut warms: Vec<(isize, Key)> = Vec::new();
-        let mut invokes: Vec<(u64, u32)> = Vec::new();
+        let mut invokes: Vec<(u64, u32, InvokeReply)> = Vec::new();
         let mut prewarms: Vec<(isize, PathBuf)> = Vec::new();
         for r in batch {
             match r {
@@ -399,17 +414,23 @@ fn worker_loop(rx: mpsc::Receiver<Req>, shared: SharedCache, self_tx: mpsc::Send
                     queued_at,
                 } => opens.push((hwnd, (paths, scope), reply, queued_at)),
                 Req::Warm { hwnd, paths, scope } => warms.push((hwnd, (paths, scope))),
-                Req::Invoke { token, cmd_id } => invokes.push((token, cmd_id)),
+                Req::Invoke {
+                    token,
+                    cmd_id,
+                    reply,
+                } => invokes.push((token, cmd_id, reply)),
                 Req::Prewarm { hwnd, path } => prewarms.push((hwnd, path)),
             }
         }
 
         // 1) Invoke — 캐시된 세션의 IContextMenu 로 실행 후 그 엔트리 파기.
-        for (token, cmd_id) in invokes {
+        for (token, cmd_id, reply) in invokes {
+            let (result, rewarm) = st.invoke(token, cmd_id);
+            let _ = reply.send(result);
             // 실행 직후 같은 선택을 백그라운드 재예열 — 안 그러면 방금 쓴 항목의 다음
             // 우클릭이 다시 cold 다. self-send 라 이번 배치의 Open 을 늦추지 않는다.
             // (실행이 대상을 없앴을 수 있으니 선택 전부가 아직 있을 때만 — 빌드 실패 로그 방지.)
-            if let Some((hwnd, (paths, scope))) = st.invoke(token, cmd_id) {
+            if let Some((hwnd, (paths, scope))) = rewarm {
                 if paths.iter().all(|p| p.exists()) {
                     let _ = self_tx.send(Req::Warm { hwnd, paths, scope });
                 }
@@ -469,6 +490,9 @@ fn worker_loop(rx: mpsc::Receiver<Req>, shared: SharedCache, self_tx: mpsc::Send
 
 /// Open 응답 채널 타입 별칭 — (token, items).
 type OpenReply = tokio::sync::oneshot::Sender<(u64, Vec<ShellMenuItem>)>;
+
+/// Invoke 응답 채널 타입 별칭 — 실행 결과.
+type InvokeReply = tokio::sync::oneshot::Sender<Result<(), DuetError>>;
 
 /// build_menu 단계별 소요(ms) — 병목 진단용. parse=PIDL·IContextMenu 획득,
 /// query=QueryContextMenu(셸 확장 핸들러 전부 동기 호출 — 통상 지배적 비용).

@@ -5,6 +5,8 @@
 //! - [`shell_selection`]: 다중 선택을 Explorer 처럼 "한 폴더 안의 항목들" 로만 받는다.
 //! - [`SessionCache`]: 빌드한 메뉴 세션을 키별로 보관하고 token 으로 찾는다. token 은 빌드마다
 //!   새로 발급되므로, 지난 선택의 token 이 새로 빌드된 다른 메뉴로 풀리는 일이 없다.
+//! - [`stale_menu_error`] / [`invoke_error`]: 셸 명령 실행 실패를 프론트가 구분할 수 있는
+//!   `DuetError` 로 바꾼다(만료=NotFound, 사용자 취소=Cancelled, 그 외=Io).
 
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
@@ -121,6 +123,33 @@ impl<K: Clone + Eq + Hash, V> SessionCache<K, V> {
     fn len(&self) -> usize {
         self.entries.len()
     }
+}
+
+/// `HRESULT_FROM_WIN32(ERROR_CANCELLED)` — 셸 명령이 띄운 대화상자(UAC 등)를 사용자가 취소.
+const HRESULT_CANCELLED: i32 = 0x8007_04C7_u32 as i32;
+/// `E_ABORT` — 일부 셸 확장이 사용자 취소를 이 값으로 돌려준다.
+const HRESULT_ABORT: i32 = 0x8000_4004_u32 as i32;
+
+/// 실행하려던 메뉴 세션이 이미 없음(다시 빌드됨·밀려남·빌드 실패). 아무것도 실행하지 않았다.
+/// 프론트는 `NotFound` 를 "메뉴를 다시 열어 주세요" 로 안내한다(셸 실행 경로에서 NotFound 는
+/// 이것 하나뿐).
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn stale_menu_error() -> DuetError {
+    DuetError::NotFound("shell menu expired; open it again".into())
+}
+
+/// `InvokeCommand` 실패 HRESULT → `DuetError`. 사용자 취소는 `Cancelled`(프론트는 조용히),
+/// 그 외는 원문과 HRESULT 를 담은 `Io`.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn invoke_error(hresult: i32, message: &str) -> DuetError {
+    if hresult == HRESULT_CANCELLED || hresult == HRESULT_ABORT {
+        return DuetError::Cancelled;
+    }
+    let message = message.trim();
+    DuetError::Io(format!(
+        "shell command failed: {message} (0x{:08X})",
+        hresult as u32
+    ))
 }
 
 #[cfg(test)]
@@ -253,5 +282,33 @@ mod tests {
         let c: SessionCache<Key, &str> = SessionCache::new(4);
         assert!(c.resolve(0).is_none());
         assert!(c.resolve(42).is_none());
+    }
+
+    #[test]
+    fn stale_menu_is_not_found() {
+        assert!(matches!(stale_menu_error(), DuetError::NotFound(_)));
+    }
+
+    #[test]
+    fn user_cancel_hresults_map_to_cancelled() {
+        assert!(matches!(
+            invoke_error(0x8007_04C7_u32 as i32, "x"),
+            DuetError::Cancelled
+        ));
+        assert!(matches!(
+            invoke_error(0x8000_4004_u32 as i32, "x"),
+            DuetError::Cancelled
+        ));
+    }
+
+    #[test]
+    fn other_invoke_failures_keep_message_and_code() {
+        match invoke_error(0x8000_4005_u32 as i32, " Unspecified error\r\n") {
+            DuetError::Io(m) => {
+                assert!(m.contains("Unspecified error"), "{m}");
+                assert!(m.contains("0x80004005"), "{m}");
+            }
+            other => panic!("expected Io, got {other:?}"),
+        }
     }
 }

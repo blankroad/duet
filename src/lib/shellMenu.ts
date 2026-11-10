@@ -9,7 +9,9 @@ import type {
 } from "@/types/bindings";
 import type { MenuEntry } from "@/stores/contextMenu";
 import { childLocation } from "@/lib/entryDnd";
+import { showError } from "@/lib/errorToast";
 import { isVirtualTrash } from "@/lib/trashView";
+import { useToast } from "@/stores/toast";
 
 /** 셸 항목 아이콘 PNG 바이트 → data URL (.ts 라 JSX 없이 createElement). */
 function iconEl(it: ShellMenuItem) {
@@ -33,8 +35,37 @@ function iconEl(it: ShellMenuItem) {
  * - 우클릭 = shell_menu_open(paths) → 캐시 있으면 즉시, 없으면 빌드. {token, items} 반환.
  *   paths 는 한 폴더 안의 선택 전부(표시 순서) — Explorer 처럼 한 메뉴로 묶는다.
  * - 커서 멈춤/폴더 변경 = shell_menu_warm([path]) → 백그라운드로 캐시 채움(useShellWarm).
- * - 잎 항목 클릭 = shell_menu_invoke(token, id) → 백엔드가 그 파일의 IContextMenu 로 실행.
+ * - 잎 항목 클릭 = shell_menu_invoke(token, id) → 백엔드가 그 선택의 IContextMenu 로 실행.
+ *   실패는 토스트로 알린다(invokeShellItem).
  */
+
+/**
+ * 셸 메뉴 항목 실행. 실패를 숨기지 않는다:
+ * - `NotFound` = 메뉴가 만료됨(백엔드가 다시 빌드했거나 밀어냄) — 아무것도 실행되지 않았으니
+ *   다시 열어 달라고 안내. (셸 실행 경로에서 NotFound 는 이것뿐 — `shell_menu_core::stale_menu_error`.)
+ * - `Cancelled` = 사용자가 명령의 대화상자(UAC 등)를 취소 — 조용히.
+ * - 그 외 = 셸 명령 실패 토스트(원문은 알림 "자세히").
+ */
+export async function invokeShellItem(
+  token: number,
+  id: number,
+): Promise<void> {
+  let r: Awaited<ReturnType<typeof commands.shellMenuInvoke>>;
+  try {
+    r = await commands.shellMenuInvoke(token, id);
+  } catch (e) {
+    showError("toast.shellMenuFailed", e);
+    return;
+  }
+  if (r.status === "ok" || r.error.kind === "Cancelled") return;
+  if (r.error.kind === "NotFound") {
+    useToast.getState().show(i18n.t("toast.shellMenuExpired"), "error", {
+      detail: r.error.message,
+    });
+    return;
+  }
+  showError("toast.shellMenuFailed", r.error);
+}
 
 function toEntries(items: ShellMenuItem[], token: number): MenuEntry[] {
   return items.map((it, i): MenuEntry => {
@@ -53,9 +84,7 @@ function toEntries(items: ShellMenuItem[], token: number): MenuEntry[] {
       label: it.label,
       disabled: it.disabled,
       icon: iconEl(it),
-      onSelect: () => {
-        void commands.shellMenuInvoke(token, it.id);
-      },
+      onSelect: () => invokeShellItem(token, it.id),
     };
   });
 }
