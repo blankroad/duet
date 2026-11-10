@@ -11,7 +11,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 
 use super::ShellScope;
 use crate::types::DuetError;
@@ -20,12 +20,26 @@ use crate::types::DuetError;
 ///
 /// - 각 경로를 [`super::local_abs`] 로 절대경로화한다(드라이브 없는 경로 보정).
 /// - 비어 있으면 거부.
-/// - 모든 항목의 부모(`Path::parent`, 문자열이 아닌 경로 비교)가 같아야 한다 — 셸은 한 부모
-///   폴더의 `GetUIObjectOf` 에 자식들을 한꺼번에 넘기므로, 다른 폴더의 항목은 같이 못 묶는다.
+/// - `.`·`..` 경로 조각이 있으면 거부. `sub/..` 는 글자상 부모가 `sub` 이지만 실제 항목은 `sub`
+///   의 부모 폴더라, 부모 비교를 통과해도 셸이 엉뚱한 부모에 묶는다. 프론트는 이런 경로를 만들지
+///   않으므로 정규화하지 않고 거부한다.
+/// - 모든 항목의 부모(`Path::parent`, 문자열이 아닌 경로 컴포넌트 비교)가 같아야 한다 — 셸은 한
+///   부모 폴더의 `GetUIObjectOf` 에 자식들을 한꺼번에 넘기므로, 다른 폴더의 항목은 같이 못 묶는다.
 ///   드라이브 루트처럼 부모가 없는 경로끼리는 "부모 없음" 으로 같다고 본다.
 /// - 순서는 그대로 둔다(화면 표시 순서 = 셸에 넘기는 순서 = 캐시 키).
+///
+/// **`fs::canonicalize` 는 쓰지 않는다.** Windows 에선 `\\?\` 접두가 붙은 경로가 나와
+/// `SHParseDisplayName` 입력으로 맞지 않고, 심볼릭 링크·정션을 대상 경로로 바꿔 사용자가 고른
+/// 셸 항목(링크 자체)이 아닌 다른 항목의 메뉴가 된다. 그래서 별칭(대소문자·8.3 이름·링크)으로
+/// 같은 폴더를 다르게 쓴 선택은 거부될 수 있다 — 프론트는 한 패널의 같은 경로 문자열로 만든다.
 pub fn shell_selection(paths: Vec<PathBuf>) -> Result<Vec<PathBuf>, DuetError> {
     let paths: Vec<PathBuf> = paths.into_iter().map(super::local_abs).collect();
+    if let Some(bad) = paths.iter().find(|p| has_dot_segment(p)) {
+        return Err(DuetError::NotSupported(format!(
+            "shell menu: path has . or .. segment ({})",
+            bad.display()
+        )));
+    }
     let first = paths
         .first()
         .ok_or_else(|| DuetError::NotSupported("shell menu: empty selection".into()))?;
@@ -38,6 +52,17 @@ pub fn shell_selection(paths: Vec<PathBuf>) -> Result<Vec<PathBuf>, DuetError> {
         )));
     }
     Ok(paths)
+}
+
+/// 경로에 `.`·`..` 조각이 있는가. `Path::components` 는 중간·끝의 `.` 을 지워서 보여 주므로
+/// 원문 조각도 본다(구분자 `/`·`\\` 둘 다 — 이 검사는 Windows 경로가 대상이다).
+fn has_dot_segment(p: &Path) -> bool {
+    p.components()
+        .any(|c| matches!(c, Component::CurDir | Component::ParentDir))
+        || p.as_os_str()
+            .to_string_lossy()
+            .split(['/', '\\'])
+            .any(|s| s == "." || s == "..")
 }
 
 /// scope 까지 본 셸 메뉴 대상 검증 — 명령 레이어의 진입점.
@@ -210,6 +235,29 @@ mod tests {
         // 끝 구분자·중복 구분자 차이는 같은 부모로 본다(Path 컴포넌트 비교).
         let sel = vec![p("/w/a.zip"), p("/w//b.zip")];
         assert!(shell_selection(sel).is_ok());
+    }
+
+    #[test]
+    fn dotdot_segment_is_rejected() {
+        // 글자상 부모는 둘 다 /w/sub 지만 sub/.. 는 /w 자체다.
+        let err = shell_selection(vec![p("/w/sub/.."), p("/w/sub/a.zip")]).unwrap_err();
+        assert!(matches!(err, DuetError::NotSupported(_)), "{err:?}");
+        assert!(shell_selection(vec![p("/w/../x/a.zip")]).is_err());
+    }
+
+    #[test]
+    fn dot_segment_is_rejected() {
+        assert!(shell_selection(vec![p("./a.zip")]).is_err());
+        // Path::components 가 지우는 중간·끝 "." 도 거부.
+        assert!(shell_selection(vec![p("/w/./a.zip")]).is_err());
+        assert!(shell_selection(vec![p("/w/sub/.")]).is_err());
+        assert!(shell_selection(vec![p(r"C:\w\.\a.zip")]).is_err());
+    }
+
+    #[test]
+    fn dotted_names_are_not_dot_segments() {
+        let sel = vec![p("/w/.hidden"), p("/w/a..zip"), p("/w/..b")];
+        assert_eq!(shell_selection(sel.clone()).unwrap(), sel);
     }
 
     #[test]
