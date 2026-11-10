@@ -8,7 +8,7 @@ import { describe, it, expect } from "vitest";
 import { parseAdHocAlias, prefillFromAlias } from "../hostAlias";
 
 describe("remote-lead: ad-hoc alias with '@' in the user name", () => {
-  it.fails("remote-30: splits user/host at the last '@'", () => {
+  it("remote-30: splits user/host at the last '@'", () => {
     expect(parseAdHocAlias("first.last@corp.com@srv.lan:22")).toEqual({
       user: "first.last@corp.com",
       host: "srv.lan",
@@ -16,7 +16,7 @@ describe("remote-lead: ad-hoc alias with '@' in the user name", () => {
     });
   });
 
-  it.fails("remote-30: prefill for reconnect points at the real host", () => {
+  it("remote-30: prefill for reconnect points at the real host", () => {
     expect(prefillFromAlias("a@b.com@10.0.0.5:2222")?.host).toBe("10.0.0.5");
   });
 

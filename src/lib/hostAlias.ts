@@ -19,10 +19,11 @@ export interface AdHocAliasParts {
  * `user@host:port` 형태의 ad-hoc alias 를 분해. 형식이 아니면 `null`.
  *
  * host 가 IPv6 리터럴(`::1`)일 수 있어 port 는 **마지막** `:` 기준으로 자르고,
- * 숫자(1..65535)일 때만 인정한다. user 는 **첫** `@` 기준.
+ * 숫자(1..65535)일 때만 인정한다. user 는 **마지막** `@` 기준 — host 에는 `@` 가
+ * 올 수 없지만 AD/SSSD 로그인(`first.last@corp.com`)은 user 에 `@` 를 품는다.
  */
 export function parseAdHocAlias(alias: string): AdHocAliasParts | null {
-  const at = alias.indexOf("@");
+  const at = alias.lastIndexOf("@");
   if (at <= 0) return null;
   const user = alias.slice(0, at);
   const rest = alias.slice(at + 1);
