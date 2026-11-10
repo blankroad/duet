@@ -167,17 +167,43 @@ pub struct FileIndex {
     inner: RwLock<HashMap<String, CompactIndex>>,
     /// 디스크 캐시 디렉토리 (`<config>/duet/index` 또는 테스트용 임시 dir).
     cache_dir: PathBuf,
-    /// 전역 빌드가 도는 동안 끝난 폴더 재색인들. 그 빌드의 공개(부분·최종)는 재색인보다 먼저
-    /// 읽은 목록이라, 공개할 때마다 이것을 다시 덮어 써야 재색인 결과가 사라지지 않는다(SC-18).
-    reindexed: std::sync::Mutex<Vec<ReindexOverlay>>,
-    /// 진행 중인 전역 빌드 수 — 0 이면 재색인을 기록할 필요가 없다.
-    global_builds: std::sync::atomic::AtomicUsize,
+    /// 진행 중인 전역 빌드와, 그 빌드들보다 늦게 시작한 폴더 재색인 기록(SC-18).
+    overlays: std::sync::Mutex<OverlayState>,
 }
 
-/// 전역 빌드 도중 끝난 폴더 재색인 한 건.
+/// 전역 빌드의 공개(부분·최종)는 빌드 시작 뒤에 읽은 목록이지만, 그 사이 끝난 폴더 재색인보다
+/// 오래된 내용일 수 있다. 그래서 빌드보다 **늦게 시작한** 재색인은 기록해 두고 그 빌드가 공개할
+/// 때마다 다시 덮어 쓴다. 순서는 벽시계(ms 충돌) 대신 단조 증가 순번으로 정한다.
+#[derive(Default)]
+struct OverlayState {
+    next_seq: u64,
+    /// 진행 중인 전역 빌드들의 시작 순번.
+    active_builds: Vec<u64>,
+    /// 재색인 기록 — 진행 중인 빌드 중 이보다 먼저 시작한 것이 있을 때만 남는다.
+    reindexed: Vec<ReindexOverlay>,
+}
+
+impl OverlayState {
+    fn take_seq(&mut self) -> u64 {
+        let s = self.next_seq;
+        self.next_seq += 1;
+        s
+    }
+
+    /// 어떤 진행 중 빌드도 필요로 하지 않는 기록을 버린다 — 기록은 자기보다 먼저 시작한
+    /// 빌드에만 필요하다. 빌드가 없으면 전부 버린다.
+    fn prune(&mut self) {
+        match self.active_builds.iter().min().copied() {
+            Some(oldest) => self.reindexed.retain(|o| o.seq > oldest),
+            None => self.reindexed.clear(),
+        }
+    }
+}
+
+/// 폴더 재색인 한 건. `seq` 는 그 재색인이 폴더를 읽기 시작할 때의 순번.
 struct ReindexOverlay {
     root: PathBuf,
-    at_ms: i64,
+    seq: u64,
     fresh: CompactIndex,
 }
 
@@ -274,8 +300,7 @@ impl FileIndex {
         Arc::new(Self {
             inner: RwLock::new(HashMap::new()),
             cache_dir,
-            reindexed: std::sync::Mutex::new(Vec::new()),
-            global_builds: std::sync::atomic::AtomicUsize::new(0),
+            overlays: std::sync::Mutex::new(OverlayState::default()),
         })
     }
 
@@ -330,6 +355,8 @@ impl FileIndex {
     /// spawn_blocking 으로 격리.
     pub async fn build_local(self: &Arc<Self>, root: &Path) -> Result<usize, DuetError> {
         let root = root.to_path_buf();
+        // 읽기 시작 시점의 순번 — 이보다 늦게 시작한 전역 빌드는 이 재색인보다 새 내용을 읽는다.
+        let seq = self.overlay_state().take_seq();
         let (root2, builder) = tokio::task::spawn_blocking(move || -> Result<_, DuetError> {
             let b = walk_local(&root)?;
             Ok((root, b))
@@ -339,23 +366,25 @@ impl FileIndex {
         let fresh = builder.finish(now_ms());
         // 전역 인덱스가 있으면 그 root 아래 부분을 방금 읽은 목록으로 갈아 끼운다(SC-18).
         // 로컬 검색은 전역 인덱스를 우선 쓰므로, 안 그러면 [재색인] 결과가 검색에 안 보인다.
-        self.splice_into_global(&root2, &fresh).await;
+        self.splice_into_global(&root2, &fresh, seq).await;
         let key = index_key(&SourceId::Local, &root2);
         self.store_compact(key, fresh).await
     }
 
-    /// 전역 인덱스에서 `root` 아래 항목을 `fresh` 로 바꾼다. 전역 빌드가 진행 중이면 그 빌드의
-    /// 다음 공개에도 다시 적용되도록 기록한다. 전역이 아직 없으면 기록만 한다.
-    async fn splice_into_global(&self, root: &Path, fresh: &CompactIndex) {
-        use std::sync::atomic::Ordering;
+    /// 전역 인덱스에서 `root` 아래 항목을 `fresh` 로 바꾼다. 이 재색인보다 먼저 시작한 전역 빌드가
+    /// 진행 중이면 그 빌드의 다음 공개에도 다시 적용되도록 기록한다. 전역이 아직 없으면 기록만 한다.
+    /// 잠금 순서: `inner` → `overlays` (publish_global 과 같다).
+    async fn splice_into_global(&self, root: &Path, fresh: &CompactIndex, seq: u64) {
         let mut guard = self.inner.write().await;
-        if self.global_builds.load(Ordering::SeqCst) > 0 {
-            if let Ok(mut list) = self.reindexed.lock() {
-                // 같은 폴더·그 하위의 옛 기록은 이번 것으로 대체된다.
-                list.retain(|o| !o.root.starts_with(root));
-                list.push(ReindexOverlay {
+        {
+            let mut st = self.overlay_state();
+            if st.active_builds.iter().any(|&b| b < seq) {
+                // 같은 폴더·그 하위의 더 오래된 기록은 이번 것으로 대체된다.
+                st.reindexed
+                    .retain(|o| !(o.root.starts_with(root) && o.seq < seq));
+                st.reindexed.push(ReindexOverlay {
                     root: root.to_path_buf(),
-                    at_ms: now_ms(),
+                    seq,
                     fresh: fresh.clone(),
                 });
             }
@@ -401,10 +430,8 @@ impl FileIndex {
         roots: Vec<PathBuf>,
         on_progress: F,
     ) -> Result<usize, DuetError> {
-        use std::sync::atomic::Ordering;
         let this = self.clone();
-        let started = now_ms();
-        self.global_builds.fetch_add(1, Ordering::SeqCst);
+        let started = self.begin_global_build();
         let count = tokio::task::spawn_blocking(move || {
             let mut b = CompactBuilder::new();
             let mut count = 0u32;
@@ -414,39 +441,63 @@ impl FileIndex {
                 let mut tick = |builder: &CompactBuilder, c: u32| {
                     on_progress(c);
                     if c >= next_publish {
-                        this.publish_global(builder.snapshot(now_ms()), started, false);
+                        this.publish_global(builder.snapshot(now_ms()), started);
                         next_publish = next_publish.saturating_mul(2);
                     }
                 };
                 for root in &roots {
                     walk_into(&mut b, root, &mut count, &mut tick);
                     // 드라이브 1개 끝날 때마다 무조건 공개 — 작은/여러 드라이브도 즉시 전체-PC.
-                    this.publish_global(b.snapshot(now_ms()), started, false);
+                    this.publish_global(b.snapshot(now_ms()), started);
                 }
             }
             let final_idx = b.finish(now_ms());
             let c = final_idx.count();
-            this.publish_global(final_idx, started, true);
+            this.publish_global(final_idx, started);
             c
         })
         .await;
-        self.global_builds.fetch_sub(1, Ordering::SeqCst);
+        self.end_global_build(started);
         let count = count.map_err(|e| DuetError::Io(format!("global index join: {e}")))?;
         Ok(count)
     }
 
+    /// 재색인 기록 잠금. 독(poison)돼도 안의 값은 일관된 상태라 그대로 쓴다.
+    fn overlay_state(&self) -> std::sync::MutexGuard<'_, OverlayState> {
+        self.overlays
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// 전역 빌드 시작 — 시작 순번을 등록하고 돌려준다.
+    fn begin_global_build(&self) -> u64 {
+        let mut st = self.overlay_state();
+        let s = st.take_seq();
+        st.active_builds.push(s);
+        s
+    }
+
+    /// 전역 빌드 끝(성공·실패 모두) — 등록을 빼고 더는 필요 없는 재색인 기록을 버린다.
+    fn end_global_build(&self, started: u64) {
+        let mut st = self.overlay_state();
+        if let Some(i) = st.active_builds.iter().position(|&b| b == started) {
+            st.active_builds.swap_remove(i);
+        }
+        st.prune();
+    }
+
     /// 전역(전체 드라이브) 인덱스를 갱신 — 부분/최종 모두 같은 키로 덮어쓴다.
-    /// `started` 이후에 끝난 폴더 재색인은 이 빌드보다 새 목록이라 다시 덮어 쓴다(SC-18).
-    /// 최종 공개(`last`)에서는 이 빌드 시작 전 기록을 버린다 — 그 내용은 이 빌드가 이미 새로 읽었다.
+    /// 이 빌드(`started`)보다 늦게 시작한 폴더 재색인은 더 새 목록이라 순번 순서대로 다시 덮어 쓴다(SC-18).
     /// blocking 컨텍스트(spawn_blocking 내부)에서 호출 가능하도록 `blocking_write` 사용.
-    fn publish_global(&self, mut idx: CompactIndex, started: i64, last: bool) {
+    fn publish_global(&self, mut idx: CompactIndex, started: u64) {
         let mut guard = self.inner.blocking_write();
-        if let Ok(mut list) = self.reindexed.lock() {
-            for o in list.iter().filter(|o| o.at_ms >= started) {
+        {
+            let st = self.overlay_state();
+            let mut newer: Vec<&ReindexOverlay> =
+                st.reindexed.iter().filter(|o| o.seq > started).collect();
+            newer.sort_by_key(|o| o.seq);
+            for o in newer {
                 idx = splice_subtree(&idx, &o.root, &o.fresh);
-            }
-            if last {
-                list.retain(|o| o.at_ms >= started);
             }
         }
         guard.insert(GLOBAL_LOCAL_KEY.to_string(), idx);
@@ -1097,39 +1148,104 @@ mod ux_smoke_browse {
         assert_eq!(names(hits), vec!["fresh_needle", "other_needle"]);
     }
 
-    /// 전역 빌드 도중 재색인: 그 빌드가 나중에 공개하는 (재색인 전에 읽은) 스냅샷이
-    /// 재색인 결과를 지우면 안 된다(Sol R1 지적). publish_global 은 blocking 이라 동기 테스트.
-    #[test]
-    fn global_publish_during_build_keeps_completed_reindex() {
-        use std::sync::atomic::Ordering;
-        let rt = tokio::runtime::Builder::new_current_thread()
+    /// 동기 테스트용 — publish_global 은 blocking 이라 async 테스트 안에서 부를 수 없다.
+    fn rt() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-            .unwrap();
-        let dir = tempfile::Builder::new()
+            .unwrap()
+    }
+
+    fn hits(rt: &tokio::runtime::Runtime, idx: &FileIndex, dir: &Path, pat: &str) -> usize {
+        rt.block_on(idx.query_global_local(dir, pat, &SearchOpts::default()))
+            .unwrap()
+            .len()
+    }
+
+    fn plain_dir() -> tempfile::TempDir {
+        tempfile::Builder::new()
             .prefix("duetidx")
             .tempdir()
-            .unwrap();
+            .unwrap()
+    }
+
+    /// 전역 빌드 도중 재색인: 그 빌드가 나중에 공개하는 (재색인 전에 읽은) 스냅샷이
+    /// 재색인 결과를 지우면 안 된다(Sol R1-02).
+    #[test]
+    fn global_publish_during_build_keeps_completed_reindex() {
+        let rt = rt();
+        let dir = plain_dir();
         let cache = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("old_needle"), b"x").unwrap();
         let idx = FileIndex::new(cache.path().into());
-        let started = now_ms();
-        idx.global_builds.fetch_add(1, Ordering::SeqCst);
-        let stale = walk_local(dir.path()).unwrap().finish(started);
-        idx.publish_global(stale.clone(), started, false);
+        let a = idx.begin_global_build();
+        let stale = walk_local(dir.path()).unwrap().finish(0);
+        idx.publish_global(stale.clone(), a);
         std::fs::write(dir.path().join("new_needle"), b"x").unwrap();
         rt.block_on(idx.build_local(dir.path())).unwrap();
-        let count = |idx: &Arc<FileIndex>| {
-            rt.block_on(idx.query_global_local(dir.path(), "new_needle", &SearchOpts::default()))
-                .unwrap()
-                .len()
-        };
-        assert_eq!(count(&idx), 1);
-        idx.publish_global(stale.clone(), started, false);
-        assert_eq!(count(&idx), 1, "partial publish must re-apply the reindex");
-        idx.publish_global(stale, started, true);
-        assert_eq!(count(&idx), 1, "final publish must re-apply the reindex");
-        idx.global_builds.fetch_sub(1, Ordering::SeqCst);
+        assert_eq!(hits(&rt, &idx, dir.path(), "new_needle"), 1);
+        idx.publish_global(stale.clone(), a);
+        assert_eq!(
+            hits(&rt, &idx, dir.path(), "new_needle"),
+            1,
+            "partial publish"
+        );
+        idx.publish_global(stale, a);
+        assert_eq!(
+            hits(&rt, &idx, dir.path(), "new_needle"),
+            1,
+            "final publish"
+        );
+        idx.end_global_build(a);
+        assert!(
+            idx.overlay_state().reindexed.is_empty(),
+            "no build left → no records"
+        );
+    }
+
+    /// Sol R2-01: 늦게 시작한 빌드 B 가 먼저 끝나도, 아직 도는 옛 빌드 A 에 필요한 기록은 남는다.
+    #[test]
+    fn newer_build_finishing_first_keeps_records_for_older_build() {
+        let rt = rt();
+        let dir = plain_dir();
+        let cache = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("old_needle"), b"x").unwrap();
+        let idx = FileIndex::new(cache.path().into());
+        let a = idx.begin_global_build();
+        let stale = walk_local(dir.path()).unwrap().finish(0);
+        idx.publish_global(stale.clone(), a);
+        std::fs::write(dir.path().join("new_needle"), b"x").unwrap();
+        rt.block_on(idx.build_local(dir.path())).unwrap();
+        let b = idx.begin_global_build();
+        let fresh = walk_local(dir.path()).unwrap().finish(0);
+        idx.publish_global(fresh, b);
+        idx.end_global_build(b);
+        idx.publish_global(stale, a);
+        assert_eq!(hits(&rt, &idx, dir.path(), "new_needle"), 1);
+        idx.end_global_build(a);
+    }
+
+    /// Sol R2-02: 빌드가 끝난 뒤 남은 옛 기록이 그 뒤의 재색인·새 빌드를 덮으면 안 된다
+    /// (벽시계 같은 ms 라도 순번으로 구분).
+    #[test]
+    fn finished_build_records_cannot_override_later_reindex() {
+        let rt = rt();
+        let dir = plain_dir();
+        let cache = tempfile::tempdir().unwrap();
+        let idx = FileIndex::new(cache.path().into());
+        let a = idx.begin_global_build();
+        idx.publish_global(CompactBuilder::new().finish(0), a);
+        std::fs::write(dir.path().join("one_needle"), b"x").unwrap();
+        rt.block_on(idx.build_local(dir.path())).unwrap();
+        idx.end_global_build(a);
+        std::fs::remove_file(dir.path().join("one_needle")).unwrap();
+        std::fs::write(dir.path().join("two_needle"), b"x").unwrap();
+        rt.block_on(idx.build_local(dir.path())).unwrap();
+        let b = idx.begin_global_build();
+        idx.publish_global(walk_local(dir.path()).unwrap().finish(0), b);
+        idx.end_global_build(b);
+        assert_eq!(hits(&rt, &idx, dir.path(), "two_needle"), 1);
+        assert_eq!(hits(&rt, &idx, dir.path(), "one_needle"), 0);
     }
 
     #[test]
