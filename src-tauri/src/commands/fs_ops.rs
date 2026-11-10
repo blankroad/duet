@@ -1660,24 +1660,20 @@ pub async fn fs_extract_here(
         queue: queue.inner().clone(),
         app,
     };
-    // 원본 경로 — fs.join 으로 (§7). 확인 못 한 항목은 아래 검증에서 거부된다.
-    let mut protect = Vec::with_capacity(archives.len());
-    for a in &archives {
-        if let Ok(fs) = fs_for(&a.location.source, &deps.pool).await {
-            protect.push(fs.join(&a.location.path, &a.name));
-        }
-    }
     let mut out = Vec::with_capacity(archives.len());
-    for archive in archives {
+    for archive in archives.iter().cloned() {
+        // 같은 일괄의 원본들은 서로의 Replace 에서 보호 (BE 가 다시 확인한 것만).
         let checked = match fs_for(&archive.location.source, &deps.pool).await {
-            Ok(fs) => archive_here::check_extract_here(&*fs, &archive).await,
+            Ok(fs) => match archive_here::check_extract_here(&*fs, &archive).await {
+                Ok(()) => Ok(archive_here::protected_sources(&*fs, &archive, &archives).await),
+                Err(e) => Err(e),
+            },
             Err(e) => Err(e),
         };
         out.push(match checked {
-            Ok(()) => ExtractDispatch {
+            Ok(protect) => ExtractDispatch {
                 task_id: Some(
-                    enqueue_extract_here(&deps, archive.clone(), policy, None, protect.clone())
-                        .await,
+                    enqueue_extract_here(&deps, archive.clone(), policy, None, protect).await,
                 ),
                 archive,
                 error: None,
@@ -1693,7 +1689,9 @@ pub async fn fs_extract_here(
 }
 
 /// 암호 아카이브의 "여기에 풀기" 재시도 — 같은 정책으로 작업 하나를 다시 건다.
-/// 암호는 command 인자로만 오가고 영구화하지 않는다 (CLAUDE.md §5).
+/// `batch` = 처음 일괄의 아카이브 목록 — 형제 원본을 계속 Replace 에서 보호한다(BE 가
+/// 같은 폴더의 일반 파일인지 다시 확인). 암호는 command 인자로만 오가고 영구화하지 않는다
+/// (CLAUDE.md §5).
 #[tauri::command]
 #[specta::specta]
 #[allow(clippy::too_many_arguments)]
@@ -1701,6 +1699,7 @@ pub async fn fs_extract_here_retry(
     archive: EntryRef,
     policy: ExtractConflict,
     password: Option<String>,
+    batch: Vec<EntryRef>,
     pool: tauri::State<'_, Arc<ConnectionPool>>,
     settings: tauri::State<'_, Arc<SettingsStore>>,
     journal: tauri::State<'_, Arc<Journal>>,
@@ -1716,7 +1715,8 @@ pub async fn fs_extract_here_retry(
     };
     let fs = fs_for(&archive.location.source, &deps.pool).await?;
     archive_here::check_extract_here(&*fs, &archive).await?;
-    Ok(enqueue_extract_here(&deps, archive, policy, password, Vec::new()).await)
+    let protect = archive_here::protected_sources(&*fs, &archive, &batch).await;
+    Ok(enqueue_extract_here(&deps, archive, policy, password, protect).await)
 }
 
 /// extract-here 작업이 쓰는 앱 상태.
