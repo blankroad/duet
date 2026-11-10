@@ -836,12 +836,16 @@ async fn leftover_staging_is_reported_in_the_summary_even_on_error() {
         )
         .await;
     assert!(out.result.is_err());
-    let left = out.summary.leftover_staging.expect("leftover reported");
+    assert!(out.summary.is_notable());
+    let left = out
+        .summary
+        .leftover_staging
+        .as_ref()
+        .expect("leftover reported");
     assert!(left
         .file_name()
         .unwrap()
         .to_string_lossy()
         .starts_with(STAGING_PREFIX));
     assert!(left.is_dir(), "left in place, not deleted");
-    assert!(out.summary.is_notable());
 }
