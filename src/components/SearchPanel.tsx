@@ -342,8 +342,10 @@ export function SearchPanel({
             <button
               key={`${hit.location.path}/${hit.name}`}
               type="button"
+              // 새 검색이 도는 동안 보이는 결과는 옛 검색어 것 — Enter 와 같이 클릭도 막는다.
+              disabled={status === "searching"}
               onClick={() => onPickHit(hit)}
-              className="flex w-full items-center gap-2 px-3 py-1 text-left text-base hover:bg-border"
+              className="flex w-full items-center gap-2 px-3 py-1 text-left text-base hover:bg-border disabled:opacity-50 disabled:hover:bg-transparent"
             >
               <span className="font-mono">{hit.name}</span>
               <span className="ml-auto min-w-0 truncate text-meta text-fg-muted">

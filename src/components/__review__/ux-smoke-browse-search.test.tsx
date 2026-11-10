@@ -97,21 +97,36 @@ describe("mocked IPC search workflows", () => {
       expect(pick).toHaveBeenCalledWith(second);
     },
   );
-  it.fails(
-    "ux-smoke browse-s01 changing query must prevent clicking stale results",
-    async () => {
-      const pick = vi.fn();
-      render(<SearchPanel onPickHit={pick} />);
-      await tick();
-      vi.mocked(commands.indexSearch).mockReturnValue(new Promise(() => {}));
-      fireEvent.change(screen.getByRole("textbox"), {
-        target: { value: "new" },
-      });
-      expect(useSearch.getState().status).toBe("searching");
-      fireEvent.click(screen.getByRole("button", { name: /old.txt/ }));
-      expect(pick).not.toHaveBeenCalled();
-    },
-  );
+  it("ux-smoke browse-s01 changing query must prevent clicking stale results", async () => {
+    const pick = vi.fn();
+    render(<SearchPanel onPickHit={pick} />);
+    await tick();
+    vi.mocked(commands.indexSearch).mockReturnValue(new Promise(() => {}));
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "new" },
+    });
+    expect(useSearch.getState().status).toBe("searching");
+    fireEvent.click(screen.getByRole("button", { name: /old.txt/ }));
+    expect(pick).not.toHaveBeenCalled();
+  });
+
+  it("browse-s01: results become clickable again once the new search finishes", async () => {
+    const pick = vi.fn();
+    render(<SearchPanel onPickHit={pick} />);
+    await tick();
+    const fresh = { ...hit, name: "new.txt" };
+    vi.mocked(commands.indexSearch).mockResolvedValue({
+      status: "ok",
+      data: [fresh],
+    });
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "new" },
+    });
+    await tick();
+    expect(useSearch.getState().status).toBe("done");
+    fireEvent.click(screen.getByRole("button", { name: /new.txt/ }));
+    expect(pick).toHaveBeenCalledWith(fresh);
+  });
 
   it.fails.each([local, remote])(
     "ux-smoke browse-s02 closing active content search cancels backend at $source.kind",
