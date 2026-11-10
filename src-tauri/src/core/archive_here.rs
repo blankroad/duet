@@ -97,6 +97,23 @@ impl ExtractHereSummary {
     }
 }
 
+/// 이 아카이브를 여기에 풀 수 있는지 (작업을 걸기 전 검사) — 로컬이고 풀 수 있는 아카이브.
+pub async fn check_extract_here(fs: &dyn FileSystem, archive: &EntryRef) -> Result<(), DuetError> {
+    check_here(fs, archive).await.map(|_| ())
+}
+
+async fn check_here(
+    fs: &dyn FileSystem,
+    archive: &EntryRef,
+) -> Result<archive::ArchiveFormat, DuetError> {
+    if !matches!(archive.location.source, SourceId::Local) {
+        return Err(DuetError::NotSupported(
+            "extract here is available for archives on this computer only".into(),
+        ));
+    }
+    archive::check_extractable(fs, archive).await
+}
+
 /// 아카이브 하나를 그 폴더에 바로 푼다. `protect` = Replace 로도 건드리지 않을 경로
 /// (같은 일괄의 다른 아카이브). 이 아카이브 자신은 늘 보호된다.
 pub async fn extract_here_execute(
@@ -108,12 +125,7 @@ pub async fn extract_here_execute(
     ctx: &OpCtx,
     cancel: CancellationToken,
 ) -> Result<(JournalEntry, UnpackReport, ExtractHereSummary), DuetError> {
-    if !matches!(archive.location.source, SourceId::Local) {
-        return Err(DuetError::NotSupported(
-            "extract here is available for archives on this computer only".into(),
-        ));
-    }
-    let format = archive::check_extractable(fs, &archive).await?;
+    let format = check_here(fs, &archive).await?;
     let dir = archive.location.path.clone();
     let archive_path = fs.join(&dir, &archive.name);
     let staging = fs.join(
