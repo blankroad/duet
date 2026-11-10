@@ -7,36 +7,33 @@ import "@/i18n";
 
 afterEach(cleanup);
 
-it.fails(
-  "browse-08: external and relative markdown links cancel default app navigation",
-  () => {
-    const view = render(
-      <PreviewContent
-        name="R2.md"
-        text="[outside](https://example.org/r2) [relative](sibling.md#next)"
-        truncated={false}
-      />,
-    );
-    const links = view.container.querySelectorAll("a");
-    expect(links.length).toBe(2);
-    const observations: boolean[] = [];
-    const observe = (event: Event) => {
-      observations.push(event.defaultPrevented);
-      event.preventDefault();
-    };
-    document.addEventListener("click", observe);
-    try {
-      for (const link of links)
-        link.dispatchEvent(
-          new MouseEvent("click", { bubbles: true, cancelable: true }),
-        );
-    } finally {
-      document.removeEventListener("click", observe);
-    }
-    expect(links[1]?.getAttribute("href")).toBe("sibling.md#next");
-    expect(observations).toEqual([true, true]);
-  },
-);
+it("browse-08: external and relative markdown links cancel default app navigation", () => {
+  const view = render(
+    <PreviewContent
+      name="R2.md"
+      text="[outside](https://example.org/r2) [relative](sibling.md#next)"
+      truncated={false}
+    />,
+  );
+  const links = view.container.querySelectorAll("a");
+  expect(links.length).toBe(2);
+  const observations: boolean[] = [];
+  const observe = (event: Event) => {
+    observations.push(event.defaultPrevented);
+    event.preventDefault();
+  };
+  document.addEventListener("click", observe);
+  try {
+    for (const link of links)
+      link.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true }),
+      );
+  } finally {
+    document.removeEventListener("click", observe);
+  }
+  expect(links[1]?.getAttribute("href")).toBe("sibling.md#next");
+  expect(observations).toEqual([true, true]);
+});
 
 it("browse-07: independently measure prose, CSV and markdown rendering", () => {
   const length = 256 * 1024;

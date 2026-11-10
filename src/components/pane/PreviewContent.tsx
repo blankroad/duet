@@ -1,6 +1,6 @@
-import { useMemo } from "react";
+import { useMemo, type ComponentPropsWithoutRef, type MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import hljs from "highlight.js/lib/common";
@@ -17,6 +17,32 @@ export interface PreviewContentProps {
   /** head 만 읽은 큰 파일이면 true — 하단에 안내. */
   truncated: boolean;
 }
+
+/** 링크 기본 동작(앱 창 이동) 차단 — 창 장식이 없는 앱이라 돌아올 방법이 없다. */
+function stopNavigation(e: MouseEvent<HTMLAnchorElement>) {
+  e.preventDefault();
+}
+
+/**
+ * 마크다운 링크는 표시만 하고 따라가지 않는다. 앱 webview 안에서 `<a href>` 를
+ * 그대로 두면 클릭 한 번에 앱 화면 자체가 그 주소로 바뀐다. 외부 브라우저로
+ * 여는 백엔드 명령이 아직 없어 클릭은 무시하고, 주소는 툴팁으로 보여 준다.
+ */
+function MarkdownLink({
+  node: _node,
+  ...props
+}: ComponentPropsWithoutRef<"a"> & { node?: unknown }) {
+  return (
+    <a
+      {...props}
+      title={props.title ?? props.href}
+      onClick={stopNavigation}
+      onAuxClick={stopNavigation}
+    />
+  );
+}
+
+const MARKDOWN_COMPONENTS: Components = { a: MarkdownLink };
 
 /** 확장자 → highlight.js 언어 id (없으면 auto-detect). */
 const EXT_LANG: Record<string, string> = {
@@ -110,6 +136,7 @@ export function PreviewContent({ name, text, truncated }: PreviewContentProps) {
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             rehypePlugins={[rehypeHighlight]}
+            components={MARKDOWN_COMPONENTS}
           >
             {text}
           </ReactMarkdown>
