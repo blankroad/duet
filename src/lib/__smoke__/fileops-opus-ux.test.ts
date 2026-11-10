@@ -411,39 +411,28 @@ describe("error toasts for common refusals (ko)", () => {
     await i18n.changeLanguage("ko");
   });
 
-  it.fails(
-    "ux-fileops-02: rename onto an existing name reads as 'already exists', not raw English",
-    () => {
-      const why = explainError({
-        kind: "Io",
-        message: "target exists: /w/b.txt",
-      });
-      expect(why.text).not.toMatch(/target exists/i);
-      expect(why.text).toContain(
-        i18n.t("errors.reason.exists", { defaultValue: "" }).slice(0, 4),
-      );
-    },
-  );
+  // Backend shapes from core/ops.rs rename_entry / batch_rename_execute.
+  it("ux-fileops-02: rename onto an existing name reads as 'already exists', not raw English", () => {
+    const why = explainError({ kind: "Io", message: "already exists: b.txt" });
+    expect(why.text).not.toMatch(/already exists/i);
+    expect(why.text).toContain(i18n.t("errors.reason.exists"));
+  });
 
-  it.fails(
-    "ux-fileops-02: batch rename collision is explained in Korean",
-    () => {
-      const why = explainError({
-        kind: "Io",
-        message: "batch rename: name collision — resolve before applying",
-      });
-      expect(why.text).not.toMatch(/[A-Za-z]{4,}/);
-    },
-  );
+  it("ux-fileops-02: batch rename collision is explained in Korean", () => {
+    const why = explainError({
+      kind: "Io",
+      message: "already exists: photo.jpg",
+    });
+    expect(why.text).not.toMatch(/already exists/i);
+    expect(why.text).toContain(i18n.t("errors.reason.exists"));
+  });
 
-  it.fails(
-    "ux-fileops-02: batch rename with no changes is explained in Korean",
-    () => {
-      const why = explainError({
-        kind: "Io",
-        message: "batch rename: nothing to rename",
-      });
-      expect(why.text).not.toMatch(/[A-Za-z]{4,}/);
-    },
-  );
+  it("ux-fileops-02: batch rename with no changes is explained in Korean", () => {
+    const why = explainError({
+      kind: "Io",
+      message: "batch rename: every new name equals the current name",
+    });
+    expect(why.text).toBe(i18n.t("errors.reason.renameUnchanged"));
+    expect(why.text).not.toMatch(/[A-Za-z]{4,}/);
+  });
 });

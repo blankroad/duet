@@ -196,7 +196,11 @@ pub(crate) async fn rename_no_replace(
 /// 두 이름이 NFC+소문자로 같고(철자만 다름), 폴더 목록에 `to` 이름이 **정확히** 없고 `from` 이름은 있으며,
 /// `to` 로 본 메타데이터가 `from` 과 같으면(종류·크기·수정시각) 자기 자신으로 본다.
 /// 대소문자·정규화 구분 볼륨에서 둘이 따로 있으면 목록에 둘 다 보여 점유로 판정된다.
-async fn self_alias(fs: &dyn FileSystem, from: &Path, to: &Path) -> Result<bool, DuetError> {
+pub(crate) async fn self_alias(
+    fs: &dyn FileSystem,
+    from: &Path,
+    to: &Path,
+) -> Result<bool, DuetError> {
     let (Some(dir), Some(from_name), Some(to_name)) =
         (from.parent(), from.file_name(), to.file_name())
     else {

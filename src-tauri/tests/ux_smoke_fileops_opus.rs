@@ -252,10 +252,9 @@ async fn rename_onto_existing_name_is_refused_and_keeps_both() {
     assert_eq!(std::fs::read(dir.join("b.txt")).unwrap(), b"B");
 }
 
-/// UX: the refusal should be a structured "already exists" error so the toast can say
-/// so in the user's language. Today it is `Io("target exists: <path>")`.
+/// UX: the refusal is an "already exists" error so the toast can say so in the user's
+/// language (it used to be `Io("target exists: <path>")`).
 #[tokio::test]
-#[ignore = "ux-fileops-02 repro"]
 async fn rename_onto_existing_name_reports_already_exists_kind() {
     let env = setup().await;
     let fs = LocalFs::new();

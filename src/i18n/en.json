@@ -1418,6 +1418,7 @@
       "linkLoop": "A symbolic link loops back on itself, so it can't be followed. Check the links.",
       "zipLargeFile": "A file over 4 GB can't be added to this zip. Use another format such as tar.gz.",
       "repackEmpty": "The archive folder is empty, so the archive can't be updated. Keep at least one item.",
+      "renameUnchanged": "The rule doesn't change any of the names.",
       "remoteZipUnsupported": "The server's unzip can't extract this zip (for example, AES encryption). Copy it to this PC and extract it there.",
       "remoteExit": "The server command ended with an error (exit code {{code}}). It may have only partly finished, so check the result.",
       "connRefused": "The server refused the connection. Check that the SSH server is running and the port is correct.",

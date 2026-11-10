@@ -3631,10 +3631,7 @@ pub async fn rename(
     fs.validate_new_name(&new_name)?;
     let from = fs.join(&target.location.path, &target.name);
     let to = fs.join(&target.location.path, &new_name);
-    if fs.metadata(&to).await.is_ok() {
-        return Err(DuetError::Io(format!("target exists: {}", to.display())));
-    }
-    fs.rename(&from, &to).await?;
+    rename_entry(fs, &from, &to, &new_name).await?;
     ctx.journal
         .push(
             OpKind::Rename {
@@ -3649,6 +3646,70 @@ pub async fn rename(
             },
         )
         .await
+}
+
+/// 이름 변경 한 건 — 덮어쓰지 않는다.
+///
+/// - 새 이름 자리가 비었으면 그대로 rename.
+/// - 그 자리에 보이는 것이 **같은 항목의 다른 철자**(대소문자·정규화만 다름 — 대소문자 무시
+///   볼륨의 `a.txt`→`A.txt`, fileops-08)면 임시 이름을 거쳐 두 단계로 바꾼다. 일부 FS 는
+///   철자만 다른 rename 을 무시하거나 거부하기 때문이다.
+/// - 다른 항목이 있으면(깨진 링크 포함) `already exists` — 프론트가 "같은 이름이 이미 있음"으로
+///   설명한다.
+async fn rename_entry(
+    fs: &dyn FileSystem,
+    from: &std::path::Path,
+    to: &std::path::Path,
+    new_name: &str,
+) -> Result<(), DuetError> {
+    match fs.symlink_metadata(to).await {
+        Err(DuetError::NotFound(_)) => fs.rename(from, to).await,
+        Err(e) => Err(e),
+        Ok(_) => {
+            if !crate::core::undo::self_alias(fs, from, to).await? {
+                return Err(DuetError::Io(format!("already exists: {new_name}")));
+            }
+            rename_via_temp(fs, from, to).await
+        }
+    }
+}
+
+/// 철자만 바꾸는 rename — `from` → 임시 이름 → `to`. 두 번째 단계가 실패하면 임시 이름에서
+/// 원래 이름으로 되돌린다. 되돌리기까지 실패하면 항목이 남은 임시 위치를 오류에 싣는다.
+async fn rename_via_temp(
+    fs: &dyn FileSystem,
+    from: &std::path::Path,
+    to: &std::path::Path,
+) -> Result<(), DuetError> {
+    let dir = parent_for(&fs.source_id(), from)
+        .ok_or_else(|| DuetError::Io(format!("no parent folder: {}", from.display())))?;
+    let mut tmp = None;
+    for _ in 0..4 {
+        let candidate = fs.join(
+            &dir,
+            &format!(".duet-rename-{}", uuid::Uuid::new_v4().simple()),
+        );
+        match fs.symlink_metadata(&candidate).await {
+            Err(DuetError::NotFound(_)) => {
+                tmp = Some(candidate);
+                break;
+            }
+            Ok(_) => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    let tmp = tmp.ok_or_else(|| DuetError::Io("no free temporary name for rename".into()))?;
+    fs.rename(from, &tmp).await?;
+    if let Err(e) = fs.rename(&tmp, to).await {
+        if let Err(re) = fs.rename(&tmp, from).await {
+            return Err(DuetError::Io(format!(
+                "rename failed ({e}); original preserved at backup {} (rollback failed: {re})",
+                tmp.display()
+            )));
+        }
+        return Err(e);
+    }
+    Ok(())
 }
 
 // === Batch rename ===
@@ -3827,7 +3888,20 @@ async fn compute_batch_mapping(
         } else if dup_in_batch || overlaps_selected_old {
             true
         } else {
-            fs.metadata(&fs.join(&location.path, new)).await.is_ok() // 선택 밖 기존 파일
+            // 선택 밖 기존 항목. 단 그 이름이 이 항목 자신의 다른 철자(대소문자 무시 볼륨의
+            // `photo.JPG`→`photo.jpg`)면 충돌이 아니다(fileops-08).
+            let to = fs.join(&location.path, new);
+            match fs.symlink_metadata(&to).await {
+                Err(DuetError::NotFound(_)) => false,
+                Err(_) => true,
+                Ok(_) => {
+                    let from = fs.join(&location.path, old);
+                    !matches!(
+                        crate::core::undo::self_alias(fs, &from, &to).await,
+                        Ok(true)
+                    )
+                }
+            }
         };
         out.push((old.clone(), new.clone(), collision));
     }
@@ -3888,10 +3962,10 @@ pub async fn batch_rename_execute(
     let location = validate_same_dir(&items)?;
     let names: Vec<String> = items.iter().map(|it| it.name.clone()).collect();
     let mapping = compute_batch_mapping(fs, &location, &names, &rule).await;
-    if mapping.iter().any(|(_, _, c)| *c) {
-        return Err(DuetError::Io(
-            "batch rename: name collision — resolve before applying".into(),
-        ));
+    if let Some((_, new, _)) = mapping.iter().find(|(_, _, c)| *c) {
+        // 무효한 이름이면 그 사유(검증 오류)를, 아니면 "이미 있음"을 — 프론트가 문장으로 설명한다.
+        fs.validate_new_name(new)?;
+        return Err(DuetError::Io(format!("already exists: {new}")));
     }
     // no-op(이름 동일) 제외하고 실제 변경 대상만 추림.
     let mut froms = Vec::new();
@@ -3903,14 +3977,22 @@ pub async fn batch_rename_execute(
         }
     }
     if froms.is_empty() {
-        return Err(DuetError::Io("batch rename: nothing to rename".into()));
+        return Err(DuetError::Io(
+            "batch rename: every new name equals the current name".into(),
+        ));
     }
     // 단일패스 rename (new==old 겹침을 위에서 차단했으므로 순서 무관하게 안전).
-    // 중간 실패 시 성공분을 역순 롤백.
+    // 철자만 바꾸는 항목은 rename_entry 가 임시 이름을 거친다. 중간 실패 시 성공분을 역순 롤백.
     for i in 0..froms.len() {
-        if let Err(e) = fs.rename(&froms[i], &tos[i]).await {
+        let new_name = file_name_for(&location.source, &tos[i])
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if let Err(e) = rename_entry(fs, &froms[i], &tos[i], &new_name).await {
             for j in (0..i).rev() {
-                let _ = fs.rename(&tos[j], &froms[j]).await;
+                let old_name = file_name_for(&location.source, &froms[j])
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let _ = rename_entry(fs, &tos[j], &froms[j], &old_name).await;
             }
             return Err(e);
         }
@@ -6780,20 +6862,82 @@ mod review_fileops_sol {
         assert_eq!(std::fs::read(d.join("a/old")).unwrap(), b"OLD");
     }
 
+    /// 폴더 목록에 보이는 실제 이름들(철자 그대로).
+    fn listed(dir: &Path) -> Vec<String> {
+        let mut v: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        v.sort();
+        v
+    }
+
+    /// fileops-08: 대소문자 무시 볼륨에서 `a.txt`→`A.txt` 가 된다 — 목록 철자, 내용, 임시 이름
+    /// 없음, journal 1건, 되돌리기로 원래 철자. 대소문자 구분 볼륨에선 건너뛴다(다른 테스트가 봄).
     #[tokio::test]
-    #[ignore = "fileops-08 repro"]
     async fn c06_case_only_rename() {
         let t = tempfile::tempdir().unwrap();
         let c = ctx(t.path()).await;
-        std::fs::write(t.path().join("a.txt"), b"safe").unwrap();
-        if !t.path().join("A.txt").exists() {
+        let d = t.path().join("d");
+        std::fs::create_dir(&d).unwrap();
+        std::fs::write(d.join("a.txt"), b"safe").unwrap();
+        if !d.join("A.txt").exists() {
             eprintln!("SKIP case-only repro: case-sensitive volume");
             return;
         }
-        let r = rename(&LocalFs, target(t.path(), "a.txt"), "A.txt".into(), &c).await;
-        eprintln!("C06 case-only={r:?}");
-        assert!(r.is_ok(), "case-only rename rejected as target exists");
+        let entry = rename(&LocalFs, target(&d, "a.txt"), "A.txt".into(), &c)
+            .await
+            .expect("case-only rename is accepted");
+        assert_eq!(listed(&d), vec!["A.txt"], "listing shows the new spelling");
+        assert_eq!(std::fs::read(d.join("A.txt")).unwrap(), b"safe");
+        assert_eq!(c.journal.history(10).await.len(), 1, "one logical rename");
+        let pool = Arc::new(crate::services::connection_pool::ConnectionPool::new());
+        let outcome = crate::core::undo::execute_undo(&entry, &pool).await;
+        assert!(
+            matches!(outcome.kind, crate::core::undo::UndoKind::Ok),
+            "{outcome:?}"
+        );
+        assert_eq!(listed(&d), vec!["a.txt"], "undo restores the spelling");
+        assert_eq!(std::fs::read(d.join("a.txt")).unwrap(), b"safe");
     }
+
+    /// 철자만 다른 **다른** 파일이 실제로 있으면(대소문자 구분 볼륨) 덮어쓰지 않고 거부한다.
+    #[tokio::test]
+    async fn c06_case_variant_of_other_file_is_refused() {
+        let t = tempfile::tempdir().unwrap();
+        let c = ctx(t.path()).await;
+        std::fs::write(t.path().join("a.txt"), b"lower").unwrap();
+        if t.path().join("A.txt").exists() {
+            eprintln!("SKIP: case-insensitive volume cannot hold both");
+            return;
+        }
+        std::fs::write(t.path().join("A.txt"), b"upper").unwrap();
+        let r = rename(&LocalFs, target(t.path(), "a.txt"), "A.txt".into(), &c).await;
+        assert!(
+            matches!(&r, Err(DuetError::Io(m)) if m.contains("already exists")),
+            "{r:?}"
+        );
+        assert_eq!(std::fs::read(t.path().join("a.txt")).unwrap(), b"lower");
+        assert_eq!(std::fs::read(t.path().join("A.txt")).unwrap(), b"upper");
+    }
+
+    /// 다른 이름의 기존 파일 위로 rename — 거부, 둘 다 그대로, 프론트가 설명할 수 있는 문구.
+    #[tokio::test]
+    async fn c06_rename_onto_other_file_reports_already_exists() {
+        let t = tempfile::tempdir().unwrap();
+        let c = ctx(t.path()).await;
+        std::fs::write(t.path().join("a.txt"), b"A").unwrap();
+        std::fs::write(t.path().join("b.txt"), b"B").unwrap();
+        let r = rename(&LocalFs, target(t.path(), "a.txt"), "b.txt".into(), &c).await;
+        assert!(
+            matches!(&r, Err(DuetError::Io(m)) if m == "already exists: b.txt"),
+            "{r:?}"
+        );
+        assert_eq!(std::fs::read(t.path().join("a.txt")).unwrap(), b"A");
+        assert_eq!(std::fs::read(t.path().join("b.txt")).unwrap(), b"B");
+        assert!(c.journal.history(10).await.is_empty());
+    }
+
     #[tokio::test]
     async fn c06_rename_must_use_filesystem_name_validation() {
         let t = tempfile::tempdir().unwrap();
@@ -6838,12 +6982,17 @@ mod review_fileops_sol {
             "temporary copy path silently clobbers unrelated user data even under Skip"
         );
     }
+    /// fileops-08: 확장자 소문자화 일괄 이름 바꾸기 — 미리보기 충돌 없음, 실행 후 목록 철자·
+    /// 내용, 임시 이름 없음, journal 1건, 되돌리기로 원래 철자.
     #[tokio::test]
-    #[ignore = "fileops-08 repro"]
     async fn c07_case_only_batch_rename() {
         let t = tempfile::tempdir().unwrap();
-        std::fs::write(t.path().join("photo.JPG"), b"safe").unwrap();
-        if !t.path().join("photo.jpg").exists() {
+        let c = ctx(t.path()).await;
+        let d = t.path().join("d");
+        std::fs::create_dir(&d).unwrap();
+        std::fs::write(d.join("photo.JPG"), b"one").unwrap();
+        std::fs::write(d.join("scan.PNG"), b"two").unwrap();
+        if !d.join("photo.jpg").exists() {
             eprintln!("SKIP batch-case repro: case-sensitive volume");
             return;
         }
@@ -6852,15 +7001,52 @@ mod review_fileops_sol {
             target_ext: true,
             ..Default::default()
         };
-        let p = batch_rename_preview(&LocalFs, vec![target(t.path(), "photo.JPG")], rule)
+        let items = vec![target(&d, "photo.JPG"), target(&d, "scan.PNG")];
+        let p = batch_rename_preview(&LocalFs, items.clone(), rule.clone())
             .await
             .unwrap();
-        eprintln!("C07 case-only preview={p:?}");
+        assert!(!p.has_collision, "{p:?}");
+        let entry = batch_rename_execute(&LocalFs, items, rule, &c)
+            .await
+            .expect("case-only batch rename");
+        assert_eq!(listed(&d), vec!["photo.jpg", "scan.png"]);
+        assert_eq!(std::fs::read(d.join("photo.jpg")).unwrap(), b"one");
+        assert_eq!(std::fs::read(d.join("scan.png")).unwrap(), b"two");
+        assert_eq!(c.journal.history(10).await.len(), 1);
+        let pool = Arc::new(crate::services::connection_pool::ConnectionPool::new());
+        let outcome = crate::core::undo::execute_undo(&entry, &pool).await;
         assert!(
-            !p.has_collision,
-            "own file is marked as collision on case-insensitive volume"
+            matches!(outcome.kind, crate::core::undo::UndoKind::Ok),
+            "{outcome:?}"
         );
+        assert_eq!(listed(&d), vec!["photo.JPG", "scan.PNG"]);
     }
+
+    /// 일괄 이름 바꾸기가 선택 밖 **다른** 기존 파일과 겹치면 여전히 충돌이다.
+    #[tokio::test]
+    async fn c07_batch_onto_other_existing_file_stays_blocked() {
+        let t = tempfile::tempdir().unwrap();
+        let c = ctx(t.path()).await;
+        std::fs::write(t.path().join("x.txt"), b"X").unwrap();
+        std::fs::write(t.path().join("keep.txt"), b"K").unwrap();
+        let rule = RenameRule {
+            base: Some("keep".into()),
+            ..Default::default()
+        };
+        let items = vec![target(t.path(), "x.txt")];
+        let p = batch_rename_preview(&LocalFs, items.clone(), rule.clone())
+            .await
+            .unwrap();
+        assert!(p.has_collision);
+        let r = batch_rename_execute(&LocalFs, items, rule, &c).await;
+        assert!(
+            matches!(&r, Err(DuetError::Io(m)) if m.contains("already exists")),
+            "{r:?}"
+        );
+        assert_eq!(std::fs::read(t.path().join("keep.txt")).unwrap(), b"K");
+        assert_eq!(std::fs::read(t.path().join("x.txt")).unwrap(), b"X");
+    }
+
     #[tokio::test]
     async fn c07_batch_preview_must_validate_names() {
         let t = tempfile::tempdir().unwrap();

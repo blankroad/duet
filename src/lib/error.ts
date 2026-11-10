@@ -63,6 +63,7 @@ type Reason =
   | "linkLoop"
   | "zipLargeFile"
   | "repackEmpty"
+  | "renameUnchanged"
   | "remoteZipUnsupported"
   | "remoteExit"
   | "syncCrossHost"
@@ -200,6 +201,8 @@ const ARCHIVE_PATTERNS: Array<[RegExp, Reason]> = [
   [/unsafe path in/i, "unsafeArchive"], // rar 의 경로 탈출 항목
   [/large file option has not been set/i, "zipLargeFile"], // zip 4GB 초과
   [/nothing to repack/i, "repackEmpty"],
+  // 일괄 이름 바꾸기 규칙이 어느 이름도 바꾸지 않음(core/ops.rs batch_rename_execute).
+  [/every new name equals the current name/i, "renameUnchanged"],
   // 동기화는 local↔local·같은 서버만 — 그 밖의 조합은 비교 창의 적용/병합으로 안내.
   [/sync supports local↔local/i, "syncCrossHost"],
 ];
