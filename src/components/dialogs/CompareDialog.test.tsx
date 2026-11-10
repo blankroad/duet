@@ -120,3 +120,58 @@ describe("CompareDialog 다시 비교", () => {
     ).toBe(true);
   });
 });
+
+describe("CompareDialog 머지 규칙 (SC-07)", () => {
+  const leftOnly: ComparePlan = {
+    ...plan("left_only"),
+    entries: [
+      { ...entry("left_only"), right_size: null, right_mtime_ms: null },
+    ],
+    left_only: 1,
+    differ: 0,
+  };
+
+  it("머지는 지금 목록을 만든 규칙을 함께 보낸다", () => {
+    const onMerge = vi.fn();
+    const rules = { ignore_globs: ["node_modules"], mtime_tolerance_ms: 0 };
+    render(
+      <CompareDialog
+        plan={leftOnly}
+        rules={rules}
+        onClose={() => {}}
+        onMerge={onMerge}
+        onApply={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Merge/ }));
+    expect(onMerge).toHaveBeenCalledWith(false, rules);
+  });
+
+  it("다시 비교 뒤의 머지는 새 규칙을 보낸다", async () => {
+    vi.mocked(commands.fsCompareDirs).mockResolvedValue({
+      status: "ok",
+      data: leftOnly,
+    });
+    const onMerge = vi.fn();
+    render(
+      <CompareDialog
+        plan={leftOnly}
+        rules={{ ignore_globs: [], mtime_tolerance_ms: 0 }}
+        onClose={() => {}}
+        onMerge={onMerge}
+        onApply={() => {}}
+      />,
+    );
+    fireEvent.change(screen.getByPlaceholderText(/ignore/i), {
+      target: { value: "*.log  dist" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Re-compare/ }));
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^Merge/ }));
+    expect(onMerge).toHaveBeenCalledWith(false, {
+      ignore_globs: ["*.log", "dist"],
+      mtime_tolerance_ms: 0,
+    });
+  });
+});

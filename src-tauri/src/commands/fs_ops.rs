@@ -1149,6 +1149,7 @@ pub async fn fs_sync_execute(
 pub async fn fs_merge_bidir(
     left: Location,
     right: Location,
+    rules: crate::core::compare::CompareRules,
     detect_renames: bool,
     pool: tauri::State<'_, Arc<ConnectionPool>>,
     settings: tauri::State<'_, Arc<SettingsStore>>,
@@ -1183,11 +1184,12 @@ pub async fn fs_merge_bidir(
                         pool: Some(pool_inner.clone()),
                         app: Some(app_for_run.clone()),
                     };
-                    let entry = ops::merge_bidir(
+                    let entry = ops::merge_bidir_with_rules(
                         &*left_fs,
                         left_for_run,
                         &*right_fs,
                         right_for_run,
+                        &rules,
                         detect_renames,
                         &ctx,
                         cancel_token,

@@ -331,7 +331,7 @@ export async function triggerCompare(
     open({ kind: "none" });
     return;
   }
-  open({ kind: "compare", plan: r.data });
+  open({ kind: "compare", plan: r.data, rules });
 }
 
 /** 3-way 비교 — base(공통 조상) 대비 left/right. base 경로는 left 소스 기준. */

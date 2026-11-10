@@ -6,8 +6,8 @@ use async_trait::async_trait;
 use duet_lib::core::compare::{compare_dirs, compare_dirs_progress, CompareRules, CompareStatus};
 use duet_lib::core::copy_progress::parse_rsync_itemize_created_file;
 use duet_lib::core::ops::{
-    apply_compare, merge_bidir, sync_execute, sync_plan, verify_compare, ApplyDecision,
-    ApplyDirection, OpCtx,
+    apply_compare, merge_bidir, merge_bidir_with_rules, sync_execute, sync_plan, verify_compare,
+    ApplyDecision, ApplyDirection, OpCtx,
 };
 use duet_lib::core::three_way::{compare_three_way, ThreeWayStatus};
 use duet_lib::core::undo::{execute_undo, UndoKind};
@@ -315,7 +315,6 @@ async fn sc05_changed_survivor_becomes_conflict_instead_of_deletion() {
 }
 
 #[tokio::test]
-#[ignore = "sync-compare repro: SC-07 independently confirmed in sol-2"]
 async fn sc07_nested_log_ignore_survives_merge() {
     let (t, l, r) = trees();
     for side in [&l, &r] {
@@ -323,26 +322,29 @@ async fn sc07_nested_log_ignore_survives_merge() {
     }
     std::fs::write(l.join("logs/한글.log"), b"excluded").unwrap();
     std::fs::write(l.join("visible"), b"keep").unwrap();
+    let rules = CompareRules {
+        ignore_globs: vec!["*.log".into()],
+        ..Default::default()
+    };
     let shown = compare_dirs_progress(
         &LocalFs,
         loc(&l),
         &LocalFs,
         loc(&r),
-        &CompareRules {
-            ignore_globs: vec!["*.log".into()],
-            ..Default::default()
-        },
+        &rules,
         &CancellationToken::new(),
         &|_| {},
     )
     .await
     .unwrap();
     assert_eq!(shown.entries.len(), 1);
-    merge_bidir(
+    // 비교창의 규칙 그대로 머지(FE 가 규칙을 넘긴다).
+    merge_bidir_with_rules(
         &LocalFs,
         loc(&l),
         &LocalFs,
         loc(&r),
+        &rules,
         false,
         &ctx(t.path()).await,
         CancellationToken::new(),

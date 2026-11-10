@@ -9,6 +9,7 @@ import type {
   CompressPlan,
   SyncPlan,
   ComparePlan,
+  CompareRules,
   ThreeWayPlan,
   ExtractPlanItem,
 } from "@/types/bindings";
@@ -56,7 +57,8 @@ export type DialogState =
     }
   | { kind: "repack-confirm"; plan: CompressPlan; label: string }
   | { kind: "sync-confirm"; plan: SyncPlan; srcLabel: string; dstLabel: string }
-  | { kind: "compare"; plan: ComparePlan }
+  /** rules = 이 plan 을 만든 비교 규칙 — 머지가 같은 규칙으로 다시 비교한다(SC-07). */
+  | { kind: "compare"; plan: ComparePlan; rules: CompareRules }
   | { kind: "compare-scanning" }
   | { kind: "three-way"; plan: ThreeWayPlan }
   | { kind: "checksum"; targets: EntryRef[] }

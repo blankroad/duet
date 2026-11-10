@@ -12,7 +12,9 @@ mod undo_fixture;
 use std::path::Path;
 
 use duet_lib::core::compare::{compare_dirs_progress, CompareRules, CompareStatus};
-use duet_lib::core::ops::{apply_compare, merge_bidir, ApplyDecision, ApplyDirection, OpCtx};
+use duet_lib::core::ops::{
+    apply_compare, merge_bidir, merge_bidir_with_rules, ApplyDecision, ApplyDirection, OpCtx,
+};
 use duet_lib::core::three_way::{compare_three_way, ThreeWayStatus};
 use duet_lib::core::undo::UndoKind;
 use duet_lib::fs::LocalFs;
@@ -287,10 +289,9 @@ async fn apply_compare_undo_does_not_silently_drop_later_edits() {
 
 // ─── C-11 양방향 머지 ────────────────────────────────────────────────────
 
-/// 비교창에서 무시 패턴(`node_modules`)을 걸어 목록에 안 보이게 했어도, 머지는 규칙
-/// 없이 다시 비교해 그 폴더까지 복사한다. 기대: 비교창에서 본 범위만 머지.
+/// 비교창에서 무시 패턴(`node_modules`)을 걸어 목록에 안 보이게 했으면, 머지도 그 규칙으로
+/// 다시 비교해 그 폴더를 복사하지 않는다(SC-07 — 예전엔 규칙 없이 다시 비교했다).
 #[tokio::test]
-#[ignore = "sync-compare repro: merge_bidir ignores the compare rules (ignore globs) the dialog used"]
 async fn merge_respects_ignore_globs_shown_in_compare_dialog() {
     let (dir, l, r) = sides();
     std::fs::write(l.join("keep.txt"), b"k").unwrap();
@@ -315,13 +316,14 @@ async fn merge_respects_ignore_globs_shown_in_compare_dialog() {
     .unwrap();
     assert_eq!(shown.entries.len(), 1, "dialog shows only keep.txt");
     assert_eq!(shown.entries[0].status, CompareStatus::LeftOnly);
-    // 사용자가 Merge 클릭 → FE 는 detectRenames 만 넘긴다(App.tsx onMerge).
+    // 사용자가 Merge 클릭 → FE 가 비교창의 현재 규칙을 함께 넘긴다(App.tsx onMerge).
     let ctx = mk_ctx(&dir.path().join("ctx")).await;
-    merge_bidir(
+    merge_bidir_with_rules(
         &fs,
         loc(&l),
         &fs,
         loc(&r),
+        &rules,
         false,
         &ctx,
         CancellationToken::new(),

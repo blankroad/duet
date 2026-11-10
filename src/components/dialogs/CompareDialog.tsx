@@ -30,11 +30,18 @@ import { DialogShell } from "./DialogShell";
 import { DialogBand } from "./DialogBand";
 import { CompareDiffPreview } from "./CompareDiffPreview";
 
+const EMPTY_RULES: CompareRules = { ignore_globs: [], mtime_tolerance_ms: 0 };
+
 export interface CompareDialogProps {
   plan: ComparePlan;
   onClose: () => void;
-  /** 양방향 머지 실행 — 한쪽에만 있는 파일을 반대편으로 복사(충돌 미변경). */
-  onMerge: (detectRenames: boolean) => void;
+  /** 이 plan 을 만든 비교 규칙(무시 패턴·허용오차). 없으면 빈 규칙. */
+  rules?: CompareRules;
+  /**
+   * 양방향 머지 실행 — 한쪽에만 있는 파일을 반대편으로 복사(충돌 미변경).
+   * `rules` = 지금 목록을 만든 규칙: 머지가 숨긴 항목까지 다시 찾아 복사하지 않게(SC-07).
+   */
+  onMerge: (detectRenames: boolean, rules: CompareRules) => void;
   /** 행별 방향 적용 — 생성 + 덮어쓰기(백업, undo 가능). */
   onApply: (decisions: ApplyDecision[]) => void;
 }
@@ -45,6 +52,7 @@ export interface CompareDialogProps {
  */
 export function CompareDialog({
   plan: initialPlan,
+  rules: initialRules = EMPTY_RULES,
   onClose,
   onMerge,
   onApply,
@@ -52,6 +60,8 @@ export function CompareDialog({
   const { t } = useTranslation();
   // plan 은 규칙 변경 시 Re-compare 로 교체되므로 로컬 상태로 보유(seed=prop).
   const [plan, setPlan] = useState(initialPlan);
+  // 지금 목록(plan)을 만든 규칙 — 다시 비교가 성공할 때만 바뀐다(실패면 목록도 그대로).
+  const rulesRef = useRef(initialRules);
   const [recomparing, setRecomparing] = useState(false);
   // 이동/이름변경 감지(기본 off). 토글 후 Re-compare 로 적용(머지에도 동일 적용).
   const [detectRenames, setDetectRenames] = useState(false);
@@ -93,6 +103,7 @@ export function CompareDialog({
     );
     if (gen !== genRef.current) return; // 더 새 다시 비교가 이어받음
     if (r.status === "ok") {
+      rulesRef.current = rules;
       replacePlan(r.data);
       setVerifyNote(null);
     } else {
@@ -269,7 +280,7 @@ export function CompareDialog({
           mergeable={mergeable}
           truncated={plan.truncated}
           onClose={onClose}
-          onMerge={() => onMerge(detectRenames)}
+          onMerge={() => onMerge(detectRenames, rulesRef.current)}
           onApply={() => onApply(apply.payload)}
         />
       }

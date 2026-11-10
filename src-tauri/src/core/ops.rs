@@ -1867,6 +1867,9 @@ async fn sync_preview_same_host(
 /// RightOnly 는 왼쪽으로 복사한다. **차이(differ/newer)·동일(same)은 절대 건드리지
 /// 않음** (덮어쓰기로 한쪽 편집을 잃지 않도록). 추가 전용이라 UndoBidirMerge 로
 /// 완전 복원(양쪽에 새로 만든 파일 제거). 진행률은 항목 개수 기준.
+///
+/// 규칙 없이(기본 규칙으로) 비교한다 — 비교창에서 온 머지는 [`merge_bidir_with_rules`] 로
+/// 그 창의 규칙을 넘겨야 한다(SC-07).
 #[allow(clippy::too_many_arguments)]
 pub async fn merge_bidir(
     left_fs: &dyn FileSystem,
@@ -1878,10 +1881,46 @@ pub async fn merge_bidir(
     cancel_token: tokio_util::sync::CancellationToken,
     progress: Option<crate::services::task_queue::ProgressEmitter>,
 ) -> Result<JournalEntry, DuetError> {
+    merge_bidir_with_rules(
+        left_fs,
+        left,
+        right_fs,
+        right,
+        &crate::core::compare::CompareRules::default(),
+        detect_renames_opt,
+        ctx,
+        cancel_token,
+        progress,
+    )
+    .await
+}
+
+/// [`merge_bidir`] + 비교 규칙. 비교창이 무시 패턴으로 숨긴 항목(`node_modules`·`*.log` 등)을
+/// 머지가 다시 비교하며 통째로 복사하지 않도록, 그 창이 쓴 규칙 그대로 다시 비교한다(SC-07).
+#[allow(clippy::too_many_arguments)]
+pub async fn merge_bidir_with_rules(
+    left_fs: &dyn FileSystem,
+    left: Location,
+    right_fs: &dyn FileSystem,
+    right: Location,
+    rules: &crate::core::compare::CompareRules,
+    detect_renames_opt: bool,
+    ctx: &OpCtx,
+    cancel_token: tokio_util::sync::CancellationToken,
+    progress: Option<crate::services::task_queue::ProgressEmitter>,
+) -> Result<JournalEntry, DuetError> {
     use crate::core::compare::CompareStatus;
     crate::core::path_guard::ensure_roots_unrelated(left_fs, &left, right_fs, &right).await?;
-    let mut plan =
-        crate::core::compare::compare_dirs(left_fs, left.clone(), right_fs, right.clone()).await?;
+    let mut plan = crate::core::compare::compare_dirs_progress(
+        left_fs,
+        left.clone(),
+        right_fs,
+        right.clone(),
+        rules,
+        &cancel_token,
+        &|_| {},
+    )
+    .await?;
     // 이동/이름변경 감지 시 — 이동 쌍을 entries 에서 제외해 양쪽 중복복제를 차단(핵심 안전).
     if detect_renames_opt {
         detect_renames(&mut plan, left_fs, right_fs, ctx.pool.as_ref()).await?;

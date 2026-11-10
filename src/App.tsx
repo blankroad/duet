@@ -2398,11 +2398,17 @@ function App() {
       {dialog.kind === "compare" && (
         <CompareDialog
           plan={dialog.plan}
+          rules={dialog.rules}
           onClose={closeDialog}
-          onMerge={(detectRenames) => {
+          onMerge={(detectRenames, rules) => {
             const { left, right } = dialog.plan;
             void (async () => {
-              const r = await commands.fsMergeBidir(left, right, detectRenames);
+              const r = await commands.fsMergeBidir(
+                left,
+                right,
+                rules,
+                detectRenames,
+              );
               if (r.status === "ok") {
                 openDialog({
                   kind: "progress",
