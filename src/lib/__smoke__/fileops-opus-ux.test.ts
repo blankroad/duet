@@ -154,17 +154,17 @@ describe("fileops shortcuts (Windows/Linux defaults)", () => {
     expect(keyRuns("Shift+Delete", false)).toBeUndefined();
   });
 
-  // DESIGN.md lists these as the TC-compatible alternates; none is registered.
-  it.fails("UX-SHL-11: F8 deletes to trash (DESIGN.md)", () => {
+  // DESIGN.md TC-compatible alternates (registered by shell UX-SHL-11).
+  it("UX-SHL-11: F8 deletes to trash (DESIGN.md)", () => {
     expect(keyRuns("F8")).toBe("file.delete");
   });
-  it.fails("UX-SHL-11: Shift+F8 deletes permanently (DESIGN.md)", () => {
+  it("UX-SHL-11: Shift+F8 deletes permanently (DESIGN.md)", () => {
     expect(keyRuns("Shift+F8")).toBe("file.deletePerm");
   });
-  it.fails("UX-SHL-11: Ctrl+Shift+N makes a new folder (DESIGN.md)", () => {
+  it("UX-SHL-11: Ctrl+Shift+N makes a new folder (DESIGN.md)", () => {
     expect(keyRuns("Ctrl+Shift+N")).toBe("file.newFolder");
   });
-  it.fails("UX-SHL-11: Shift+F6 renames (DESIGN.md)", () => {
+  it("UX-SHL-11: Shift+F6 renames (DESIGN.md)", () => {
     expect(keyRuns("Shift+F6")).toBe("file.rename");
   });
   it("there is no default key for Operation history (palette/TopBar only)", () => {
@@ -178,13 +178,10 @@ describe("fileops shortcuts (Windows/Linux defaults)", () => {
 describe("fileops shortcuts (macOS defaults)", () => {
   // Mac keyboards have no forward-Delete key without fn; Finder's trash key is ⌘⌫.
   // keyEvent maps ⌘ to "Ctrl", so ⌘⌫ arrives as "Ctrl+Backspace".
-  it.fails(
-    "UX-SHL-12: ⌘⌫ (Ctrl+Backspace) moves the selection to trash",
-    () => {
-      h.platform = "macos";
-      expect(keyRuns("Ctrl+Backspace")).toBe("file.delete");
-    },
-  );
+  it("UX-SHL-12: ⌘⌫ (Ctrl+Backspace) moves the selection to trash", () => {
+    h.platform = "macos";
+    expect(keyRuns("Ctrl+Backspace")).toBe("file.delete");
+  });
   it("plain Backspace is not bound to delete (it goes up a folder)", () => {
     h.platform = "macos";
     expect(keyRuns("Backspace")).toBeUndefined();
