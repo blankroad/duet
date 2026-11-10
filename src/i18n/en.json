@@ -240,7 +240,8 @@
         "deleteConflict": "Delete conflict"
       },
       "desc": "Three-way comparison of left and right against a common base directory.",
-      "basePrompt": "Base (common ancestor) directory path — relative to the left source:"
+      "basePrompt": "Base (common ancestor) directory path — relative to the left source:",
+      "basePlaceholder": "e.g. a snapshot or backup copy of this folder"
     },
     "batchRename": {
       "title_one": "Batch rename — {{count}} item",
@@ -869,6 +870,7 @@
     "alreadyInFolder": "Already in this folder",
     "compareError": "Compare: {{err}}",
     "threeWayError": "3-way: {{err}}",
+    "threeWayBaseOverlaps": "The base folder must be a separate folder — not the left or right folder, and not inside or around either of them.",
     "syncError": "Sync: {{err}}",
     "permissionsSelect": "Permissions: select files or folders (not symlinks)",
     "copyPlanFailed": "Copy plan failed: {{err}}",

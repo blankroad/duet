@@ -238,7 +238,8 @@
         "deleteConflict": "삭제 충돌"
       },
       "desc": "공통 base 디렉토리에 대한 좌/우 3-way 비교.",
-      "basePrompt": "Base(공통 조상) 디렉토리 경로 — 왼쪽 소스 기준:"
+      "basePrompt": "Base(공통 조상) 디렉토리 경로 — 왼쪽 소스 기준:",
+      "basePlaceholder": "예: 이 폴더의 스냅샷·백업 사본 경로"
     },
     "batchRename": {
       "title_other": "일괄 이름변경 — {{count}}개",
@@ -860,6 +861,7 @@
     "alreadyInFolder": "이미 이 폴더에 있습니다",
     "compareError": "비교: {{err}}",
     "threeWayError": "3-way: {{err}}",
+    "threeWayBaseOverlaps": "Base 는 별도 폴더여야 합니다 — 왼쪽·오른쪽 폴더 자신이거나 그 안·바깥(상위) 폴더는 쓸 수 없습니다.",
     "syncError": "동기화: {{err}}",
     "permissionsSelect": "권한: 파일 또는 폴더를 선택하세요 (심볼릭 링크 제외)",
     "copyPlanFailed": "복사 계획 실패: {{err}}",

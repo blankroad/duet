@@ -128,6 +128,16 @@ pub async fn compare_three_way(
     right_fs: &dyn FileSystem,
     right: Location,
 ) -> Result<ThreeWayPlan, DuetError> {
+    // 어느 두 루트든 같거나 상·하위면 비교 전에 거부한다(SC-16). base==left 면 왼쪽 전용
+    // 파일이 전부 "오른쪽에서 삭제됨"으로 분류되고, 적용(apply_three_way)은 같은 가드로
+    // 어차피 실패한다 — 실패할 [적용]을 보여 주는 창을 띄우지 않는다.
+    for (a_fs, a, b_fs, b) in [
+        (left_fs, &left, right_fs, &right),
+        (base_fs, &base, left_fs, &left),
+        (base_fs, &base, right_fs, &right),
+    ] {
+        crate::core::path_guard::ensure_roots_unrelated(a_fs, a, b_fs, b).await?;
+    }
     if left_fs.metadata(&left.path).await?.kind != EntryKind::Dir
         || right_fs.metadata(&right.path).await?.kind != EntryKind::Dir
         || base_fs.metadata(&base.path).await?.kind != EntryKind::Dir
@@ -339,5 +349,44 @@ mod tests {
         assert_eq!(by("gone.txt"), Some(ThreeWayStatus::LeftDeleted));
         assert_eq!(by("new.txt"), Some(ThreeWayStatus::LeftAdded));
         assert_eq!(plan.conflicts, 0);
+    }
+
+    /// SC-16: base 가 left/right 와 같거나 상·하위면 비교 자체를 거부한다.
+    #[tokio::test]
+    async fn compare_three_way_rejects_related_roots() {
+        use crate::fs::LocalFs;
+        use crate::types::SourceId;
+        let dir = tempfile::TempDir::new().unwrap();
+        let l = dir.path().join("L");
+        let r = dir.path().join("R");
+        let inside_r = r.join("snapshot");
+        for p in [&l, &r, &inside_r] {
+            std::fs::create_dir_all(p).unwrap();
+        }
+        let fs = LocalFs::new();
+        let loc = |p: &std::path::Path| Location {
+            source: SourceId::Local,
+            path: p.to_path_buf(),
+        };
+        // base == left (예전 입력칸 기본값 그대로 Enter).
+        let same = compare_three_way(&fs, loc(&l), &fs, loc(&l), &fs, loc(&r)).await;
+        assert!(matches!(same, Err(DuetError::IntoItself(_))), "{same:?}");
+        // base 가 right 안.
+        let inside = compare_three_way(&fs, loc(&inside_r), &fs, loc(&l), &fs, loc(&r)).await;
+        assert!(
+            matches!(inside, Err(DuetError::IntoItself(_))),
+            "{inside:?}"
+        );
+        // right 가 base 안(반대 방향).
+        let outer = compare_three_way(&fs, loc(&r), &fs, loc(&l), &fs, loc(&inside_r)).await;
+        assert!(matches!(outer, Err(DuetError::IntoItself(_))), "{outer:?}");
+        // 서로 무관한 세 폴더는 통과.
+        let base = dir.path().join("B");
+        std::fs::create_dir_all(&base).unwrap();
+        assert!(
+            compare_three_way(&fs, loc(&base), &fs, loc(&l), &fs, loc(&r))
+                .await
+                .is_ok()
+        );
     }
 }

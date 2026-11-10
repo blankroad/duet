@@ -343,12 +343,24 @@ export async function triggerThreeWay(
   const state = usePanes.getState();
   const left = activeTab(state, active).location;
   const right = activeTab(state, opposite).location;
+  // 입력칸은 비워 둔다 — 예전엔 왼쪽 경로가 기본값이라 그대로 Enter 하면 base==left 로
+  // 왼쪽 전용 파일이 전부 "삭제"로 분류됐다(SC-16).
   const input = await promptText({
     title: i18n.t("dialog.threeWay.basePrompt"),
-    initial: String(left.path),
+    initial: "",
+    placeholder: i18n.t("dialog.threeWay.basePlaceholder"),
   });
   if (input == null || input.trim() === "") return;
   const baseLoc: Location = { source: left.source, path: input.trim() };
+  // base 가 왼쪽·오른쪽과 같거나 상·하위면 스캔 전에 안내(최종 판정은 백엔드 가드).
+  if (
+    [left, right].some(
+      (side) => isSameOrInside(baseLoc, side) || isSameOrInside(side, baseLoc),
+    )
+  ) {
+    showToast(i18n.t("toast.threeWayBaseOverlaps"));
+    return;
+  }
   const r = await commands.fsCompareThreeWay(baseLoc, left, right);
   if (r.status === "error") {
     showError("toast.threeWayError", r.error, { toast: showToast });

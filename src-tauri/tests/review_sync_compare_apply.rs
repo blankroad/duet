@@ -489,25 +489,21 @@ async fn three_way_unreadable_subfolder_is_not_classified_as_deleted() {
     );
 }
 
-/// base 입력칸의 기본값은 왼쪽 경로(fileActions.ts:318). 그대로 Enter 하면 base==left →
-/// 왼쪽에만 있는 파일이 전부 "오른쪽에서 삭제됨"(적용 시 왼쪽에서 휴지통) 이 된다.
-/// 같은 경로 거부가 없음을 보이는 증거(현재 동작 단언 — 통과).
+/// base 입력칸의 기본값이 왼쪽 경로였을 때(fileActions.ts) 그대로 Enter 하면 base==left →
+/// 왼쪽에만 있는 파일이 전부 "오른쪽에서 삭제됨"(적용 시 왼쪽에서 휴지통) 이 됐다(SC-16).
+/// 이제 비교 단계에서 같은 경로·상하위 루트를 `IntoItself` 로 거부한다.
 #[tokio::test]
-async fn three_way_base_equal_to_left_turns_left_only_into_deletions() {
+async fn three_way_base_equal_to_left_is_rejected() {
     let (dir, l, r) = sides();
     let _ = dir;
     std::fs::write(l.join("new-work.txt"), b"mine").unwrap();
     let fs = LocalFs::new();
-    let plan = compare_three_way(&fs, loc(&l), &fs, loc(&l), &fs, loc(&r))
-        .await
-        .unwrap();
-    let e = plan
-        .entries
-        .iter()
-        .find(|e| e.rel == "new-work.txt")
-        .expect("listed");
-    assert_eq!(e.status, ThreeWayStatus::RightDeleted);
-    assert_eq!(plan.conflicts, 0, "nothing flagged as a conflict");
+    let res = compare_three_way(&fs, loc(&l), &fs, loc(&l), &fs, loc(&r)).await;
+    assert!(
+        matches!(res, Err(duet_lib::types::DuetError::IntoItself(_))),
+        "base == left must be refused before classifying anything: {:?}",
+        res.map(|p| p.entries.len())
+    );
 }
 
 /// 3-way 적용(변경·추가 전파) + Ctrl+Z 왕복 — 삭제 전파는 OS 휴지통이라 제외.
