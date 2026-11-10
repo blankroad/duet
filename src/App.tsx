@@ -128,7 +128,11 @@ import {
   findBookmarkId,
 } from "@/stores/bookmarks";
 import { bookmarkLocation } from "@/lib/bookmarkActions";
-import { bootstrapHostFavorites } from "@/stores/hostFavorites";
+import {
+  bootstrapHostFavorites,
+  findHostFavoriteId,
+  removeHostFavorite,
+} from "@/stores/hostFavorites";
 import { bootstrapUserAliases } from "@/stores/userAliases";
 import { bootstrapAppLaunchers, setAppArgs } from "@/stores/appLaunchers";
 import { bootstrapPlaces, refreshVolumes } from "@/stores/places";
@@ -1121,7 +1125,13 @@ function App() {
         const id = usePanes.getState().activePane;
         const tab = activeTab(usePanes.getState(), id);
         if (tab.location.source.kind === "ssh") {
-          void bookmarkLocation(tab.location, folderName(tab.location));
+          // 경로 바 ★ 와 같은 토글 — 이미 즐겨찾기면 지운다(UX-BRW-09).
+          const favId = findHostFavoriteId(
+            aliasFromConnectionId(tab.location.source.connection_id),
+            String(tab.location.path),
+          );
+          if (favId) void removeHostFavorite(favId);
+          else void bookmarkLocation(tab.location, folderName(tab.location));
           return;
         }
         const existing = findBookmarkId(tab.location);

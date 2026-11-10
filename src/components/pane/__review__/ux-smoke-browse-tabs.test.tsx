@@ -421,35 +421,30 @@ describe.each(["remote", "archive"] as const)(
   },
 );
 
-it.fails(
-  "ux-smoke browse-s11 Ctrl+D on bookmarked SSH folder must remove favorite like the path-bar star",
-  async () => {
-    await boot();
-    act(() => {
-      useConnections.getState().upsertActive({
-        id: "fixture:live",
-        alias: "fixture",
-        host_ip: "192.0.2.1",
-        user: "u",
-        state: { kind: "connected" },
-      });
-      usePanes.getState().setEntries("left", remote, [file("a.txt")]);
-      useHostFavorites
-        .getState()
-        .setAll([
-          { id: "fav1", host_alias: "fixture", name: "srv", path: "/srv" },
-        ]);
+it("ux-smoke browse-s11 Ctrl+D on bookmarked SSH folder must remove favorite like the path-bar star", async () => {
+  await boot();
+  act(() => {
+    useConnections.getState().upsertActive({
+      id: "fixture:live",
+      alias: "fixture",
+      host_ip: "192.0.2.1",
+      user: "u",
+      state: { kind: "connected" },
     });
-    key({ key: "d", code: "KeyD", ctrlKey: true });
-    await wait(30);
-    expect(
-      actionCalls.find((c) => c.command === "hostFavoritesRemove")?.args,
-    ).toEqual(["fav1"]);
-    expect(actionCalls.some((c) => c.command === "hostFavoritesAdd")).toBe(
-      false,
-    );
-  },
-);
+    usePanes.getState().setEntries("left", remote, [file("a.txt")]);
+    useHostFavorites
+      .getState()
+      .setAll([
+        { id: "fav1", host_alias: "fixture", name: "srv", path: "/srv" },
+      ]);
+  });
+  key({ key: "d", code: "KeyD", ctrlKey: true });
+  await wait(30);
+  expect(
+    actionCalls.find((c) => c.command === "hostFavoritesRemove")?.args,
+  ).toEqual(["fav1"]);
+  expect(actionCalls.some((c) => c.command === "hostFavoritesAdd")).toBe(false);
+});
 
 it("palette favorite command for disconnected SSH host opens a cancellable connection flow", async () => {
   await boot();
