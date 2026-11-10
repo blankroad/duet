@@ -1,4 +1,9 @@
-import { useMemo, type ComponentPropsWithoutRef, type MouseEvent } from "react";
+import {
+  useMemo,
+  type ComponentPropsWithoutRef,
+  type KeyboardEvent,
+  type MouseEvent,
+} from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -24,6 +29,15 @@ function stopNavigation(e: MouseEvent<HTMLAnchorElement>) {
 }
 
 /**
+ * 링크에 포커스가 있을 때 Enter·Space 가 window 의 패널 키 처리(useKeyboardNav)까지
+ * 올라가면 뒤 파일 목록의 커서 항목이 열리거나 Quick Look 이 뜬다 — 링크에서 멈춘다.
+ * (Enter 가 만드는 click 은 stopNavigation 이 막는다.)
+ */
+function keepKeysOnLink(e: KeyboardEvent<HTMLAnchorElement>) {
+  if (e.key === "Enter" || e.key === " ") e.stopPropagation();
+}
+
+/**
  * 마크다운 링크는 표시만 하고 따라가지 않는다. 앱 webview 안에서 `<a href>` 를
  * 그대로 두면 클릭 한 번에 앱 화면 자체가 그 주소로 바뀐다. 외부 브라우저로
  * 여는 백엔드 명령이 아직 없어 클릭은 무시하고, 주소는 툴팁으로 보여 준다.
@@ -38,6 +52,7 @@ function MarkdownLink({
       title={props.title ?? props.href}
       onClick={stopNavigation}
       onAuxClick={stopNavigation}
+      onKeyDown={keepKeysOnLink}
     />
   );
 }

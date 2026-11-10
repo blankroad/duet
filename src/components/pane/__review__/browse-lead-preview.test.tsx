@@ -1,7 +1,14 @@
-import { describe, expect, it } from "vitest";
-import { fireEvent, render } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
 import "@/i18n";
 import { PreviewContent } from "../PreviewContent";
+import { activeTab, computeDisplayed, usePanes } from "@/stores/panes";
+import { useKeyboardNav } from "@/hooks/useKeyboardNav";
+import { useCommands } from "@/stores/commands";
+import { useKeymap } from "@/stores/keymap";
+import type { Entry } from "@/types/bindings";
+
+vi.mock("@tauri-apps/plugin-os", () => ({ platform: () => "linux" }));
 
 /**
  * browse 점검(lead) 재현 — 마크다운 미리보기의 링크.
@@ -47,4 +54,57 @@ describe("browse-lead: 마크다운 미리보기 링크", () => {
     a.dispatchEvent(ev);
     expect(ev.defaultPrevented).toBe(true);
   });
+
+  it.each([
+    ["Enter", "Enter"],
+    [" ", "Space"],
+  ])(
+    "browse-08 (R2): %s on a focused preview link does not reach the pane",
+    (key, code) => {
+      const file: Entry = {
+        name: "a.txt",
+        kind: "file",
+        size: 1,
+        modified_ms: 0,
+        permissions: null,
+        hidden: false,
+      };
+      usePanes
+        .getState()
+        .setEntries("left", { source: { kind: "local" }, path: "/fixture" }, [
+          file,
+        ]);
+      usePanes.getState().setActivePane("left");
+      const t = activeTab(usePanes.getState(), "left");
+      usePanes.getState().setCursor(
+        "left",
+        computeDisplayed(t).findIndex((e) => e.name === "a.txt"),
+      );
+      useCommands.setState({ builtins: [], dynamic: [] });
+      useKeymap.setState({ bindings: [] });
+      const activate = vi.fn();
+      const quickLook = vi.fn();
+      function Preview() {
+        useKeyboardNav(activate, vi.fn(), quickLook);
+        return (
+          <PreviewContent
+            name="README.md"
+            text="[site](https://example.com)"
+            truncated={false}
+          />
+        );
+      }
+      render(<Preview />);
+      const link = screen.getByRole("link");
+      link.focus();
+      fireEvent.keyDown(link, { key, code });
+      expect(activate).not.toHaveBeenCalled();
+      expect(quickLook).not.toHaveBeenCalled();
+      // 대조: 같은 키를 링크 밖에서 누르면 패널이 처리한다.
+      if (key === "Enter") {
+        fireEvent.keyDown(document.body, { key, code });
+        expect(activate).toHaveBeenCalledOnce();
+      }
+    },
+  );
 });
