@@ -148,7 +148,6 @@ impl FileSystem for FixtureFs {
 }
 
 #[tokio::test]
-#[ignore = "sync-compare repro: SC-01 independently confirmed in sol-2"]
 async fn sc01_stat_failure_after_backup_keeps_original_in_place() {
     let (t, l, r) = trees();
     std::fs::write(l.join("b_한글"), b"new larger source").unwrap();
@@ -169,7 +168,6 @@ async fn sc01_stat_failure_after_backup_keeps_original_in_place() {
 }
 
 #[tokio::test]
-#[ignore = "sync-compare repro: SC-01 independently confirmed in sol-2"]
 async fn sc01_cancel_after_first_completed_file_keeps_journal() {
     let (t, l, r) = trees();
     std::fs::write(l.join("a"), b"first").unwrap();

@@ -151,7 +151,6 @@ impl FileSystem for Fixture {
 /// 사용자가 동기화 도중 [취소]. 취소 전에 a 는 새로 생기고 b 는 덮어써졌다(.bak 생성).
 /// 기대: 이미 반영된 변경이 journal 에 남아 Ctrl+Z 로 되돌릴 수 있다.
 #[tokio::test]
-#[ignore = "sync-compare repro: SC-01 cancelled sync leaves applied changes without a journal entry"]
 async fn sync_cancel_midway_journals_what_was_already_applied() {
     let t = TempDir::new().unwrap();
     let (src, dst) = (t.path().join("src"), t.path().join("dst"));

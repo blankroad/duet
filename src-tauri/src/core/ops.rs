@@ -1267,7 +1267,9 @@ async fn sync_execute_local(
         done: 0,
         total,
     };
-    mirror_dir(
+    // 도중 실패·취소여도 이미 반영한 변경은 journal 에 남긴 뒤 오류를 전파한다(SC-01, §4).
+    // 예전엔 `?` 조기 반환이라 복사·덮어쓴 것을 Ctrl+Z 로 되돌릴 수 없었다.
+    let mut outcome = mirror_dir(
         src_fs,
         dst_fs,
         &plan.src.path,
@@ -1276,12 +1278,12 @@ async fn sync_execute_local(
         progress.as_ref(),
         &mut state,
     )
-    .await?;
+    .await;
     // prune: src 에 없는 dst 항목을 휴지통으로 (삭제 전파, undo 복원 가능).
     let mut pruned = Vec::new();
-    if plan.prune {
+    if outcome.is_ok() && plan.prune {
         let batch_id = crate::services::trash::new_batch_id();
-        prune_pass(
+        outcome = prune_pass(
             src_fs,
             &plan.src.path,
             dst_fs,
@@ -1290,7 +1292,17 @@ async fn sync_execute_local(
             &batch_id,
             &mut pruned,
         )
-        .await?;
+        .await;
+    }
+    // 아무것도 바꾸지 못하고 실패·취소했으면 빈 기록을 남기지 않는다(SC-40 과 같은 규칙).
+    let changed = !state.created.is_empty()
+        || !state.backups.is_empty()
+        || !state.created_dirs.is_empty()
+        || !pruned.is_empty();
+    if !changed {
+        if let Err(e) = outcome {
+            return Err(e);
+        }
     }
     let op = OpKind::Sync {
         count: state.done as u32,
@@ -1310,7 +1322,9 @@ async fn sync_execute_local(
         created_stamps,
         created_dirs: state.created_dirs,
     };
-    ctx.journal.push(op, undo).await
+    let entry = ctx.journal.push(op, undo).await?;
+    outcome?;
+    Ok(entry)
 }
 
 struct MirrorState {
@@ -1338,7 +1352,9 @@ async fn mirror_dir(
     progress: Option<&crate::services::task_queue::ProgressEmitter>,
     state: &mut MirrorState,
 ) -> Result<(), DuetError> {
-    let entries = src_fs.list(src_dir).await?;
+    let mut entries = src_fs.list(src_dir).await?;
+    // 이름순으로 처리 — 실패·취소 지점이 OS 의 나열 순서에 따라 달라지지 않게.
+    entries.sort_by(|a, b| a.name.cmp(&b.name));
     for e in entries {
         if cancel.is_cancelled() {
             return Err(DuetError::Cancelled);
@@ -1360,20 +1376,17 @@ async fn mirror_dir(
                     Some(dm) => entry_differs(&e, dm),
                 };
                 if needs {
-                    if dst_meta.is_some() {
-                        // 덮어쓰기 전 기존 dst 파일 백업 (undo 복원용).
-                        let backup = pick_backup_path(dst_fs, dst_dir, &e.name).await?;
-                        dst_fs.rename(&d, &backup).await?;
-                        state.backups.push(BackupRestore {
-                            backup_path: backup,
-                            original_path: d.clone(),
-                            applied: None, // 기록 직전에 채움
-                        });
-                    } else {
-                        state.created.push(d.clone());
-                        state.created_from.push(s.clone());
-                    }
-                    crate::fs::copy_relay(src_fs, &s, dst_fs, &d).await?;
+                    mirror_file(
+                        src_fs,
+                        dst_fs,
+                        &s,
+                        &d,
+                        dst_dir,
+                        &e.name,
+                        dst_meta.is_some(),
+                        state,
+                    )
+                    .await?;
                 }
                 state.done += 1;
                 if let Some(p) = progress {
@@ -1394,6 +1407,58 @@ async fn mirror_dir(
         }
     }
     Ok(())
+}
+
+/// 파일 하나를 미러 — 덮어쓰기면 기존 dst 를 `.bak` 으로 옮긴 뒤 복사한다.
+///
+/// 복사가 실패하면(SC-01) 원래 이름 자리가 비어 있을 때 백업을 제자리로 되돌린다 —
+/// 실패한 동기화가 사용자 파일을 `.bak` 이름으로만 남기지 않게. 자리가 이미 차 있거나
+/// (부분 복사) 되돌리기가 실패하면 백업을 기록에 남겨 Ctrl+Z 가 복원하게 한다.
+/// 새 파일은 실제로 생긴 경우에만 생성분으로 기록한다.
+#[allow(clippy::too_many_arguments)]
+async fn mirror_file(
+    src_fs: &dyn FileSystem,
+    dst_fs: &dyn FileSystem,
+    s: &std::path::Path,
+    d: &std::path::Path,
+    dst_dir: &std::path::Path,
+    name: &str,
+    overwrite: bool,
+    state: &mut MirrorState,
+) -> Result<(), DuetError> {
+    let backup = if overwrite {
+        let backup = pick_backup_path(dst_fs, dst_dir, name).await?;
+        dst_fs.rename(d, &backup).await?;
+        Some(backup)
+    } else {
+        None
+    };
+    let copied = crate::fs::copy_relay(src_fs, s, dst_fs, d).await;
+    let keep_record = match (&copied, &backup) {
+        (Ok(()), _) => true,
+        (Err(_), Some(b)) => {
+            let slot_free = matches!(
+                dst_fs.symlink_metadata(d).await,
+                Err(DuetError::NotFound(_))
+            );
+            !(slot_free && dst_fs.rename(b, d).await.is_ok())
+        }
+        (Err(_), None) => dst_fs.symlink_metadata(d).await.is_ok(),
+    };
+    if keep_record {
+        match backup {
+            Some(backup_path) => state.backups.push(BackupRestore {
+                backup_path,
+                original_path: d.to_path_buf(),
+                applied: None, // 기록 직전에 채움
+            }),
+            None => {
+                state.created.push(d.to_path_buf());
+                state.created_from.push(s.to_path_buf());
+            }
+        }
+    }
+    copied
 }
 
 /// prune: src 에 없는 dst 항목을 휴지통으로 (삭제 전파). dst 에만 있는 디렉토리는
@@ -7253,7 +7318,6 @@ mod review_sync_compare_lead {
     }
 
     #[tokio::test]
-    #[ignore = "sync-compare repro: sync 중간 실패 시 dst 원본이 .bak 로 옮겨진 채 제자리에서 사라짐"]
     async fn review_sync_failure_keeps_dst_original_in_place() {
         let (_dir, dst, r, _ctx) = run_failing_sync().await;
         assert!(r.is_err(), "unreadable src file must fail the sync");
@@ -7268,7 +7332,6 @@ mod review_sync_compare_lead {
     }
 
     #[tokio::test]
-    #[ignore = "sync-compare repro: sync 중간 실패/취소 시 이미 반영한 변경이 journal 에 안 남아 undo 불가"]
     async fn review_sync_failure_journals_partial_progress() {
         let (_dir, _dst, r, ctx) = run_failing_sync().await;
         assert!(r.is_err());
