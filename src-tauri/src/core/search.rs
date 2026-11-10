@@ -281,6 +281,15 @@ impl SearchBackend for LocalContentSearch {
                 if meta.len() > CONTENT_MAX_FILE_BYTES {
                     continue;
                 }
+                let modified_ms = meta
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_millis() as i64);
+                // 화면에 켜 둔 크기·날짜·종류 필터를 내용 읽기 전에 적용(SC-20).
+                if !opts.accepts(EntryKind::File, meta.len(), modified_ms) {
+                    continue;
+                }
                 let bytes = match std::fs::read(path) {
                     Ok(b) => b,
                     Err(_) => continue,
@@ -301,11 +310,6 @@ impl SearchBackend for LocalContentSearch {
                     Some(p) => p.to_path_buf(),
                     None => continue,
                 };
-                let modified_ms = meta
-                    .modified()
-                    .ok()
-                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|d| d.as_millis() as i64);
                 hits.push(SearchHit {
                     location: Location {
                         source: SourceId::Local,
