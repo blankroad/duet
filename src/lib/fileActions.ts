@@ -28,6 +28,7 @@ import { isSameOrInside } from "@/lib/nesting";
 import { sameDirForOps } from "@/lib/planItems";
 import { isVirtualTrash } from "@/lib/trashView";
 import { basename } from "@/lib/paths";
+import { hasRemoteSide, initialTolerance } from "@/lib/compareRules";
 import { undoToast } from "@/lib/journalLabel";
 import { useClipboard } from "@/stores/clipboard";
 import { useShelf, shelfSectionItems } from "@/stores/shelf";
@@ -306,12 +307,20 @@ export async function triggerCompare(
   // 스캔 중 다이얼로그(진행률+취소) 표시 — 대형/원격 트리에서 UI 멈춤 방지.
   open({ kind: "compare-scanning" });
   // 저장된 비교 규칙으로 초기 비교(없으면 빈 규칙). 비교창에서 Re-compare 로 갱신/저장.
-  let rules = { ignore_globs: [] as string[], mtime_tolerance_ms: 0 };
+  // 원격이 끼면 허용오차를 최소 2초로(SFTP 초 단위 시각 — SC-11).
+  const remote = hasRemoteSide(left, right);
+  let rules = {
+    ignore_globs: [] as string[],
+    mtime_tolerance_ms: initialTolerance(0, remote),
+  };
   const sg = await commands.settingsGet();
   if (sg.status === "ok") {
     rules = {
       ignore_globs: sg.data.compare_ignore_globs ?? [],
-      mtime_tolerance_ms: sg.data.compare_mtime_tolerance_ms ?? 0,
+      mtime_tolerance_ms: initialTolerance(
+        sg.data.compare_mtime_tolerance_ms ?? 0,
+        remote,
+      ),
     };
   }
   const r = await commands.fsCompareDirs(left, right, rules, false);

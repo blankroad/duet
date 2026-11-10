@@ -21,6 +21,7 @@ import {
 import { CompareList } from "./CompareList";
 import { basename } from "@/lib/paths";
 import { formatErr } from "@/lib/error";
+import { hasRemoteSide } from "@/lib/compareRules";
 import { CompareTree } from "./CompareTree";
 import { CompareRulesBar } from "./CompareRulesBar";
 import { CompareFilterBar } from "./CompareFilterBar";
@@ -296,7 +297,11 @@ export function CompareDialog({
         setQuery={setQuery}
       />
 
-      <CompareRulesBar onRecompare={onRecompare} busy={recomparing} />
+      <CompareRulesBar
+        onRecompare={onRecompare}
+        busy={recomparing}
+        remote={hasRemoteSide(plan.left, plan.right)}
+      />
 
       <div className="flex items-center gap-2 text-meta text-fg-muted">
         <button

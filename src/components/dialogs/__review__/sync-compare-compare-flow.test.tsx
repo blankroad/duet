@@ -108,21 +108,37 @@ describe("C-08 로컬↔원격 기본 허용오차 0", () => {
     ]);
   });
 
-  it.fails(
-    "sync-compare: 1초 미만 차이뿐인 로컬↔원격 행을 기본으로 덮어쓰기에 넣지 않아야 한다",
-    () => {
-      const onApply = vi.fn();
-      render(
-        <CompareDialog
-          plan={subSecond}
-          onClose={() => {}}
-          onMerge={() => {}}
-          onApply={onApply}
-        />,
-      );
-      expect(applyBtn().disabled).toBe(true);
-    },
-  );
+  // SC-11 수정: 원격이 낀 비교는 허용오차 최소 ±2s 로 비교한다(첫 비교는 triggerCompare,
+  // 다시 비교는 규칙 바). 위 plan 은 백엔드가 허용오차 0 으로 계산한 결과라 화면 판정은
+  // 그대로이고, 수정의 단언은 "다시 비교가 ±2s 를 보내는가" 다(첫 비교는 compareRules.test).
+  it("SC-11: 원격이 낀 비교창의 다시 비교는 ±2s 로 하고, 자동값은 저장하지 않는다", async () => {
+    vi.mocked(commands.fsCompareDirs).mockResolvedValue({
+      status: "ok",
+      data: planOf(subSecond.entries.map((e) => ({ ...e, status: "same" }))),
+    });
+    render(
+      <CompareDialog
+        plan={subSecond}
+        onClose={() => {}}
+        onMerge={() => {}}
+        onApply={() => {}}
+      />,
+    );
+    const tol = screen.getByTitle(/mtime tolerance/) as HTMLSelectElement;
+    expect(tol.value).toBe("2000");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Re-compare/ }));
+    });
+    expect(vi.mocked(commands.fsCompareDirs).mock.calls.at(-1)?.[2]).toEqual({
+      ignore_globs: [],
+      mtime_tolerance_ms: 2000,
+    });
+    expect(
+      vi.mocked(commands.settingsSet).mock.calls.at(-1)?.[0]
+        .compare_mtime_tolerance_ms,
+    ).toBeNull();
+    expect(applyBtn().disabled).toBe(true);
+  });
 });
 
 describe("C-08 필터·검색으로 가린 행도 적용된다", () => {
