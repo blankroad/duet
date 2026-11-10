@@ -5,9 +5,9 @@
 //! 1. **준비(staging)** — 같은 폴더(같은 볼륨이라 이동이 싸다)에 `.duet-extract-<uuid>` 를
 //!    만들고 기존 엔진(`archive::extract_local`)으로 거기에 푼다. 암호·손상·취소로 여기서
 //!    실패하면 사용자 폴더에는 아무것도 놓이지 않는다.
-//! 2. **배치(placement)** — 준비된 맨 위 항목을 하나씩 사용자 폴더로 옮긴다. 이름은 늘
-//!    **원자적으로 예약**(`archive_names::try_reserve` = `mkdir` / `create_new_file`)한 뒤
-//!    채우므로 검사-후-쓰기 사이에 생긴 항목을 덮는 일이 없다.
+//! 2. **배치(placement)** — 준비된 맨 위 항목을 하나씩 사용자 폴더로 옮긴다. 이름은 먼저
+//!    `mkdir` / `create_new_file`(이미 있으면 실패하는 생성)로 예약한 뒤 채운다
+//!    (`archive_names::try_reserve`).
 //!    - 폴더 ↔ 기존 **진짜** 폴더(lstat, 링크는 따라가지 않음) → 병합(안으로 내려감).
 //!    - 그 밖의 충돌 → 일괄당 하나의 정책 [`ExtractConflict`]:
 //!      `KeepBoth`(기본, `이름 (2)` 예약) / `Replace`(기존을 `.bak` 으로 옮기고 Ctrl+Z 복원,
@@ -19,6 +19,19 @@
 //! 멈춰도 그때까지 놓은 것은 기록한 뒤 에러를 돌려준다(CLAUDE.md §4). 준비 폴더에 남은
 //! 것(건너뛴 항목·못 옮긴 항목)은 휴지통으로 보낸다(§3 — 영구 삭제하지 않음). 비었으면
 //! 빈 폴더만 지운다. 휴지통도 실패하면 그 자리에 두고 경로를 알린다.
+//!
+//! ## 보장하는 것 / 아닌 것
+//!
+//! - **보장**: 예약 시점에 이미 있던 항목은 KeepBoth·Skip 에서 바꾸거나 덮지 않는다.
+//!   Replace 는 사용자가 고른 경우에만, 백업(`.bak`)으로 옮긴 뒤 놓는다(Ctrl+Z 복원).
+//!   원본 아카이브(같은 일괄 포함)는 Replace 로도 옮기지 않는다.
+//! - **협력하는 duet 작업끼리**: 같은 호스트의 작업은 `TaskQueue` 가 한 줄로 세워 서로
+//!   끼어들지 않는다.
+//! - **최선 노력(보장 아님)**: 예약 *뒤에* 외부 프로그램이 같은 자리에 쓰는 경우.
+//!   파일은 rename 직전에 그 자리가 아직 우리 0바이트 자리인지 다시 확인하고, 아니면
+//!   덮지 않고 건너뛴다 — 확인과 rename 사이의 짧은 틈은 남는다. 새로 만든 폴더 안으로
+//!   자식을 옮길 때는 충돌을 다시 확인하지 않는다(방금 만든 빈 폴더라는 가정). 예약 뒤
+//!   상위 폴더가 링크로 바뀌는 경우도 막지 않는다.
 //!
 //! 원격(SSH)은 이번 범위에서 지원하지 않는다 — SFTP rename 이 우리가 만든 빈 자리를
 //! 덮는 동작(OpenSSH 는 link/unlink 라 EEXIST)이 실제 서버에서 검증되지 않았다.
@@ -112,6 +125,28 @@ async fn check_here(
         ));
     }
     archive::check_extractable(fs, archive).await
+}
+
+/// Replace 에서 보호할 원본 아카이브 경로 — `batch` 중 `archive` 와 같은 위치(같은 source·
+/// 같은 폴더)에 지금 일반 파일로 있는 것만. 프론트가 넘긴 목록을 그대로 믿지 않고 다시
+/// 확인한다. 암호 재시도도 처음 일괄 목록을 넘겨 형제 원본을 계속 보호한다.
+pub async fn protected_sources(
+    fs: &dyn FileSystem,
+    archive: &EntryRef,
+    batch: &[EntryRef],
+) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for b in batch {
+        if b.location.source != archive.location.source || b.location.path != archive.location.path
+        {
+            continue;
+        }
+        let path = fs.join(&b.location.path, &b.name);
+        if matches!(fs.symlink_metadata(&path).await, Ok(m) if m.kind == EntryKind::File) {
+            out.push(path);
+        }
+    }
+    out
 }
 
 /// 아카이브 하나를 그 폴더에 바로 푼다. `protect` = Replace 로도 건드리지 않을 경로
@@ -336,7 +371,8 @@ impl Placer<'_> {
             // 먼저 기록 — 자식 이동이 도중에 실패해도 옮긴 만큼은 Ctrl+Z 대상이다.
             self.created.push(target.to_path_buf());
             self.summary.placed += 1;
-            // 새로 만든 빈 폴더라 자식 이름이 부딪힐 일이 없다.
+            // 방금 만든 빈 폴더라 자식 이름이 부딪히지 않는다고 본다 — 그 사이 외부 프로그램이
+            // 이 폴더에 쓰는 경우는 다시 확인하지 않는다(최선 노력, 모듈 문서 참조).
             for e in self.fs.list(staged).await? {
                 let from = self.fs.join(staged, &e.name);
                 let to = self.fs.join(target, &e.name);
@@ -346,7 +382,19 @@ impl Placer<'_> {
             let _ = self.fs.remove_empty_dir(staged).await;
             return Ok(());
         }
-        // 파일·링크 — 우리가 만든 빈 자리 위로 rename.
+        // 파일·링크 — 우리가 만든 빈 자리 위로 rename. 그 사이 다른 프로그램이 그 자리에
+        // 썼으면(더는 0바이트 일반 파일이 아님) 덮지 않고 건너뛴다. 이 확인과 rename 사이의
+        // 짧은 틈은 남는다(최선 노력).
+        if !self.still_placeholder(target).await {
+            self.summary.skipped.push(SkippedItem {
+                dir: target.parent().map(Path::to_path_buf).unwrap_or_default(),
+                name: target
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+            });
+            return Ok(());
+        }
         match self.fs.rename(staged, target).await {
             Ok(()) => {
                 self.created.push(target.to_path_buf());
@@ -360,6 +408,14 @@ impl Placer<'_> {
                 Err(with_placeholder(e, target))
             }
         }
+    }
+
+    /// `target` 이 아직 우리가 예약한 빈 자리(0바이트 일반 파일)인가.
+    async fn still_placeholder(&self, target: &Path) -> bool {
+        matches!(
+            self.fs.symlink_metadata(target).await,
+            Ok(m) if m.kind == EntryKind::File && m.size == Some(0)
+        )
     }
 
     /// 대소문자 무시 비교 — 대소문자 구분 없는 볼륨에서 다른 표기로 원본을 가리켜도 보호.

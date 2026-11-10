@@ -17,6 +17,8 @@ struct HereFs {
     trash_dir: PathBuf,
     trashed: Arc<Mutex<Vec<PathBuf>>>,
     fail_rename_to: Option<String>,
+    /// 이 이름을 예약(create_new_file)한 직후 다른 프로그램이 내용을 쓴 것처럼 흉내.
+    scribble_after_reserve: Option<String>,
 }
 
 impl HereFs {
@@ -27,6 +29,7 @@ impl HereFs {
             trash_dir,
             trashed: Arc::default(),
             fail_rename_to: None,
+            scribble_after_reserve: None,
         }
     }
     fn trashed(&self) -> Vec<PathBuf> {
@@ -59,7 +62,12 @@ impl FileSystem for HereFs {
         LocalFs.mkdir(p).await
     }
     async fn create_new_file(&self, p: &Path) -> Result<(), DuetError> {
-        LocalFs.create_new_file(p).await
+        LocalFs.create_new_file(p).await?;
+        let name = p.file_name().map(|n| n.to_string_lossy().into_owned());
+        if name.is_some() && name == self.scribble_after_reserve {
+            std::fs::write(p, b"written by another program").unwrap();
+        }
+        Ok(())
     }
     async fn remove_empty_dir(&self, p: &Path) -> Result<(), DuetError> {
         LocalFs.remove_empty_dir(p).await
@@ -570,4 +578,136 @@ async fn remote_archive_is_refused_before_touching_anything() {
     .unwrap_err();
     assert!(matches!(err, DuetError::NotSupported(_)));
     assert_eq!(std::fs::read_dir(&e.work).unwrap().count(), 1);
+}
+
+// ---------- 리뷰 반영: 보호 목록·병합 undo·자리 재확인 ----------
+
+/// 보호 목록은 같은 폴더·같은 source 에 지금 일반 파일로 있는 것만 받는다.
+#[tokio::test]
+async fn protected_sources_keeps_only_existing_files_in_the_same_folder() {
+    let e = env().await;
+    write_zip(&e.p("a.zip"), &[("x", "x")]);
+    write_zip(&e.p("b.zip"), &[("y", "y")]);
+    std::fs::create_dir(e.p("dir.zip")).unwrap();
+    let other = e.work.parent().unwrap().join("elsewhere");
+    std::fs::create_dir(&other).unwrap();
+    std::fs::write(other.join("c.zip"), b"c").unwrap();
+    let here = |dir: &Path, name: &str| EntryRef {
+        location: Location {
+            source: SourceId::Local,
+            path: dir.to_path_buf(),
+        },
+        name: name.into(),
+    };
+    let batch = vec![
+        here(&e.work, "a.zip"),
+        here(&e.work, "b.zip"),
+        here(&e.work, "missing.zip"),
+        here(&e.work, "dir.zip"),
+        here(&other, "c.zip"),
+    ];
+    let got = protected_sources(&e.fs, &here(&e.work, "a.zip"), &batch).await;
+    assert_eq!(got, vec![e.p("a.zip"), e.p("b.zip")]);
+}
+
+/// 암호 재시도 + Replace 도 처음 일괄의 형제 원본 아카이브를 옮기지 않는다.
+#[tokio::test]
+async fn password_retry_with_replace_never_moves_sibling_source_archives() {
+    let e = env().await;
+    write_zip(&e.p("b.zip"), &[("inside-b.txt", "b")]);
+    let sibling = std::fs::read(e.p("b.zip")).unwrap();
+    {
+        let f = std::fs::File::create(e.p("a.zip")).unwrap();
+        let mut w = zip::ZipWriter::new(f);
+        let opts: zip::write::FileOptions<()> =
+            zip::write::FileOptions::default().with_aes_encryption(zip::AesMode::Aes256, "pw");
+        w.start_file("b.zip", opts).unwrap();
+        w.write_all(b"not the sibling").unwrap();
+        w.finish().unwrap();
+    }
+    let a = EntryRef {
+        location: Location {
+            source: SourceId::Local,
+            path: e.work.clone(),
+        },
+        name: "a.zip".into(),
+    };
+    let b = EntryRef {
+        name: "b.zip".into(),
+        ..a.clone()
+    };
+    let batch = vec![a.clone(), b];
+    // 1차: 암호 없음 → NeedPassword. 재시도는 같은 일괄 목록으로 보호 경로를 다시 만든다.
+    let protect = protected_sources(&e.fs, &a, &batch).await;
+    let first = extract_here_execute(
+        &e.fs,
+        a.clone(),
+        ExtractConflict::Replace,
+        None,
+        &protect,
+        &e.ctx,
+        CancellationToken::new(),
+    )
+    .await;
+    assert!(matches!(first, Err(DuetError::NeedPassword)));
+    let protect = protected_sources(&e.fs, &a, &batch).await;
+    let (_, _, s) = extract_here_execute(
+        &e.fs,
+        a,
+        ExtractConflict::Replace,
+        Some("pw".into()),
+        &protect,
+        &e.ctx,
+        CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        std::fs::read(e.p("b.zip")).unwrap(),
+        sibling,
+        "sibling untouched"
+    );
+    assert!(s.replaced.is_empty());
+    assert_eq!(e.read("b (2).zip"), "not the sibling");
+}
+
+/// 두 아카이브가 **이미 있는 사용자 폴더**로 병합 — 각자의 undo 는 자기 파일만 치우고
+/// 사용자의 원래 파일은 그대로.
+#[tokio::test]
+async fn undo_of_each_merge_into_existing_user_folder_removes_only_its_files() {
+    let e = env().await;
+    std::fs::create_dir(e.p("photos")).unwrap();
+    std::fs::write(e.p("photos/mine.jpg"), "user").unwrap();
+    write_zip(&e.p("one.zip"), &[("photos/", ""), ("photos/a.jpg", "A")]);
+    write_zip(&e.p("two.zip"), &[("photos/", ""), ("photos/b.jpg", "B")]);
+
+    let (first, _, _) = e.here("one.zip", ExtractConflict::KeepBoth).await.unwrap();
+    let (second, _, _) = e.here("two.zip", ExtractConflict::KeepBoth).await.unwrap();
+    assert_eq!(copied_of(&first), vec![e.p("photos/a.jpg")]);
+    assert_eq!(copied_of(&second), vec![e.p("photos/b.jpg")]);
+
+    let out = undo_with_fixture(&second).await;
+    assert_eq!(out.kind, UndoKind::Ok, "{out:?}");
+    assert!(!e.p("photos/b.jpg").exists());
+    assert_eq!(e.read("photos/a.jpg"), "A");
+    assert_eq!(e.read("photos/mine.jpg"), "user");
+
+    let out = undo_with_fixture(&first).await;
+    assert_eq!(out.kind, UndoKind::Ok, "{out:?}");
+    assert!(!e.p("photos/a.jpg").exists());
+    assert_eq!(e.read("photos/mine.jpg"), "user");
+    assert!(e.p("photos").is_dir(), "the user's folder stays");
+}
+
+/// 예약 뒤 다른 프로그램이 그 자리에 쓰면 덮지 않고 건너뛴다(최선 노력 재확인).
+#[tokio::test]
+async fn placeholder_written_by_someone_else_is_not_overwritten() {
+    let mut e = env().await;
+    write_zip(&e.p("r.zip"), &[("note.txt", "ours"), ("other.txt", "o")]);
+    e.fs.scribble_after_reserve = Some("note.txt".into());
+    let (entry, _, s) = e.here("r.zip", ExtractConflict::KeepBoth).await.unwrap();
+    assert_eq!(e.read("note.txt"), "written by another program");
+    assert_eq!(s.skipped.len(), 1);
+    assert_eq!(s.skipped[0].name, "note.txt");
+    assert_eq!(copied_of(&entry), vec![e.p("other.txt")]);
 }
