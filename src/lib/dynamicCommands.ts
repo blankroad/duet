@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { useCommands } from "@/stores/commands";
 import { useSavedHosts } from "@/stores/savedHosts";
 import { useConnections } from "@/stores/connections";
-import { useHostNicknames } from "@/stores/hostNicknames";
+import { useHostNicknames, nicknameOf } from "@/stores/hostNicknames";
 import { useBookmarks } from "@/stores/bookmarks";
 import { useHostFavorites } from "@/stores/hostFavorites";
 import { useUserAliases } from "@/stores/userAliases";
@@ -49,8 +49,8 @@ export function useDynamicCommands(deps: DynamicDeps) {
       ...configHosts.map((h) => ({
         id: `host.connectConfig:${h.alias}`,
         // 별명을 쓰되 alias 로도 찾을 수 있게 둘 다 담는다.
-        label: `Connect: ${nicknames[h.alias] ?? h.alias}${
-          nicknames[h.alias] ? ` (${h.alias})` : ""
+        label: `Connect: ${nicknameOf(nicknames, h.alias) ?? h.alias}${
+          nicknameOf(nicknames, h.alias) ? ` (${h.alias})` : ""
         }`,
         category: "Connection" as const,
         action: () => depsRef.current.onHostActivate(h.alias),

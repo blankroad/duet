@@ -79,7 +79,11 @@ import { useToast } from "@/stores/toast";
 import { promptText } from "@/stores/promptDialog";
 import { useReorderable } from "@/hooks/useReorderable";
 import { ShelfSection } from "@/components/ShelfSection";
-import { useHostNicknames, setHostNickname } from "@/stores/hostNicknames";
+import {
+  useHostNicknames,
+  setHostNickname,
+  nicknameOf,
+} from "@/stores/hostNicknames";
 import { aliasLabel } from "@/lib/hostLabel";
 import { adHocAliasOf } from "@/lib/hostAlias";
 import { TagBar } from "@/components/TagBar";
@@ -1044,7 +1048,8 @@ function SavedHostsBody({
   const q = useSidebarFilter((s) => s.q);
   const hosts = allHosts.filter(
     (h) =>
-      !hideAliases.has(h.alias) && matchesQuery(nicks[h.alias] ?? h.alias, q),
+      !hideAliases.has(h.alias) &&
+      matchesQuery(nicknameOf(nicks, h.alias) ?? h.alias, q),
   );
   const groups = useHostGroups((s) => s.groups);
   const filtering = useFiltering();
@@ -1251,7 +1256,10 @@ function SavedHostItem({
   reorder?: { dragging: boolean; onMouseDown: (e: React.MouseEvent) => void };
 }) {
   const { t } = useTranslation();
-  const nickname = useHostNicknames((s) => s.byAlias)[host.alias];
+  const nickname = nicknameOf(
+    useHostNicknames((s) => s.byAlias),
+    host.alias,
+  );
   const tags = tagsFor(
     useTags((s) => s.byKey),
     hostTagKey(host.alias),
@@ -1394,7 +1402,8 @@ function BookmarksSection({
     keys: items.map((b) => b.id),
     onCommit: (next) => void reorderBookmarks(next),
   });
-  const favGroups: Record<string, HostFavorite[]> = {};
+  // 프로토타입 없는 맵 — `__proto__`·`constructor` alias 가 상속 속성을 집지 않게(remote-NEW-3).
+  const favGroups: Record<string, HostFavorite[]> = Object.create(null);
   for (const f of favItems) (favGroups[f.host_alias] ??= []).push(f);
   const favKeys = Object.keys(favGroups).sort();
   // 전체 개수(배지·빈상태 판단)는 필터 무관, 표시는 필터 적용분.
@@ -1749,7 +1758,7 @@ function HostsSection({
   // 태그 필터 — config 호스트는 host:<alias> 키. 이름 필터는 별명 우선(화면에 보이는 것).
   const visible = (alias: string) =>
     matchesTagFilter(tagsFor(byKey, hostTagKey(alias)), active) &&
-    matchesQuery(nicks[alias] ?? alias, q);
+    matchesQuery(nicknameOf(nicks, alias) ?? alias, q);
   const hosts = allHosts.filter((h) => visible(h.alias));
   // config 와 같은 alias 의 저장본은 숨겨지므로 개수에서도 뺀다(예전엔 두 번 셌다).
   const savedOnly = savedHosts.filter((h) => !configAliases.has(h.alias));
@@ -1820,7 +1829,7 @@ function HostItem({
   const nicks = useHostNicknames((s) => s.byAlias);
   const byKey = useTags((s) => s.byKey);
   const tags = tagsFor(byKey, hostTagKey(host.alias));
-  const nickname = nicks[host.alias];
+  const nickname = nicknameOf(nicks, host.alias);
   const display = nickname ?? host.alias;
   const pane = usePanesOnHost(host.alias);
 
