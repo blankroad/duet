@@ -1443,7 +1443,13 @@ async fn mirror_file(
             );
             !(slot_free && dst_fs.rename(b, d).await.is_ok())
         }
-        (Err(_), None) => dst_fs.symlink_metadata(d).await.is_ok(),
+        // 새 파일: 확실히 없을 때(NotFound)만 기록에서 뺀다. 확인이 실패하면(권한·연결) 부분
+        // 복사본이 남았을 수 있어 보수적으로 기록 — undo 의 지문 검사가 없는 경로는 건너뛴다
+        // (`any_exists` 와 같은 규칙).
+        (Err(_), None) => !matches!(
+            dst_fs.symlink_metadata(d).await,
+            Err(DuetError::NotFound(_))
+        ),
     };
     if keep_record {
         match backup {
@@ -7831,5 +7837,120 @@ mod same_host_hash_tests {
         }
         assert!(cmd.contains(" && "));
         assert!(!cmd.contains("sha256sum --"));
+    }
+}
+
+/// SC-01 `mirror_file`: 복사 실패 뒤 존재 확인이 불확실하면 새 파일을 보수적으로 기록한다.
+/// TempDir 안에서만 — 받는 쪽 mock 은 휴지통·영구 삭제를 부르면 panic.
+#[cfg(test)]
+mod mirror_file_tests {
+    use super::*;
+    use crate::fs::LocalFs;
+    use crate::types::{ConnectionId, Entry, EntryMeta};
+    use std::path::Path;
+    use std::pin::Pin;
+
+    /// 받는 쪽: 쓰기 도중 실패하면서 최종 이름 자리에 일부를 남기고(부분 쓰기), 그 뒤
+    /// lstat 은 NotFound 가 아닌 권한 오류를 낸다 — 존재 여부를 확정할 수 없는 상태.
+    /// 원격 SourceId 라 로컬 OS 복사 API 대신 open_write 스트림 경로를 탄다.
+    struct PartialWriteFs {
+        partial_at: PathBuf,
+    }
+
+    #[async_trait::async_trait]
+    impl FileSystem for PartialWriteFs {
+        fn source_id(&self) -> SourceId {
+            SourceId::Ssh {
+                connection_id: ConnectionId("fixture".into()),
+                host_ip: "127.0.0.1".parse().unwrap(),
+                user: "fixture".into(),
+            }
+        }
+        async fn list(&self, p: &Path) -> Result<Vec<Entry>, DuetError> {
+            LocalFs.list(p).await
+        }
+        async fn metadata(&self, p: &Path) -> Result<EntryMeta, DuetError> {
+            LocalFs.metadata(p).await
+        }
+        async fn symlink_metadata(&self, _: &Path) -> Result<EntryMeta, DuetError> {
+            Err(DuetError::PermissionDenied("injected stat failure".into()))
+        }
+        async fn rename(&self, f: &Path, t: &Path) -> Result<(), DuetError> {
+            LocalFs.rename(f, t).await
+        }
+        async fn mkdir(&self, p: &Path) -> Result<(), DuetError> {
+            LocalFs.mkdir(p).await
+        }
+        async fn trash(&self, _: &Path, _: &str) -> Result<TrashLocation, DuetError> {
+            panic!("fixture never trashes")
+        }
+        async fn remove(&self, _: &Path) -> Result<(), DuetError> {
+            panic!("fixture: permanent removal forbidden")
+        }
+        async fn restore_from_trash(&self, _: &TrashLocation, _: &Path) -> Result<(), DuetError> {
+            panic!("fixture never restores from trash")
+        }
+        async fn read_full(&self, p: &Path) -> Result<Vec<u8>, DuetError> {
+            LocalFs.read_full(p).await
+        }
+        async fn write_full(&self, p: &Path, b: &[u8]) -> Result<(), DuetError> {
+            LocalFs.write_full(p, b).await
+        }
+        async fn open_read(
+            &self,
+            p: &Path,
+            o: u64,
+        ) -> Result<Pin<Box<dyn tokio::io::AsyncRead + Send>>, DuetError> {
+            LocalFs.open_read(p, o).await
+        }
+        async fn open_write(
+            &self,
+            _: &Path,
+            _: u64,
+        ) -> Result<Pin<Box<dyn tokio::io::AsyncWrite + Send>>, DuetError> {
+            std::fs::write(&self.partial_at, b"part").map_err(|e| DuetError::Io(e.to_string()))?;
+            Err(DuetError::Io("injected: disk full mid-write".into()))
+        }
+    }
+
+    #[tokio::test]
+    async fn new_file_copy_failure_with_uncertain_stat_is_recorded() {
+        let t = tempfile::TempDir::new().unwrap();
+        let (src, dst) = (t.path().join("src"), t.path().join("dst"));
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&dst).unwrap();
+        std::fs::write(src.join("a.txt"), b"content").unwrap();
+        let d = dst.join("a.txt");
+        let dst_fs = PartialWriteFs {
+            partial_at: d.clone(),
+        };
+        let mut st = MirrorState {
+            created: Vec::new(),
+            created_from: Vec::new(),
+            created_dirs: Vec::new(),
+            backups: Vec::new(),
+            done: 0,
+            total: 1,
+        };
+        let r = mirror_file(
+            &LocalFs,
+            &dst_fs,
+            &src.join("a.txt"),
+            &d,
+            &dst,
+            "a.txt",
+            false,
+            &mut st,
+        )
+        .await;
+        assert!(r.is_err(), "the copy failure is still reported");
+        assert!(d.exists(), "fixture left a partial file at the final name");
+        assert_eq!(
+            st.created,
+            vec![d.clone()],
+            "uncertain post-failure stat → record the path so undo can clean the partial copy"
+        );
+        assert_eq!(st.created_from, vec![src.join("a.txt")]);
+        assert!(st.backups.is_empty());
     }
 }
