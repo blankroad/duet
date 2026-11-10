@@ -1070,7 +1070,11 @@ export const usePanes = create<PanesState>((set, get) => ({
       const cur = p.tabs[i];
       if (!cur) return s;
       const tabs = p.tabs.slice();
-      tabs[i] = { ...cur, dirSizes: { ...cur.dirSizes, [name]: bytes } };
+      // 크기 정렬이면 순서가 바뀔 수 있다 — 커서는 보던 항목을 따라간다.
+      tabs[i] = keepCursor(cur, {
+        ...cur,
+        dirSizes: { ...cur.dirSizes, [name]: bytes },
+      });
       return { panes: { ...s.panes, [id]: { ...p, tabs } } };
     }),
   setTrashRoot: (id, root, tabId) =>
@@ -1171,7 +1175,7 @@ export function computeDisplayed(t: TabState): Entry[] {
   if (!t.showHidden) {
     arr = arr.filter((e) => !e.hidden);
   }
-  const sorted = sortEntries(arr, t.sortKey, t.sortOrder);
+  const sorted = sortEntries(arr, t.sortKey, t.sortOrder, t.dirSizes);
   // 루트가 아니고 필터가 없을 때만 최상단에 ".." (부모/아카이브 나가기) 행.
   // 정렬과 무관하게 항상 맨 위 고정. 빈 폴더에서도 돌아갈 수 있게 표시.
   // (아카이브/휴지통 임시 루트는 드라이브 루트가 아니라 isRootPath=false → ".." 유지.)
@@ -1206,6 +1210,7 @@ function sortEntries(
   entries: Entry[],
   key: SortKey,
   order: SortOrder,
+  dirSizes: Record<string, number>,
 ): Entry[] {
   const dirsFirst = (a: Entry, b: Entry) => {
     if (!dirsFirstEnabled) return 0;
@@ -1216,6 +1221,9 @@ function sortEntries(
     return 0;
   };
   const cmpName = (a: Entry, b: Entry) => collator.compare(a.name, b.name);
+  // 폴더는 "크기 계산" 결과가 있으면 그 값으로 — 표시되는 크기와 정렬 순서를 맞춘다.
+  const sizeOf = (e: Entry) =>
+    (e.kind === "dir" ? dirSizes[e.name] : undefined) ?? e.size ?? 0;
   const cmpExt = (a: Entry, b: Entry) => {
     const ax = a.name.lastIndexOf(".");
     const bx = b.name.lastIndexOf(".");
@@ -1228,7 +1236,7 @@ function sortEntries(
       case "name":
         return cmpName(a, b);
       case "size":
-        return (a.size ?? 0) - (b.size ?? 0) || cmpName(a, b);
+        return sizeOf(a) - sizeOf(b) || cmpName(a, b);
       case "mtime":
         return (a.modified_ms ?? 0) - (b.modified_ms ?? 0) || cmpName(a, b);
       case "kind":

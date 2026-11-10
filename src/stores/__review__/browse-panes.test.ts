@@ -282,18 +282,15 @@ describe("C-12 정렬", () => {
     expect(out).toEqual(["Makefile", ".bashrc", "a.md", "b.txt"]);
   });
 
-  it.fails(
-    "browse-28 (F-opus-08): 크기 정렬이 '크기 계산' 결과(dirSizes)를 쓰지 않는다 — 폴더는 크기 0 취급",
-    () => {
-      const out = show([mk("big", "dir"), mk("small", "dir")], {
-        sortKey: "size",
-        sortOrder: "desc",
-        dirSizes: { big: 9_000_000, small: 1 },
-      });
-      // 계산한 크기 기준이면 big, small 이어야 한다
-      expect(out).toEqual(["big", "small"]);
-    },
-  );
+  it("browse-28 (F-opus-08): 크기 정렬이 '크기 계산' 결과(dirSizes)를 쓰지 않는다 — 폴더는 크기 0 취급", () => {
+    const out = show([mk("big", "dir"), mk("small", "dir")], {
+      sortKey: "size",
+      sortOrder: "desc",
+      dirSizes: { big: 9_000_000, small: 1 },
+    });
+    // 계산한 크기 기준이면 big, small 이어야 한다
+    expect(out).toEqual(["big", "small"]);
+  });
 });
 
 describe("C-12 패턴 선택", () => {

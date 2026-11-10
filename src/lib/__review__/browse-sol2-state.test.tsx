@@ -235,23 +235,18 @@ it.each([
   expect(patternToMatcher(pattern)(name)).toBe(expected);
 });
 
-it.fails(
-  "browse-28: computed directory sizes determine ascending size order",
-  () => {
-    usePanes
-      .getState()
-      .setEntries("left", local("/"), [
-        file("a-large", "dir"),
-        file("z-small", "dir"),
-      ]);
-    const id = activeTab(usePanes.getState(), "left").id;
-    usePanes.getState().setDirSize("left", id, "a-large", 1_000_000);
-    usePanes.getState().setDirSize("left", id, "z-small", 2);
-    usePanes.getState().setSort("left", "size", "asc");
-    expect(
-      computeDisplayed(activeTab(usePanes.getState(), "left")).map(
-        (e) => e.name,
-      ),
-    ).toEqual(["z-small", "a-large"]);
-  },
-);
+it("browse-28: computed directory sizes determine ascending size order", () => {
+  usePanes
+    .getState()
+    .setEntries("left", local("/"), [
+      file("a-large", "dir"),
+      file("z-small", "dir"),
+    ]);
+  const id = activeTab(usePanes.getState(), "left").id;
+  usePanes.getState().setDirSize("left", id, "a-large", 1_000_000);
+  usePanes.getState().setDirSize("left", id, "z-small", 2);
+  usePanes.getState().setSort("left", "size", "asc");
+  expect(
+    computeDisplayed(activeTab(usePanes.getState(), "left")).map((e) => e.name),
+  ).toEqual(["z-small", "a-large"]);
+});

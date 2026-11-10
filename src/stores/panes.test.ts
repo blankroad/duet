@@ -133,6 +133,23 @@ describe("panes — dirSizes (크기 계산 캐시)", () => {
     s.setEntries("left", { source: { kind: "local" }, path: "/tmp2" }, []);
     expect(usePanes.getState().panes.left.tabs[0]!.dirSizes).toEqual({});
   });
+
+  it("크기 정렬 중 계산 결과로 순서가 바뀌어도 커서는 같은 폴더에 남는다", () => {
+    const s = usePanes.getState();
+    s.setEntries("left", homeLocation, [mk("a", "dir"), mk("b", "dir")]);
+    s.setSort("left", "size", "asc");
+    const names = () =>
+      computeDisplayed(activeTab(usePanes.getState(), "left")).map(
+        (e) => e.name,
+      );
+    expect(names()).toEqual(["a", "b"]);
+    s.setCursor("left", 0); // "a"
+    const tabId = activeTab(usePanes.getState(), "left").id;
+    s.setDirSize("left", tabId, "a", 5000);
+    expect(names()).toEqual(["b", "a"]);
+    const t = activeTab(usePanes.getState(), "left");
+    expect(computeDisplayed(t)[t.cursorIndex]?.name).toBe("a");
+  });
 });
 
 describe("panes — tab management", () => {
