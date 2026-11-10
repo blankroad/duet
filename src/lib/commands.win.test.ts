@@ -47,3 +47,24 @@ describe("commands — F4 편집 (UX-SHL-07)", () => {
     expect(editFile).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("commands — DESIGN.md 보조 키 (fileops-03)", () => {
+  it("F8·Shift+F8·Ctrl+Shift+N·Shift+F6 가 삭제·영구 삭제·새 폴더·이름 바꾸기", () => {
+    const byId = new Map(buildBuiltins(deps).map((c) => [c.id, c]));
+    expect(byId.get("file.delete")?.altKeys).toContain("F8");
+    expect(byId.get("file.deletePerm")?.altKeys).toContain("Shift+F8");
+    expect(byId.get("file.newFolder")?.altKeys).toContain("Ctrl+Shift+N");
+    expect(byId.get("file.rename")?.altKeys).toContain("Shift+F6");
+  });
+
+  it("보조 키도 다른 명령의 기본·보조 키와 겹치지 않는다", () => {
+    const seen = new Map<string, string>();
+    for (const c of buildBuiltins(deps)) {
+      for (const k of [c.defaultKey, ...(c.altKeys ?? [])]) {
+        if (!k) continue;
+        expect(seen.has(k), `${k}: ${seen.get(k)} vs ${c.id}`).toBe(false);
+        seen.set(k, c.id);
+      }
+    }
+  });
+});

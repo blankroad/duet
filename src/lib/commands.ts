@@ -199,6 +199,8 @@ const MAC_KEYS: Record<string, string> = {
 /** macOS 에서 추가로 받아 주는 키 — 맥 사용자가 먼저 눌러 보는 것들. */
 const MAC_ALT_KEYS: Record<string, string[]> = {
   "pane.editPath": ["Ctrl+Shift+G"], // 파인더 "폴더로 이동"
+  // 맥 키보드엔 fn 없이 앞쪽 Delete 가 없다 — 파인더 휴지통 키 ⌘⌫. (⌘ 는 "Ctrl" 로 온다.)
+  "file.delete": ["Ctrl+Backspace"],
 };
 
 /** 플랫폼별 기본 키 적용 — 등록 직후 한 번. */
@@ -600,6 +602,8 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
         label: "Rename",
         category: "File",
         defaultKey: "F2",
+        // DESIGN.md "File ops (TC 호환)" 의 보조 키 — TC 사용자가 먼저 누르는 키.
+        altKeys: ["Shift+F6"],
         action: deps.rename,
       },
       {
@@ -607,6 +611,7 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
         label: "New folder",
         category: "File",
         defaultKey: "F7",
+        altKeys: ["Ctrl+Shift+N"], // 탐색기·파인더(⇧⌘N) 새 폴더
         action: deps.newFolder,
       },
       {
@@ -622,6 +627,7 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
         label: "Delete (to trash)",
         category: "File",
         defaultKey: "Delete",
+        altKeys: ["F8"], // TC
         action: deps.delete,
       },
       // 영구 삭제는 설정에서 켠 경우에만 등록한다(CLAUDE.md §3) — 꺼져 있는데 팔레트에
@@ -633,6 +639,7 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
               label: "Delete permanently",
               category: "File",
               defaultKey: "Shift+Delete",
+              altKeys: ["Shift+F8"],
               action: deps.deletePerm,
             } as Command,
           ]

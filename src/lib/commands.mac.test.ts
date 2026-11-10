@@ -39,6 +39,10 @@ describe("commands — macOS 기본 키", () => {
     expect(byId.get("pane.editPath")?.altKeys).toContain("Ctrl+Shift+G");
   });
 
+  it("⌘⌫(Ctrl+Backspace)도 휴지통으로 — 파인더 관례 (fileops-04)", () => {
+    expect(byId.get("file.delete")?.altKeys).toContain("Ctrl+Backspace");
+  });
+
   it("기본 키가 서로 겹치지 않는다", () => {
     const seen = new Map<string, string>();
     for (const c of cmds) {
