@@ -682,14 +682,21 @@ pub async fn file_icon(path: PathBuf, size: i32) -> Result<Vec<u8>, DuetError> {
 // ── 셸 컨텍스트 메뉴(IContextMenu) — Explorer/TC 와 동일 ──────────
 
 /// 우클릭 대상의 실제 셸 메뉴를 핫 COM 워커로 빌드해 항목 트리 반환(token 으로 보관). Windows 전용.
+///
+/// `paths` 는 한 폴더 안의 선택(표시 순서, ≥1) — Explorer 처럼 전부를 한 메뉴로 묶는다
+/// (7-Zip/Bandizip "각각 압축 풀기" 등 다중 항목 명령). 비었거나 부모 폴더가 다르면 `NotSupported`.
 #[tauri::command]
 #[specta::specta]
 pub async fn shell_menu_open(
     app: tauri::AppHandle,
-    path: PathBuf,
+    paths: Vec<PathBuf>,
     scope: crate::platform::ShellScope,
     registry: tauri::State<'_, std::sync::Arc<crate::platform::ShellMenuRegistry>>,
 ) -> Result<crate::platform::ShellMenu, DuetError> {
+    // FE 가 간헐적으로 드라이브(C:) 없는 경로를 보내면 셸(IContextMenu)이 항목을 못
+    // 잡아 빈 메뉴("(none)")가 된다 — COM 직전에 절대경로화(local_abs: 이미 절대면 no-op).
+    // 같은 부모 검증은 FE 가 아니라 여기서(백엔드) 한다.
+    let paths = crate::platform::shell_menu_core::shell_selection(paths)?;
     #[cfg(windows)]
     {
         use tauri::Manager;
@@ -698,16 +705,13 @@ pub async fn shell_menu_open(
             .and_then(|w| w.hwnd().ok())
             .map(|h| h.0 as isize)
             .unwrap_or(0);
-        // FE 가 간헐적으로 드라이브(C:) 없는 경로를 보내면 셸(IContextMenu)이 항목을 못
-        // 잡아 빈 메뉴("(none)")가 된다 — COM 직전에 절대경로화(local_abs: 이미 절대면 no-op).
-        let path = crate::platform::local_abs(path);
-        // 캐시 있으면 즉시, 없으면 빌드. token 은 워커가 발급/재사용(invoke 대상).
-        let (token, items) = registry.worker().open(hwnd, path, scope).await;
+        // 캐시 있으면 즉시, 없으면 빌드. token 은 워커가 빌드마다 발급(invoke 대상).
+        let (token, items) = registry.worker().open(hwnd, paths, scope).await;
         Ok(crate::platform::ShellMenu { token, items })
     }
     #[cfg(not(windows))]
     {
-        let _ = (app, path, scope);
+        let _ = (app, paths, scope);
         let _ = registry;
         Ok(crate::platform::ShellMenu {
             token: 0,
@@ -716,17 +720,19 @@ pub async fn shell_menu_open(
     }
 }
 
-/// 셸 메뉴 백그라운드 예열 — 커서가 파일/폴더에 멈추거나 폴더가 바뀔 때 호출. 그 경로의
+/// 셸 메뉴 백그라운드 예열 — 커서가 파일/폴더에 멈추거나 폴더가 바뀔 때 호출. 그 선택의
 /// 메뉴를 미리 빌드해 캐시에 채운다(fire-and-forget). 우클릭 시 캐시에서 즉시 서빙되어
 /// QueryContextMenu(제3자 셸 확장, cold 수 초)를 임계경로에서 치운다. Windows 전용.
+/// `paths` 규칙은 `shell_menu_open` 과 같다(FE 는 현재 한 항목만 예열).
 #[tauri::command]
 #[specta::specta]
 pub async fn shell_menu_warm(
     app: tauri::AppHandle,
-    path: PathBuf,
+    paths: Vec<PathBuf>,
     scope: crate::platform::ShellScope,
     registry: tauri::State<'_, std::sync::Arc<crate::platform::ShellMenuRegistry>>,
 ) -> Result<(), DuetError> {
+    let paths = crate::platform::shell_menu_core::shell_selection(paths)?;
     #[cfg(windows)]
     {
         use tauri::Manager;
@@ -735,12 +741,11 @@ pub async fn shell_menu_warm(
             .and_then(|w| w.hwnd().ok())
             .map(|h| h.0 as isize)
             .unwrap_or(0);
-        let path = crate::platform::local_abs(path);
-        registry.worker().warm(hwnd, path, scope);
+        registry.worker().warm(hwnd, paths, scope);
     }
     #[cfg(not(windows))]
     {
-        let _ = (app, path, scope, registry);
+        let _ = (app, paths, scope, registry);
     }
     Ok(())
 }

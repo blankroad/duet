@@ -18,6 +18,7 @@ pub mod links;
 
 #[cfg(windows)]
 pub mod shell_menu;
+pub mod shell_menu_core;
 
 /// 파일 경로들을 **OS 클립보드**에 올린다 — Finder/탐색기, 그리고 클립보드 동기화 도구가
 /// "복사된 파일"로 인식한다. 인앱 클립보드(Ctrl+C 큐)와 함께 갱신해 두 세계를 일치시킨다.
