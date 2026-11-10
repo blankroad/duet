@@ -167,6 +167,34 @@ pub struct FileIndex {
     inner: RwLock<HashMap<String, CompactIndex>>,
     /// 디스크 캐시 디렉토리 (`<config>/duet/index` 또는 테스트용 임시 dir).
     cache_dir: PathBuf,
+    /// 전역 빌드가 도는 동안 끝난 폴더 재색인들. 그 빌드의 공개(부분·최종)는 재색인보다 먼저
+    /// 읽은 목록이라, 공개할 때마다 이것을 다시 덮어 써야 재색인 결과가 사라지지 않는다(SC-18).
+    reindexed: std::sync::Mutex<Vec<ReindexOverlay>>,
+    /// 진행 중인 전역 빌드 수 — 0 이면 재색인을 기록할 필요가 없다.
+    global_builds: std::sync::atomic::AtomicUsize,
+}
+
+/// 전역 빌드 도중 끝난 폴더 재색인 한 건.
+struct ReindexOverlay {
+    root: PathBuf,
+    at_ms: i64,
+    fresh: CompactIndex,
+}
+
+/// `global` 에서 `root` 아래(자기 자신 제외) 항목을 빼고 `fresh` 항목을 붙인 새 인덱스.
+fn splice_subtree(global: &CompactIndex, root: &Path, fresh: &CompactIndex) -> CompactIndex {
+    let mut b = CompactBuilder::new();
+    for i in 0..global.count() {
+        let path = Path::new(global.path_at(i));
+        if path != root && path.starts_with(root) {
+            continue;
+        }
+        b.push_from(global, i);
+    }
+    for i in 0..fresh.count() {
+        b.push_from(fresh, i);
+    }
+    b.finish(global.built_at_ms)
 }
 
 /// source + root → 캐시 키. SSH 는 connection_id(세션마다 바뀜) 대신 host_ip+user
@@ -185,7 +213,8 @@ pub fn index_key(source: &SourceId, root: &Path) -> String {
 fn key_to_filename(key: &str) -> String {
     let safe: String = key
         .chars()
-        .map(|c| if c.is_alphanumeric() { c } else { '_' })
+        // ASCII 만 남겨 길이(바이트)를 고정 상한으로 — 한글 경로도 파일명 255바이트 안에 든다.
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .take(120)
         .collect();
     format!("{safe}-{:016x}.json", fnv1a64(key.as_bytes()))
@@ -245,6 +274,8 @@ impl FileIndex {
         Arc::new(Self {
             inner: RwLock::new(HashMap::new()),
             cache_dir,
+            reindexed: std::sync::Mutex::new(Vec::new()),
+            global_builds: std::sync::atomic::AtomicUsize::new(0),
         })
     }
 
@@ -313,26 +344,27 @@ impl FileIndex {
         self.store_compact(key, fresh).await
     }
 
-    /// 전역 인덱스에서 `root` 아래 항목을 빼고 `fresh` 항목을 넣는다. 전역이 없으면 아무것도 안 한다.
-    /// 전역 빌드가 진행 중이면 다음 부분 공개가 이 결과를 덮을 수 있지만, 그 빌드도 같은 트리를 새로 읽는다.
+    /// 전역 인덱스에서 `root` 아래 항목을 `fresh` 로 바꾼다. 전역 빌드가 진행 중이면 그 빌드의
+    /// 다음 공개에도 다시 적용되도록 기록한다. 전역이 아직 없으면 기록만 한다.
     async fn splice_into_global(&self, root: &Path, fresh: &CompactIndex) {
+        use std::sync::atomic::Ordering;
         let mut guard = self.inner.write().await;
+        if self.global_builds.load(Ordering::SeqCst) > 0 {
+            if let Ok(mut list) = self.reindexed.lock() {
+                // 같은 폴더·그 하위의 옛 기록은 이번 것으로 대체된다.
+                list.retain(|o| !o.root.starts_with(root));
+                list.push(ReindexOverlay {
+                    root: root.to_path_buf(),
+                    at_ms: now_ms(),
+                    fresh: fresh.clone(),
+                });
+            }
+        }
         let Some(global) = guard.get(GLOBAL_LOCAL_KEY) else {
             return;
         };
-        let mut b = CompactBuilder::new();
-        for i in 0..global.count() {
-            let path = Path::new(global.path_at(i));
-            if path != root && path.starts_with(root) {
-                continue;
-            }
-            b.push_from(global, i);
-        }
-        for i in 0..fresh.count() {
-            b.push_from(fresh, i);
-        }
-        let built_at = global.built_at_ms;
-        guard.insert(GLOBAL_LOCAL_KEY.to_string(), b.finish(built_at));
+        let next = splice_subtree(global, root, fresh);
+        guard.insert(GLOBAL_LOCAL_KEY.to_string(), next);
     }
 
     /// 이미 수집된 경로 목록(원격 `find` 등)을 인덱스에 저장 + 디스크 캐시.
@@ -369,7 +401,10 @@ impl FileIndex {
         roots: Vec<PathBuf>,
         on_progress: F,
     ) -> Result<usize, DuetError> {
+        use std::sync::atomic::Ordering;
         let this = self.clone();
+        let started = now_ms();
+        self.global_builds.fetch_add(1, Ordering::SeqCst);
         let count = tokio::task::spawn_blocking(move || {
             let mut b = CompactBuilder::new();
             let mut count = 0u32;
@@ -379,32 +414,42 @@ impl FileIndex {
                 let mut tick = |builder: &CompactBuilder, c: u32| {
                     on_progress(c);
                     if c >= next_publish {
-                        this.publish_global(builder.snapshot(now_ms()));
+                        this.publish_global(builder.snapshot(now_ms()), started, false);
                         next_publish = next_publish.saturating_mul(2);
                     }
                 };
                 for root in &roots {
                     walk_into(&mut b, root, &mut count, &mut tick);
                     // 드라이브 1개 끝날 때마다 무조건 공개 — 작은/여러 드라이브도 즉시 전체-PC.
-                    this.publish_global(b.snapshot(now_ms()));
+                    this.publish_global(b.snapshot(now_ms()), started, false);
                 }
             }
             let final_idx = b.finish(now_ms());
             let c = final_idx.count();
-            this.publish_global(final_idx);
+            this.publish_global(final_idx, started, true);
             c
         })
-        .await
-        .map_err(|e| DuetError::Io(format!("global index join: {e}")))?;
+        .await;
+        self.global_builds.fetch_sub(1, Ordering::SeqCst);
+        let count = count.map_err(|e| DuetError::Io(format!("global index join: {e}")))?;
         Ok(count)
     }
 
     /// 전역(전체 드라이브) 인덱스를 갱신 — 부분/최종 모두 같은 키로 덮어쓴다.
+    /// `started` 이후에 끝난 폴더 재색인은 이 빌드보다 새 목록이라 다시 덮어 쓴다(SC-18).
+    /// 최종 공개(`last`)에서는 이 빌드 시작 전 기록을 버린다 — 그 내용은 이 빌드가 이미 새로 읽었다.
     /// blocking 컨텍스트(spawn_blocking 내부)에서 호출 가능하도록 `blocking_write` 사용.
-    fn publish_global(&self, idx: CompactIndex) {
-        self.inner
-            .blocking_write()
-            .insert(GLOBAL_LOCAL_KEY.to_string(), idx);
+    fn publish_global(&self, mut idx: CompactIndex, started: i64, last: bool) {
+        let mut guard = self.inner.blocking_write();
+        if let Ok(mut list) = self.reindexed.lock() {
+            for o in list.iter().filter(|o| o.at_ms >= started) {
+                idx = splice_subtree(&idx, &o.root, &o.fresh);
+            }
+            if last {
+                list.retain(|o| o.at_ms >= started);
+            }
+        }
+        guard.insert(GLOBAL_LOCAL_KEY.to_string(), idx);
     }
 
     /// 전역(전체 드라이브) 인덱스가 빌드돼 있으면 쿼리, 아니면 `None`.
@@ -1050,6 +1095,52 @@ mod ux_smoke_browse {
             .await
             .unwrap();
         assert_eq!(names(hits), vec!["fresh_needle", "other_needle"]);
+    }
+
+    /// 전역 빌드 도중 재색인: 그 빌드가 나중에 공개하는 (재색인 전에 읽은) 스냅샷이
+    /// 재색인 결과를 지우면 안 된다(Sol R1 지적). publish_global 은 blocking 이라 동기 테스트.
+    #[test]
+    fn global_publish_during_build_keeps_completed_reindex() {
+        use std::sync::atomic::Ordering;
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let dir = tempfile::Builder::new()
+            .prefix("duetidx")
+            .tempdir()
+            .unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("old_needle"), b"x").unwrap();
+        let idx = FileIndex::new(cache.path().into());
+        let started = now_ms();
+        idx.global_builds.fetch_add(1, Ordering::SeqCst);
+        let stale = walk_local(dir.path()).unwrap().finish(started);
+        idx.publish_global(stale.clone(), started, false);
+        std::fs::write(dir.path().join("new_needle"), b"x").unwrap();
+        rt.block_on(idx.build_local(dir.path())).unwrap();
+        let count = |idx: &Arc<FileIndex>| {
+            rt.block_on(idx.query_global_local(dir.path(), "new_needle", &SearchOpts::default()))
+                .unwrap()
+                .len()
+        };
+        assert_eq!(count(&idx), 1);
+        idx.publish_global(stale.clone(), started, false);
+        assert_eq!(count(&idx), 1, "partial publish must re-apply the reindex");
+        idx.publish_global(stale, started, true);
+        assert_eq!(count(&idx), 1, "final publish must re-apply the reindex");
+        idx.global_builds.fetch_sub(1, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn cache_name_stays_short_for_long_unicode_roots() {
+        let root = format!(
+            "local|/{}/{}/{}",
+            "가".repeat(40),
+            "나".repeat(40),
+            "다".repeat(40)
+        );
+        assert!(key_to_filename(&root).len() <= 160);
     }
 
     #[test]
