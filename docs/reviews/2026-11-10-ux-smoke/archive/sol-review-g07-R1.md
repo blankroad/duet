@@ -1,0 +1,35 @@
+# G-07 R1 independent FE review — CHANGES
+
+Reviewed commit `ddf352ffa356983b2fe9db121780fe2f882bd5a6` against baseline `a8562c7`. Applied exactly with `git show ddf352f | git apply`, no --index and no commit. Read SPEC-R1b.md: true local Extract here is primary, each-to-folder secondary, atomic KeepBoth, password FIFO, per-archive tasks/undo; remote here hidden. Ready for later implementation review; no R1b implementation reviewed here.
+
+## Required changes
+
+1. **P2 — New tabs opened inside an archive lose the new Back-restoration behavior.** `src/stores/panes.ts:426-433` creates an initial tab and copies `archive` but never `archiveTrail`. Repro: browse outer.zip; use new-tab (+ / openTab with omitted location); Up to original folder; Back to extracted root. `setEntries` cleared the sole current context on exit, so Back has neither current nor trail: archive is undefined, Update disappears and session records temp path again. Independent failing test `openTab clone retains Back restoration after exit`: expected outer.zip, got undefined. Copy/seed appropriate context trail for this path (and explicit same-archive subfolder openTab), rather than only duplicateTab. This is an uncovered route through the exact browse-32 fix, not a claim that this commit introduced openTab itself.
+
+2. **P2 — Reopening a closed nested archive discards its parent context and persists a temporary path.** `src/stores/panes.ts:588-605` uses immediate `archive.exitTo`, clears both archive and archiveTrail, and resets history to that immediate exit. Repro: outer.zip from /archives → outer/sub/inner.zip → close inner tab → reopen closed tab. Result is `/tmp/duet-archive/A/content/sub` with no archive context. Up escapes through temp paths; snapshot saves that temporary directory, which fails on restart after reaping. Two independent failing tests: `reopen nested tab returns to durable outer folder` and `reopened nested tab does not persist a temporary path`; both expected /archives, got the outer temp/sub path. Session.snapshot already walks to outermost parent; apply an equivalent durable-target decision in reopenClosedTab (or restore validated parent context while temp exists, with durable fallback). Existing immediate-exit behavior predates patch, but the new nested-parent model leaves this explicitly requested route inconsistent.
+
+## Additional robustness findings (not asserted as production blockers)
+
+3. **Overlapping roots choose current ancestor before more specific remembered archive.** `archiveFor` lines 65-69 returns first containing current/parent, before inspecting trail. Independent test uses outer root `/tmp/duet-archive/A/content` and inner root `.../content/nested`: after leaving, returning to outer then inner restores outer.zip, not inner.zip. App Update then constructs original=outer.exitTo/outer.label and repack root=outer.root (App.tsx:1277-1283), so this synthetic overlap can select the wrong archive for Update. **Reachability caveat:** real core open_for_browse uses independent UUID-token/content roots for each archive, not physically nested extracted roots. Thus no normal-current-backend wrong-archive update reproduced. Consider longest-containing-root matching if overlap is intended to be supported; do not report this synthetic case as proven user-data corruption.
+
+4. **Trail array cap is not a bound on retained contexts.** `setArchiveContext` lines 1017-1029 limits only array entries. Every nested archive links its parent, so 30 real-shaped sequential nested opens retain all 30 context objects even though trail.length=20. Independent failing test `trail limit also bounds reachable parent contexts`: received 30, limit 20. Retention is linear in nested depth (not an observed exponential leak), and the parent chain is needed for nested session fallback. Document the cap accurately / decide a depth policy rather than dropping parents and breaking correctness. No long-run memory benchmark or OOM attributed to this patch.
+
+## Checks and exact outcomes
+
+- `git show ddf352f | git apply`: exit 0. Production edits are this patch only, unstaged.
+- `pnpm exec vitest run src/stores/__review__/archive-context.test.ts src/components/pane/__review__/browse-sol3-app.test.tsx src/components/pane/__review__/browse-opus2-app.test.tsx --testTimeout=30000`: **exit 0; 3 files passed, 20 tests passed**. Includes original nested exit, Back/repack/session, Up focusName tests. Duration 28.54s.
+- `pnpm exec tsc --noEmit`: **exit 0**, run once. Generated bindings prerequisite was copied read-only from main in Phase A; no generation/build/cargo here.
+- `pnpm exec vitest run _report/g07-review.test.ts`: **exit 1; 1 file failed, 5 failed / 2 passed**. Duration 19.22s. Store test artifact retained in _report uncommitted. Five failures correspond exactly to findings above (finding 2 has two tests). All are real store/snapshot behavior with synthetic paths, no filesystem mutations or live desktop.
+- The two passing independent controls: source/separator boundaries (local root vs same-path ssh and `content-other` rejected), and nested-active session.snapshot resolves /archives correctly.
+- Both Vitest invocations were started before lead single-worker resource rule arrived; second had already completed when rule was handled. No repeat run or tsc retry. Future Vitest must be coordinated and use `--maxWorkers=1 --minWorkers=1`.
+- No cargo commands, bindings generation, full suites or live app runs in this review. Phase A Rust remains queued #8; queued command updated by lead to `cd src-tauri && CARGO_BUILD_JOBS=2 cargo test --config profile.test.package.duet.opt-level=0 --config profile.test.package.duet.debug=0 --test ux_smoke_archive_sol`; NOT run.
+
+## Other requested risks checked
+
+- Local vs remote same path: insideArchive checks sameSource before prefix; independent control passes. SSH connection identity uses connection_id, consistent with other navigation helpers. Root de-dup only by string (not source) could evict a different source's same-path trail; normal local/remote UUID roots differ, so no ordinary scenario reproduced.
+- Reaped directories: App.navigateTo applies entries/context only after successful listEntries; failure retains current tab and history. Existing Back-to-reaped-root will fail navigation rather than restore nonexistent content. Static inspection, no backend or live reaping run. Reopen issue in finding 2 bypasses the intended durable fallback.
+- FocusName: requested App tests pass; new focus option is forwarded to target-tab setEntries after navigation freshness check. No additional focus regression found.
+- duplicateTab uses spread and therefore retains archiveTrail, with history copied; setArchiveContext builds a new array, so no shared-array mutation found. openTab gap is finding 1.
+- No normal UUID-root path was shown to repack the wrong original archive. Synthetic overlap limitation explicitly separated in finding 3.
+
+No files outside own worktree written. _report is uncommitted; no staging or commit attempted.

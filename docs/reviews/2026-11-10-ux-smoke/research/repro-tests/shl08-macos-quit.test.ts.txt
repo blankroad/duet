@@ -1,0 +1,43 @@
+// FE-MOCK isolated production callback, NOT a mounted App/live-app test.
+// Extract the actual App buildBuiltins quit property with TS AST. Only the
+// dynamic Tauri import is replaced by a mock boundary; behavior is not rewritten.
+import { readFileSync } from "node:fs";
+import ts from "typescript";
+import { afterEach, expect, it, vi } from "vitest";
+vi.mock("@tauri-apps/plugin-os", () => ({ platform: () => "macos" }));
+import { buildBuiltins } from "@/lib/commands";
+const source = readFileSync(`${process.cwd()}/src/App.tsx`, "utf8");
+const ast = ts.createSourceFile("App.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+let callback: ts.Expression | undefined;
+function visit(node: ts.Node): void {
+  if (ts.isCallExpression(node) && node.expression.getText(ast) === "buildBuiltins") {
+    const arg = node.arguments[0];
+    if (arg && ts.isObjectLiteralExpression(arg)) {
+      const property = arg.properties.find(p => ts.isPropertyAssignment(p) && p.name.getText(ast) === "quit");
+      if (property && ts.isPropertyAssignment(property)) callback = property.initializer;
+    }
+  }
+  ts.forEachChild(node, visit);
+}
+visit(ast);
+if (!callback) throw new Error("Harness: App buildBuiltins.quit callback not found");
+const isolated = ts.transpileModule(`const quit = ${callback.getText(ast)}; return quit;`, {
+  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
+}).outputText;
+const mockable = isolated.replace(/import\(["']@tauri-apps\/api\/window["']\)/g, "Promise.resolve({ getCurrentWindow })");
+if (mockable === isolated) throw new Error("Harness: Tauri window mock replacement not found");
+afterEach(() => vi.unstubAllGlobals());
+it.each(["Windows", "Macintosh"])("UX-SHL-08: registered Quit closes the app on %s", async userAgent => {
+  vi.stubGlobal("navigator", { userAgent });
+  const close = vi.fn().mockResolvedValue(undefined);
+  const getCurrentWindow = vi.fn(() => ({ close }));
+  const quit = new Function("getCurrentWindow", mockable)(getCurrentWindow) as () => void;
+  const deps = new Proxy({ permanentDeleteEnabled: false, quit }, {
+    get: (t, k) => k in t ? Reflect.get(t, k) : vi.fn(),
+  }) as Parameters<typeof buildBuiltins>[0];
+  const command = buildBuiltins(deps).find(c => c.id === "app.quit");
+  expect(command).toBeDefined();
+  command!.action();
+  await Promise.resolve();
+  expect(close, "available Quit must perform a window action").toHaveBeenCalledOnce();
+});

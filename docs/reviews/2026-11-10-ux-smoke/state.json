@@ -1,0 +1,51 @@
+{
+  "base": "76b9b6e8b61608168b42a135a7a888422a3b1c60",
+  "session": "duet",
+  "research": {
+    "workspace_id": "w2",
+    "pane_id": "w2:p1",
+    "agent": "ux-research-lead"
+  },
+  "modules": {
+    "archive": {
+      "workspace_id": "w3",
+      "pane_id": "w3:p1",
+      "agent": "ux-archive-lead"
+    },
+    "shell": {
+      "workspace_id": "w4",
+      "pane_id": "w4:p1",
+      "agent": "ux-shell-lead"
+    },
+    "fileops": {
+      "workspace_id": "w5",
+      "pane_id": "w5:p1",
+      "agent": "ux-fileops-lead"
+    },
+    "browse": {
+      "workspace_id": "w6",
+      "pane_id": "w6:p1",
+      "agent": "ux-browse-lead"
+    },
+    "remote": {
+      "workspace_id": "w7",
+      "pane_id": "w7:p1",
+      "agent": "ux-remote-lead"
+    },
+    "sync": {
+      "workspace_id": "w8",
+      "pane_id": "w8:p1",
+      "agent": "ux-sync-lead"
+    }
+  },
+  "main": {
+    "pane_id": "w1:p1"
+  },
+  "resume": {
+    "at": "2026-11-11T02:05:00+09:00",
+    "timer_pane_id": "w2:p4",
+    "timer_tab_id": "w2:t2"
+  },
+  "status": "reviewed_scope_complete",
+  "automatic_resume": "one-shot timer sent; deferred Claude retries canceled; no next schedule"
+}

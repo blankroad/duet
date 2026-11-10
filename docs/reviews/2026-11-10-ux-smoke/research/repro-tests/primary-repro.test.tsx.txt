@@ -1,0 +1,161 @@
+// FE-MOCK acceptance. Execute actual App callbacks (including its More block),
+// real menu builder/shared actions/shell adapter. No copied selection gates.
+// App callbacks are AST-isolated to avoid mounting unrelated app startup IPC.
+import { readFileSync } from "node:fs";
+import ts from "typescript";
+import type { ComponentType } from "react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+const h = vi.hoisted(() => ({ calls: [] as { command: string; args: unknown[] }[], nextTask: 0 }));
+vi.mock("@tauri-apps/plugin-os", () => ({ platform: () => "windows" }));
+vi.mock("@/types/bindings", () => ({ commands: new Proxy({}, {
+  get: (_target, key) => async (...args: unknown[]) => {
+    const command = String(key);
+    h.calls.push({ command, args });
+    if (/shell.*menu.*open/i.test(command)) return { status: "ok", data: { token: 1, items: [] } };
+    const makePlan = (item: { location?: unknown; name?: string }) => ({ source: { kind: "local" }, archive_dir: item.location, archive_name: item.name, format: "zip", dest_dir: `C:/fixture-output/${item.name}`, conflict: false });
+    if (/extract.*plan.*batch/i.test(command)) {
+      const items = args[0] as { location?: unknown; name?: string }[];
+      return { status: "ok", data: items.map(archive => ({ archive, plan: makePlan(archive), error: null })) };
+    }
+    if (/extract.*plan|plan.*extract/i.test(command)) return { status: "ok", data: makePlan(args[0] as { location?: unknown; name?: string }) };
+    if (/extract.*here.*retry/i.test(command)) return { status: "ok", data: `fixture-task-${++h.nextTask}` };
+    if (/extract.*here/i.test(command)) return { status: "ok", data: (args[0] as unknown[]).map(archive => ({ archive, task_id: `fixture-task-${++h.nextTask}`, error: null })) };
+    if (/extract.*execute|execute.*extract/i.test(command)) return { status: "ok", data: `fixture-task-${++h.nextTask}` };
+    return { status: "ok", data: null };
+  },
+}) }));
+import { platform } from "@tauri-apps/plugin-os";
+import * as paneExports from "@/stores/panes";
+import * as menuExports from "@/lib/entryMenu";
+import * as shellExports from "@/lib/shellMenu";
+import * as dndExports from "@/lib/entryDnd";
+import * as trashExports from "@/lib/trashView";
+import { useContextMenu } from "@/stores/contextMenu";
+import i18n from "@/i18n";
+import type { Entry, EntryRef } from "@/types/bindings";
+import { useUIDialogs } from "@/stores/ui-dialogs";
+import type { MenuItem } from "@/stores/contextMenu";
+const { usePanes, activeTab, computeDisplayed } = paneExports;
+const archives = ["a.zip", "b.7z", "c.tar.gz"];
+const source = readFileSync(`${process.cwd()}/src/App.tsx`, "utf8");
+const ast = ts.createSourceFile("App.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+function appCallback(name: string, env: Record<string, unknown>) {
+  let found: ts.Expression | undefined;
+  const visit = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node) && node.name.getText(ast) === name && node.initializer && ts.isCallExpression(node.initializer)) found = node.initializer.arguments[0];
+    ts.forEachChild(node, visit);
+  };
+  visit(ast);
+  if (!found) throw new Error(`Harness: actual App callback ${name} not found`);
+  const js = ts.transpileModule(`return (${found.getText(ast)});`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
+  return new Function(...Object.keys(env), js)(...Object.values(env));
+}
+const env = { ...paneExports, ...menuExports, ...shellExports, ...dndExports, ...trashExports, platform, useContextMenu, i18n,
+  onActivate: vi.fn(), onOpenInOtherPane: vi.fn(), onPutBack: vi.fn(), onUp: vi.fn(), showToast: vi.fn() };
+const openEntryMenuAt = appCallback("openEntryMenuAt", env);
+const onEntryContextMenu = appCallback("onEntryContextMenu", { openEntryMenuAt });
+function openScenario(mixed: boolean) {
+  const names = mixed ? [...archives, "readme.txt"] : archives;
+  const entries: Entry[] = names.map(name => ({ name, kind: "file", size: 10, modified_ms: 0, permissions: null, hidden: false }));
+  const s = usePanes.getState(), base = activeTab(s, "left");
+  usePanes.setState({ activePane: "left", panes: { ...s.panes, left: { tabs: [{ ...base, location: { source: { kind: "local" }, path: "C:/fixtures" }, entries, selected: new Set(names), cursorIndex: 0, filter: "", showHidden: false }], activeTabIndex: 0 } } });
+  const index = computeDisplayed(activeTab(usePanes.getState(), "left")).findIndex(e => e.name === "b.7z");
+  const clicked = entries.find(e => e.name === "b.7z")!;
+  render(<button onContextMenu={e => onEntryContextMenu("left", clicked, index, e)}>b.7z</button>);
+  fireEvent.contextMenu(screen.getByRole("button", { name: "b.7z" }));
+  expect([...activeTab(usePanes.getState(), "left").selected].sort()).toEqual([...names].sort());
+  return useContextMenu.getState().items;
+}
+function strings(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap(strings);
+  if (value && typeof value === "object") return Object.values(value).flatMap(strings);
+  return [];
+}
+function archiveNamesIn(value: unknown) {
+  return [...new Set(strings(value).map(s => s.replaceAll("\\", "/").split("/").pop()!).filter(s => [...archives, "readme.txt"].includes(s)))].sort();
+}
+function extractionNames() {
+  return archiveNamesIn(h.calls.filter(c => /extract/i.test(c.command)).map(c => c.args));
+}
+// A glob returns no loader on base, so its missing menu assertion is reached
+// without a collection error. On the archive patch, load the REAL export only
+// when its real dialog opens. No direct IPC/policy implementation in this test.
+const extractActionModules = import.meta.glob<{
+  runExtractHere: (archives: readonly EntryRef[], policy: "keep_both", toast: typeof env.showToast) => Promise<void>;
+}>("../lib/extractActions.ts");
+const extractDialogModules = import.meta.glob<{
+  ExtractHereDialog: ComponentType<{ archives: readonly EntryRef[]; onConfirm: (policy: "keep_both" | "replace" | "skip") => void; onCancel: () => void }>;
+}>("../components/dialogs/ExtractHereDialog.tsx");
+async function confirmExtractionDialog(payload: unknown): Promise<void> {
+  const dialog = payload as { kind: string; archives: EntryRef[] };
+  expect(dialog.kind).toBe("extract-here");
+  expect(Array.isArray(dialog.archives)).toBe(true);
+  const load = extractActionModules["../lib/extractActions.ts"];
+  if (!load) throw new Error("INCONCLUSIVE-harness: extract-here dialog has no real extractActions module");
+  const { runExtractHere } = await load();
+  const loadDialog = extractDialogModules["../components/dialogs/ExtractHereDialog.tsx"];
+  if (!loadDialog) throw new Error("INCONCLUSIVE-harness: real ExtractHereDialog module missing");
+  const { ExtractHereDialog } = await loadDialog();
+  let confirmation: Promise<void> | undefined;
+  const view = render(<ExtractHereDialog
+    archives={dialog.archives}
+    onCancel={() => useUIDialogs.getState().close()}
+    onConfirm={policy => {
+      expect(policy).toBe("keep_both");
+      useUIDialogs.getState().close();
+      confirmation = runExtractHere(dialog.archives, policy as "keep_both", env.showToast);
+    }}
+  />);
+  fireEvent.click(screen.getByRole("button", { name: /^Extract/ }));
+  expect(confirmation, "real Extract button must invoke the confirmation path").toBeDefined();
+  await confirmation;
+  view.unmount();
+}
+async function exerciseExtractAction(action: MenuItem) {
+  h.calls.length = 0;
+  useUIDialogs.setState({ dialog: { kind: "none" }, queue: [], fromQueue: false });
+  await action.onSelect?.();
+  const dialog = useUIDialogs.getState().dialog;
+  if (dialog.kind !== "none") {
+    expect(archiveNamesIn(dialog), `${action.id}: dialog payload must contain all archives only`).toEqual([...archives].sort());
+    await confirmExtractionDialog(dialog);
+  }
+  await waitFor(() => expect(extractionNames(), `${action.id}: all archives must reach extract IPC`).toEqual([...archives].sort()));
+  expect(extractionNames()).not.toContain("readme.txt");
+  // Planning alone must not satisfy acceptance: confirm real execution dispatch.
+  await waitFor(() => expect(archiveNamesIn(h.calls.filter(c => /extract/i.test(c.command) && /here|execute/i.test(c.command)).map(c => c.args)), `${action.id}: execution IPC must contain all archives`).toEqual([...archives].sort()));
+}
+beforeEach(async () => {
+  h.calls.length = 0;
+  useUIDialogs.setState({ dialog: { kind: "none" }, queue: [], fromQueue: false });
+  await i18n.changeLanguage("en");
+});
+afterEach(() => { cleanup(); useContextMenu.getState().close(); useUIDialogs.getState().close(); });
+it("A: every enabled extract action sends all three differently named archives to extract IPC", async () => {
+  const actions = openScenario(false).filter((e): e is MenuItem => "id" in e && e.id.startsWith("extract") && !e.disabled);
+  expect(actions.length, "multi-archive right-click must expose an enabled extract* action").toBeGreaterThan(0);
+  expect(actions.map(a => a.id), "local archive actions: here first, then folders").toEqual(["extract-here", "extract"]);
+  for (const action of actions) await exerciseExtractAction(action);
+});
+it("A mixed control: no enabled extract action submits the plain file", async () => {
+  const actions = openScenario(true).filter((e): e is MenuItem => "id" in e && e.id.startsWith("extract") && !e.disabled);
+  if (actions.length === 0) { expect(extractionNames()).toEqual([]); return; }
+  for (const action of actions) await exerciseExtractAction(action);
+});
+it.each([false, true])("B: Windows local More retains complete multi-selection (plain-file control=%s)", async mixed => {
+  const action = openScenario(mixed).find(e => "id" in e && (e.id.includes("more") || /more options/i.test(e.label)));
+  expect(action, "Windows local multi-selection must expose More options").toBeDefined();
+  if (!action || !("id" in action)) return;
+  expect(action.disabled).not.toBe(true);
+  await action.loadChildren?.();
+  await action.onSelect?.();
+  const expected = (mixed ? [...archives, "readme.txt"] : archives).map(n => `C:/fixtures/${n}`).sort();
+  await waitFor(() => {
+    const calls = h.calls.filter(c => /shell.*menu.*open/i.test(c.command));
+    expect(calls, "native menu open must reach IPC").not.toHaveLength(0);
+    const paths = [...new Set(calls.flatMap(c => strings(c.args)).map(s => s.replaceAll("\\", "/")).filter(s => s.startsWith("C:/fixtures/")))].sort();
+    expect(paths, "shell IPC must contain the whole selected path set").toEqual(expected);
+  });
+});

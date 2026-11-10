@@ -1,0 +1,19 @@
+{
+  "local_rs_sha256": "c87fc7ee58d0bca7400332a591ac0d83fbab33497c15b460486ca1aaeb1db889",
+  "tsc_noEmit": "passed",
+  "vitest": {
+    "files": 157,
+    "passed": 1094,
+    "command": "pnpm exec vitest run",
+    "duration_s": 90.1
+  },
+  "user_diff_sha256": "c00f448a4f73001e39e179e6b67e328491b7daa6ecd98a1c78ae5bdb2cf45cdd",
+  "cargo_lib": {
+    "command": "CARGO_BUILD_JOBS=2 cargo test --manifest-path src-tauri/Cargo.toml --config 'profile.test.package.duet.opt-level=0' --config 'profile.test.package.duet.debug=0' --lib",
+    "passed": 704,
+    "failed": 0,
+    "ignored": 50,
+    "test_duration_s": 25.41,
+    "log": "/tmp/duet-ux-main-baseline-cargo-fast.log"
+  }
+}

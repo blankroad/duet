@@ -1,0 +1,14 @@
+// FE-MOCK: correct expected behavior; intentionally red on base.
+import { expect, it, vi } from "vitest";
+vi.mock("@tauri-apps/plugin-os", () => ({ platform: () => "windows" }));
+import { buildBuiltins } from "@/lib/commands";
+it("UX-SHL-07: F4 emits the supplied editor action as a configurable command", () => {
+  const editFile = vi.fn();
+  const deps = new Proxy({ permanentDeleteEnabled: false, editFile }, {
+    get: (t, k) => k in t ? Reflect.get(t, k) : vi.fn(),
+  }) as Parameters<typeof buildBuiltins>[0];
+  const command = buildBuiltins(deps).find(c => c.defaultKey === "F4");
+  expect(command, "F4 editor command must be registered").toBeDefined();
+  command!.action();
+  expect(editFile).toHaveBeenCalledOnce();
+});

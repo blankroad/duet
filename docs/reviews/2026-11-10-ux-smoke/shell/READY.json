@@ -1,0 +1,169 @@
+{
+  "module": "shell",
+  "branch": "ux-smoke/shell",
+  "base": "76b9b6e8b61608168b42a135a7a888422a3b1c60",
+  "batches": [
+    {
+      "id": "L1",
+      "status": "integrated (main: 88f7d99, e94719d, c6aaa3d)",
+      "rounds": 2,
+      "reviewer": "shell-sol (Codex gpt-6.1-sol)",
+      "verdict": "APPROVE (round 1: bd92c6b (UX-SHL-11/12) APPROVE, 4f80d38 (UX-SHL-07) CHANGES tsc TS2352; round 2: 4f80d38+d6dba8b APPROVE)",
+      "review_report": "docs/reviews/2026-11-10-ux-smoke/shell/review-L1-sol.md",
+      "commits_in_order": [
+        "4f80d38fba2d90fc4337c9177f591ab098ceee48",
+        "bd92c6b3bcf270b6e1c96fe4b1013f579ba6d99b",
+        "d6dba8ba836aa018b3bf7da3ca99e3611c5aac89"
+      ],
+      "fixes": [
+        "UX-SHL-07: F4 file.edit command was never registered (callback only since 8c4b836) -> F4 and palette Edit did nothing",
+        "UX-SHL-11 (alias ux-fileops-03 smoke label): DESIGN.md alternate keys F8 / Shift+F8 / Ctrl+Shift+N / Shift+F6 (as altKeys, user rebinding still wins)",
+        "UX-SHL-12 (alias ux-fileops-04 smoke label): macOS Cmd+Backspace (arrives as Ctrl+Backspace) moves selection to trash"
+      ],
+      "frontend_only": true,
+      "bindings_change": false,
+      "tests": [
+        "pnpm exec vitest run --maxWorkers=1 --minWorkers=1 src/lib/commands.win.test.ts src/lib/commands.mac.test.ts src/stores/keymap.test.ts  # lead: 13 passed (pre-d6dba8b), Sol: commands.win 4/4 after d6dba8b",
+        "pnpm exec tsc --noEmit  # exit 0 (lead and Sol)",
+        "F4 regression test fails without 4f80d38: 'expected undefined to be F4'",
+        "fileops' own repro 6371b88 src/lib/__smoke__/fileops-opus-ux.test.ts -t 'ux-fileops-0[34]': all 5 it.fails now pass -> flip to it() on integration"
+      ],
+      "mocked_only": "All FE tests are mocked (Vitest), not live app; macOS hardware F-key behavior unverified."
+    },
+    {
+      "id": "L2",
+      "status": "integrated (main de032ee..2d84c7e)",
+      "priority": "PRIMARY (user repro: multi-select archives -> native More options / Bandizip 'extract each')",
+      "fixes": [
+        "UX-SHL-01: Windows native 'More options' for multi-selection — all selected items (incl. filter-hidden), pane sort order, '..' excluded; backend one-parent multi-PIDL GetUIObjectOf; cache keyed by (ordered paths, scope); Session owns HMENU/IContextMenu/parent IShellFolder/absolute PIDLs until drop; stale token never resolves to a newer menu; '.'/'..' segments rejected (typed DuetError) — no fs::canonicalize by lead decision",
+        "UX-SHL-03 (alias shell-settings-16): shell menu invoke failures surfaced — stale token NotFound → 'menu expired' toast, InvokeCommand error → showError, user cancel silent, out-of-range NotSupported",
+        "UX-SHL-02 (alias shell-settings-10): background 'More options' is the folder's own background menu (SHBindToObject + CreateViewObject), no longer the folder-as-item menu with Delete/Rename of the current folder"
+      ],
+      "rounds": {
+        "UX-SHL-01": 2,
+        "UX-SHL-03": 1,
+        "UX-SHL-02": 1
+      },
+      "reviewer": "shell-sol (Codex gpt-6.1-sol)",
+      "verdict": "APPROVE — UX-SHL-01 r1 CHANGES (filter-hidden selection dropped; lexical parent check) → r2 d6b4191+d32af3b APPROVE; UX-SHL-03 1af2860 APPROVE; UX-SHL-02 dd80ca6 APPROVE",
+      "review_reports": [
+        "shell/review-L2-sol.md",
+        "shell/review-L2r2-sol.md",
+        "shell/review-L4-sol.md"
+      ],
+      "implementer_report": "shell/opus-R1.md",
+      "commits_in_order_source_branch": {
+        "branch": "ux-smoke/shell-opus (based directly on 76b9b6e, recommended pick source)",
+        "commits": [
+          "8aff4f1d383b711d2e9f356ac28d6c95756a9dfb  be/platform UX-SHL-01 (prerequisite)",
+          "87dd723fda62df0433fcdde4d6eb3a418e5fb3b2  fe/ui UX-SHL-01 (prerequisite)",
+          "1af28601f8fc2c5f593377423a3f4694de9b3484  UX-SHL-03",
+          "dd80ca68862da5ea50968bbe51d7f62059ef8648  UX-SHL-02",
+          "d6b41917d161fc9d08ca42cd09bc61fc6995ba0d  fe/ui UX-SHL-01 R2",
+          "d32af3b30d52f38418656b810e908e7bd701fdde  be/platform UX-SHL-01 R2"
+        ]
+      },
+      "same_commits_on_module_branch": {
+        "branch": "ux-smoke/shell (cherry-picked on top of dfc74b3/b9b5ee5, clean, no conflicts)",
+        "commits": [
+          "331f1f8c3d23b005b6d139edcc86261b900df057",
+          "827d50ef2e9d756adfe3156c6537edfa8560985a",
+          "37e58149e6efd4d4f5686dc842107c26ad2fc866",
+          "abb800111958efbced98ba37cdccbfa4dae352f8",
+          "9096df2b2478b62b115290270dd96d39d34416c4",
+          "b9a14470561cfc437d94488dab4e41a4d3ed50fa"
+        ]
+      },
+      "do_not_pick_with_this_batch": "dfc74b3 (UX-SHL-04 clipboard, Sol L3 CHANGES, round 2 pending) — the L2 commits do not depend on it",
+      "ipc_change": "shell_menu_open(paths: Vec<PathBuf>, scope) / shell_menu_warm(paths: Vec<PathBuf>, scope) — main ACKed; shell_menu_invoke(token, cmd_id) signature unchanged but now returns real errors",
+      "bindings": "REGENERATED for real by shell-opus with `pnpm gen:bindings` (its leased cargo slot, target /tmp/duet-ux-target-shell-opus): shellMenuOpen(paths: string[], scope), shellMenuWarm(paths: string[], scope). bindings.ts is gitignored — main must run `pnpm gen:bindings` after integration. Lead re-ran `pnpm exec tsc --noEmit` on the combined module branch with those generated bindings: exit 0.",
+      "tests": [
+        "cargo test --lib shell_menu_core  # 21 passed (macOS; Opus, d32af3b)",
+        "cargo test --test ux_shell_l2  # 1 passed (Sol's '..' wrong-parent repro, ignore removed)",
+        "cargo clippy --target x86_64-pc-windows-gnu --lib -- -D warnings  # clean after each of 8aff4f1, 1af2860, dd80ca6, d32af3b (Opus)",
+        "pnpm exec vitest run --maxWorkers=1 --minWorkers=1 src/lib/shellMenu.test.ts src/lib/__review__/shell-settings-shell-menu.test.ts src/hooks/useShellWarm.test.tsx  # Sol: 3 files / 20 passed",
+        "research acceptance research/repro-tests/primary-repro.test.tsx.txt -t 'B:'  # PASS (Sol, research-sol R3b, and lead on module branch: 4 files 22 passed / 2 Part-A skipped)",
+        "pnpm exec tsc --noEmit  # exit 0 (Opus, lead on combined branch)"
+      ],
+      "source_baseline_test_changes": "src/lib/__review__/shell-settings-shell-menu.test.ts (11-08 repro shell-settings-16) flips it.fails → it in 1af2860 because UX-SHL-03 fixes it; src-tauri/tests/ux_shell_l2.rs added (Sol repro, now passing). New: src/lib/shellMenu.test.ts, src-tauri/src/platform/shell_menu_core.rs unit tests.",
+      "mocked_only": "All FE tests mock IPC and pass the OS as 'windows' — not live app tests.",
+      "unverified": "Windows runtime NOT exercised: multi-PIDL GetUIObjectOf with ILFindLastID children, Bandizip/7-Zip 'extract each' appearing/working for N archives, Explorer MultiSelectModel item limits (no cap added), real cancel HRESULTs from shell extensions, background menu contents (IContextMenu2/3 lazy submenus such as New/Send to may be empty; View/Sort come from DefView and will not appear). windows-gnu clippy proves compile only. macOS/Linux have no native More menu (platform limit).",
+      "backlog_noted_by_review": "UX-SHL-06: shell menu worker rx.await has no timeout — a hung shell extension leaves the FE promise pending (pre-existing)."
+    },
+    {
+      "id": "L1-tests",
+      "status": "integrated (main f90fb82 fa67b2e d2f57fb 8fc67b5)",
+      "commits_in_order": [
+        "84a1c41c2e3c57e895c45c563278bb3c51cbc55e",
+        "47dd1b945933a4f5883137a1f521440c7f004ab0",
+        "f52945a13f18416615fc0534a83a8cbaf5536772",
+        "b9b5ee55993ec8e85d4d702a1bb35fb6e850f674"
+      ],
+      "branch": "ux-smoke/shell",
+      "note": "84a1c41 + 47dd1b9 are shell-sol's own Phase A repros and L1 review tests (FE 5 files / 27 passed in lead WT); src-tauri/tests/ux_shell_sol_a.rs compiles (lead, cargo test --test ux_shell_sol_a --include-ignored: ignored UX-SHL-10 repro fails as intended = open -a missing app returns Ok on real macOS). f52945a + b9b5ee5 relabel test titles to UX-SHL-11/12/10 — Sol L3 APPROVE. Needs L1 (integrated) underneath."
+    },
+    {
+      "id": "INT-1",
+      "status": "integrated (main 7984ad7)",
+      "kind": "integration follow-up (test + comment only, no product behavior change)",
+      "branch": "ux-smoke/shell-int (based on main 197bf87)",
+      "commits_in_order": [
+        "c34b1e3d86bcf3030a9cd494112a1b64e80bd419"
+      ],
+      "fixes": [
+        "UX-SHL-01 test contract after browse03 (1ebad57) selection pruning: split the L2 filter test — after setFilter both duet actions and native More get only the visible pick; a selection set after the filter keeps hidden names and native More gets all, same as resolveActiveTargets. shellMenuTarget comment: store may prune, helper honors the selection given."
+      ],
+      "rounds": "UX-SHL-01 round 3 (max)",
+      "reviewer": "shell-sol (Codex gpt-6.1-sol)",
+      "verdict": "APPROVE (emitted JS of shellMenu.ts identical before/after; browse03 intact)",
+      "review_report": "shell/review-int-c34b1e3-sol.md",
+      "tests": [
+        "pnpm exec vitest run --maxWorkers=1 --minWorkers=1 src/lib/shellMenu.test.ts src/stores/panes.test.ts src/stores/__review__/browse-panes.test.ts src/lib/__review__/shell-settings-shell-menu.test.ts src/hooks/useShellWarm.test.tsx  # 5 files / 102 passed (lead on main+c34b1e3; Sol on same snapshot)",
+        "research acceptance -t 'B:' 2 passed / 2 Part-A skipped",
+        "eslint + prettier clean"
+      ],
+      "mocked_only": "FE/store tests with mocked IPC — not live app."
+    },
+    {
+      "id": "L3",
+      "status": "integrated (main 89b590c fc7da20 7758a16)",
+      "fixes": [
+        "UX-SHL-04 (alias 11-08 fileops-36): Ctrl+C on remote (SSH) or mixed items no longer leaves duet's previous local file copy on the OS clipboard — duet clears it only if its own owner marker is still there. Windows: marker check + empty under one OpenClipboard (no interleaving). macOS: best effort, small but unbounded, non-atomic gap between check and clear (no pasteboard lock API). Linux: unchanged (no marker; wl-copy/xclip). Unreadable marker keeps ownership for retry; duet set/clear serialized."
+      ],
+      "rounds": 3,
+      "reviewer": "shell-sol (Codex gpt-6.1-sol)",
+      "verdict": "r1 dfc74b3 CHANGES (ownership races, retry loss, dangerous test comment) → r2 e0ee94e CHANGES (unreadable marker treated as not-ours) → r3 d0fc43d APPROVE (pair e0ee94e+d0fc43d on base dfc74b3)",
+      "review_reports": [
+        "shell/review-L3-sol.md",
+        "shell/review-L3r2-sol.md",
+        "shell/review-L3r3-sol.md"
+      ],
+      "pick_from_main_based_branch": {
+        "branch": "ux-smoke/shell-int (main 197bf87 + c34b1e3[=7984ad7] + these 3); git merge-tree vs current main: clean",
+        "commits_in_order": [
+          "c27912ddc3a3735fe89ecc80b08893f76fc8f61e",
+          "b3da76bd4e192f2e3447610449b110ce5d5e0ab0",
+          "6745e384ccca30cd44da58822baa08ce723385ef"
+        ]
+      },
+      "same_commits_on_module_branch": {
+        "branch": "ux-smoke/shell",
+        "commits": [
+          "dfc74b3da20c5642e646e03254271eb5e634bc51",
+          "e0ee94ecbf5723de0a3b4174f56b466ee7e89e0b",
+          "d0fc43d517671fd1f821ecd40c2e00cee6712653"
+        ]
+      },
+      "bindings_change": false,
+      "tests": [
+        "cargo test --lib platform::  # 47 passed (lead, leased slot A 03:30, CARGO_TARGET_DIR=/tmp/duet-ux-target-shell, on d0fc43d source)",
+        "cargo test --lib platform::macos::tests::clear_if_owned_clears_only_our_unchanged_contents -- --ignored --exact  # passed on real macOS NSPasteboard — private named pasteboard only; also checks another app's plain text is kept",
+        "cargo clippy --target x86_64-pc-windows-gnu --lib -- -D warnings  # clean (compile-only)"
+      ],
+      "warning": "NEVER run the platform::macos tests with a broad --ignored: set_file_clipboard_writes_real_pasteboard overwrites the user's clipboard.",
+      "unverified": "Windows runtime (CF_HDROP + DuetClipboardOwner marker, clear under open clipboard); macOS race window is disclosed best effort, not eliminated; nonce is cooperative ownership, not a security boundary."
+    }
+  ],
+  "never_includes": "src-tauri/src/fs/local.rs (user's uncommitted work)",
+  "final": "All shell batches integrated. Final native integration gates are main's. Windows runtime unverified for UX-SHL-01/02/03/04; UX-SHL-04 on macOS is best effort (non-atomic check→clear), Linux unchanged."
+}

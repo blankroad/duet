@@ -1,0 +1,108 @@
+{
+  "module": "browse",
+  "branch": "ux-smoke/browse",
+  "base": "76b9b6e8b61608168b42a135a7a888422a3b1c60",
+  "ready": [
+    {
+      "batch": "FE1 — browse selection/size/sort/glob/session + search/jumper/bookmark workflow fixes",
+      "commits_in_order": [
+        "7d10ad9",
+        "524a2b6",
+        "ed9b319",
+        "7116980",
+        "b49ea77",
+        "e260a36",
+        "d453bc1",
+        "4677366",
+        "6b4268f",
+        "d12403f",
+        "068224a",
+        "eca6a7b"
+      ],
+      "source_commit_map": {
+        "7d10ad9": "lead: Sol Phase 1 repro tests (browse-s01..s15)",
+        "524a2b6": "lead: UX-BRW-09",
+        "ed9b319": "opus 6bf87a3 browse-03",
+        "7116980": "opus 86444ef browse-09 (= UX-BRW-03)",
+        "b49ea77": "opus 6dece77 browse-20",
+        "e260a36": "opus 6d2b005 browse-25",
+        "d453bc1": "opus 7baf001 browse-28",
+        "4677366": "opus 14d173a browse-26",
+        "6b4268f": "opus 7ac5445 UX-BRW-05",
+        "d12403f": "opus b0c1d18 UX-BRW-06",
+        "068224a": "opus 4c4e966 UX-BRW-07",
+        "eca6a7b": "opus 8aedae0 UX-BRW-08 (folder enter/up only; navigateTo path not covered)"
+      },
+      "fixed_ids": [
+        "browse-03",
+        "browse-09",
+        "UX-BRW-03",
+        "browse-20",
+        "browse-25",
+        "browse-28",
+        "browse-26",
+        "UX-BRW-05",
+        "UX-BRW-06",
+        "UX-BRW-07",
+        "UX-BRW-08 (enter/up)",
+        "UX-BRW-09"
+      ],
+      "rounds": 1,
+      "reviewer": "ux-browse-sol (gpt-6.1-sol)",
+      "verdict": "APPROVE (R1) for every listed SHA; 7d10ad9 APPROVE with F4 external dependency (shell UX-SHL-07, already on main)",
+      "review_reports": [
+        "docs/reviews/2026-11-10-ux-smoke/browse/sol-review-r1.md"
+      ],
+      "tests": [
+        "lead dry-run: scratch worktree /tmp/duet-ux-smoke-worktrees/browse-integ at main 62c6c37 + these 12 cherry-picks in this order: no conflicts",
+        "there: pnpm exec tsc --noEmit  # 0",
+        "there: pnpm exec vitest run --maxWorkers=1 --minWorkers=1 <14 touched test files from `git diff --name-only main..HEAD -- 'src/**/*.test.ts*'`> src/components/SearchPanel.test.tsx  # 15 files / 184 passed (F4 smoke controls pass on main)",
+        "list of the 14 files: /tmp/duet-ux-smoke-worktrees/browse-integ-files.txt; log /tmp/duet-ux-smoke-worktrees/browse-integ-vitest.log"
+      ],
+      "evidence_kind": "FE-mock (store/component/App with mocked IPC); no live desktop, no native close event",
+      "integration_notes": [
+        "Main advanced after the dry-run (fileops 374474e touches App.tsx, fileActions.ts); re-run the same focused files after picking",
+        "browse-03 policy: filter-hidden selection is pruned permanently (main ACKed)",
+        "does not touch src-tauri/ or src/types/bindings.ts; does not touch src-tauri/src/fs/local.rs"
+      ]
+    },
+    {
+      "batch": "FE2 — browse-08 markdown links + browse-16 thumbnails (R2)",
+      "commits_in_order": [
+        "23f0c03",
+        "0ba87da",
+        "dfccc8c",
+        "997facb"
+      ],
+      "source_commit_map": {
+        "23f0c03": "opus cf94e9b browse-08",
+        "0ba87da": "opus da7dfc2 browse-08 R2 (Enter/Space isolation, Sol R1-01)",
+        "dfccc8c": "opus 49f2413 browse-16",
+        "997facb": "opus b152ce0 browse-16 R2 (failure keyed by URL, Sol R1-04)"
+      },
+      "fixed_ids": [
+        "browse-08",
+        "browse-16"
+      ],
+      "rounds": 2,
+      "reviewer": "ux-browse-sol (gpt-6.1-sol)",
+      "verdict": "R1 CHANGES (R1-01, R1-04) -> R2 APPROVE for both pairs",
+      "review_reports": [
+        "docs/reviews/2026-11-10-ux-smoke/browse/sol-review-r1.md",
+        "docs/reviews/2026-11-10-ux-smoke/browse/sol-review-r2.md"
+      ],
+      "tests": [
+        "lead dry-run: scratch worktree browse-integ at main 8fc67b5 + these 4 picks: no conflicts",
+        "pnpm exec vitest run --maxWorkers=1 --minWorkers=1 src/components/pane/__review__/browse-lead-preview.test.tsx src/components/pane/__review__/browse-sol2-preview-perf.test.tsx src/components/pane/__review__/browse-thumbnail-refresh.test.tsx src/components/pane/PreviewInspector.test.tsx  # 4 files / 14 passed",
+        "pnpm exec tsc --noEmit  # only errors: src/lib/shellMenu.ts:96,106 from stale copied bindings.ts vs shell IPC change (not browse files); rerun after main regenerates bindings"
+      ],
+      "evidence_kind": "FE-mock (component tests); no live webview navigation or real image decode",
+      "integration_notes": [
+        "no src-tauri changes; browse-08 has no OS-browser open for links (no backend command) — clicks are ignored, address shown as tooltip"
+      ]
+    }
+  ],
+  "not_ready": [
+    "SC-18/20/25/27 BE: ccfc5db, 0fba4eb, f66dd0e, 8f9547e, 7615754 — R3 (last round) fix 7615754 waits cargo lease (queue: browse after sync) then Sol R3"
+  ]
+}

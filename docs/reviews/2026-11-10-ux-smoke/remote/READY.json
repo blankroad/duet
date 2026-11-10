@@ -1,0 +1,71 @@
+{
+  "module": "remote",
+  "branch": "ux-smoke/remote",
+  "worktree": "/tmp/duet-ux-smoke-worktrees/remote",
+  "base": "76b9b6e8b61608168b42a135a7a888422a3b1c60",
+  "batches": [
+    {
+      "name": "FE batch 1 (round 1)",
+      "round": 1,
+      "commits_in_order": [
+        "7ba7bcc",
+        "bb2fe92",
+        "33b9199",
+        "1cbebca"
+      ],
+      "fixed_ids": [
+        "remote-30",
+        "remote-27"
+      ],
+      "test_only_commits": {
+        "33b9199": "repros remote-NEW-1/2/3 as it.fails (later batches flip them)",
+        "1cbebca": "tsc narrowing in NEW-2 repro"
+      },
+      "tests": [
+        "pnpm exec vitest run --maxWorkers=1 --minWorkers=1 src/lib/__review__/remote-lead-host-alias.test.ts src/lib/hostAlias.test.ts src/hooks/useConnectionEvents.test.tsx src/components/connection/__review__/remote-sol-r1-save-failure.test.tsx src/components/connection/__review__/remote-sol-r1-saved-disconnect.test.tsx src/stores/__review__/remote-sol-r1-prototype-alias.test.tsx",
+        "pnpm exec tsc --noEmit"
+      ],
+      "test_results": "lead: all pass single-worker (mocked FE tests); useConnectionEvents.test fails without the fix (verified via stash). Reviewer: 10 files / 52 tests pass single-worker.",
+      "reviewer": "ux-remote-sol (codex gpt-6.1-sol)",
+      "verdict": "APPROVE (7ba7bcc, bb2fe92, 33b9199, 1cbebca)",
+      "review_report": "docs/reviews/2026-11-10-ux-smoke/remote/sol-review-r1-fe.md",
+      "touches_user_local_rs": false,
+      "rust_changes": false,
+      "status": "INTEGRATED by main (513f16d, 6cd9f11, 670bf88, 62a9702) \u2014 do not re-pick"
+    },
+    {
+      "name": "FE batch 2",
+      "rounds": 3,
+      "status": "INTEGRATED by main (59418e7, f631500, 1e47531, 2cc4f01, 96a0742, 8173e0a, 62c6c37) \u2014 do not re-pick",
+      "commits_in_order": [
+        "445bc89",
+        "2c09d18",
+        "c9cf480",
+        "a40e48d",
+        "0454ba0",
+        "3cd94c5",
+        "10719a8"
+      ],
+      "fixed_ids": [
+        "remote-NEW-1/UX-REM-03",
+        "remote-NEW-2/UX-REM-04",
+        "remote-NEW-3/UX-REM-05"
+      ],
+      "tests": [
+        "pnpm exec vitest run --maxWorkers=1 --minWorkers=1 src/components/connection/__review__ src/lib/__review__/remote-sol-r2-own-nicknames.test.ts src/stores/__review__/remote-sol-r1-prototype-alias.test.tsx src/hooks/__review__/remote-sol-r1-refresh.test.tsx src/lib/hostLabel.test.ts src/components/__smoke__/sidebar-shell.smoke.test.tsx src/components/__review__/shell-settings-sidebar.test.tsx src/components/__review__/shell-settings-hosts.test.tsx",
+        "pnpm exec tsc --noEmit"
+      ],
+      "test_results": "reviewer: 11 files / 66 passed (mocked FE, single worker); lead: same 66 passed + prototype/refresh/hostLabel/dynamicCommands 64 passed; tsc + eslint OK at 10719a8",
+      "notes": "Changes expectation of existing smoke test sidebar-shell 'saved host shows state' to the real ad-hoc alias user@host:port. NEW-1/2/3 repros from batch1 (it.fails) become ordinary tests here.",
+      "reviewer": "ux-remote-sol (codex gpt-6.1-sol)",
+      "verdict": "APPROVE (R3)",
+      "review_reports": [
+        "remote/sol-review-r1-fe.md",
+        "remote/sol-review-r2-fe.md",
+        "remote/sol-review-r3-fe.md"
+      ],
+      "touches_user_local_rs": false,
+      "rust_changes": false
+    }
+  ]
+}

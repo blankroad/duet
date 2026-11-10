@@ -1,0 +1,389 @@
+{
+  "status": "READY",
+  "ready_for_integration": true,
+  "reviewer": "ux-sync-sol",
+  "verified_at": "2026-11-11T02:37:54.984511+09:00",
+  "review_round": 3,
+  "new_review_round_started": false,
+  "approved_snapshot": "84b58453625a447d478ea92c6d4e247b6bad11e7",
+  "base": "76b9b6e8b61608168b42a135a7a888422a3b1c60",
+  "approved_commits": [
+    "863d38d",
+    "b3fb471",
+    "ac5554e",
+    "093db91",
+    "487ffca",
+    "a3a271c",
+    "d165503",
+    "6083f1a",
+    "b16b507",
+    "912bf01",
+    "84b5845"
+  ],
+  "source_identity": {
+    "observed_opus_head": "84b58453625a447d478ea92c6d4e247b6bad11e7",
+    "tracked_diff_vs_snapshot_under_src_and_src_tauri": "empty"
+  },
+  "scope": {
+    "SC-01": "LOCAL-only recovery approved; same-host rsync partial failure remains OPEN backlog",
+    "remaining_ignored": "54 known baseline/out-of-scope/environment cases; not asserted fixed and not required to pass",
+    "real_ssh_and_windows_device_validation": "not claimed"
+  },
+  "conditions": {
+    "independent_R2_frontend": {
+      "vitest": {
+        "files_passed": 5,
+        "tests_green": 30,
+        "exit_code": 0,
+        "log": "_report/round2-vitest.log",
+        "note": "includes one known SC-38 it.fails; that defect remains open"
+      },
+      "tsc": {
+        "exit_code": 0,
+        "log": "_report/round2-tsc.log"
+      }
+    },
+    "native_library": {
+      "passed": 711,
+      "failed": 0,
+      "ignored": 48,
+      "filtered_out": 0
+    },
+    "native_integration": [
+      {
+        "target": "review_sync_compare_apply",
+        "passed": 14,
+        "failed": 0,
+        "ignored": 0
+      },
+      {
+        "target": "review_sync_compare_r3_sol",
+        "passed": 5,
+        "failed": 0,
+        "ignored": 2
+      },
+      {
+        "target": "review_sync_compare_xcheck_opus",
+        "passed": 6,
+        "failed": 0,
+        "ignored": 2
+      },
+      {
+        "target": "review_sync_compare_xcheck_sol",
+        "passed": 12,
+        "failed": 0,
+        "ignored": 2
+      }
+    ],
+    "required_contract_tests": {
+      "core::ops::mirror_file_tests::new_file_copy_failure_with_uncertain_stat_is_recorded": "passed in main-executed native log",
+      "core::ops::sync_relay_guard_tests::sync_preview_rejects_local_to_remote_relay": "passed in main-executed native log",
+      "core::ops::sync_relay_guard_tests::sync_execute_rejects_relay_even_when_plan_claims_local": "passed in main-executed native log",
+      "core::ops::review_sync_compare_lead::review_sync_failure_journals_partial_progress": "passed in main-executed native log",
+      "core::ops::review_sync_compare_lead::review_sync_failure_keeps_dst_original_in_place": "passed in main-executed native log",
+      "sync_cancel_midway_journals_what_was_already_applied": "passed in main-executed native log",
+      "sync_cancel_right_after_backup_rename_keeps_contract": "passed in main-executed native log"
+    },
+    "clippy": {
+      "status": "passed",
+      "completion": "Finished `dev` profile [optimized + debuginfo] target(s) in 25.71s",
+      "diagnostics": [],
+      "baseline_allowance": "items_after_test_module for pre-existing fs/local.rs:637, as explicitly specified by main; invocation not echoed in log",
+      "changed_file_order_check": "R3 static check found no new items_after_test_module pattern"
+    },
+    "bindings": {
+      "status": "main-reported generation passed; earlier inspected cargo-r2 summary confirmed only fsMergeBidir rules argument and ThreeWayStatus unreadable changes; R2 independent tsc passed with matching hand edits"
+    }
+  },
+  "logs": [
+    {
+      "path": "/tmp/duet-ux-final-sync-gate.log",
+      "sha256": "289491d94995af7f10a7e9f6aca8a7c23cc9564d6e6f9f637331c37d272caf51",
+      "provenance": "executed by main; independently read and validated by reviewer"
+    },
+    {
+      "path": "/tmp/duet-ux-final-sync-clippy.log",
+      "sha256": "4c0db60d56bbf4d9bbc952fcc8bad5f559b920865d8816e923580afdb8baaa16",
+      "provenance": "executed by main; independently read and validated by reviewer"
+    }
+  ],
+  "remaining_ignored": [
+    {
+      "test": "core::archive::review_archive_lead::lead_gz_trailing_zeros_still_decodes",
+      "reason": "archive-28 repro",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::archive::review_archive_lead::lead_zst_skippable_frame_is_ignored",
+      "reason": "archive-29 repro",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::archive::review_archive_opus::opus2_extract_rollback_failure_strands_backup",
+      "reason": "archive-09 repro",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::archive::review_archive_opus::opus_browse_need_password_leaves_no_token_dir",
+      "reason": "시스템 temp duet-archive 를 공유 — 동시 실행 시 드물게 오탐",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::archive::review_archive_opus::opus_compress_failure_restores_conflicting_archive",
+      "reason": "archive-03 repro",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::archive::review_archive_opus::opus_compress_zip_keeps_exec_bit",
+      "reason": "archive-12 repro",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::archive::review_archive_opus::opus_compress_zip_keeps_mtime",
+      "reason": "archive-12 repro",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::archive::review_archive_opus::opus_compress_zip_over_4gib_file",
+      "reason": "archive-13 repro (느림 — 단독 실행)",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::archive::review_archive_opus::opus_repack_encrypted_zip_stays_encrypted",
+      "reason": "archive-11 repro",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::archive::review_archive_opus::opus_repack_targz_with_dangling_symlink",
+      "reason": "archive-03 repro",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::archive::review_archive_opus::opus_zipcrypto_wrong_password_passing_header_check",
+      "reason": "archive-20 repro",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::archive::review_archive_sol::sol2_cancel_after_zip_io_started_still_succeeds",
+      "reason": "archive-14 현재 결함을 관찰(통과=결함 있음) — 수정 시 기대값 반전",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::archive::review_archive_sol::sol2_failed_targz_conflict_dangling_link_no_rollback",
+      "reason": "archive-03 현재 결함을 관찰(통과=결함 있음) — 수정 시 기대값 반전",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::archive::review_archive_sol::sol2_failed_zip_permission_leaves_openable_partial",
+      "reason": "archive-03 현재 결함을 관찰(통과=결함 있음) — 수정 시 기대값 반전",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::archive::review_archive_sol::sol2_gz_padding_single_vs_tar",
+      "reason": "archive-28 현재 결함을 관찰(통과=결함 있음) — 수정 시 기대값 반전",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::archive::review_archive_sol::sol2_pre_cancelled_compress_moves_original_without_journal",
+      "reason": "archive-03 현재 결함을 관찰(통과=결함 있음) — 수정 시 기대값 반전",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::archive::review_archive_sol::sol2_zip_metadata_compared_to_targz",
+      "reason": "archive-12 현재 결함을 관찰(통과=결함 있음) — 수정 시 기대값 반전",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::archive::review_archive_sol::sol2_zipcrypto_repack_removes_encryption",
+      "reason": "archive-11 현재 결함을 관찰(통과=결함 있음) — 수정 시 기대값 반전",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::archive::review_archive_sol::sol2_zipcrypto_wrong_password_error_class",
+      "reason": "archive-20 현재 결함을 관찰(통과=결함 있음) — 수정 시 기대값 반전",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::archive::review_archive_sol::sol2_zstd_skippable_middle_single_and_tar",
+      "reason": "archive-29 현재 결함을 관찰(통과=결함 있음) — 수정 시 기대값 반전",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::archive::review_archive_sol::sol_tar_readonly_failure_restores_conflicting_destination",
+      "reason": "archive-09 repro",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::archive::review_archive_sol::sol_zip_sjis_names",
+      "reason": "archive-04: Shift-JIS 는 CP949 와 구분 불가 — 범위 밖 (core/zip_names.rs 모듈 설명)",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::elevate::review_fileops_lead::elevated_folder_overwrite_failure_rolls_back_original",
+      "reason": "fileops-09 repro",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::elevate::review_fileops_lead::elevated_folder_overwrite_keeps_backup_for_undo",
+      "reason": "fileops-10 repro",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::ops::review_fileops_sol::c03_replace_folder_trash_failure_restores_target",
+      "reason": "fileops-09 repro",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::ops::review_fileops_sol::c03_trash_failure_must_not_leave_unjournaled_copy",
+      "reason": "fileops-17 repro",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::ops::review_fileops_sol::c04_cancel_partial_file_is_tracked_or_cleaned",
+      "reason": "fileops-18 repro",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::ops::review_fileops_sol::c04_partial_folder_failure_restores_old_folder",
+      "reason": "fileops-09 repro",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::ops::review_fileops_sol::c04_preexisting_part_named_user_file_must_survive",
+      "reason": "fileops-26 repro",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::ops::review_fileops_sol::c04_write_failure_restores_old_file_but_leaves_part",
+      "reason": "fileops-18 repro",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::ops::review_fileops_sol::c06_case_only_rename",
+      "reason": "fileops-08 repro",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::ops::review_fileops_sol::c07_batch_rollback_failure_must_be_journaled",
+      "reason": "fileops-27 repro",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::ops::review_fileops_sol::c07_case_only_batch_rename",
+      "reason": "fileops-08 repro",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::search::review_sync_compare::remote_newline_filename_is_one_search_hit",
+      "reason": "sync-compare repro: F-sol-12 newline filename splits into two search hits",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::sudo::review_fileops_lead::sudo_folder_replace_keeps_backup",
+      "reason": "fileops-10 repro",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::sudo::review_fileops_lead::sudo_keepboth_without_conflict_keeps_original_name",
+      "reason": "fileops-13 repro",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::undo::review_fileops_opus::undo_copy_after_file_replace_reports_ok_but_leaves_nothing",
+      "reason": "fileops-21 repro",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "core::undo::review_fileops_sol_r3::partial_first_folder_must_not_block_second_backup_restore",
+      "reason": "fileops-15 repro",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "fs::review_fileops_opus_r3::r3_folder_resume_fails_on_existing_dst_dir",
+      "reason": "fileops-35 repro",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "fs::review_fileops_opus_r3::r3_resume_after_source_changed_same_length_mixes_content",
+      "reason": "fileops-34 repro",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "fs::review_fileops_opus_r3::r3_resume_after_source_shrank_finalizes_stale_part",
+      "reason": "fileops-34 repro",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "platform::macos::tests::set_file_clipboard_writes_real_pasteboard",
+      "reason": "OS 클립보드를 실제로 변경한다",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "services::bookmarks::review_shell_settings::reorder_with_duplicate_ids_never_drops_items",
+      "reason": "shell-settings-20 repro: 재정렬 요청에 같은 id 가 두 번 오면 다른 북마크가 사라짐",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "services::edit_session::review_browse::changed_remote_must_not_be_silently_overwritten_by_stale_edit",
+      "reason": "browse-02 repro (F-sol-08)",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "services::file_index::review_sync_compare::global_results_reflect_folder_reindex",
+      "reason": "sync-compare repro: F-sol-06 folder reindex leaves search-visible global index stale",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "services::frecency::review_sync_compare_opus_frecency::multi_keyword_query",
+      "reason": "sync-compare repro: 여러 단어 질의(zoxide 식 'proj src')는 한 덩어리 부분문자열이라 0건",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "services::frecency::review_sync_compare_opus_frecency::slash_query_matches_windows_path",
+      "reason": "sync-compare repro: Windows 경로(역슬래시)는 '/' 섞인 질의로 안 잡힘",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "ssh::connection::review_remote_sol::tofu_approval_must_not_accept_an_unseen_second_host",
+      "reason": "remote-02 repro: learn applies to every hop",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "sc06_prune_nested_directory_link_preserves_external_directory",
+      "reason": "sync-compare repro: SC-06 independently confirmed in sol-3",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "sc47_escaped_checksum_names_produce_plain_digest",
+      "reason": "sync-compare: SC-47 환경 의존 대조군 (macOS /sbin/sha256sum 전용)",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "sync_prune_does_not_trash_through_destination_directory_link",
+      "reason": "sync-compare repro: SC-06 prune follows a destination directory link and trashes files outside the target",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "sync_prune_overwrite_then_undo_restores_overwritten_file",
+      "reason": "sync-compare repro: SC-02 undo after prune+overwrite reports Ok but the overwritten file keeps the new content",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "sc10_local_system_rsync_supports_progress2",
+      "reason": "sync-compare repro: SC-10 independently confirmed in sol-2",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    },
+    {
+      "test": "sc10_rsync3_octally_escaped_korean_round_trips",
+      "reason": "sync-compare repro: SC-10 independently confirmed in sol-2",
+      "disposition": "known baseline/out-of-scope or environment-specific; not required to pass for this approved batch"
+    }
+  ],
+  "review_reports": [
+    "REVIEW-sync-round1-review.md",
+    "REVIEW-sync-round2-review.md",
+    "REVIEW-sync-round3-review.md"
+  ],
+  "reviewer_actions": "read-only source/log verification and report writing only; no Cargo, Vitest, implementation, model substitution or R4",
+  "integration_scope": "root may integrate the approved 11-commit snapshot; this artifact does not claim backlog issues fixed"
+}

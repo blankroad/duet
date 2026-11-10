@@ -1,0 +1,476 @@
+{
+  "batches": [
+    {
+      "module": "shell",
+      "batch": "L1",
+      "rounds": 2,
+      "source_commits": [
+        "4f80d38",
+        "bd92c6b",
+        "d6dba8b"
+      ],
+      "main_commits": [
+        "88f7d99",
+        "e94719d",
+        "c6aaa3d"
+      ],
+      "independent_review": "shell/review-L1-sol.md",
+      "main_checks": {
+        "tsc": "passed",
+        "focused_vitest": "3 files / 13 passed",
+        "final_gate": "passed; VALIDATION.json (existing user local.rs worktree preserved)"
+      }
+    },
+    {
+      "module": "archive",
+      "batch": "G07",
+      "rounds": 2,
+      "source_commits": [
+        "ddf352f",
+        "eb183e0"
+      ],
+      "main_commits": [
+        "8fa018a",
+        "cc0bd8f"
+      ],
+      "independent_review": "archive/sol-review-g07-R2.md",
+      "main_checks": {
+        "focused_vitest": "7 files / 140 passed",
+        "final_gate": "passed; VALIDATION.json (existing user local.rs worktree preserved)"
+      }
+    },
+    {
+      "module": "remote",
+      "batch": "FE1",
+      "rounds": 1,
+      "source_commits": [
+        "7ba7bcc",
+        "bb2fe92",
+        "33b9199",
+        "1cbebca"
+      ],
+      "main_commits": [
+        "513f16d",
+        "6cd9f11",
+        "670bf88",
+        "62a9702"
+      ],
+      "independent_review": "remote/sol-review-r1-fe.md",
+      "main_checks": {
+        "focused_vitest": "6 files / 22 passed (includes existing expected-failure repros)",
+        "final_gate": "passed; VALIDATION.json (existing user local.rs worktree preserved)"
+      }
+    },
+    {
+      "module": "remote",
+      "batch": "FE2",
+      "rounds": 3,
+      "source_commits": [
+        "445bc89",
+        "2c09d18",
+        "c9cf480",
+        "a40e48d",
+        "0454ba0",
+        "3cd94c5",
+        "10719a8"
+      ],
+      "main_commits": [
+        "59418e7",
+        "f631500",
+        "1e47531",
+        "2cc4f01",
+        "96a0742",
+        "8173e0a",
+        "62c6c37"
+      ],
+      "independent_review": "remote/sol-review-r3-fe.md",
+      "main_checks": {
+        "focused_vitest": "14 files / 75 passed (includes unrelated expected-failure cases)",
+        "final_gate": "passed; VALIDATION.json (existing user local.rs worktree preserved)"
+      }
+    },
+    {
+      "module": "fileops",
+      "batch": "A",
+      "rounds": {
+        "A1": 2,
+        "A2": 1,
+        "A3": 2
+      },
+      "source_commits": [
+        "538aba5",
+        "282a9b4",
+        "a1388bd",
+        "64894a4",
+        "717523d",
+        "481300c",
+        "ca555c2",
+        "f3afe3c"
+      ],
+      "main_commits": [
+        "03a19a9",
+        "f97b83b",
+        "12896ff",
+        "d42f8fe",
+        "2d7afc8",
+        "5470ee5",
+        "1ef3d2c",
+        "374474e"
+      ],
+      "independent_review": "fileops/review-A3-r2.md (+A1/A2 reports)",
+      "main_checks": {
+        "focused_vitest": "11 files / 123 passed (3 unresolved rename expected-fail cases)",
+        "final_gate": "passed; VALIDATION.json (existing user local.rs worktree preserved)"
+      }
+    },
+    {
+      "module": "browse",
+      "batch": "FE1",
+      "rounds": 1,
+      "source_commits": [
+        "7d10ad9",
+        "524a2b6",
+        "ed9b319",
+        "7116980",
+        "b49ea77",
+        "e260a36",
+        "d453bc1",
+        "4677366",
+        "6b4268f",
+        "d12403f",
+        "068224a",
+        "eca6a7b"
+      ],
+      "main_commits": [
+        "b89f5c8",
+        "54bb901",
+        "1ebad57",
+        "f5c5dfb",
+        "c683fe6",
+        "e0920ca",
+        "7bc60f2",
+        "feeaf74",
+        "5502d4a",
+        "cd4385f",
+        "9c87671",
+        "569e67f"
+      ],
+      "independent_review": "browse/sol-review-r1.md",
+      "main_checks": {
+        "focused_vitest": "15 files / 184 passed",
+        "tsc": "passed",
+        "final_gate": "passed; VALIDATION.json (existing user local.rs worktree preserved)"
+      }
+    },
+    {
+      "module": "shell",
+      "batch": "L2",
+      "rounds": {
+        "UX-SHL-01": 2,
+        "UX-SHL-02": 1,
+        "UX-SHL-03": 1
+      },
+      "source_commits": [
+        "8aff4f1",
+        "87dd723",
+        "1af2860",
+        "dd80ca6",
+        "d6b4191",
+        "d32af3b"
+      ],
+      "main_commits": [
+        "de032ee",
+        "0d97e51",
+        "8ccf975",
+        "c438b45",
+        "6f657e4",
+        "2d84c7e"
+      ],
+      "independent_review": [
+        "shell/review-L2r2-sol.md",
+        "shell/review-L4-sol.md"
+      ],
+      "main_checks": {
+        "focused_vitest": "initial selection contract conflict resolved by approved INT1; focused102 and final full1322 passed",
+        "bindings": "actual cargo export_bindings succeeded at main197bf87; tsc passed",
+        "final_gate": "passed; VALIDATION.json (existing user local.rs worktree preserved)"
+      },
+      "limits": "Windows runtime and Bandizip unverified; native More Windows only"
+    },
+    {
+      "module": "shell",
+      "batch": "L1-tests",
+      "source_commits": [
+        "84a1c41",
+        "47dd1b9",
+        "f52945a",
+        "b9b5ee5"
+      ],
+      "main_commits": [
+        "f90fb82",
+        "fa67b2e",
+        "d2f57fb",
+        "8fc67b5"
+      ],
+      "independent_review": "shell/review-L1-sol.md; shell/review-L3-sol.md",
+      "main_checks": {
+        "final_gate": "passed; VALIDATION.json (existing user local.rs worktree preserved)"
+      }
+    },
+    {
+      "module": "browse",
+      "batch": "FE2",
+      "rounds": 2,
+      "source_commits": [
+        "23f0c03",
+        "0ba87da",
+        "dfccc8c",
+        "997facb"
+      ],
+      "main_commits": [
+        "fa2d520",
+        "8e7e27d",
+        "a4cb3c9",
+        "197bf87"
+      ],
+      "independent_review": "browse/sol-review-r2.md",
+      "main_checks": {
+        "focused_vitest": "4 files / 14 passed (3-file preview run + 1-file Inspector run)",
+        "tsc": "passed with regenerated main bindings",
+        "final_gate": "passed; VALIDATION.json (existing user local.rs worktree preserved)"
+      }
+    },
+    {
+      "module": "shell",
+      "batch": "INT-1",
+      "rounds": 3,
+      "source_commits": [
+        "c34b1e3"
+      ],
+      "main_commits": [
+        "7984ad7"
+      ],
+      "independent_review": "shell/review-int-c34b1e3-sol.md",
+      "main_checks": {
+        "focused_vitest": "5 files / 102 passed",
+        "final_gate": "passed; VALIDATION.json (existing user local.rs worktree preserved)"
+      },
+      "scope": "test/comment only; emitted runtime JS unchanged; reconcile browse03 selection policy"
+    },
+    {
+      "module": "shell",
+      "batch": "L3",
+      "rounds": 3,
+      "source_commits": [
+        "c27912d",
+        "b3da76b",
+        "6745e38"
+      ],
+      "main_commits": [
+        "89b590c",
+        "fc7da20",
+        "7758a16"
+      ],
+      "independent_review": "shell/review-L3r3-sol.md",
+      "main_checks": {
+        "native_gates": "final full Rust + native and Windows all-target strict Clippy passed",
+        "final_gate": "passed; VALIDATION.json (existing user local.rs worktree preserved)"
+      },
+      "limits": "Windows runtime unverified; macOS conditional clear is best effort, not atomic; real general clipboard test remains ignored"
+    },
+    {
+      "module": "archive",
+      "batch": "multi-extract",
+      "rounds": 3,
+      "source_commits": [
+        "df32c91",
+        "caf1a50",
+        "e1653b7",
+        "8b1756b",
+        "9fd81a6",
+        "c767fde",
+        "4b33b2a",
+        "d5a9927",
+        "d5de6b6",
+        "e5505cc",
+        "95b6d67",
+        "fe719d7",
+        "c98159f",
+        "4cc4fea",
+        "a6b867d",
+        "dd8b394",
+        "785889b",
+        "37d3ec5"
+      ],
+      "main_commits": [
+        "2dadc2b",
+        "f43f681",
+        "f76684a",
+        "3b52a12",
+        "583cffb",
+        "c0220fa",
+        "a45f471",
+        "5282ae0",
+        "c8b726a",
+        "cdb954a",
+        "fe4615e",
+        "d96d0f2",
+        "0fe73b2",
+        "f59bf97",
+        "539abb8",
+        "d665053",
+        "9d4eca6",
+        "0386fc5"
+      ],
+      "independent_review": "archive/sol-review-here-R3.md",
+      "main_checks": {
+        "combined_bindings": "generated; exact SHA in VALIDATION.json",
+        "native_final": "all targets passed; includes archive smoke7/core123+",
+        "final_acceptance": "4/4 FE-MOCK; source/bindings byte-verified",
+        "final_gate": "passed; VALIDATION.json (existing user local.rs worktree preserved)"
+      },
+      "limits": [
+        "remote extract-here unavailable",
+        "Windows symlink runtime unverified",
+        "external writers best effort",
+        "not crash-atomic",
+        "cancellation granularity limited"
+      ]
+    },
+    {
+      "module": "sync",
+      "batch": "bounded-R3",
+      "rounds": 3,
+      "source_commits": [
+        "863d38d",
+        "b3fb471",
+        "ac5554e",
+        "093db91",
+        "487ffca",
+        "a3a271c",
+        "d165503",
+        "6083f1a",
+        "b16b507",
+        "912bf01",
+        "84b5845"
+      ],
+      "main_commits": [
+        "4b83524",
+        "f49fe45",
+        "c3ec83b",
+        "708a7ee",
+        "34b360b",
+        "4966dbb",
+        "924e375",
+        "af15237",
+        "e7bfb2b",
+        "775e35c",
+        "a0babf0"
+      ],
+      "independent_review": "sync/sol-round3-review.md; sync/READY-final.json",
+      "main_checks": {
+        "isolated_native": "lib711pass48ignored; integration14+5+6+12pass,6ignored; exit0",
+        "clippy": "pass with approved pre-existing items_after_test_module allowance",
+        "final_gate": "passed; VALIDATION.json (existing user local.rs worktree preserved)"
+      }
+    },
+    {
+      "module": "fileops",
+      "batch": "B-approved-subset",
+      "rounds": 1,
+      "source_commits": [
+        "df6f586",
+        "d509fa0",
+        "342b28d"
+      ],
+      "subset_commits": [
+        "7b27754",
+        "cf1e5c4",
+        "7694b3b"
+      ],
+      "main_commits": [
+        "fb4d374",
+        "2654fc6",
+        "3e30153"
+      ],
+      "independent_review": "fileops/review-B-r1.md; fileops/review-B-approved-subset.md",
+      "main_checks": {
+        "native": "lib777pass49ignored; mvp7pass; smoke12pass2ignored; exit0",
+        "frontend": "4files88passed",
+        "clippy": "inherited clipboard test lint fixed mechanically; final native and Windows strict Clippy passed",
+        "final_gate": "passed; VALIDATION.json (existing user local.rs worktree preserved)"
+      },
+      "excluded": "B2 self-copy/no-op fix9489013 not approved, not integrated"
+    },
+    {
+      "module": "browse",
+      "batch": "BE-R3",
+      "rounds": 3,
+      "source_commits": [
+        "ccfc5db",
+        "0fba4eb",
+        "f66dd0e",
+        "8f9547e",
+        "7615754"
+      ],
+      "main_commits": [
+        "6f1e71e",
+        "0b185e5",
+        "585b587",
+        "0f7b2aa",
+        "650c9e6"
+      ],
+      "independent_review": "browse/sol-review-r3.md",
+      "main_checks": {
+        "native": "lib40passed1ignored; integration8passed; exit0",
+        "final_gate": "passed; VALIDATION.json (existing user local.rs worktree preserved)"
+      }
+    },
+    {
+      "module": "integration",
+      "batch": "native-test-lint",
+      "main_commits": [
+        "32760e9"
+      ],
+      "scope": "compiler-suggested borrow of two test fixture paths; no production behavior change",
+      "main_checks": {
+        "final_gate": "passed; VALIDATION.json (existing user local.rs worktree preserved)"
+      }
+    },
+    {
+      "module": "integration",
+      "batch": "test-portability",
+      "main_commits": [
+        "146efc7"
+      ],
+      "scope": "Unix-only test import scoped; no production behavior change",
+      "main_checks": {
+        "final_gate": "passed; VALIDATION.json (existing user local.rs worktree preserved)"
+      }
+    },
+    {
+      "module": "integration",
+      "batch": "promoted-regression",
+      "main_commits": [
+        "807efbf",
+        "67c7d24"
+      ],
+      "scope": "resolved SS31 regression and formatting only",
+      "main_checks": {
+        "final_gate": "passed; VALIDATION.json (existing user local.rs worktree preserved)"
+      }
+    }
+  ],
+  "main_changed_files_eslint": "passed after shell L1 + archive G07 + remote FE1",
+  "state": "reviewed_scope_complete",
+  "resume_at": "2026-11-11T02:05:00+09:00",
+  "resumed_at": "2026-11-11T02:05:00+09:00",
+  "excluded": [
+    "fileopsB2 same-host self-copy/no-op journal changes (CHANGES, Opus limit)",
+    "remote BE batch including G10/remote03 (overallR2 CHANGES; exact cancel ordering test and rerun evidence pending)"
+  ],
+  "final_validation": "VALIDATION.json",
+  "final_code_head": "67c7d24074c1e4de6f1476acc28dae821c458448",
+  "remaining_work": "research/BACKLOG.md; unapproved fileopsB2 and remoteBE not integrated",
+  "integration_followup_review": "fileops/review-final-integration.md"
+}

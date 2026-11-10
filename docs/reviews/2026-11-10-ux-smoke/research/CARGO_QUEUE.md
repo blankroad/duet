@@ -1,0 +1,58 @@
+> MAIN now owns final validation queue after Claude usage limit. No deferred automatic retries/grants. At most 2 Cargo processes. Existing queue below is a checkpoint, not a live grant.
+
+# Cargo slot queue (research lead grants within main's cap)
+
+**STATE (updated ~22:35): FREEZE LIFTED.** Main baseline done (704 passed / 0 failed / 50 ignored, fast profile). Main delegated grants: **max TWO team slots concurrently**, one active cargo per team (workers serialize on the team-owned target).
+
+## RESUMED 2026-11-11 02:05 KST
+
+## Explicit leases (main, 02:57) — BINDING
+- A lease = one team + the exact command list + CARGO_TARGET_DIR + grant time, written in the Active slots table. Only those commands may run under it.
+- Max 2 duet cargo processes machine-wide, **including `pnpm gen:bindings`**. No third job ever.
+- A lease ends when its listed commands finish, or when the holder releases or I revoke it. Revoked or lapsed grants are VOID: no cargo or gen:bindings may start on them. Request again and wait for an explicit '<team> go'.
+- Running cargo outside a live lease = protocol violation; report to main.
+
+## Lease policy (main, 02:38)
+A lease covers only actual queued Cargo / gen:bindings jobs. Coding, tsc and review do NOT hold a slot. When the jobs finish or the slot sits idle, it is released and you requeue. Archive's R2 validation requeues at the front when ready.
+
+## Rules
+- Cache: `cp -cR /tmp/duet-ux-target-ready <team-own-new-target-dir>` (APFS COW, frozen snapshot; dir must not exist — rename an existing one to `target-before-cache` first). Then `CARGO_TARGET_DIR=<that dir>`. One target dir per TEAM; never shared between teams.
+- Always: `CARGO_BUILD_JOBS=2` and package-only overrides `--config profile.test.package.duet.opt-level=0 --config profile.test.package.duet.debug=0` (also usable for gen:bindings dev builds). No whole-profile env (invalidates deps).
+- Vitest: `--maxWorkers=1 --minWorkers=1`, one FE test process per team.
+- Message ux-research-lead "cargo done <team>" when your slot's jobs finish. Grants go in queue order.
+- Never touch non-duet cargo processes.
+
+## Active slots
+| Slot | Team | Granted | Jobs |
+|---|---|---|---|
+| A | remote | 03:55 | team target /tmp/duet-ux-target-remote, sequential: (7) remote-lead `--lib -- core::sudo` + docker `--test review_remote_opus_r2 -- --ignored --exact r12_sudo_staging_fails_every_time_without_parent` + `--test review_remote_opus_sftp -- --ignored --exact c21_search_korean_space_hidden_root_backslash`; (8) remote-opus `--lib -- core::ops::ops_paths_tests` + chaos `c13_long_exec` (same env as 4b) |
+| B | archive (PRIMARY R3 final) @37d3ec5 | 03:48 | cwd archive-test/src-tauri (detached 37d3ec5), /tmp/duet-ux-archive-target: (1) `--lib -- core::archive` (2) `--test ux_smoke_archive_sol` (3) `clippy --lib --tests -- -D warnings` |
+
+## Waiting (order)
+- (granted 03:48) archive @37d3ec5 (ux-smoke/archive = Opus R3 ccf8029/771b53b/f027487 + Sol inverted baseline): cwd archive-test/src-tauri (detached 37d3ec5), /tmp/duet-ux-archive-target: (1) `--lib -- core::archive` (2) `--test ux_smoke_archive_sol` (3) `clippy --lib --tests -- -D warnings`. Primary-yield invoked on remote (B): releases after its step (7).
+- (granted 03:55) remote remaining (7): remote-lead `--lib -- core::sudo` + docker `--test review_remote_opus_r2 -- --ignored --exact r12_sudo_staging_fails_every_time_without_parent` + `--test review_remote_opus_sftp -- --ignored --exact c21_search_korean_space_hidden_root_backslash`; then (8): remote-opus `--lib -- core::ops::ops_paths_tests` + chaos `c13_long_exec` (same env as 4b). Status so far: (1)(2) pass; (3)-(6) remote-opus lib 77/77, docker 21/21, chaos 2/3 + core::ops 183/184 (both failures were test bugs, fixups committed).
+- (granted 03:24) MAIN binding regen: cwd main checkout, main's own target, CARGO_BUILD_JOBS=2 `cargo run --manifest-path src-tauri/Cargo.toml --config profile.dev.package.duet.opt-level=0 --config profile.dev.package.duet.debug=0 --bin export_bindings`. Short. Again after archive's source lands.
+- (03:20 request, after sync) browse R3 — cwd browse/src-tauri, /tmp/duet-ux-browse-target: (1) `cargo test --offline <overrides> --lib --test review_sync_compare_sol -- file_index core::search search index` (2) `cargo clippy --offline --lib --tests` (no -D; check services/file_index.rs, core/search.rs, commands/search.rs only).
+- (granted 03:16) archive @905bc2f (= d37f5be + test compile fix): cwd archive-test/src-tauri, /tmp/duet-ux-archive-target: (1) `--lib -- core::archive` (2) `clippy --lib --tests -- -D warnings`. No remote yield needed (sync on its last step).
+- (granted 02:52) archive @d37f5be — cwd archive-test/src-tauri, team target /tmp/duet-ux-archive-target: (1) `cargo test <overrides> --lib -- core::archive` (2) `cargo clippy --lib --tests -- -D warnings`. One at a time.
+- (granted 03:30) shell — lead WT shell, CARGO_TARGET_DIR=/tmp/duet-ux-target-shell, UX-SHL-04 r2: (1) `--lib platform::` (2) `--lib platform::macos::tests::clear_if_owned_clears_only_our_unchanged_contents -- --ignored --exact` (private pasteboard ONLY) (3) `clippy --target x86_64-pc-windows-gnu --lib -- -D warnings`. ~5 min. Earlier note: lease released 02:38 (idle); requeue the remaining shell-opus short clippy (UX-SHL-02/03) and the UX-SHL-04 re-test after the fix. Goes ahead of sync/remote as primary-team follow-up only if it is the UX-SHL-01 path; otherwise in order.
+0. archive (PRIMARY) — next request after the Opus FE + R2 fixes commit; goes ahead of the others. Previous run (BE slice d5c8309) — cwd archive-test/src-tauri, CARGO_TARGET_DIR=/tmp/duet-ux-archive-target: `cargo test <overrides> --lib -- core::archive`; then `cargo clippy --lib -D warnings` (same target); then `pnpm gen:bindings` + tsc. Sequential. GETS NEXT FREE SLOT.
+1. DONE 03:55 fileops — WT fileops-opus, CARGO_TARGET_DIR=/tmp/duet-ux-target-fileops-opus, sequential: (1) `--lib -- services::task_queue core::path_guard review_fileops_sol::c0 batch_rename rename alias` (2) `--test ux_smoke_fileops_opus` (3) `--test mvp2_smoke` (4) `clippy --lib --tests -- -D warnings`. Earlier: released unused 02:40. — (updated 02:12) WT fileops-opus, CARGO_TARGET_DIR=/tmp/duet-ux-target-fileops-opus: `--test ux_smoke_fileops_opus`, then `-- --ignored`, clippy on that test, then batch B focused lib tests. OLD: #9 fileops-opus `--test ux_smoke_fileops_opus` (+ `--ignored`, clippy on that test), then #7 fileops-sol `--lib review_fileops -- --ignored --nocapture --skip undo_copy_after_file_replace_reports_ok_but_leaves_nothing` + 4 focused controls (fileops/sol-baseline.md)
+2. DONE browse 02:58 — lib file_index/core::search/search/index 38 passed / 0 failed / 1 ignored; --test review_sync_compare_sol 8 passed / 0 failed (log /tmp/duet-ux-smoke-worktrees/browse-lead-cargo-r2.log). Overlap 02:54–02:58 recorded. Old entry: — (updated 02:16) cwd browse/src-tauri, CARGO_TARGET_DIR=/tmp/duet-ux-browse-target: `cargo test --offline <overrides> --lib --test review_sync_compare_sol -- file_index core::search search index` (one run; SC-18/20/25/27 + Sol R1 fixes)
+3. (03:16 request, after fileops) sync round 3 — WT sync-opus/src-tauri, /tmp/duet-ux-sync-target: (1) `--lib -- three_way review_sync_failure_ sc40_ merge_and_apply ops_paths_tests mirror_file_tests sync_relay_guard_tests endpoint apply_compare merge_bidir sync_` (2) `--no-fail-fast --test review_sync_compare_apply --test review_sync_compare_xcheck_opus --test review_sync_compare_xcheck_sol --test review_sync_compare_r3_sol` (3) same `-- --ignored` (4) `clippy --lib --tests -- -D warnings -A clippy::items_after_test_module` (the -A only bypasses the baseline fs/local.rs:637 lint; the reviewer must confirm no new items_after_test_module in sync code). No gen:bindings. PREVIOUS lease: (updated 02:10) WT sync-opus/src-tauri, CARGO_TARGET_DIR=/tmp/duet-ux-sync-target: (1) `--lib three_way review_sync_failure_ apply_compare merge_bidir sync_`; (2) `--test review_sync_compare_apply --test review_sync_compare_xcheck_opus --test review_sync_compare_xcheck_sol --test review_sync_compare_r3_sol -- --ignored`; (3) `clippy --lib --tests -D warnings`; (4) `pnpm gen:bindings` (SC-07 changes fs_merge_bidir signature). OLD: `--test review_sync_compare_apply --test review_sync_compare_xcheck_opus --test review_sync_compare_xcheck_sol --test review_sync_compare_r3_sol -- --ignored`
+4. (granted 03:01) remote — remote-lead `--lib core::search core::sudo`; remote-sol `--lib ssh::`; remote-opus (replaces old #5): (a) WT remote-opus `--lib ssh:: fs::ssh services::connection_pool core::search services::retry`, then `--test 'ssh_it_*' --test review_remote_opus_handle --test review_remote_opus_chaos -- --ignored --test-threads=1` (docker, ~6 min); (b) optional base comparison — skip if slots tight. Remote lead coordinates main's full lib+clippy gate for G-10.
+
+## History
+- 03:55 cargo done fileops (results in fileops/status.md). Slot A → remote (7)+(8).
+- 03:48 remote yielded B. Results: (1) lead core::search+sudo 32/0; (2) sol ssh:: 40/0; (3)-(6) opus lib 77/0, docker 21/0, chaos 2/1 (test bug), core::ops 183/1 (test bug), walk_links 9/0, sftp_links 1/0. Slot B → archive R3 final.
+- 03:38 cargo done shell UX-SHL-04 r3: platform:: 47 passed; exact private-pasteboard test passed on real macOS; windows-gnu clippy -D warnings clean after a 1-line import fix (step 3 re-run once). Slot A → fileops.
+- 03:30 cargo done main: export_bindings OK at main 197bf87 (includes shell L2; shellMenuOpen(paths: string[], scope) generated); log /tmp/duet-ux-main-gen-bindings.log. Main needs another regen after archive integrates. Slot A → shell.
+- 03:24 cargo done archive @905bc2f: core::archive 121 passed / 0 failed / 22 ignored (new rollback / journal / password-retry / undo-merge tests ok); clippy --lib --tests -D warnings shows only the baseline fs/local.rs:637. Slot A → MAIN.
+- 03:16 cargo done sync: step 1 lib not run (filter syntax error); 2a: 1 real failure (SC-01 cancel test); clippy blocked only by baseline fs/local.rs:637; gen:bindings done. Slot A → archive.
+- 03:01 cargo done archive @d37f5be: Rust test build FAILS TO COMPILE (archive_here_tests.rs:839-846 use-after-partial-move in a new test); clippy the same; no pass/fail data. Archive re-requests after the Opus fix commit (primary, front of queue). Slot B → remote.
+- 02:58 cargo done browse → back to 2 (sync A, archive B). Next: remote, then shell UX-SHL-04 r2, then fileops B when ready.
+- 02:52 cargo done shell: shell-opus UX-SHL-01 R2 d6b4191 + d32af3b; shell_menu_core 21 passed, ux_shell_l2 1 passed, windows-gnu clippy clean. Shell UX-SHL-04 r2 requeued behind remote.
+- 02:27 cargo done archive @d5c8309: core::archive 118 pass / 0 fail / 22 ignored; clippy --lib --tests -D warnings: 1 new archive issue (archive_batch_tests.rs:450, being fixed) + KNOWN BASELINE fs/local.rs:637 (exists at base, not user-WIP related); gen:bindings OK. Slot A → fileops.
+- ~23:10 cargo done archive: archive-sol `--test ux_smoke_archive_sol` 5/5 pass (baseline probe: single-only, a.zip/a.tar.gz clobber, silent .bak); archive-opus 9b661ac `--lib core::archive_here core::archive_names` 16/16 pass. Target /tmp/duet-ux-archive-target. Slot B → browse.
+- ~21:50 over cap (6 cold builds); ~21:52 main FREEZE + SIGINT; ~21:55–22:00 surviving sync-opus/remote-sol jobs stopped by owners. Non-duet Loom build observed, untouched.
+- 02:54 OVER CAP briefly: 3 duet cargo (sync A, archive B, browse — late start on a lapsed 02:38 grant, before my hold message). Browse's run is one short warm-target test; left to finish rather than killing another team's job. Browse releases on exit; no further grants until two or fewer are running.

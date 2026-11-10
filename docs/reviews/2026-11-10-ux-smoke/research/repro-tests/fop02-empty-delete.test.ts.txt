@@ -1,0 +1,18 @@
+// FE-MOCK: real shared action and pane store, no filesystem access.
+import { expect, it, vi } from "vitest";
+vi.mock("@tauri-apps/plugin-os", () => ({ platform: () => "windows" }));
+vi.mock("@/types/bindings", () => ({ commands: { fsDeletePlan: vi.fn() } }));
+import { commands } from "@/types/bindings";
+import { triggerDelete, resolveActiveTargets } from "@/lib/fileActions";
+import { usePanes, activeTab } from "@/stores/panes";
+it("UX-FOP-02: Delete without targets explains why nothing happened", async () => {
+  const s = usePanes.getState();
+  const base = activeTab(s, "left");
+  usePanes.setState({ activePane: "left", panes: { ...s.panes, left: { tabs: [{ ...base, location: { source: { kind: "local" }, path: "/" }, entries: [], selected: new Set(), cursorIndex: -1 }], activeTabIndex: 0 } } });
+  expect(resolveActiveTargets().targets).toEqual([]);
+  const open = vi.fn(), toast = vi.fn();
+  await triggerDelete("trash", open, toast);
+  expect(commands.fsDeletePlan).not.toHaveBeenCalled();
+  expect(open).not.toHaveBeenCalled();
+  expect(toast, "empty selection needs user feedback").toHaveBeenCalled();
+});

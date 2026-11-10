@@ -1,0 +1,117 @@
+{
+  "module": "archive",
+  "branch": "ux-smoke/archive",
+  "base": "76b9b6e8b61608168b42a135a7a888422a3b1c60",
+  "ready": [
+    {
+      "batch": "G-07 / UX-ARC-08 archive-browse context",
+      "commits_in_order": [
+        "ddf352f",
+        "eb183e0"
+      ],
+      "fixed_ids": [
+        "archive-15",
+        "browse-32",
+        "browse-34",
+        "UX-ARC-08"
+      ],
+      "rounds": 2,
+      "reviewer": "ux-archive-sol (gpt-6.1-sol)",
+      "verdict": "APPROVE (R2); R1 was CHANGES (2x P2 + 2 robustness, all addressed)",
+      "review_reports": [
+        "docs/reviews/2026-11-10-ux-smoke/archive/sol-review-g07-R1.md",
+        "docs/reviews/2026-11-10-ux-smoke/archive/sol-review-g07-R2.md"
+      ],
+      "files": [
+        "src/App.tsx",
+        "src/stores/panes.ts",
+        "src/stores/session.ts",
+        "src/stores/__review__/archive-context.test.ts",
+        "src/stores/__review__/archive-context-g07-sol.test.ts",
+        "src/components/pane/__review__/browse-sol3-app.test.tsx",
+        "src/components/pane/__review__/browse-opus2-app.test.tsx"
+      ],
+      "tests": [
+        "pnpm exec vitest run --maxWorkers=1 --minWorkers=1 src/stores/__review__/archive-context-g07-sol.test.ts src/stores/__review__/archive-context.test.ts  # 9/9 (lead + Sol)",
+        "pnpm exec vitest run --maxWorkers=1 --minWorkers=1 --testTimeout=30000 src/components/pane/__review__/browse-sol3-app.test.tsx src/components/pane/__review__/browse-opus2-app.test.tsx  # 18/18 (lead)",
+        "pnpm exec tsc --noEmit  # 0 (lead; bindings.ts copied from main checkout, no BE change)",
+        "pnpm exec eslint <touched files>  # 0"
+      ],
+      "evidence_kind": "FE-mock (store + App with mocked IPC); no live desktop",
+      "integration_notes": [
+        "panes.ts setArchiveContext hunk sits ~13 lines from browse-opus setFilter edits: integrate sequentially and re-run panes*.test.ts",
+        "session.ts L37 one-hunk edit (browse-owned file, browse lead informed)",
+        "App.tsx edits: navigateTo opts (focusName) and onUp archive-root branch only; not the shell More-options blocks",
+        "Under swap, first App test hit default 5s timeout; use --testTimeout=30000",
+        "does not touch src-tauri/src/fs/local.rs"
+      ],
+      "status": "integrated by main as 8fa018a+cc0bd8f"
+    },
+    {
+      "batch": "UX-ARC-01..05 true Extract here + extract each to its own folder (multi-archive), palette commands",
+      "branch": "ux-smoke/archive",
+      "head": "37d3ec5",
+      "commits_in_order": [
+        "df32c91",
+        "caf1a50",
+        "e1653b7",
+        "8b1756b",
+        "9fd81a6",
+        "c767fde",
+        "4b33b2a",
+        "d5a9927",
+        "d5de6b6",
+        "e5505cc",
+        "95b6d67",
+        "fe719d7",
+        "c98159f",
+        "4cc4fea",
+        "a6b867d",
+        "dd8b394",
+        "785889b",
+        "37d3ec5"
+      ],
+      "fixed_ids": [
+        "UX-ARC-01",
+        "UX-ARC-02",
+        "UX-ARC-03 (archive-21)",
+        "UX-ARC-04",
+        "UX-ARC-05"
+      ],
+      "rounds": 3,
+      "reviewer": "ux-archive-sol (gpt-6.1-sol)",
+      "verdict": "R1 static CHANGES -> R2 CHANGES -> R3 APPROVE",
+      "review_reports": [
+        "archive/sol-review-here-R1-static.md",
+        "archive/sol-review-here-R2.md",
+        "archive/sol-review-here-R3.md",
+        "archive/opus-R1.md"
+      ],
+      "acceptance": "research/sol-acceptance.md R3c/R3d Part A PASS (FE-mock) on 905bc2f",
+      "tests": [
+        "cargo test --lib -- core::archive @37d3ec5: 123 passed/0 failed/22 ignored (archive/_be-tests-37d3ec5.log)",
+        "cargo test --test ux_smoke_archive_sol @37d3ec5: 7/7 (archive/_smoke-37d3ec5.log)",
+        "cargo clippy --lib --tests -D warnings: only baseline fs/local.rs:637 (archive/_clippy-37d3ec5.log)",
+        "pnpm exec tsc --noEmit: 0 (lead + Sol; real gen:bindings from d5c8309, no IPC change after)",
+        "vitest --maxWorkers=1 (Sol R3): ExtractPasswordPrompt, extractActions, ExtractDialogs, ux-smoke-archive-sol: 4 files/28 pass; lead: extractActions, ExtractDialogs, commands.extract, entryMenu, G-07 store, archive-notice: 7 files/51 pass"
+      ],
+      "integration_notes": [
+        "New IPC fs_extract_plan_batch, fs_extract_here, fs_extract_here_retry: main must regenerate bindings together with shell paths[] IPC",
+        "fileActions.ts hunk is deletion-only (old triggerExtract)",
+        "useTaskEvents.ts 4 small hunks (fileops informed); App.tsx: imports, 2 builtin-deps lines, extract dialog blocks only",
+        "commands.ts entries after file.calcSize; i18n cmd.file.extract/compress before cmd.file.calcSize (shell 4f80d38 adjacency)",
+        "4cc4fea+a6b867d are Sol's baseline smoke turned regression tests",
+        "does not touch src-tauri/src/fs/local.rs, core/ops.rs, core/undo.rs"
+      ],
+      "limits": [
+        "remote extract-here refused/hidden",
+        "no preflight conflict listing (dialog always asks)",
+        "external concurrent writers best-effort only",
+        "journal-failure rollback not crash-safe (write-ahead = cross-cutting backlog)",
+        "extract cancel granularity (G-09)",
+        "Windows symlink placement unverified on device"
+      ]
+    }
+  ],
+  "not_ready": []
+}

@@ -1,0 +1,20 @@
+// FE-MOCK: a multi-selection must not silently bookmark only the clicked child.
+import { expect, it, vi } from "vitest";
+vi.mock("@tauri-apps/plugin-os", () => ({ platform: () => "windows" }));
+vi.mock("@/lib/bookmarkActions", () => ({ bookmarkLocation: vi.fn() }));
+import { buildEntryMenu } from "@/lib/entryMenu";
+import { bookmarkLocation } from "@/lib/bookmarkActions";
+import { usePanes, activeTab } from "@/stores/panes";
+import type { Entry, Location } from "@/types/bindings";
+it("UX-BRW-01: a bookmark action on two selected folders handles both or is unavailable", async () => {
+  const location: Location = { source: { kind: "local" }, path: "/fixture" };
+  const entries: Entry[] = ["alpha", "beta"].map(name => ({ name, kind: "dir", size: null, modified_ms: 0, permissions: null, hidden: false }));
+  const s = usePanes.getState();
+  s.setActivePane("left");
+  const base = activeTab(s, "left");
+  usePanes.setState({ panes: { ...s.panes, left: { tabs: [{ ...base, location, entries, selected: new Set(["alpha", "beta"]), cursorIndex: 0 }], activeTabIndex: 0 } } });
+  const action = buildEntryMenu({ paneId: "left", entry: entries[0]!, location, selectedCount: 2, onActivate: vi.fn(), onOpenInOtherPane: vi.fn() }).find(x => "id" in x && x.id === "bookmark");
+  if (!action || !("id" in action) || action.disabled) return; // Hiding/disable is an acceptable explicit policy.
+  await action.onSelect?.();
+  expect(vi.mocked(bookmarkLocation).mock.calls.map(([loc]) => loc.path).sort()).toEqual(["/fixture/alpha", "/fixture/beta"]);
+});

@@ -1,0 +1,26 @@
+{
+  "module": "fileops",
+  "batch": "A",
+  "branch": "ux-smoke/fileops",
+  "based_on_main": "62a9702",
+  "commits_in_order": ["538aba5", "282a9b4", "a1388bd", "64894a4", "717523d", "481300c", "ca555c2", "f3afe3c"],
+  "source_commits_on_ux-smoke/fileops-opus": ["6371b88", "86dddea", "e300302", "756c9fe", "d4874f4", "bc0561e", "(lead) ca555c2", "c6fc958"],
+  "fixed_ids": {
+    "A1": "fileops-24 (11-08) cut->paste keeps clipboard on cancel/Esc/plan error/rejected enqueue; Skip keeps skipped items; no double enqueue",
+    "A2": "UX-FOP-01, UX-FOP-02, inventory rows 7/20-22: Recycle Bin view refuses clip copy/cut/rename/transfer + toolbar disabled; empty Delete toast",
+    "A3": "inventory rows 10-11: same-folder move refused ('already in this folder'); same-folder copy preselects Keep both; SSH/POSIX backslash kept literal",
+    "test": "UX-SHL-11/12 it.fails flipped (fixed by shell L1 already on main)"
+  },
+  "rounds": {"A1": 2, "A2": 1, "A3": 2},
+  "independent_review": ["fileops/review-A1-r1.md", "fileops/review-A-r2.md", "fileops/review-A3-r2.md"],
+  "reviewer": "ux-fileops-sol (codex gpt-6.1-sol)",
+  "verdict": "APPROVE all (A1 r2, A2 r1, A3 r2)",
+  "lead_checks_on_branch": {
+    "vitest": "node node_modules/vitest/vitest.mjs run --minWorkers=1 --maxWorkers=1 src/components/__smoke__/fileops-opus-self-copy.test.tsx src/lib/__smoke__/fileops-opus-ux.test.ts src/lib/__review__/fileops-opus-clippaste.test.ts src/components/dialogs/CopyMoveConfirmDialog.test.tsx src/components/pane/__smoke__/fileops-fop01-trash-toolbar.test.tsx src/lib/__smoke__/fileops-fop02-empty-delete.test.ts src/lib/entryMenu.test.tsx src/lib/fileActions.errors.test.ts src/components/pane/PaneToolbar.test.tsx src/stores/clipboard.test.ts src/hooks/useCutNames.test.ts -> 11 files / 123 passed (mocked FE)",
+    "tsc": "tsc --noEmit exit 0",
+    "eslint_prettier": "changed ts/tsx/json pass"
+  },
+  "remaining_it_fails": "ux-fileops-02 x3 (rename already-exists text) -> batch B",
+  "limits": "mocked FE only; no live app, Windows Recycle Bin, real SSH. Clipboard consumed on task acceptance, not completion. No Rust/bindings changes. fs/local.rs untouched.",
+  "not_ready": "batch B (backend) in progress"
+}

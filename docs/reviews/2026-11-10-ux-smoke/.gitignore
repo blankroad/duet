@@ -1,0 +1,8 @@
+**/*.log
+**/*.patch
+**/*.tgz
+**/wip/
+**/opus-commits/
+**/cargo-r2/
+**/cargo-r3/
+resume-timer.lock

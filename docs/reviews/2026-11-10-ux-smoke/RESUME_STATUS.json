@@ -1,0 +1,27 @@
+{
+  "state": "sent",
+  "due": "2026-11-11T02:05:00+09:00",
+  "updated_at": "2026-11-10T17:05:00.036159+00:00",
+  "attempt": 1,
+  "response": {
+    "id": "cli:agent:prompt",
+    "result": {
+      "agent": {
+        "agent": "codex",
+        "agent_status": "done",
+        "cwd": "/Users/ctmctm/Desktop/01_PROJECT/duet",
+        "focused": true,
+        "foreground_cwd": "/Users/ctmctm/Desktop/01_PROJECT/duet",
+        "pane_id": "w1:p1",
+        "revision": 64,
+        "state_change_seq": 318,
+        "tab_id": "w1:t1",
+        "terminal_id": "term_65feafccd735b1",
+        "terminal_title": "점검하고 오케스트레이션 개선 | duet",
+        "terminal_title_stripped": "점검하고 오케스트레이션 개선 | duet",
+        "workspace_id": "w1"
+      },
+      "type": "agent_prompted"
+    }
+  }
+}

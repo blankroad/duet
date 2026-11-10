@@ -1,0 +1,29 @@
+// FE-MOCK: real toolbar/shared actions/store; only Tauri IPC is mocked.
+import { afterEach, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+const h = vi.hoisted(() => ({ copy: vi.fn(), move: vi.fn(), del: vi.fn() }));
+vi.mock("@tauri-apps/plugin-os", () => ({ platform: () => "windows" }));
+vi.mock("@/types/bindings", () => ({ commands: {
+  fsCopyPlan: h.copy, fsMovePlan: h.move, fsDeletePlan: h.del,
+} }));
+import { PaneToolbar } from "@/components/pane/PaneToolbar";
+import { usePanes, activeTab, RESTORED_CONN, isRestoredRemote } from "@/stores/panes";
+import { useConnections } from "@/stores/connections";
+import i18n from "@/i18n";
+afterEach(cleanup);
+it.each(["Copy", "Move", "Delete to trash"])("UX-REM-02: restored SSH toolbar %s must not send dead-source IPC", async label => {
+  await i18n.changeLanguage("en");
+  vi.clearAllMocks();
+  for (const fn of [h.copy, h.move, h.del]) fn.mockResolvedValue({ status: "error", error: { kind: "NotFound", message: "fixture: disconnected" } });
+  const s = usePanes.getState(), base = activeTab(s, "left");
+  const location = { source: { kind: "ssh" as const, connection_id: `prod:${RESTORED_CONN}`, host_ip: "10.0.0.7", user: "deploy" }, path: "/srv" };
+  useConnections.setState({ active: {} });
+  usePanes.setState({ activePane: "left", panes: { ...s.panes, left: { tabs: [{ ...base, location, entries: [{ name: "a.txt", kind: "file", size: 1, modified_ms: 0, permissions: null, hidden: false }], selected: new Set(["a.txt"]), cursorIndex: 0 }], activeTabIndex: 0 } } });
+  expect(isRestoredRemote(location)).toBe(true);
+  render(<PaneToolbar id="left" />);
+  fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${label}`) }));
+  await Promise.resolve();
+  expect(h.copy, "must reconnect or disable before copy IPC").not.toHaveBeenCalled();
+  expect(h.move, "must reconnect or disable before move IPC").not.toHaveBeenCalled();
+  expect(h.del, "must reconnect or disable before delete IPC").not.toHaveBeenCalled();
+});

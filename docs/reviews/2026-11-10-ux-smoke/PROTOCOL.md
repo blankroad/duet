@@ -1,0 +1,22 @@
+# UX smoke orchestration
+
+Main orchestrator: current Codex session in Herdr duet, pane w1:p1.
+Base: 76b9b6e8b61608168b42a135a7a888422a3b1c60.
+User authorizes module research, smoke reproduction, implementation and independent review, up to 3 iterations. Each feature has ONE Herdr workspace containing its Opus 5.5 lead, Opus 5.5 implementation worker, and gpt-6.1-sol review worker. Research has its own workspace with Opus 5.5 lead and Opus 5.5 + gpt-6.1-sol research workers.
+Use herdr --skill and explicit --session duet. User explicitly overrides HERDR_ENV precheck for this main daemon session; named session is verified live. Start agents sequentially, parse actual returned IDs, preserve focus with --no-focus. Do not close preexisting panes. Never bypass permissions automatically; report blocked prompts.
+
+Read CLAUDE.md and ARCHITECTURE.md. Preserve uncommitted src-tauri/src/fs/local.rs completely. Product work MUST use isolated git worktrees outside main repository, each agent on own branch based on the base SHA above; create under /tmp/duet-ux-smoke-worktrees. No shared build directories, no edits to main checkout except assigned report folder. Leads coordinate workers and cherry-pick their reviewed commits onto their own module branch; main alone integrates module branches. No force reset/clean. Dependencies/product-policy changes beyond approved behavior require main escalation.
+
+Research owns central registry and cached research, under this report directory/research/. Read previous 2026-11-08-functional-review and 2026-11-10-fix-round reports first. Registry fields: canonical ID, symptom, root cause/file, module owner, prior issue aliases, status, evidence and test command, citations if externally researched. Teams submit discovery notes under their assigned module report directory; research deduplicates and sends cross-cutting ownership guidance via Herdr. Avoid repeating known research or tests except to verify current state. Research workers each have distinct assignments. Findings reproduced by actual tests must be distinguished from static hypotheses; mocked FE tests must not be called live app tests. Windows/native/real SSH claims require actual evidence, otherwise mark unverified.
+
+Each module: inspect all major user-facing actions in its scope and their entry points (context menu, toolbar, shortcut, command palette), none/single/multi/mixed selection, local/remote/archive contexts, cancellation/failure/permissions. Prioritize broken user workflows. Begin with focused smoke tests and implementation of evidence-backed issues, not broad speculative refactoring. Coordinate shared files before editing, propose contract changes to main. At most 3 implementation-review iterations; stop early on clean independent review, or report unresolved blockers after 3. Reviewer checks working code and tests, not just descriptions. Keep focused commits and record hashes. Reports include exact commands/results, regression tests, remaining known issues, platform limits, round count and independent reviewer verdict. Run checks appropriate to changes, then main performs integration gates. No actual user files/servers in tests.
+
+Module ownership:
+- archive: multi-archive extract-here/extract-each-folder, compression and archive browse/repack; archive actions/hooks/dialogs, archive backend.
+- shell: multi-selection More/native context menus/Bandizip, open-with, external tools, clipboard shell integration, settings/keymap. Native platform context menu ownership here; archive team owns archive menu sections. Coordinate shared EntryContextMenu files.
+- fileops: copy/move/delete/rename/mkdir/batch rename, drag/drop, selection transfer, undo/history/task queue/cancellation.
+- browse: navigation/tabs/selection/filter/search/bookmarks, previews/media/text, pane state. Coordinate selection helpers with fileops.
+- remote: connections/auth/reconnect/SFTP/remote command flows/identity, remote source lifecycle.
+- sync: compare/merge/sync and associated UI + core; shared ops/undo contracts coordinated with fileops.
+
+Research lead may coordinate but must not create module workspaces; main creates six leads. Each lead creates only its 2 worker panes within its given workspace. Reports: <module>/ (research lead uses research/). Initial progress in terminal, end with concise verdict and report location. Do not create hidden background agents or alternative multiplexers. Keep worker count to assigned 2, no recursive agent explosion.

@@ -1,0 +1,382 @@
+{
+  "source_head": "67c7d24",
+  "native_targets": [
+    {
+      "target": "unittests src/lib.rs (src-tauri/target/debug/deps/duet_lib-d56d13a84a9b0ddc)",
+      "passed": 793,
+      "failed": 0,
+      "ignored": 46
+    },
+    {
+      "target": "unittests src/main.rs (src-tauri/target/debug/deps/duet-f4e09b69f7e6c906)",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "target": "unittests src/bin/export_bindings.rs (src-tauri/target/debug/deps/export_bindings-a78ce7bf2383287e)",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "target": "tests/mvp2_smoke.rs (src-tauri/target/debug/deps/mvp2_smoke-467262d317668daf)",
+      "passed": 7,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "target": "tests/mvp3_smoke.rs (src-tauri/target/debug/deps/mvp3_smoke-b045582a9c4bc91e)",
+      "passed": 5,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "target": "tests/mvp4_smoke.rs (src-tauri/target/debug/deps/mvp4_smoke-cfddb8b7a5c25e94)",
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "target": "tests/mvp5_search_smoke.rs (src-tauri/target/debug/deps/mvp5_search_smoke-aa962bb82f7274c0)",
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "target": "tests/mvp6_bookmarks_smoke.rs (src-tauri/target/debug/deps/mvp6_bookmarks_smoke-603c4b5495659c4d)",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "target": "tests/mvp6_host_favorites_smoke.rs (src-tauri/target/debug/deps/mvp6_host_favorites_smoke-36bf8d3464d95185)",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "target": "tests/mvp7_keymap_smoke.rs (src-tauri/target/debug/deps/mvp7_keymap_smoke-9b2c7a4dad2f99fe)",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "target": "tests/mvp7_user_aliases_smoke.rs (src-tauri/target/debug/deps/mvp7_user_aliases_smoke-da2179b3c27a507b)",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "target": "tests/review_browse_local.rs (src-tauri/target/debug/deps/review_browse_local-28390a1b4fd96128)",
+      "passed": 6,
+      "failed": 0,
+      "ignored": 3
+    },
+    {
+      "target": "tests/review_browse_sc17_sensitive.rs (src-tauri/target/debug/deps/review_browse_sc17_sensitive-33fd1fd714e6ff87)",
+      "passed": 7,
+      "failed": 0,
+      "ignored": 2
+    },
+    {
+      "target": "tests/review_browse_sol2_preview.rs (src-tauri/target/debug/deps/review_browse_sol2_preview-78db3ee7200a0cce)",
+      "passed": 5,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "target": "tests/review_remote_opus_chaos.rs (src-tauri/target/debug/deps/review_remote_opus_chaos-affbfb0ef21b3436)",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 6
+    },
+    {
+      "target": "tests/review_remote_opus_config.rs (src-tauri/target/debug/deps/review_remote_opus_config-15d447deee1b2be9)",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 1
+    },
+    {
+      "target": "tests/review_remote_opus_handle.rs (src-tauri/target/debug/deps/review_remote_opus_handle-472c5eaa6c2e8be4)",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 1
+    },
+    {
+      "target": "tests/review_remote_opus_jump.rs (src-tauri/target/debug/deps/review_remote_opus_jump-e0958ab8ddb31104)",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 3
+    },
+    {
+      "target": "tests/review_remote_opus_r2.rs (src-tauri/target/debug/deps/review_remote_opus_r2-b38854a526775551)",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 3
+    },
+    {
+      "target": "tests/review_remote_opus_sftp.rs (src-tauri/target/debug/deps/review_remote_opus_sftp-cc1aa65f6181910f)",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 11
+    },
+    {
+      "target": "tests/review_remote_sol_config.rs (src-tauri/target/debug/deps/review_remote_sol_config-2ddaa4491488440e)",
+      "passed": 3,
+      "failed": 0,
+      "ignored": 9
+    },
+    {
+      "target": "tests/review_remote_sol_r2.rs (src-tauri/target/debug/deps/review_remote_sol_r2-4495aed072179861)",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 6
+    },
+    {
+      "target": "tests/review_remote_sol_ssh.rs (src-tauri/target/debug/deps/review_remote_sol_ssh-a763471c3c1b28aa)",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 7
+    },
+    {
+      "target": "tests/review_remote_sol_vault.rs (src-tauri/target/debug/deps/review_remote_sol_vault-78d4021992e03c7c)",
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "target": "tests/review_shell_settings_boot.rs (src-tauri/target/debug/deps/review_shell_settings_boot-1683f3a149432370)",
+      "passed": 11,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "target": "tests/review_shell_settings_keymap.rs (src-tauri/target/debug/deps/review_shell_settings_keymap-08ca30e1c51062d9)",
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "target": "tests/review_shell_settings_r2.rs (src-tauri/target/debug/deps/review_shell_settings_r2-9a2e67db9a19f37a)",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "target": "tests/review_sync_compare_apply.rs (src-tauri/target/debug/deps/review_sync_compare_apply-5d6f586af7d13b2c)",
+      "passed": 14,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "target": "tests/review_sync_compare_r3_opus.rs (src-tauri/target/debug/deps/review_sync_compare_r3_opus-f98a158ba5fb7a79)",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "target": "tests/review_sync_compare_r3_sol.rs (src-tauri/target/debug/deps/review_sync_compare_r3_sol-2e3ce9f4a4104329)",
+      "passed": 5,
+      "failed": 0,
+      "ignored": 2
+    },
+    {
+      "target": "tests/review_sync_compare_sol.rs (src-tauri/target/debug/deps/review_sync_compare_sol-581078a5afb93021)",
+      "passed": 24,
+      "failed": 0,
+      "ignored": 11
+    },
+    {
+      "target": "tests/review_sync_compare_xcheck_opus.rs (src-tauri/target/debug/deps/review_sync_compare_xcheck_opus-9dc2d41e19509408)",
+      "passed": 6,
+      "failed": 0,
+      "ignored": 2
+    },
+    {
+      "target": "tests/review_sync_compare_xcheck_sol.rs (src-tauri/target/debug/deps/review_sync_compare_xcheck_sol-cfdecea63ecc755e)",
+      "passed": 12,
+      "failed": 0,
+      "ignored": 2
+    },
+    {
+      "target": "tests/saved_hosts_smoke.rs (src-tauri/target/debug/deps/saved_hosts_smoke-e1ade968d3afc9eb)",
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "target": "tests/secret_vault_smoke.rs (src-tauri/target/debug/deps/secret_vault_smoke-1bd65ccdf970efb6)",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "target": "tests/ssh_it_connect.rs (src-tauri/target/debug/deps/ssh_it_connect-459d7649e590bdc7)",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 3
+    },
+    {
+      "target": "tests/ssh_it_same_host_copy.rs (src-tauri/target/debug/deps/ssh_it_same_host_copy-32606f484ef53d80)",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 8
+    },
+    {
+      "target": "tests/ssh_it_search.rs (src-tauri/target/debug/deps/ssh_it_search-816e87f2a9b31549)",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 1
+    },
+    {
+      "target": "tests/ssh_it_sftp.rs (src-tauri/target/debug/deps/ssh_it_sftp-1793d72d22dab9c5)",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 4
+    },
+    {
+      "target": "tests/ssh_it_stress.rs (src-tauri/target/debug/deps/ssh_it_stress-b1780bd62346b9d3)",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 2
+    },
+    {
+      "target": "tests/ux_shell_l2.rs (src-tauri/target/debug/deps/ux_shell_l2-e661fd65e86bf339)",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "target": "tests/ux_shell_sol_a.rs (src-tauri/target/debug/deps/ux_shell_sol_a-d8a16b541f6f3acc)",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 1
+    },
+    {
+      "target": "tests/ux_smoke_archive_sol.rs (src-tauri/target/debug/deps/ux_smoke_archive_sol-470c8b68a497ec72)",
+      "passed": 7,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "target": "tests/ux_smoke_fileops_opus.rs (src-tauri/target/debug/deps/ux_smoke_fileops_opus-87ef3964964ba529)",
+      "passed": 12,
+      "failed": 0,
+      "ignored": 2
+    }
+  ],
+  "native_passed": 944,
+  "native_ignored": 136,
+  "vitest": {
+    "files": 188,
+    "passed": 1322,
+    "note": "includes existing it.fails cases for unresolved bugs; expected failure passes are not bug fixes"
+  },
+  "primary_acceptance": {
+    "passed": 4,
+    "report": "research/sol-acceptance-final.md",
+    "source": "32760e9",
+    "source_equivalence": "later changes are test-only imports/assertion promotion/formatting; no product behavior change"
+  },
+  "bindings_sha256": "63ce077ea00db72253c4a41410c32db7d1c349ce5feaabeab10348ac34d631fa",
+  "user_local_rs_unchanged": true,
+  "user_local_rs_sha256": "c87fc7ee58d0bca7400332a591ac0d83fbab33497c15b460486ca1aaeb1db889",
+  "dependencies_changed": false,
+  "logs": {
+    "cargo-tests": {
+      "path": "docs/reviews/2026-11-10-ux-smoke/validation/cargo-tests.log",
+      "sha256": "bb62679fae7cbc9c5c27c1e7f60793e08a02b94ebf9452288cb423566fbefad0"
+    },
+    "vitest": {
+      "path": "docs/reviews/2026-11-10-ux-smoke/validation/vitest.log",
+      "sha256": "06f85c185fae4da47a45bd126b709625710162cc2c00c684291397a577eb4723"
+    },
+    "native-clippy": {
+      "path": "docs/reviews/2026-11-10-ux-smoke/validation/native-clippy.log",
+      "sha256": "4d14d840b826579451fedf93ac2dc8edb580aa2a9df5fd518d3c3af5f0d74137"
+    },
+    "windows-clippy": {
+      "path": "docs/reviews/2026-11-10-ux-smoke/validation/windows-clippy.log",
+      "sha256": "6925660b48c8be6bafb9525e0f321f7b14084b5f8ff8283e481c77763f7da2af"
+    },
+    "bindings": {
+      "path": "docs/reviews/2026-11-10-ux-smoke/validation/bindings.log",
+      "sha256": "39c5bd9fcd6cc22b736e28b5efe3f98499106e763d31d502cf8305dd6c39397f"
+    },
+    "tsc": {
+      "path": "docs/reviews/2026-11-10-ux-smoke/validation/tsc.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "vite": {
+      "path": "docs/reviews/2026-11-10-ux-smoke/validation/vite.log",
+      "sha256": "9fb6a79507c33b9c43b3e29ee68431c2cb609a0a901c660ca11d5de83c0d2c25"
+    },
+    "eslint": {
+      "path": "docs/reviews/2026-11-10-ux-smoke/validation/eslint.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "prettier": {
+      "path": "docs/reviews/2026-11-10-ux-smoke/validation/prettier.log",
+      "sha256": "17aa973d3f004560237d9a95171210b0671deff23d61628eecf7322ff5938f20"
+    },
+    "rustfmt": {
+      "path": "docs/reviews/2026-11-10-ux-smoke/validation/rustfmt.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "limits": [
+    "Windows runtime/Bandizip not tested on device",
+    "remote extract-here unavailable",
+    "remaining known repros intentionally retained",
+    "checks use existing user local.rs working change without modifying or committing it"
+  ],
+  "checks": {
+    "cargo-tests": {
+      "status": "passed",
+      "exit_code": 0
+    },
+    "vitest": {
+      "status": "passed",
+      "exit_code": 0
+    },
+    "native-clippy": {
+      "status": "passed",
+      "exit_code": 0
+    },
+    "windows-clippy": {
+      "status": "passed",
+      "exit_code": 0
+    },
+    "bindings": {
+      "status": "passed",
+      "exit_code": 0
+    },
+    "tsc": {
+      "status": "passed",
+      "exit_code": 0
+    },
+    "vite": {
+      "status": "passed",
+      "exit_code": 0
+    },
+    "eslint": {
+      "status": "passed",
+      "exit_code": 0
+    },
+    "prettier": {
+      "status": "passed",
+      "exit_code": 0
+    },
+    "rustfmt": {
+      "status": "passed",
+      "exit_code": 0
+    }
+  },
+  "followups": {
+    "146efc7": "Unix-only test import scoped for Windows lint",
+    "807efbf": "resolved SS31 expected-failure promoted and guard notice asserted",
+    "67c7d24": "Prettier-only regression-test formatting"
+  },
+  "code_changes_after_acceptance": "test-only import scope, regression promotion and formatting; production source unchanged"
+}
