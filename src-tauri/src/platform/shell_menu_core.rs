@@ -3,6 +3,7 @@
 //! COM 호출은 `shell_menu.rs`(Windows 전용)에 있고, 여기는 순수 로직만 둔다. 그래야 macOS/Linux
 //! 에서도 단위 테스트로 규칙을 고정할 수 있다.
 //! - [`shell_selection`]: 다중 선택을 Explorer 처럼 "한 폴더 안의 항목들" 로만 받는다.
+//!   [`shell_target`] 은 여기에 scope 규칙을 더한다(빈 영역 메뉴는 폴더 하나).
 //! - [`SessionCache`]: 빌드한 메뉴 세션을 키별로 보관하고 token 으로 찾는다. token 은 빌드마다
 //!   새로 발급되므로, 지난 선택의 token 이 새로 빌드된 다른 메뉴로 풀리는 일이 없다.
 //! - [`stale_menu_error`] / [`invoke_error`]: 셸 명령 실행 실패를 프론트가 구분할 수 있는
@@ -12,6 +13,7 @@ use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use std::path::PathBuf;
 
+use super::ShellScope;
 use crate::types::DuetError;
 
 /// 셸 메뉴 대상 선택을 검증하고 캐시 키로 쓸 경로 목록을 돌려준다.
@@ -33,6 +35,21 @@ pub fn shell_selection(paths: Vec<PathBuf>) -> Result<Vec<PathBuf>, DuetError> {
             "shell menu: selection spans folders ({} vs {})",
             first.display(),
             other.display()
+        )));
+    }
+    Ok(paths)
+}
+
+/// scope 까지 본 셸 메뉴 대상 검증 — 명령 레이어의 진입점.
+///
+/// [`shell_selection`] 규칙에 더해, `Background`(폴더 빈 영역 메뉴)는 **그 폴더 하나**만 받는다
+/// — 빈 영역 메뉴는 항목들이 아니라 현재 폴더 자체의 메뉴(`CreateViewObject`)라서다.
+pub fn shell_target(paths: Vec<PathBuf>, scope: ShellScope) -> Result<Vec<PathBuf>, DuetError> {
+    let paths = shell_selection(paths)?;
+    if scope == ShellScope::Background && paths.len() != 1 {
+        return Err(DuetError::NotSupported(format!(
+            "shell menu: background menu takes one folder, got {}",
+            paths.len()
         )));
     }
     Ok(paths)
@@ -282,6 +299,27 @@ mod tests {
         let c: SessionCache<Key, &str> = SessionCache::new(4);
         assert!(c.resolve(0).is_none());
         assert!(c.resolve(42).is_none());
+    }
+
+    #[test]
+    fn background_takes_exactly_one_folder() {
+        assert_eq!(
+            shell_target(vec![p("/w")], ShellScope::Background).unwrap(),
+            vec![p("/w")]
+        );
+        assert!(shell_target(vec![p("/w/a"), p("/w/b")], ShellScope::Background).is_err());
+        assert!(shell_target(Vec::new(), ShellScope::Background).is_err());
+    }
+
+    #[test]
+    fn item_scopes_keep_multi_selection() {
+        let sel = vec![p("/w/a"), p("/w/b")];
+        assert_eq!(shell_target(sel.clone(), ShellScope::File).unwrap(), sel);
+        assert_eq!(
+            shell_target(sel.clone(), ShellScope::Directory).unwrap(),
+            sel
+        );
+        assert!(shell_target(vec![p("/w/a"), p("/x/b")], ShellScope::File).is_err());
     }
 
     #[test]

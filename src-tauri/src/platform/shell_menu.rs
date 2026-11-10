@@ -24,11 +24,13 @@ use std::time::{Duration, Instant};
 use windows::core::{PCSTR, PCWSTR};
 use windows::Win32::Foundation::{E_FAIL, E_INVALIDARG, HWND};
 use windows::Win32::Graphics::Gdi::HBITMAP;
-use windows::Win32::System::Com::{CoInitializeEx, CoTaskMemFree, COINIT_APARTMENTTHREADED};
+use windows::Win32::System::Com::{
+    CoInitializeEx, CoTaskMemFree, IBindCtx, COINIT_APARTMENTTHREADED,
+};
 use windows::Win32::UI::Shell::Common::ITEMIDLIST;
 use windows::Win32::UI::Shell::{
-    IContextMenu, ILFindLastID, IShellFolder, SHBindToParent, SHParseDisplayName, CMF_NORMAL,
-    CMINVOKECOMMANDINFO,
+    IContextMenu, ILFindLastID, IShellFolder, SHBindToObject, SHBindToParent, SHParseDisplayName,
+    CMF_NORMAL, CMINVOKECOMMANDINFO,
 };
 use windows::Win32::UI::WindowsAndMessaging::HMENU;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -98,12 +100,13 @@ impl Drop for AbsPidls {
 /// 빌드된 셸 메뉴 세션 — STA 워커 스레드 전용(COM affinity).
 ///
 /// 정리 순서: `Drop` 이 HMENU 를 파기한 뒤 필드가 선언 순서로 drop 된다 —
-/// IContextMenu Release → 부모 IShellFolder Release → 절대 PIDL 해제. 메뉴 객체가 먼저
+/// IContextMenu Release → IShellFolder Release → 절대 PIDL 해제. 메뉴 객체가 먼저
 /// 놓여야 그 객체가 아직 참조할 수 있는 PIDL 을 먼저 풀지 않는다.
 struct Session {
     hmenu: HMENU,
     cm: IContextMenu,
-    _parent: IShellFolder,
+    /// 항목 메뉴면 부모 폴더, 빈 영역 메뉴면 그 폴더 자체.
+    _folder: IShellFolder,
     _pidls: AbsPidls,
 }
 
@@ -273,7 +276,7 @@ impl State {
 
         let t_build = Instant::now();
         // SAFETY: 셸 객체 생성/열거는 이 스레드에서만.
-        match unsafe { build_menu(HWND(hwnd as *mut _), &key.0) } {
+        match unsafe { build_menu(HWND(hwnd as *mut _), &key.0, key.1) } {
             Ok((session, phases)) => {
                 let build_ms = t_build.elapsed().as_millis() as u64;
                 let mut stats = EnumStats::default();
@@ -477,7 +480,14 @@ fn worker_loop(rx: mpsc::Receiver<Req>, shared: SharedCache, self_tx: mpsc::Send
         for (hwnd, path) in prewarms {
             let t = Instant::now();
             // SAFETY: 셸 객체 생성/파기 전부 이 스레드에서.
-            let built = unsafe { build_menu(HWND(hwnd as *mut _), std::slice::from_ref(&path)) };
+            // 항목 메뉴 경로로 예열(셸 확장 핸들러 로드가 목적 — scope 는 File 이면 충분).
+            let built = unsafe {
+                build_menu(
+                    HWND(hwnd as *mut _),
+                    std::slice::from_ref(&path),
+                    ShellScope::File,
+                )
+            };
             drop(built);
             tracing::info!(
                 elapsed_ms = t.elapsed().as_millis() as u64,
@@ -503,7 +513,12 @@ struct BuildPhases {
 
 /// 한 폴더 안의 선택 → IContextMenu + 채워진 HMENU 를 쥔 세션. (모든 호출 unsafe COM)
 ///
-/// Explorer 와 같은 방식: 부모 IShellFolder 를 한 번 바인딩하고, 선택 전부의 자식 PIDL 을
+/// `scope == Background` 면 `paths` 는 폴더 하나이고, 그 폴더의 **빈 영역 메뉴**를 만든다:
+/// 폴더 자체에 바인딩(`SHBindToObject`)해 `IShellFolder::CreateViewObject(IContextMenu)` —
+/// Explorer 빈 공간 우클릭과 같은 계열(새로 만들기·붙여넣기·속성, `Directory\Background`
+/// 확장). 예전엔 폴더를 *항목*으로 묶어(`GetUIObjectOf`) 그 폴더의 삭제/이름 바꾸기가 떴다.
+///
+/// 항목 메뉴(File/Directory)는 Explorer 와 같은 방식: 부모 IShellFolder 를 한 번 바인딩하고, 선택 전부의 자식 PIDL 을
 /// 한 번의 `GetUIObjectOf` 에 넘긴다 — 그래야 셸 확장(7-Zip/Bandizip 등)이 N 개를 한 번에
 /// 받아 "각각 압축 풀기" 같은 다중 항목 명령을 낸다. 같은 부모인지는 명령 레이어
 /// (`shell_menu_core::shell_selection`)가 이미 검증했다.
@@ -513,6 +528,7 @@ struct BuildPhases {
 unsafe fn build_menu(
     hwnd: HWND,
     paths: &[PathBuf],
+    scope: ShellScope,
 ) -> windows::core::Result<(Session, BuildPhases)> {
     let t = Instant::now();
     // 경로 → 절대 PIDL. 중간 실패 시 이미 받은 것들은 AbsPidls drop 이 해제.
@@ -535,24 +551,31 @@ unsafe fn build_menu(
         .first()
         .ok_or(windows::core::Error::from(E_INVALIDARG))?;
 
-    // 부모 IShellFolder — 첫 항목 기준 한 번만. (riid/ppv 는 제네릭 반환으로 접힘 — windows 0.58)
-    let parent: IShellFolder = SHBindToParent(first, None)?;
-    // 각 항목의 자식(상대) PIDL — SHBindToParent 의 ppidlLast 와 같은 값(절대 PIDL 의 마지막 ID).
-    let children: Vec<*const ITEMIDLIST> = pidls
-        .0
-        .iter()
-        .map(|&p| ILFindLastID(p) as *const ITEMIDLIST)
-        .collect();
-
-    // IContextMenu 획득 — 선택 전부를 한 번에.
-    let cm: IContextMenu = parent.GetUIObjectOf(hwnd, &children, None)?;
+    let (folder, cm): (IShellFolder, IContextMenu) = if scope == ShellScope::Background {
+        // 폴더 자체의 IShellFolder(데스크톱 기준 절대 PIDL 로 바인딩) → 빈 영역 메뉴.
+        let folder: IShellFolder = SHBindToObject(None::<&IShellFolder>, first, None::<&IBindCtx>)?;
+        let cm: IContextMenu = folder.CreateViewObject(hwnd)?;
+        (folder, cm)
+    } else {
+        // 부모 IShellFolder — 첫 항목 기준 한 번만. (riid/ppv 는 제네릭 반환으로 접힘 — windows 0.58)
+        let parent: IShellFolder = SHBindToParent(first, None)?;
+        // 각 항목의 자식(상대) PIDL — SHBindToParent 의 ppidlLast 와 같은 값(절대 PIDL 의 마지막 ID).
+        let children: Vec<*const ITEMIDLIST> = pidls
+            .0
+            .iter()
+            .map(|&p| ILFindLastID(p) as *const ITEMIDLIST)
+            .collect();
+        // IContextMenu 획득 — 선택 전부를 한 번에.
+        let cm: IContextMenu = parent.GetUIObjectOf(hwnd, &children, None)?;
+        (parent, cm)
+    };
     let parse_ms = t.elapsed().as_millis() as u64;
 
     // HMENU 구성. 세션을 먼저 묶어 두면 QueryContextMenu 실패 시에도 Drop 이 전부 정리한다.
     let session = Session {
         hmenu: CreatePopupMenu()?,
         cm,
-        _parent: parent,
+        _folder: folder,
         _pidls: pidls,
     };
     let t = Instant::now();

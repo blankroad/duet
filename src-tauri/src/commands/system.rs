@@ -695,8 +695,8 @@ pub async fn shell_menu_open(
 ) -> Result<crate::platform::ShellMenu, DuetError> {
     // FE 가 간헐적으로 드라이브(C:) 없는 경로를 보내면 셸(IContextMenu)이 항목을 못
     // 잡아 빈 메뉴("(none)")가 된다 — COM 직전에 절대경로화(local_abs: 이미 절대면 no-op).
-    // 같은 부모 검증은 FE 가 아니라 여기서(백엔드) 한다.
-    let paths = crate::platform::shell_menu_core::shell_selection(paths)?;
+    // 같은 부모 검증은 FE 가 아니라 여기서(백엔드) 한다. background 는 폴더 하나.
+    let paths = crate::platform::shell_menu_core::shell_target(paths, scope)?;
     #[cfg(windows)]
     {
         use tauri::Manager;
@@ -732,7 +732,7 @@ pub async fn shell_menu_warm(
     scope: crate::platform::ShellScope,
     registry: tauri::State<'_, std::sync::Arc<crate::platform::ShellMenuRegistry>>,
 ) -> Result<(), DuetError> {
-    let paths = crate::platform::shell_menu_core::shell_selection(paths)?;
+    let paths = crate::platform::shell_menu_core::shell_target(paths, scope)?;
     #[cfg(windows)]
     {
         use tauri::Manager;
