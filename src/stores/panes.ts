@@ -354,6 +354,16 @@ export function activeTab(state: PanesState, id: PaneId): TabState {
 }
 
 /**
+ * 탭 id 를 지금 가지고 있는 패널 — 없으면(닫힘) null. 이동을 기다리는 사이 패널
+ * 맞바꾸기·탭 옮기기로 탭이 반대 패널로 갔을 수 있어, 응답을 적용할 때 쓴다.
+ */
+export function paneOfTab(state: PanesState, tabId: string): PaneId | null {
+  if (state.panes.left.tabs.some((t) => t.id === tabId)) return "left";
+  if (state.panes.right.tabs.some((t) => t.id === tabId)) return "right";
+  return null;
+}
+
+/**
  * 표시 순서가 바뀌는 변경(정렬·숨김 토글) 뒤에도 커서가 **보던 항목**(이름)을 따라가게.
  * 예전엔 역순 정렬 뒤 커서가 같은 인덱스의 다른 파일에 남거나(Enter·F2·Delete 대상이
  * 바뀜) 맨 위로 튀었다. 항목이 사라졌으면(숨김) 인덱스를 clamp.

@@ -278,41 +278,35 @@ describe("mocked IPC tabs while navigating", () => {
     expect(tabL().loading).toBe(false);
   });
 
-  it.fails(
-    "ux-smoke browse-s06 swap panes while navigating must preserve the pending destination",
-    async () => {
-      await boot("/other");
-      const original = tabL().id;
-      holdSlow = true;
-      cursorTo("slow");
-      enter();
-      await wait(30);
-      key({ key: "u", code: "KeyU", ctrlKey: true });
-      expect(tabR().id).toBe(original);
-      await releaseSlow();
-      await wait(100);
-      expect(tabR().loading).toBe(false);
-      expect(String(tabR().location.path)).toBe("/home/slow");
-      expect(tabR().entries.map((e) => e.name)).toEqual(["late.txt"]);
-    },
-  );
+  it("ux-smoke browse-s06 swap panes while navigating must preserve the pending destination", async () => {
+    await boot("/other");
+    const original = tabL().id;
+    holdSlow = true;
+    cursorTo("slow");
+    enter();
+    await wait(30);
+    key({ key: "u", code: "KeyU", ctrlKey: true });
+    expect(tabR().id).toBe(original);
+    await releaseSlow();
+    await wait(100);
+    expect(tabR().loading).toBe(false);
+    expect(String(tabR().location.path)).toBe("/home/slow");
+    expect(tabR().entries.map((e) => e.name)).toEqual(["late.txt"]);
+  });
 
-  it.fails(
-    "ux-smoke browse-s07 move tab to other pane while navigating must preserve pending destination",
-    async () => {
-      await boot("/other");
-      const original = tabL().id;
-      holdSlow = true;
-      cursorTo("slow");
-      enter();
-      await wait(30);
-      act(() => usePanes.getState().moveActiveTabToOther());
-      expect(tabR().id).toBe(original);
-      await releaseSlow();
-      await wait(100);
-      expect(String(tabR().location.path)).toBe("/home/slow");
-    },
-  );
+  it("ux-smoke browse-s07 move tab to other pane while navigating must preserve pending destination", async () => {
+    await boot("/other");
+    const original = tabL().id;
+    holdSlow = true;
+    cursorTo("slow");
+    enter();
+    await wait(30);
+    act(() => usePanes.getState().moveActiveTabToOther());
+    expect(tabR().id).toBe(original);
+    await releaseSlow();
+    await wait(100);
+    expect(String(tabR().location.path)).toBe("/home/slow");
+  });
 
   it("sync-browse mirrors a successful directory enter and skips a missing counterpart", async () => {
     await boot("/other");

@@ -108,6 +108,7 @@ import { useVault } from "@/stores/vault";
 import {
   usePanes,
   activeTab,
+  paneOfTab,
   computeDisplayed,
   isParentEntry,
   isRestoredRemote,
@@ -270,14 +271,18 @@ function App() {
       try {
         const entries = await listEntries(location);
         if (!current()) return; // 이 탭에서 더 새 이동이 시작됨
+        // 기다리는 사이 패널 맞바꾸기·탭 옮기기로 탭이 반대 패널로 갔을 수 있다 —
+        // 지금 그 탭을 가진 패널에 적용한다. 탭이 닫혔으면 할 일이 없다.
+        const pane = paneOfTab(usePanes.getState(), tabId);
+        if (!pane) return;
         // 새로고침 응답은 그 탭이 아직 그 폴더일 때만 — 그사이 끝난 이동을
         // 옛 폴더 목록으로 되돌리지 않게.
         const now = usePanes
           .getState()
-          .panes[id].tabs.find((t) => t.id === tabId);
+          .panes[pane].tabs.find((t) => t.id === tabId);
         if (opts.refresh && (!now || !sameLocation(now.location, location)))
           return;
-        state.setEntries(id, location, entries, {
+        state.setEntries(pane, location, entries, {
           tabId,
           pushHistory: opts.pushHistory ?? true,
           ...(opts.focusName !== undefined
@@ -287,9 +292,9 @@ function App() {
         // navigate 성공 후 watcher 갱신. 실패는 silent — fs:changed 알림 안 옴
         // 정도의 영향. (사용자가 명시 새로고침으로 우회 가능.) 감시자는 패널당
         // 하나 — 그 탭이 지금 보이는 탭일 때만 옮긴다 (숨은 탭의 늦은 이동 제외).
-        const p = usePanes.getState().panes[id];
+        const p = usePanes.getState().panes[pane];
         if (!isVirtualTrash(location) && p.tabs[p.activeTabIndex]?.id === tabId)
-          void commands.paneWatchSet(id, location);
+          void commands.paneWatchSet(pane, location);
         if (opts.pushHistory !== false) {
           if (!isVirtualTrash(location)) {
             recordRecent(location);
@@ -300,7 +305,8 @@ function App() {
         }
       } catch (e) {
         if (!current()) return; // 낡은 요청의 실패는 무시
-        usePanes.getState().setLoading(id, false, tabId);
+        const pane = paneOfTab(usePanes.getState(), tabId) ?? id;
+        usePanes.getState().setLoading(pane, false, tabId);
         // 사용자가 더블클릭해도 silent fail 면 무반응으로 인식. toast 로 노출.
         showError("toast.cannotOpen", e, { vars: { name: path } });
       }
