@@ -20,6 +20,7 @@ import { DialogInput } from "@/components/dialogs/DialogInput";
 import { ConnectErrorBox } from "./ConnectErrorBox";
 import { ReconnectTarget, type ReconnectInfo } from "./ReconnectTarget";
 import { formatErr } from "@/lib/error";
+import { showError } from "@/lib/errorToast";
 
 /**
  * `~/.ssh/config` 에 없는 host 에 직접 입력으로 연결.
@@ -274,13 +275,19 @@ export function AdHocConnectDialog({
       let needsMasterFlow = false;
       if (save) {
         const savedAlias = alias.trim() || dto.alias;
-        await saveHost({
+        // 저장 실패는 연결을 되돌리지 않지만 알려야 한다 — 예전엔 조용히 닫혀 다음
+        // 접속 때야 호스트·비밀번호가 없는 걸 알았다(remote-NEW-1).
+        const hostErr = await saveHost({
           alias: savedAlias,
           host: req.host,
           port: req.port,
           user: req.user,
           key_path: req.keyPath,
         });
+        if (hostErr)
+          showError("dialog.adhoc.saveHostFailed", hostErr, {
+            vars: { alias: savedAlias },
+          });
         if (mine !== attempt.current) {
           // 저장하는 사이 취소함 — 늦게 패널을 옮기거나 저장 프롬프트를 띄우지 않는다.
           void commands.connectionClose(dto.id);
@@ -293,7 +300,11 @@ export function AdHocConnectDialog({
             // 으로 연결, vault unlocked 되면 자동 실행.
             const pwToSave = pw;
             saveAfterUnlock.current = async () => {
-              await vaultSet(savedAlias, pwToSave);
+              const err = await vaultSet(savedAlias, pwToSave);
+              if (err)
+                showError("dialog.adhoc.savePasswordFailed", err, {
+                  vars: { alias: savedAlias },
+                });
             };
             setMasterDialog({
               open: true,
@@ -302,7 +313,11 @@ export function AdHocConnectDialog({
             });
             needsMasterFlow = true;
           } else {
-            await vaultSet(savedAlias, pw);
+            const pwErr = await vaultSet(savedAlias, pw);
+            if (pwErr)
+              showError("dialog.adhoc.savePasswordFailed", pwErr, {
+                vars: { alias: savedAlias },
+              });
             if (mine !== attempt.current) {
               void commands.connectionClose(dto.id);
               return;

@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { reorderInSlots } from "@/lib/reorderSlots";
 import { commands } from "@/types/bindings";
 import { showError } from "@/lib/errorToast";
-import type { SavedHost } from "@/types/bindings";
+import type { DuetError, SavedHost } from "@/types/bindings";
 
 /**
  * 저장된 SSH 호스트 (host/port/user/key_path — 비밀번호 X, CLAUDE.md §5).
@@ -26,14 +26,17 @@ export async function bootstrapSavedHosts(): Promise<void> {
   if (r.status === "ok") useSavedHosts.getState().setAll(r.data);
 }
 
-/** Upsert (alias 키, 기존 alias 면 overwrite). 성공 시 store 자동 갱신. */
-export async function saveHost(host: SavedHost): Promise<boolean> {
+/**
+ * Upsert (alias 키, 기존 alias 면 overwrite). 성공 시 store 자동 갱신.
+ * 실패하면 그 오류를 돌려준다(성공은 `null`) — 호출부가 사용자에게 알린다.
+ */
+export async function saveHost(host: SavedHost): Promise<DuetError | null> {
   const r = await commands.savedHostsUpsert(host);
   if (r.status === "ok") {
     useSavedHosts.getState().setAll(r.data);
-    return true;
+    return null;
   }
-  return false;
+  return r.error;
 }
 
 /** alias 로 삭제. 없으면 no-op. */

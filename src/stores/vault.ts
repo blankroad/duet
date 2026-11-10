@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { commands } from "@/types/bindings";
+import type { DuetError } from "@/types/bindings";
 
 /**
  * Master-password vault state mirror (백엔드 SecretVault).
@@ -36,17 +37,20 @@ export async function vaultUnlock(passphrase: string): Promise<boolean> {
   return false;
 }
 
-/** alias → password 저장. vault 가 unlocked 여야 함. */
+/**
+ * alias → password 저장. vault 가 unlocked 여야 함.
+ * 실패하면 그 오류를 돌려준다(성공은 `null`) — 호출부가 사용자에게 알린다.
+ */
 export async function vaultSet(
   alias: string,
   password: string,
-): Promise<boolean> {
+): Promise<DuetError | null> {
   const r = await commands.vaultSet(alias, password);
   if (r.status === "ok") {
     await useVault.getState().refresh(); // exists=true 갱신
-    return true;
+    return null;
   }
-  return false;
+  return r.error;
 }
 
 /**

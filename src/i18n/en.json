@@ -336,6 +336,8 @@
       "saveHost": "Save host",
       "alias": "Alias",
       "savePassword": "Save password too (encrypted with master — age scrypt+ChaCha20)",
+      "saveHostFailed": "Connected, but could not save host {{alias}}: {{err}}",
+      "savePasswordFailed": "Connected, but could not save the password for {{alias}}: {{err}}",
       "authFailedHint": "Key/agent failed. Enter a password and retry, or check the key file path.",
       "desc": "Connect to a host that is not in your ~/.ssh/config."
     },

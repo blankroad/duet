@@ -333,6 +333,8 @@
       "saveHost": "호스트 저장",
       "alias": "별칭",
       "savePassword": "비밀번호도 저장 (마스터로 암호화 — age scrypt+ChaCha20)",
+      "saveHostFailed": "연결은 됐지만 호스트 {{alias}} 를 저장하지 못했습니다: {{err}}",
+      "savePasswordFailed": "연결은 됐지만 {{alias}} 의 비밀번호를 저장하지 못했습니다: {{err}}",
       "authFailedHint": "키/에이전트 실패. 비밀번호를 입력해 다시 시도하거나 키 파일 경로를 확인하세요.",
       "desc": "~/.ssh/config 에 없는 호스트에 연결."
     },
