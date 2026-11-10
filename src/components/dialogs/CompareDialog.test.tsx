@@ -238,3 +238,69 @@ describe("CompareRulesBar 늦은 설정 프리필 (SC-11 R2)", () => {
     ).toBe(0);
   });
 });
+
+// 리뷰어(sol) 독립 R1 리뷰의 회귀 테스트를 손으로 옮김(원 패치는 a3a271c 기준이라 충돌).
+describe("independent round-1 SC-11 adversarial review", () => {
+  type SettingsResult = Awaited<ReturnType<typeof commands.settingsGet>>;
+  const remotePlan: ComparePlan = {
+    ...plan("left_only"),
+    right: {
+      source: {
+        kind: "ssh",
+        connection_id: "fixture",
+        host_ip: "10.0.0.2",
+        user: "u",
+      },
+      path: "/fixture/remote",
+    },
+  };
+  function deferSettings() {
+    let finish: (value: SettingsResult) => void = () => {};
+    vi.mocked(commands.settingsGet).mockReturnValueOnce(
+      new Promise<SettingsResult>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    return (globs: string[], tol: number) =>
+      finish({
+        status: "ok",
+        data: { compare_ignore_globs: globs, compare_mtime_tolerance_ms: tol },
+      } as unknown as SettingsResult);
+  }
+  const renderRemote = () =>
+    render(
+      <CompareDialog
+        plan={remotePlan}
+        rules={{ ignore_globs: [], mtime_tolerance_ms: 2000 }}
+        onClose={() => {}}
+        onMerge={() => {}}
+        onApply={() => {}}
+      />,
+    );
+
+  it("late settings must preserve the user's explicitly selected exact tolerance", async () => {
+    const finishSettings = deferSettings();
+    renderRemote();
+    const control = screen.getByTitle(/mtime tolerance/) as HTMLSelectElement;
+    expect(control.value).toBe("2000");
+    fireEvent.change(control, { target: { value: "0" } });
+    expect(control.value).toBe("0");
+    await act(async () => {
+      finishSettings([], 0);
+    });
+    expect(control.value).toBe("0");
+  });
+
+  it("late settings must preserve edited ignore text but still prefill the untouched tolerance", async () => {
+    const finishSettings = deferSettings();
+    renderRemote();
+    const ignore = screen.getByPlaceholderText(/ignore/i) as HTMLInputElement;
+    const control = screen.getByTitle(/mtime tolerance/) as HTMLSelectElement;
+    fireEvent.change(ignore, { target: { value: "build" } });
+    await act(async () => {
+      finishSettings(["saved-glob"], 60_000);
+    });
+    expect(ignore.value).toBe("build");
+    expect(control.value).toBe("60000");
+  });
+});
