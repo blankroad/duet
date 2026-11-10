@@ -47,6 +47,8 @@ import { explainError } from "@/lib/error";
 import {
   clipCopy,
   clipCut,
+  clipPaste,
+  triggerCopy,
   planTransferTo,
   triggerDelete,
   triggerMove,
@@ -254,21 +256,65 @@ describe("multi selection", () => {
 
 describe("both panes show the same folder", () => {
   const here = local("/w");
-  it.fails(
-    "ux-fileops-01: F6 says 'already in this folder' instead of planning a move onto itself",
-    async () => {
-      seed({
-        left: here,
-        right: here,
-        entries: [file("a.txt")],
-        selected: ["a.txt"],
-      });
-      const toast = vi.fn();
-      await triggerMove(vi.fn(), toast);
-      expect(h.calls.find(([n]) => n === "fsMovePlan")).toBeUndefined();
-      expect(toast).toHaveBeenCalledWith(i18n.t("toast.alreadyInFolder"));
+  it("ux-fileops-01: F6 says 'already in this folder' instead of planning a move onto itself", async () => {
+    seed({
+      left: here,
+      right: here,
+      entries: [file("a.txt")],
+      selected: ["a.txt"],
+    });
+    const toast = vi.fn();
+    await triggerMove(vi.fn(), toast);
+    expect(h.calls.find(([n]) => n === "fsMovePlan")).toBeUndefined();
+    expect(toast).toHaveBeenCalledWith(i18n.t("toast.alreadyInFolder"));
+  });
+});
+
+describe("both panes show the same folder — copy", () => {
+  const here = local("/w");
+  const conflictPlan = {
+    status: "ok",
+    data: {
+      src_source: { kind: "local" },
+      dst: here,
+      items: [{ location: here, name: "a.txt" }],
+      conflicts: [{ name: "a.txt" }],
+      total_size_bytes: 0,
+      strategy: { kind: "local_to_local" },
     },
-  );
+  };
+
+  it("F5 still plans a copy and opens the confirm dialog (duplicate)", async () => {
+    seed({
+      left: here,
+      right: here,
+      entries: [file("a.txt")],
+      selected: ["a.txt"],
+    });
+    h.plan = conflictPlan;
+    const open = vi.fn();
+    await triggerCopy(open, vi.fn());
+    expect(open).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "copy-confirm" }),
+    );
+  });
+
+  it("Ctrl+C → Ctrl+V in place opens the copy confirm dialog", async () => {
+    seed({
+      left: here,
+      right: local("/x"),
+      entries: [file("a.txt")],
+      selected: ["a.txt"],
+    });
+    clipCopy(vi.fn());
+    h.plan = conflictPlan;
+    const open = vi.fn();
+    await clipPaste(open, vi.fn());
+    expect(open).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "copy-confirm" }),
+    );
+    expect(useClipboard.getState().entry?.mode).toBe("copy");
+  });
 });
 
 // ── Windows Recycle Bin view (virtual path, not a real folder) ──

@@ -20,6 +20,7 @@ import {
 } from "./TransferPlanBody";
 import { useKeyHint } from "@/lib/keyHint";
 import { initialConflictPolicy, useAppSettings } from "@/stores/settings";
+import { selfConflictsOnly } from "@/lib/planItems";
 
 const POLICY_HINT = {
   skip: "conflict.skipAllHint",
@@ -53,9 +54,14 @@ export function CopyMoveConfirmDialog({
   const ctaRef = useRef<HTMLButtonElement>(null);
   const conflicts = plan.conflicts;
   const cta = t(`dialog.transfer.${kind}`);
+  // 같은 폴더로 복사해 충돌이 전부 자기 자신이면 사본 만들기(둘 다 유지)가 의도다 —
+  // 탐색기/파인더와 같다. 건너뛰기면 아무 일도 없고, 교체는 자기 자신을 덮는다.
+  const selfDuplicate = kind === "copy" && selfConflictsOnly(plan);
   // 기본 선택은 설정값(디폴트 건너뛰기) — "마지막 선택 기억"이 켜져 있으면 세션의
   // 직전 선택. 매번 같은 것을 다시 고르지 않게 한다.
-  const [policy, setPolicy] = useState<ConflictPolicy>(initialConflictPolicy);
+  const [policy, setPolicy] = useState<ConflictPolicy>(() =>
+    selfDuplicate ? "keepboth" : initialConflictPolicy(),
+  );
   const [perFile, setPerFile] = useState(false);
   const [decisions, setDecisions] = useState<Record<string, ConflictPolicy>>(
     () => Object.fromEntries(conflicts.map((c) => [c.name, policy])),
@@ -109,7 +115,8 @@ export function CopyMoveConfirmDialog({
 
   /** 고른 정책을 세션에 기록한 뒤 실행 — 다음 다이얼로그의 기본이 된다. */
   const confirmWith = (p: ConflictPolicy) => {
-    useAppSettings.getState().setLastConflictChoice(p);
+    // 같은 폴더 사본 만들기의 선택은 일반 충돌 선호가 아니라 기억하지 않는다.
+    if (!selfDuplicate) useAppSettings.getState().setLastConflictChoice(p);
     onConfirm(p);
   };
 
