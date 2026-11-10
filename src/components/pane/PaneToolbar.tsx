@@ -58,6 +58,12 @@ interface PaneToolbarProps {
 export function PaneToolbar({ id }: PaneToolbarProps) {
   const kNewFile = useKeyHint("file.newFile");
   const canCreate = usePanes((s) => !isVirtualTrash(activeTab(s, id).location));
+  // 반대 패널로 복사/이동 — 어느 쪽이든 가상 휴지통이면 성립하지 않는다(복원은 Put back).
+  const canTransfer = usePanes(
+    (s) =>
+      !isVirtualTrash(activeTab(s, id).location) &&
+      !isVirtualTrash(activeTab(s, id === "left" ? "right" : "left").location),
+  );
   const kNewFolder = useKeyHint("file.newFolder");
   const kCopy = useKeyHint("file.copy");
   const kMove = useKeyHint("file.move");
@@ -143,6 +149,7 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
       </ToolButton>
       <ToolButton
         label={t("toolbar.copy", { key: kCopy })}
+        disabled={!canTransfer}
         onClick={() => runHere(() => void triggerCopy(open, showToast))}
         shortLabel={t("menu.copy")}
       >
@@ -150,6 +157,7 @@ export function PaneToolbar({ id }: PaneToolbarProps) {
       </ToolButton>
       <ToolButton
         label={t("toolbar.move", { key: kMove })}
+        disabled={!canTransfer}
         onClick={() => runHere(() => void triggerMove(open, showToast))}
         shortLabel={t("shelf.move")}
       >

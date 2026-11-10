@@ -212,16 +212,13 @@ describe("no selection, cursor on '..'", () => {
     expect(toast).toHaveBeenCalledWith(i18n.t("toast.renameSelectOne"));
   });
 
-  it.fails(
-    "ux-fileops-05: Delete with nothing selected tells the user why nothing happened",
-    async () => {
-      seed({ left: here, right: there, entries: [file("a.txt")], cursor: 0 });
-      const toast = vi.fn();
-      await triggerDelete("trash", vi.fn(), toast);
-      expect(h.calls).toEqual([]);
-      expect(toast).toHaveBeenCalledTimes(1);
-    },
-  );
+  it("ux-fileops-05: Delete with nothing selected tells the user why nothing happened", async () => {
+    seed({ left: here, right: there, entries: [file("a.txt")], cursor: 0 });
+    const toast = vi.fn();
+    await triggerDelete("trash", vi.fn(), toast);
+    expect(h.calls).toEqual([]);
+    expect(toast).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("multi selection", () => {
@@ -293,21 +290,18 @@ describe("Windows Recycle Bin view", () => {
     );
   });
 
-  it.fails(
-    "ux-fileops-06: Ctrl+X in the bin is refused like F6 (else Ctrl+V plans a move from a virtual path)",
-    () => {
-      seed({
-        left: bin,
-        right: local("C:\\x"),
-        entries: [file("a.txt")],
-        selected: ["a.txt"],
-      });
-      clipCut(vi.fn());
-      expect(useClipboard.getState().entry).toBeNull();
-    },
-  );
+  it("ux-fileops-06: Ctrl+X in the bin is refused like F6 (else Ctrl+V plans a move from a virtual path)", () => {
+    seed({
+      left: bin,
+      right: local("C:\\x"),
+      entries: [file("a.txt")],
+      selected: ["a.txt"],
+    });
+    clipCut(vi.fn());
+    expect(useClipboard.getState().entry).toBeNull();
+  });
 
-  it.fails("ux-fileops-06: Ctrl+C in the bin is refused like F5", () => {
+  it("ux-fileops-06: Ctrl+C in the bin is refused like F5", () => {
     seed({
       left: bin,
       right: local("C:\\x"),
@@ -318,38 +312,32 @@ describe("Windows Recycle Bin view", () => {
     expect(useClipboard.getState().entry).toBeNull();
   });
 
-  it.fails(
-    "ux-fileops-06: F2 in the bin does not open an inline rename on a virtual entry",
-    () => {
-      seed({
-        left: bin,
-        right: local("C:\\x"),
-        entries: [file("a.txt")],
-        selected: ["a.txt"],
-      });
-      const spy = vi.fn();
-      useUI.setState({ requestInlineRename: spy });
-      triggerRename(vi.fn());
-      expect(spy).not.toHaveBeenCalled();
-    },
-  );
+  it("ux-fileops-06: F2 in the bin does not open an inline rename on a virtual entry", () => {
+    seed({
+      left: bin,
+      right: local("C:\\x"),
+      entries: [file("a.txt")],
+      selected: ["a.txt"],
+    });
+    const spy = vi.fn();
+    useUI.setState({ requestInlineRename: spy });
+    triggerRename(vi.fn());
+    expect(spy).not.toHaveBeenCalled();
+  });
   // Drag/drop (useEntryDrag, sidebar drop) calls planTransferTo directly; only the
   // F5/F6/Ctrl+V triggers check for the bin. Static reading: dropping onto a bin pane
   // plans a copy into the virtual path. Windows-only path, not run on a device.
-  it.fails(
-    "ux-fileops-06: a drop onto the bin pane does not plan a copy into the virtual path",
-    async () => {
-      const toast = vi.fn();
-      await planTransferTo(
-        [{ location: local("C:\\x"), name: "a.txt" }],
-        bin,
-        "copy",
-        vi.fn(),
-        toast,
-      );
-      expect(h.calls.find(([n]) => n === "fsCopyPlan")).toBeUndefined();
-    },
-  );
+  it("ux-fileops-06: a drop onto the bin pane does not plan a copy into the virtual path", async () => {
+    const toast = vi.fn();
+    await planTransferTo(
+      [{ location: local("C:\\x"), name: "a.txt" }],
+      bin,
+      "copy",
+      vi.fn(),
+      toast,
+    );
+    expect(h.calls.find(([n]) => n === "fsCopyPlan")).toBeUndefined();
+  });
 });
 
 // ── Error text for backend refusals the user hits in normal use ──

@@ -828,6 +828,7 @@
     "copyNothingSelected": "복사: 선택된 항목 없음",
     "cutNothingSelected": "잘라내기: 선택된 항목 없음",
     "moveNothingSelected": "이동: 선택된 항목 없음",
+    "deleteNothingSelected": "삭제: 선택된 항목 없음",
     "shelfNothingSelected": "선반: 선택된 항목 없음",
     "copiedItems": "{{count}}개 복사됨 — Ctrl+V 로 붙여넣기",
     "cutItems": "{{count}}개 잘라냄 — Ctrl+V 로 붙여넣기",

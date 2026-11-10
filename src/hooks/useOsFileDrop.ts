@@ -6,6 +6,7 @@ import { useToast } from "@/stores/toast";
 import { dropLocationAt, resolveSidebarDropAt } from "@/lib/dropTarget";
 import { showError } from "@/lib/errorToast";
 import { selfDropKind } from "@/lib/selfDrag";
+import { isVirtualTrash } from "@/lib/trashView";
 import i18n from "@/i18n";
 
 /**
@@ -38,6 +39,11 @@ export function useOsFileDrop() {
         const dst =
           dropLocationAt(x, y) ?? resolveSidebarDropAt(x, y)?.location ?? null;
         if (!dst) return; // 받을 곳 없음 — 무시
+        // 가상 휴지통은 실제 폴더가 아니다 — 가져오기 대상이 될 수 없다.
+        if (isVirtualTrash(dst)) {
+          showToast(i18n.t("toast.trashOnlyPutBack"), "error");
+          return;
+        }
         // 목록에서 끈 파일을 원래 폴더나 그 폴더 자신에게 도로 놓은 경우 — 자기 자신과
         // 충돌하는 복사 확인 창 대신 짧게 알리고 끝낸다.
         const self = selfDropKind(paths, dst);

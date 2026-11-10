@@ -833,6 +833,7 @@
     "copyNothingSelected": "Copy: nothing selected",
     "cutNothingSelected": "Cut: nothing selected",
     "moveNothingSelected": "Move: nothing selected",
+    "deleteNothingSelected": "Delete: nothing selected",
     "shelfNothingSelected": "Shelf: nothing selected",
     "copiedItems": "Copied {{count}} item(s) — paste with Ctrl+V",
     "cutItems": "Cut {{count}} item(s) — paste with Ctrl+V",
