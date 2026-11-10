@@ -140,20 +140,22 @@ describe("C-06 shelf apply", () => {
     },
   );
 
-  it.fails(
-    "shell-settings-31: 활성 패널이 가상 휴지통이면 선반 적용을 막는다(F5 와 같게)",
-    async () => {
-      usePanes.getState().setEntries("left", local(VIRTUAL_TRASH_PATH), []);
-      usePanes.getState().setActivePane("left");
-      useShelf.getState().add([ref(local("/a"), "a.txt")]);
-      cmd.fsCopyPlan.mockResolvedValue({
-        status: "error",
-        error: { kind: "Io", message: "x" },
-      });
-      await applyShelfTo("copy", vi.fn(), vi.fn());
-      expect(cmd.fsCopyPlan).not.toHaveBeenCalled();
-    },
-  );
+  it("shell-settings-31: 활성 패널이 가상 휴지통이면 선반 적용을 막는다(F5 와 같게)", async () => {
+    usePanes.getState().setEntries("left", local(VIRTUAL_TRASH_PATH), []);
+    usePanes.getState().setActivePane("left");
+    useShelf.getState().add([ref(local("/a"), "a.txt")]);
+    cmd.fsCopyPlan.mockResolvedValue({
+      status: "error",
+      error: { kind: "Io", message: "x" },
+    });
+    const toast = vi.fn();
+    await applyShelfTo("copy", vi.fn(), toast);
+    expect(cmd.fsCopyPlan).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith(
+      i18n.t("toast.trashOnlyPutBack"),
+      "error",
+    );
+  });
 });
 
 describe("C-08 state dot", () => {
