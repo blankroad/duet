@@ -1,7 +1,8 @@
-//! Baseline smoke: real local extraction and journal undo, exclusively in tempdirs.
+//! Regression smoke: real local extraction and journal undo, exclusively in tempdirs.
 #[path = "support/undo_fixture.rs"]
 mod undo_fixture;
 
+use duet_lib::core::archive_batch::extract_plan_batch;
 use duet_lib::core::{
     archive::{extract_execute, extract_plan},
     ops::OpCtx,
@@ -101,16 +102,16 @@ async fn single_zip_extracts_to_stem_folder_and_undo_removes_it() {
 }
 
 #[tokio::test]
-async fn existing_stem_is_backed_up_without_execute_confirmation_and_undo_restores() {
+async fn explicit_batch_replace_backs_up_existing_stem_and_undo_restores() {
     let t = tempfile::tempdir().unwrap();
     let c = ctx(t.path()).await;
     zip(t.path(), "data.zip");
     std::fs::create_dir(t.path().join("data")).unwrap();
     std::fs::write(t.path().join("data/original.txt"), b"original").unwrap();
-    let p = extract_plan(&LocalFs, entry(t.path(), "data.zip"))
-        .await
-        .unwrap();
+    let items = extract_plan_batch(&LocalFs, vec![entry(t.path(), "data.zip")], false).await;
+    let p = items[0].plan.clone().unwrap();
     assert!(p.conflict);
+    assert!(!p.keep_both);
     let (e, _) = extract_execute(&LocalFs, p, None, &c, CancellationToken::new())
         .await
         .unwrap();
@@ -129,19 +130,22 @@ async fn existing_stem_is_backed_up_without_execute_confirmation_and_undo_restor
 }
 
 #[tokio::test]
-async fn upfront_same_stem_plans_collide_when_executed_sequentially() {
+async fn upfront_batch_same_stem_plans_never_clobber_each_other() {
     let t = tempfile::tempdir().unwrap();
     let c = ctx(t.path()).await;
     zip(t.path(), "a.zip");
     gzip(t.path(), "a.tar.gz", true);
-    let first = extract_plan(&LocalFs, entry(t.path(), "a.zip"))
-        .await
-        .unwrap();
-    let second = extract_plan(&LocalFs, entry(t.path(), "a.tar.gz"))
-        .await
-        .unwrap();
-    assert_eq!(first.dest_dir, second.dest_dir);
-    assert!(!first.conflict && !second.conflict);
+    let items = extract_plan_batch(
+        &LocalFs,
+        vec![entry(t.path(), "a.zip"), entry(t.path(), "a.tar.gz")],
+        false,
+    )
+    .await;
+    let first = items[0].plan.clone().unwrap();
+    let second = items[1].plan.clone().unwrap();
+    assert_eq!(first.dest_dir, t.path().join("a"));
+    assert_eq!(second.dest_dir, t.path().join("a (2)"));
+    assert!(first.keep_both && second.keep_both);
     let (e1, _) = extract_execute(&LocalFs, first, None, &c, CancellationToken::new())
         .await
         .unwrap();
@@ -150,20 +154,61 @@ async fn upfront_same_stem_plans_collide_when_executed_sequentially() {
         .unwrap();
     assert_ne!(e1.id, e2.id);
     assert_eq!(
-        std::fs::read(t.path().join("a/tar.txt")).unwrap(),
-        b"tar payload"
-    );
-    assert!(!t.path().join("a/zip.txt").exists());
-    assert_eq!(
-        std::fs::read(backup(&e2).join("zip.txt")).unwrap(),
-        b"zip payload"
-    );
-    assert_eq!(undo_fixture::undo_tmp(&e2).await.kind, UndoKind::Ok);
-    assert_eq!(
         std::fs::read(t.path().join("a/zip.txt")).unwrap(),
         b"zip payload"
     );
+    assert_eq!(
+        std::fs::read(t.path().join("a (2)/tar.txt")).unwrap(),
+        b"tar payload"
+    );
+    let UndoAction::UndoCopy {
+        backups_to_restore, ..
+    } = &e2.undo
+    else {
+        panic!("UndoCopy")
+    };
+    assert!(backups_to_restore.is_empty());
+    assert_eq!(undo_fixture::undo_tmp(&e2).await.kind, UndoKind::Ok);
+    assert!(t.path().join("a/zip.txt").exists());
     assert_eq!(undo_fixture::undo_tmp(&e1).await.kind, UndoKind::Ok);
+}
+
+#[tokio::test]
+async fn keep_both_reserves_at_execute_and_preserves_raced_destination() {
+    let t = tempfile::tempdir().unwrap();
+    let c = ctx(t.path()).await;
+    zip(t.path(), "data.zip");
+    std::fs::create_dir(t.path().join("data")).unwrap();
+    std::fs::write(t.path().join("data/original.txt"), b"original").unwrap();
+    let items = extract_plan_batch(&LocalFs, vec![entry(t.path(), "data.zip")], true).await;
+    let plan = items[0].plan.clone().unwrap();
+    assert_eq!(plan.dest_dir, t.path().join("data (2)"));
+    std::fs::create_dir(t.path().join("data (2)")).unwrap();
+    std::fs::write(t.path().join("data (2)/raced.txt"), b"raced").unwrap();
+    let (e, _) = extract_execute(&LocalFs, plan, None, &c, CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::read(t.path().join("data (3)/zip.txt")).unwrap(),
+        b"zip payload"
+    );
+    assert_eq!(
+        std::fs::read(t.path().join("data (2)/raced.txt")).unwrap(),
+        b"raced"
+    );
+    assert_eq!(
+        std::fs::read(t.path().join("data/original.txt")).unwrap(),
+        b"original"
+    );
+    let UndoAction::UndoCopy {
+        backups_to_restore, ..
+    } = &e.undo
+    else {
+        panic!("UndoCopy")
+    };
+    assert!(backups_to_restore.is_empty());
+    assert_eq!(undo_fixture::undo_tmp(&e).await.kind, UndoKind::Ok);
+    assert!(t.path().join("data (2)/raced.txt").exists());
 }
 
 #[tokio::test]
@@ -204,4 +249,46 @@ async fn non_archive_and_remote_unsupported_are_rejected_before_io() {
             Err(DuetError::NotSupported(_))
         ));
     }
+}
+
+struct TempRollback(undo_fixture::TrashDirFs);
+#[async_trait::async_trait]
+impl duet_lib::core::undo::FsResolver for TempRollback {
+    async fn fs(&self, source: &SourceId) -> Result<Box<dyn duet_lib::fs::FileSystem>, DuetError> {
+        assert!(matches!(source, SourceId::Local));
+        Ok(Box::new(self.0.clone()))
+    }
+}
+
+#[tokio::test]
+async fn true_extract_here_places_next_to_source_and_undo_preserves_source() {
+    use duet_lib::core::archive_here::{extract_here_execute, ExtractConflict, HereRequest};
+    let t = tempfile::tempdir().unwrap();
+    let c = ctx(t.path()).await;
+    zip(t.path(), "data.zip");
+    let original = std::fs::read(t.path().join("data.zip")).unwrap();
+    let resolver = TempRollback(undo_fixture::TrashDirFs::new(&t.path().join("trash")));
+    let out = extract_here_execute(
+        &LocalFs,
+        HereRequest {
+            archive: entry(t.path(), "data.zip"),
+            policy: ExtractConflict::KeepBoth,
+            password: None,
+            protect: &[],
+        },
+        &c,
+        &resolver,
+        CancellationToken::new(),
+    )
+    .await;
+    let (e, _) = out.result.unwrap();
+    assert_eq!(
+        std::fs::read(t.path().join("zip.txt")).unwrap(),
+        b"zip payload"
+    );
+    assert!(!t.path().join("data").exists());
+    assert_eq!(std::fs::read(t.path().join("data.zip")).unwrap(), original);
+    assert_eq!(undo_fixture::undo_tmp(&e).await.kind, UndoKind::Ok);
+    assert!(!t.path().join("zip.txt").exists());
+    assert_eq!(std::fs::read(t.path().join("data.zip")).unwrap(), original);
 }
