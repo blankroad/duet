@@ -123,15 +123,19 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
 
   setReconnecting: (alias, on) =>
     set((s) => {
-      if (on === alias in s.reconnecting) return s;
-      const next = { ...s.reconnecting };
-      if (on) next[alias] = true;
-      else delete next[alias];
-      return { reconnecting: next };
+      if (on === isReconnecting(s.reconnecting, alias)) return s;
+      // `next[alias] = true` 는 alias 가 `__proto__` 면 프로토타입 setter 로 사라진다 —
+      // fromEntries 는 항상 자기 속성으로 만든다.
+      const keys = Object.keys(s.reconnecting).filter((k) => k !== alias);
+      if (on) keys.push(alias);
+      return {
+        reconnecting: Object.fromEntries(keys.map((k) => [k, true as const])),
+      };
     }),
 
   stateByAlias: () => {
-    const out: Record<string, ConnectionState> = {};
+    // 프로토타입 없는 객체 — `constructor`·`toString` 같은 alias 가 상속 속성과 섞이지 않게.
+    const out: Record<string, ConnectionState> = Object.create(null);
     for (const conn of Object.values(get().active)) {
       const prev = out[conn.alias];
       if (!prev || statePriority(conn.state) > statePriority(prev)) {
@@ -151,6 +155,18 @@ export const useConnections = create<ConnectionsState>((set, get) => ({
     return found;
   },
 }));
+
+/**
+ * alias 의 수동 재연결이 진행 중인가. `in` 은 상속 속성도 보므로 `constructor`·
+ * `toString`·`__proto__` 같은 (유효한) ssh alias 가 늘 "재연결 중"으로 보여 배너에서
+ * 재연결 버튼이 사라졌다(remote-NEW-3) — 자기 속성만 본다.
+ */
+export function isReconnecting(
+  reconnecting: Record<string, true>,
+  alias: string,
+): boolean {
+  return Object.hasOwn(reconnecting, alias);
+}
 
 /**
  * 이 alias 의 살아있는 연결을 모두 끊는다 — 사이드바/팔레트의 "연결 끊기".

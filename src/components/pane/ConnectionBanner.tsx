@@ -6,7 +6,7 @@ import {
   isRestoredRemote,
   type PaneId,
 } from "@/stores/panes";
-import { useConnections } from "@/stores/connections";
+import { useConnections, isReconnecting } from "@/stores/connections";
 import { commands } from "@/types/bindings";
 import { aliasFromConnectionId } from "@/lib/hostAlias";
 import { useHostLabel } from "@/lib/hostLabel";
@@ -60,7 +60,7 @@ export function ConnectionBanner({
   const conn = useConnections((s) => (connId ? s.active[connId] : undefined));
   const alias = conn?.alias ?? (connId ? aliasFromConnectionId(connId) : null);
   const reconnecting = useConnections((s) =>
-    alias ? alias in s.reconnecting : false,
+    alias ? isReconnecting(s.reconnecting, alias) : false,
   );
   // 표시는 탭·소스 칩과 같은 라벨(별명 → alias → user@ip), 재연결 대상은 raw alias.
   const label = useHostLabel(source);

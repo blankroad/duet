@@ -16,8 +16,8 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-it.fails.each(["constructor", "toString", "__proto__"])(
-  "remote-NEW-3 repro: disconnected %s alias must offer Reconnect",
+it.each(["constructor", "toString", "__proto__"])(
+  "remote-NEW-3: disconnected %s alias must offer Reconnect",
   (alias) => {
     usePanes.getState().setEntries(
       "left",

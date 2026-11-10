@@ -24,7 +24,7 @@ export function resolveHostLabel(
   const id = source.connection_id;
   const alias =
     aliasOf(id) ?? (id.includes(":") ? aliasFromConnectionId(id) : undefined);
-  const nick = alias ? nicks[alias] : undefined;
+  const nick = alias ? ownNick(nicks, alias) : undefined;
   return nick ?? alias ?? `${source.user}@${source.host_ip}`;
 }
 
@@ -95,5 +95,13 @@ export function useSourceStatus(source: SourceId): SourceStatus {
 
 /** alias 문자열의 표시명 — 별명 있으면 별명, 없으면 alias 그대로(Recent/Sidebar 용). */
 export function aliasLabel(alias: string, nicks: NickMap): string {
-  return nicks[alias] ?? alias;
+  return ownNick(nicks, alias) ?? alias;
+}
+
+/**
+ * 별명 조회 — 자기 속성만. `nicks[alias]` 는 alias 가 `constructor`·`__proto__` 면
+ * 상속 속성(함수·객체)을 돌려줘 라벨 자리에 객체가 렌더됐다(remote-NEW-3).
+ */
+function ownNick(nicks: NickMap, alias: string): string | undefined {
+  return Object.hasOwn(nicks, alias) ? nicks[alias] : undefined;
 }

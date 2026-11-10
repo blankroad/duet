@@ -133,7 +133,7 @@ import { bootstrapHostGroups } from "@/stores/sidebarGroups";
 import { bootstrapHostNicknames } from "@/stores/hostNicknames";
 import { bootstrapTags } from "@/stores/tags";
 import { useDynamicCommands } from "@/lib/dynamicCommands";
-import { useConnections } from "@/stores/connections";
+import { useConnections, isReconnecting } from "@/stores/connections";
 import { useTauri } from "@/hooks/useTauri";
 import { useKeyboardNav } from "@/hooks/useKeyboardNav";
 import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
@@ -1639,7 +1639,7 @@ function App() {
     (host: SavedHost) => {
       // 이 저장 호스트의 연결 alias 가 배너 재연결 중이면 대화상자를 또 띄우지 않는다.
       const connAlias = `${host.user}@${host.host}:${host.port}`;
-      if (connAlias in useConnections.getState().reconnecting) {
+      if (isReconnecting(useConnections.getState().reconnecting, connAlias)) {
         showToast(i18n.t("toast.reconnectInProgress", { alias: host.alias }));
         return;
       }
@@ -1705,7 +1705,7 @@ function App() {
         });
         return;
       }
-      if (hostAlias in useConnections.getState().reconnecting) {
+      if (isReconnecting(useConnections.getState().reconnecting, hostAlias)) {
         // 배너 재연결이 진행 중 — 대화상자를 하나 더 띄우면 세션이 둘 생긴다.
         showToast(i18n.t("toast.reconnectInProgress", { alias: hostAlias }));
         return;
@@ -1745,7 +1745,7 @@ function App() {
         })();
         return;
       }
-      if (alias in useConnections.getState().reconnecting) {
+      if (isReconnecting(useConnections.getState().reconnecting, alias)) {
         showToast(i18n.t("toast.reconnectInProgress", { alias }));
         return;
       }
@@ -1778,7 +1778,7 @@ function App() {
           : [target];
         const conns = useConnections.getState();
         const existing = candidates.find(
-          (a) => conns.liveByAlias(a) || a in conns.reconnecting,
+          (a) => conns.liveByAlias(a) || isReconnecting(conns.reconnecting, a),
         );
         if (existing) {
           onHostActivate(existing);
@@ -1982,7 +1982,7 @@ function App() {
         return;
       }
       const conns = useConnections.getState();
-      if (alias in conns.reconnecting) return;
+      if (isReconnecting(conns.reconnecting, alias)) return;
       const tab = activeTab(usePanes.getState(), paneId);
       // 이 요청만의 목표 — 공유 ref 에 두지 않고 직접 넘긴다(동시 재연결 격리).
       const nav: ConnectNav = {
