@@ -43,30 +43,27 @@ describe("archive-opus: archive context in panes store", () => {
     expect(ctx()).toBeUndefined();
   });
 
-  it(
-    "archive-15: 아카이브 안의 아카이브: 안쪽에서 '위로' 로 나오면 바깥 아카이브 문맥이 돌아와야 한다",
-    () => {
-      // 바깥 아카이브 열기.
-      open(`${T}/A/content`);
-      usePanes.getState().setArchiveContext("left", {
-        label: "outer.zip",
-        root: `${T}/A/content`,
-        exitTo: loc("/home/u/Downloads"),
-      });
-      open(`${T}/A/content/sub`);
-      // 안쪽 아카이브 더블클릭 → 새 임시 폴더로 이동 + 문맥 교체 (exitTo = 바깥 임시 폴더).
-      open(`${T}/B/content`);
-      usePanes.getState().setArchiveContext("left", {
-        label: "inner.zip",
-        root: `${T}/B/content`,
-        exitTo: loc(`${T}/A/content/sub`),
-      });
-      expect(ctx()?.label).toBe("inner.zip");
-      // 안쪽 루트에서 "위로" → exitTo 로 이동.
-      open(`${T}/A/content/sub`);
-      // 기대: outer.zip 문맥 복귀 (breadcrumb·"아카이브 업데이트"·"위로=원래 폴더").
-      // 현재: 문맥이 사라져 임시 경로가 그대로 보이고 "위로" 가 시스템 temp 로 올라간다.
-      expect(ctx()?.label).toBe("outer.zip");
-    },
-  );
+  it("archive-15: 아카이브 안의 아카이브: 안쪽에서 '위로' 로 나오면 바깥 아카이브 문맥이 돌아와야 한다", () => {
+    // 바깥 아카이브 열기.
+    open(`${T}/A/content`);
+    usePanes.getState().setArchiveContext("left", {
+      label: "outer.zip",
+      root: `${T}/A/content`,
+      exitTo: loc("/home/u/Downloads"),
+    });
+    open(`${T}/A/content/sub`);
+    // 안쪽 아카이브 더블클릭 → 새 임시 폴더로 이동 + 문맥 교체 (exitTo = 바깥 임시 폴더).
+    open(`${T}/B/content`);
+    usePanes.getState().setArchiveContext("left", {
+      label: "inner.zip",
+      root: `${T}/B/content`,
+      exitTo: loc(`${T}/A/content/sub`),
+    });
+    expect(ctx()?.label).toBe("inner.zip");
+    // 안쪽 루트에서 "위로" → exitTo 로 이동.
+    open(`${T}/A/content/sub`);
+    // 기대: outer.zip 문맥 복귀 (breadcrumb·"아카이브 업데이트"·"위로=원래 폴더").
+    // 현재: 문맥이 사라져 임시 경로가 그대로 보이고 "위로" 가 시스템 temp 로 올라간다.
+    expect(ctx()?.label).toBe("outer.zip");
+  });
 });

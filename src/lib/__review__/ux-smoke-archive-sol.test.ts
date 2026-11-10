@@ -38,20 +38,40 @@ describe("archive regression (mocked FE, not live)", () => {
         onActivate: vi.fn(),
         onOpenInOtherPane: vi.fn(),
       }).filter((e): e is MenuItem => !isSeparator(e));
-    expect(menu(1).find((e) => e.id === "extract-here")?.label).toBe("Extract here");
-    expect(menu(1).find((e) => e.id === "extract")?.label).toBe(i18n.t("menu.extractToFolder"));
-    expect(menu(2).map((e) => e.id)).toEqual(expect.arrayContaining(["extract", "extract-here"]));
-    expect(menu(2).find((e) => e.id === "extract")?.label).toBe(i18n.t("menu.extractEach", {count: 2}));
+    expect(menu(1).find((e) => e.id === "extract-here")?.label).toBe(
+      "Extract here",
+    );
+    expect(menu(1).find((e) => e.id === "extract")?.label).toBe(
+      i18n.t("menu.extractToFolder"),
+    );
+    expect(menu(2).map((e) => e.id)).toEqual(
+      expect.arrayContaining(["extract", "extract-here"]),
+    );
+    expect(menu(2).find((e) => e.id === "extract")?.label).toBe(
+      i18n.t("menu.extractEach", { count: 2 }),
+    );
   });
   it("two selected archives are planned and dispatched instead of extractSelectOne", async () => {
-    const plan = (name: string) => ({ source: location.source, archive_dir: location,
-      archive_name: name, format: name.endsWith("zip") ? "zip" : "tar_gz",
-      dest_dir: name, conflict: false, keep_both: true });
-    ipc.plan.mockResolvedValue({status: "ok", data: entries.map((e) => ({
-      archive: {location, name: e.name}, plan: plan(e.name), error: null,
-    }))});
-    ipc.execute.mockResolvedValueOnce({status: "ok", data: "one"})
-      .mockResolvedValueOnce({status: "ok", data: "two"});
+    const plan = (name: string) => ({
+      source: location.source,
+      archive_dir: location,
+      archive_name: name,
+      format: name.endsWith("zip") ? "zip" : "tar_gz",
+      dest_dir: name,
+      conflict: false,
+      keep_both: true,
+    });
+    ipc.plan.mockResolvedValue({
+      status: "ok",
+      data: entries.map((e) => ({
+        archive: { location, name: e.name },
+        plan: plan(e.name),
+        error: null,
+      })),
+    });
+    ipc.execute
+      .mockResolvedValueOnce({ status: "ok", data: "one" })
+      .mockResolvedValueOnce({ status: "ok", data: "two" });
     const toast = vi.fn();
     await triggerExtractToFolders(vi.fn(), toast);
     expect(ipc.plan).toHaveBeenCalledTimes(1);

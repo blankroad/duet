@@ -22,37 +22,34 @@ const dir = (name: string) => ({
   hidden: false,
 });
 
-it(
-  "browse-32 (F-opus-201): returning to extracted content restores repack controls and session destination",
-  async () => {
-    await boot();
-    cursorTo("x.zip");
-    key({ key: "Enter", code: "Enter" });
-    await waitFor(() => expect(tabL().archive?.label).toBe("x.zip"));
-    expect(archiveRequests[0]).toEqual({
-      location: { source: { kind: "local" }, path: "/home" },
-      name: "x.zip",
-    });
-    expect(
-      screen.getAllByRole("button", { name: "Update archive" }),
-    ).toHaveLength(1);
-    key({ key: "Backspace", code: "Backspace" });
-    await waitFor(() => expect(tabL().location.path).toBe("/home"));
-    back();
-    await waitFor(() =>
-      expect(tabL().location.path).toBe("/tmp/duet-archive/r3-token/content"),
-    );
-    const observed = {
-      archive: tabL().archive ?? null,
-      sessionPath: snapshot().panes.left.tabs[0]?.path,
-      updateButtons: screen.queryAllByRole("button", { name: "Update archive" })
-        .length,
-    };
-    console.info("browse-sol3-archive-context", JSON.stringify(observed));
-    expect(observed.sessionPath).toBe("/home");
-    expect(observed.updateButtons).toBe(1);
-  },
-);
+it("browse-32 (F-opus-201): returning to extracted content restores repack controls and session destination", async () => {
+  await boot();
+  cursorTo("x.zip");
+  key({ key: "Enter", code: "Enter" });
+  await waitFor(() => expect(tabL().archive?.label).toBe("x.zip"));
+  expect(archiveRequests[0]).toEqual({
+    location: { source: { kind: "local" }, path: "/home" },
+    name: "x.zip",
+  });
+  expect(
+    screen.getAllByRole("button", { name: "Update archive" }),
+  ).toHaveLength(1);
+  key({ key: "Backspace", code: "Backspace" });
+  await waitFor(() => expect(tabL().location.path).toBe("/home"));
+  back();
+  await waitFor(() =>
+    expect(tabL().location.path).toBe("/tmp/duet-archive/r3-token/content"),
+  );
+  const observed = {
+    archive: tabL().archive ?? null,
+    sessionPath: snapshot().panes.left.tabs[0]?.path,
+    updateButtons: screen.queryAllByRole("button", { name: "Update archive" })
+      .length,
+  };
+  console.info("browse-sol3-archive-context", JSON.stringify(observed));
+  expect(observed.sessionPath).toBe("/home");
+  expect(observed.updateButtons).toBe(1);
+});
 
 function setStartupSession(host?: string) {
   localStorage.setItem(
@@ -454,32 +451,26 @@ describe("C-21 압축 내부 보기 문맥", () => {
     expect(tabL().archive).toBeUndefined();
   });
 
-  it(
-    "browse-32 (F-opus-201): 아카이브에서 나온 뒤 '뒤로' 가면 문맥 없이 임시 추출 폴더로 들어간다",
-    async () => {
-      await openZip();
-      key({ key: "Backspace", code: "Backspace" }); // 나가기 → /home
-      await wait(80);
-      expect(String(tabL().location.path)).toBe("/home");
-      back();
-      await wait(80);
-      // 뒤로 = 임시 폴더 /tmp/duet-archive/r3-token/content 로 돌아왔는데 아카이브 문맥이 없다:
-      // 브레드크럼에 임시 경로, 위로 = /tmp, "아카이브 갱신" 없음, 탭 제목 = "ex"
-      expect(String(tabL().location.path)).toBe(
-        "/tmp/duet-archive/r3-token/content",
-      );
-      expect(tabL().archive?.label).toBe("x.zip");
-    },
-  );
+  it("browse-32 (F-opus-201): 아카이브에서 나온 뒤 '뒤로' 가면 문맥 없이 임시 추출 폴더로 들어간다", async () => {
+    await openZip();
+    key({ key: "Backspace", code: "Backspace" }); // 나가기 → /home
+    await wait(80);
+    expect(String(tabL().location.path)).toBe("/home");
+    back();
+    await wait(80);
+    // 뒤로 = 임시 폴더 /tmp/duet-archive/r3-token/content 로 돌아왔는데 아카이브 문맥이 없다:
+    // 브레드크럼에 임시 경로, 위로 = /tmp, "아카이브 갱신" 없음, 탭 제목 = "ex"
+    expect(String(tabL().location.path)).toBe(
+      "/tmp/duet-archive/r3-token/content",
+    );
+    expect(tabL().archive?.label).toBe("x.zip");
+  });
 
-  it(
-    "browse-34 (F-opus-202): 아카이브 루트에서 위로 나가면 커서가 아카이브 파일이 아니라 맨 위에 놓인다",
-    async () => {
-      await openZip();
-      key({ key: "Backspace", code: "Backspace" });
-      await wait(80);
-      const t = tabL();
-      expect(computeDisplayed(t)[t.cursorIndex]?.name).toBe("x.zip");
-    },
-  );
+  it("browse-34 (F-opus-202): 아카이브 루트에서 위로 나가면 커서가 아카이브 파일이 아니라 맨 위에 놓인다", async () => {
+    await openZip();
+    key({ key: "Backspace", code: "Backspace" });
+    await wait(80);
+    const t = tabL();
+    expect(computeDisplayed(t)[t.cursorIndex]?.name).toBe("x.zip");
+  });
 });
