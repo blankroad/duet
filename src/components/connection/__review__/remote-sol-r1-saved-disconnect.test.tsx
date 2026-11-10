@@ -86,8 +86,8 @@ it.fails(
     fireEvent.contextMenu(row!);
     const ids = useContextMenu
       .getState()
-      .items.filter((e) => !isSeparator(e))
-      .map((e) => e.id);
+      .items.map((e) => (isSeparator(e) ? null : e.id))
+      .filter((id) => id !== null);
     expect(ids).toContain("connect");
     expect(ids).toContain("disconnect");
   },
