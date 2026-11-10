@@ -458,3 +458,79 @@ async fn remote_unsupported_formats_fail_per_item() {
     assert!(items[4].plan.is_some());
     assert!(matches!(items[5].error, Some(DuetError::Io(_))));
 }
+
+/// 결과 이름이 함께 선택한 원본과 같으면(`a.zip.gz` → `a.zip`) 교체를 골라도 원본을
+/// 백업하지 않는다 — 두 원본은 제자리에 그대로, 결과는 서로 다른 이름, `.bak` 없음.
+#[tokio::test]
+async fn output_named_like_a_selected_source_never_replaces_it() {
+    let root = tempfile::tempdir().unwrap();
+    let work = work_dir(root.path());
+    write_zip(&work.join("a.zip"), "inner.txt", b"zip");
+    let zip_bytes = std::fs::read(work.join("a.zip")).unwrap();
+    {
+        // 다른 내용의 zip 을 gzip — 풀린 결과가 원본 a.zip 과 달라야 덮였는지 알 수 있다.
+        let other = root.path().join("other.zip");
+        write_zip(&other, "gz-inner.txt", b"from gz");
+        let f = std::fs::File::create(work.join("a.zip.gz")).unwrap();
+        let mut gz = flate2::write::GzEncoder::new(f, flate2::Compression::default());
+        gz.write_all(&std::fs::read(&other).unwrap()).unwrap();
+        gz.finish().unwrap();
+    }
+    let gz_bytes = std::fs::read(work.join("a.zip.gz")).unwrap();
+    let ctx = mk_ctx(root.path()).await;
+    let local = LocalFs::new();
+    for order in [["a.zip.gz", "a.zip"], ["a.zip", "a.zip.gz"]] {
+        let items = extract_plan_batch(
+            &local,
+            order.iter().map(|n| eref(&work, n)).collect(),
+            // 교체 선택 — 그래도 원본은 백업 대상이 아니다.
+            false,
+        )
+        .await;
+        let gz = items
+            .iter()
+            .find(|i| i.archive.name == "a.zip.gz")
+            .and_then(|i| i.plan.clone())
+            .unwrap();
+        assert!(!gz.conflict && gz.keep_both, "{gz:?}");
+        assert_ne!(gz.dest_dir, work.join("a.zip"));
+    }
+    // 실행 (교체를 고른 경우와 같은 경로: 받은 계획 그대로).
+    let items = extract_plan_batch(
+        &local,
+        vec![eref(&work, "a.zip.gz"), eref(&work, "a.zip")],
+        false,
+    )
+    .await;
+    for it in &items {
+        extract_execute(
+            &local,
+            it.plan.clone().unwrap(),
+            None,
+            &ctx,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    }
+    assert_eq!(std::fs::read(work.join("a.zip")).unwrap(), zip_bytes);
+    assert_eq!(std::fs::read(work.join("a.zip.gz")).unwrap(), gz_bytes);
+    let unpacked = std::fs::read(work.join("a (2).zip")).unwrap();
+    assert_ne!(unpacked, zip_bytes, "gz output is its own file");
+    assert_eq!(
+        std::fs::read(work.join("a").join("inner.txt")).unwrap(),
+        b"zip"
+    );
+    let names: Vec<String> = std::fs::read_dir(&work)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(!names.iter().any(|n| n.contains(".bak")), "{names:?}");
+    // 같은 계획으로 다시 실행(암호 재실행과 같은 경로)해도 원본을 건드리지 않는다.
+    let gz_plan = items[0].plan.clone().unwrap();
+    extract_execute(&local, gz_plan, None, &ctx, CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(std::fs::read(work.join("a.zip")).unwrap(), zip_bytes);
+    assert!(work.join("a (3).zip").is_file());
+}

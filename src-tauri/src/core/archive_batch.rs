@@ -14,6 +14,9 @@
 //! 충돌로 표시되지 않은 항목은 모두 `ExtractPlan::keep_both = true` — 실행이 이름을
 //! 원자적으로 예약하므로 계획 뒤에 생긴 항목(TOCTOU)도 백업하거나 덮지 않는다.
 //!
+//! 선택한 원본 아카이브는 받는 이름 후보에서 빠진다 — 결과 이름이 원본과 같으면
+//! (`a.zip.gz` → `a.zip`, 함께 선택한 `a.zip`) 교체가 아니라 번호 붙은 이름으로 간다.
+//!
 //! 이름 비교는 대소문자를 무시한다 — 대소문자 구분 없는 볼륨(macOS·Windows 기본)에서
 //! `A.zip` 과 `a.tar.gz` 의 결과가 같은 폴더가 되는 것을 막는다. 구분하는 볼륨에선
 //! 쓸데없이 `(2)` 가 붙을 뿐 아무것도 잃지 않는다.
@@ -45,8 +48,15 @@ pub async fn extract_plan_batch(
     keep_both: bool,
 ) -> Vec<ExtractPlanItem> {
     let source = fs.source_id();
-    // (폴더, 소문자 이름) — 이 일괄에서 이미 배정한 받는 이름.
-    let mut claimed: HashSet<(PathBuf, String)> = HashSet::new();
+    // (폴더, 소문자 이름) — 이 일괄에서 받는 이름으로 쓸 수 없는 것. 선택한 원본 아카이브
+    // 자체도 미리 넣는다: `a.zip.gz` 의 결과 이름 `a.zip` 이 함께 선택한 원본 `a.zip` 과
+    // 같으면 그 자리를 교체(백업)하지 않고 번호 붙은 새 이름(`a (2).zip`)으로 간다 —
+    // 원본은 옮기거나 이름을 바꾸지 않는다. 그런 항목은 충돌이 아니라 keep_both 라 실행·
+    // 암호 재실행 때도 이름을 새로 예약할 뿐 무엇도 백업하지 않는다.
+    let mut claimed: HashSet<(PathBuf, String)> = archives
+        .iter()
+        .map(|a| claim_key(&a.location.path, &a.name))
+        .collect();
     let mut out = Vec::with_capacity(archives.len());
     for archive in archives {
         let result = if archive.location.source != source {
