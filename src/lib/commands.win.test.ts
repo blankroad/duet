@@ -39,7 +39,7 @@ describe("commands — F4 편집 (UX-SHL-07)", () => {
           get: (t, k) =>
             k in t ? (t as Record<string, unknown>)[k as string] : () => {},
         },
-      ) as Parameters<typeof buildBuiltins>[0],
+      ) as unknown as Parameters<typeof buildBuiltins>[0],
     );
     const edit = cmds.find((c) => c.id === "file.edit");
     expect(edit?.defaultKey).toBe("F4");
