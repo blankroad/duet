@@ -30,7 +30,8 @@ pub fn set_file_clipboard(paths: &[std::path::PathBuf]) -> Result<(), DuetError>
 }
 
 /// OS 클립보드가 아직 duet 이 마지막으로 올린 파일 목록이면 비운다(비웠으면 true).
-/// 그사이 다른 앱에서 복사한 내용은 건드리지 않는다. Linux 는 판정 수단이 없어 항상 false.
+/// 그사이 다른 앱에서 복사한 내용은 건드리지 않는다 — Windows 는 확정, macOS 는 최선 노력(확인과
+/// 비우기 사이 작은 틈, `file_clipboard::clear_if_owned` 참고). Linux 는 판정 수단이 없어 항상 false.
 pub fn clear_file_clipboard_if_owned() -> Result<bool, DuetError> {
     file_clipboard::clear_if_owned()
 }

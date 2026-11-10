@@ -41,7 +41,7 @@ function run(argv) {
 ///
 /// `argv = [pasteboard 이름, 기대 표식]`. 그사이 다른 앱이 무언가를 복사했다면 표식이 사라져
 /// 건드리지 않는다. stdout: `cleared` | `kept`. (macOS 는 pasteboard 잠금이 없어 확인과
-/// 비우기 사이 수 ms 미만의 틈은 남는다 — `file_clipboard::clear_if_owned` 참고.)
+/// 비우기는 별개 호출 — 작지만 상한 없는 틈이 남는다. `file_clipboard::clear_if_owned` 참고.)
 const CLEAR_IF_OWNED_JXA: &str = r#"ObjC.import("AppKit");
 const OWNER = "com.duet.clipboard-owner";
 function board(name) {

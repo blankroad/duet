@@ -105,7 +105,8 @@ pub fn set(paths: &[PathBuf]) -> Result<(), DuetError> {
 /// 판정은 파일 목록과 같이 실은 소유 표식으로 한다 — 그사이 다른 앱이 무언가를 복사했다면 표식이
 /// 없어지므로 건드리지 않는다. Windows 는 클립보드를 연(다른 앱이 못 쓰는) 상태에서 표식 확인과
 /// 비우기를 하므로 끼어들 틈이 없다. macOS 는 pasteboard 잠금 API 가 없어, 한 osascript 안의
-/// 확인과 비우기 사이(수 ms 미만)에 다른 앱이 쓰면 그 내용이 지워질 수 있다 — 최선 노력.
+/// 확인과 비우기는 별개 호출이다 — 그 사이(작지만 상한 없는 틈)에 다른 앱이 쓰면 그 내용이
+/// 지워질 수 있다. 최선 노력이며 원자적이지 않다.
 pub fn clear_if_owned() -> Result<bool, DuetError> {
     clear_with(&OWNED, clear_os_if)
 }
@@ -201,35 +202,67 @@ fn owner_format() -> u32 {
     }
 }
 
+/// 클립보드에서 duet 표식을 읽은 결과 — 판정(`marker_verdict`)과 OS 읽기를 나눠 테스트한다.
+#[cfg_attr(not(windows), allow(dead_code))]
+enum MarkerRead {
+    /// 표식 형식이 클립보드에 없다 — 다른 앱이 덮었거나 이미 비워졌다.
+    Absent,
+    /// 표식이 있을 수 있는데 읽지 못했다(형식 등록·데이터 조회·잠금 실패) — 판정 불가.
+    Unreadable(String),
+    /// 표식 바이트.
+    Bytes(Vec<u8>),
+}
+
+/// 표식 판정 — `Ok(true)` = 우리 것(비워도 됨), `Ok(false)` = 확실히 우리 것이 아님,
+/// `Err` = 판정 불가(호출자가 소유 표식을 남겨 다음에 다시 시도).
+#[cfg_attr(not(windows), allow(dead_code))]
+fn marker_verdict(read: MarkerRead, nonce: u64) -> Result<bool, DuetError> {
+    match read {
+        MarkerRead::Absent => Ok(false),
+        MarkerRead::Unreadable(why) => Err(DuetError::Io(format!("clipboard owner mark: {why}"))),
+        MarkerRead::Bytes(b) => Ok(b.len() >= 8 && b[..8] == nonce.to_le_bytes()),
+    }
+}
+
 /// Windows: 클립보드를 **연 채로** duet 표식이 `nonce` 인지 확인하고, 맞으면 비운다.
 /// 열려 있는 동안 다른 앱은 쓸 수 없어 확인과 비우기 사이에 끼어들 수 없다.
+/// 표식을 읽지 못하면(등록·조회·잠금 실패) "우리 것 아님" 이 아니라 오류 — 소유 표식이 남아 재시도된다.
 #[cfg(windows)]
 fn clear_windows_if(nonce: u64) -> Result<bool, DuetError> {
     use windows::Win32::Foundation::HGLOBAL;
-    use windows::Win32::System::DataExchange::{EmptyClipboard, GetClipboardData, OpenClipboard};
+    use windows::Win32::System::DataExchange::{
+        EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
+    };
     use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
 
     let fmt = owner_format();
-    if fmt == 0 {
-        return Ok(false);
-    }
     // SAFETY(§8): Open 성공 뒤에만 가드 생성(Close 보장). GetClipboardData 핸들은 시스템 소유라
-    // 해제하지 않고 Lock/Unlock 만 하며, GlobalSize 로 확인한 크기 안에서만 8바이트를 읽는다.
+    // 해제하지 않고 Lock/Unlock 만 하며, GlobalSize 로 확인한 크기만큼만 복사한다.
     unsafe {
         OpenClipboard(None).map_err(|e| DuetError::Io(format!("OpenClipboard: {e}")))?;
         let _guard = ClipboardGuard;
-        let Ok(h) = GetClipboardData(fmt) else {
-            return Ok(false); // 표식 없음 — 다른 앱 내용이거나 이미 비워짐.
+        let read = if fmt == 0 {
+            MarkerRead::Unreadable("RegisterClipboardFormatW failed".into())
+        } else if IsClipboardFormatAvailable(fmt).is_err() {
+            MarkerRead::Absent
+        } else {
+            match GetClipboardData(fmt) {
+                Err(e) => MarkerRead::Unreadable(format!("GetClipboardData: {e}")),
+                Ok(h) => {
+                    let hmem = HGLOBAL(h.0);
+                    let p = GlobalLock(hmem) as *const u8;
+                    if p.is_null() {
+                        MarkerRead::Unreadable("GlobalLock returned null".into())
+                    } else {
+                        let n = GlobalSize(hmem).min(8);
+                        let bytes = std::slice::from_raw_parts(p, n).to_vec();
+                        let _ = GlobalUnlock(hmem);
+                        MarkerRead::Bytes(bytes)
+                    }
+                }
+            }
         };
-        let hmem = HGLOBAL(h.0);
-        let p = GlobalLock(hmem) as *const u8;
-        if p.is_null() {
-            return Ok(false);
-        }
-        let ours = GlobalSize(hmem) >= 8
-            && std::ptr::read_unaligned(p as *const [u8; 8]) == nonce.to_le_bytes();
-        let _ = GlobalUnlock(hmem);
-        if !ours {
+        if !marker_verdict(read, nonce)? {
             return Ok(false);
         }
         EmptyClipboard().map_err(|e| DuetError::Io(format!("EmptyClipboard: {e}")))?;
@@ -244,7 +277,7 @@ fn clear_windows_if(nonce: u64) -> Result<bool, DuetError> {
 /// 반환: 표식까지 실었으면 true(파일만 올라갔으면 false — 그땐 나중에 비우지 않는다).
 #[cfg(windows)]
 fn set_windows(paths: &[PathBuf], nonce: u64) -> Result<bool, DuetError> {
-    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::Foundation::{GlobalFree, HANDLE};
     use windows::Win32::System::DataExchange::{EmptyClipboard, OpenClipboard, SetClipboardData};
     use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
     use windows::Win32::System::Ole::CF_HDROP;
@@ -301,11 +334,16 @@ fn set_windows(paths: &[PathBuf], nonce: u64) -> Result<bool, DuetError> {
         };
         let mp = GlobalLock(mark) as *mut u8;
         if mp.is_null() {
+            let _ = GlobalFree(mark); // 시스템에 넘기지 못한 메모리는 우리가 해제.
             return Ok(false);
         }
         std::ptr::copy_nonoverlapping(nonce.to_le_bytes().as_ptr(), mp, 8);
         let _ = GlobalUnlock(mark);
-        Ok(SetClipboardData(fmt, HANDLE(mark.0)).is_ok())
+        if SetClipboardData(fmt, HANDLE(mark.0)).is_err() {
+            let _ = GlobalFree(mark);
+            return Ok(false);
+        }
+        Ok(true)
     }
 }
 
@@ -446,6 +484,25 @@ mod tests {
             "다음 원격 복사 때 다시 시도"
         );
         assert!(clear_with(&owned, |_| Ok(true)).unwrap());
+    }
+
+    #[test]
+    fn marker_verdict_separates_absent_unreadable_and_bytes() {
+        // 표식이 없으면 확실히 우리 것이 아님 → 비우지 않고 표식은 버린다.
+        assert!(!marker_verdict(MarkerRead::Absent, 42).unwrap());
+        // 읽지 못하면 판정 불가 → 오류(clear_with 가 표식을 남겨 재시도).
+        assert!(marker_verdict(MarkerRead::Unreadable("lock".into()), 42).is_err());
+        let owned = Mutex::new(Some(42));
+        assert!(clear_with(&owned, |n| marker_verdict(
+            MarkerRead::Unreadable("x".into()),
+            n
+        ))
+        .is_err());
+        assert_eq!(*owned.lock().unwrap(), Some(42));
+        // 바이트: 우리 표식이면 true, 다르거나 짧으면 false.
+        assert!(marker_verdict(MarkerRead::Bytes(42u64.to_le_bytes().to_vec()), 42).unwrap());
+        assert!(!marker_verdict(MarkerRead::Bytes(7u64.to_le_bytes().to_vec()), 42).unwrap());
+        assert!(!marker_verdict(MarkerRead::Bytes(vec![42, 0, 0]), 42).unwrap());
     }
 
     #[test]
