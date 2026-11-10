@@ -87,7 +87,24 @@ export function SearchPanel({
   // 요청 경합 가드 — 매 검색마다 증가. 응답 도착 시 최신 seq 아니면 버림
   // (느린 첫-빌드 응답이 더 새 쿼리 결과를 덮어쓰는 버그 방지).
   const seqRef = useRef(0);
+  // 진행 중인 내용(grep) 검색의 seq — 닫을 때 백엔드 작업을 취소하려고 기억한다.
+  const contentSeqRef = useRef<number | null>(null);
   const [indexing, setIndexing] = useState(false);
+
+  // 내용 검색 도중 닫으면(버튼·Esc·단축키 모두) 백엔드 grep 도 멈춘다 — 화면만
+  // 비우면 원격 grep 이 끝날 때까지 계속 돈다. 검색어 변경은 새 검색이 토큰을
+  // 갈아 끼우므로 여기서 취소하지 않는다.
+  useEffect(() => {
+    if (isOpen || contentSeqRef.current === null) return;
+    contentSeqRef.current = null;
+    void commands.searchCancel();
+  }, [isOpen]);
+  useEffect(
+    () => () => {
+      if (contentSeqRef.current !== null) void commands.searchCancel();
+    },
+    [],
+  );
 
   useEffect(() => {
     if (isOpen) inputRef.current?.focus();
@@ -136,9 +153,11 @@ export function SearchPanel({
     const timer = setTimeout(() => {
       void (async () => {
         // 파일명 = 인덱스(즉시·오프라인), 내용 = grep/rg(원격 연결 필요).
+        if (content) contentSeqRef.current = seq;
         const r = content
           ? await commands.searchGlobal(root, trimmed, opts)
           : await commands.indexSearch(root, trimmed, opts);
+        if (contentSeqRef.current === seq) contentSeqRef.current = null;
         // 더 새 검색이 시작됐거나 닫힘 → 이 응답은 버림
         if (!live || seq !== seqRef.current) return;
         if (r.status === "ok") setResults(r.data ?? []);

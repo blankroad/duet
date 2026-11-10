@@ -128,7 +128,7 @@ describe("mocked IPC search workflows", () => {
     expect(pick).toHaveBeenCalledWith(fresh);
   });
 
-  it.fails.each([local, remote])(
+  it.each([local, remote])(
     "ux-smoke browse-s02 closing active content search cancels backend at $source.kind",
     async (root) => {
       useSearch.setState({ root, content: true });
@@ -141,6 +141,28 @@ describe("mocked IPC search workflows", () => {
       expect(commands.searchCancel).toHaveBeenCalledOnce();
     },
   );
+
+  it("browse-s02: closing after a content search finished does not cancel", async () => {
+    useSearch.setState({ content: true });
+    render(<SearchPanel onPickHit={vi.fn()} />);
+    await tick();
+    expect(useSearch.getState().status).toBe("done");
+    fireEvent.click(screen.getByRole("button", { name: "search.close" }));
+    expect(commands.searchCancel).not.toHaveBeenCalled();
+  });
+
+  it("browse-s02: changing the content query does not cancel the new search", async () => {
+    useSearch.setState({ content: true });
+    vi.mocked(commands.searchGlobal).mockReturnValue(new Promise(() => {}));
+    render(<SearchPanel onPickHit={vi.fn()} />);
+    await tick();
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "next" },
+    });
+    await tick();
+    expect(commands.searchGlobal).toHaveBeenCalledTimes(2);
+    expect(commands.searchCancel).not.toHaveBeenCalled();
+  });
 
   it.fails(
     "ux-smoke browse-s03 failed reindex must show failure instead of silently rerunning stale cache (SC-42)",
