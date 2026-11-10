@@ -1,6 +1,6 @@
 
 fileops-08 — static source evidence
-src-tauri/src/core/ops.rs:3415: 
+src-tauri/src/core/ops.rs:3415:
 src-tauri/src/core/ops.rs:3416: pub async fn rename(
 src-tauri/src/core/ops.rs:3417:     fs: &dyn FileSystem,
 src-tauri/src/core/ops.rs:3418:     target: EntryRef,
@@ -40,7 +40,7 @@ src-tauri/src/core/ops.rs:3625:         out.push((old.clone(), new.clone(), coll
 src-tauri/src/core/ops.rs:3626:     }
 src-tauri/src/core/ops.rs:3627:     out
 src-tauri/src/core/ops.rs:3628: }
-src-tauri/src/core/ops.rs:3629: 
+src-tauri/src/core/ops.rs:3629:
 src-tauri/src/core/ops.rs:3630: /// 같은 디렉토리의 항목들인지 검증하고 location 을 돌려준다.
 
 fileops-09 — static source evidence
@@ -122,7 +122,7 @@ src-tauri/src/core/elevate.rs:272:         }
 src-tauri/src/core/elevate.rs:273:     }
 src-tauri/src/core/elevate.rs:274:     do_copy(src, dst).map_err(|e| e.to_string())
 src-tauri/src/core/elevate.rs:275: }
-src-tauri/src/core/elevate.rs:276: 
+src-tauri/src/core/elevate.rs:276:
 
 fileops-10 — static source evidence
 src-tauri/src/core/elevate.rs:255:                 let target = unique_path(dst);
@@ -146,7 +146,7 @@ src-tauri/src/core/elevate.rs:272:         }
 src-tauri/src/core/elevate.rs:273:     }
 src-tauri/src/core/elevate.rs:274:     do_copy(src, dst).map_err(|e| e.to_string())
 src-tauri/src/core/elevate.rs:275: }
-src-tauri/src/core/elevate.rs:276: 
+src-tauri/src/core/elevate.rs:276:
 src-tauri/src/core/sudo.rs:106:             ConflictPolicy::Replace => {
 src-tauri/src/core/sudo.rs:107:                 // 실패 안전 덮어쓰기: 기존→임시백업→복사/이동→성공시 백업삭제 / 실패시 롤백.
 src-tauri/src/core/sudo.rs:108:                 let mut bak_os = dst.as_os_str().to_owned();
@@ -174,7 +174,7 @@ src-tauri/src/core/elevate.rs:281:     }
 src-tauri/src/core/elevate.rs:282:     copy_one(src, dst, conflict)?;
 src-tauri/src/core/elevate.rs:283:     remove_path(src).map_err(|e| e.to_string())
 src-tauri/src/core/elevate.rs:284: }
-src-tauri/src/core/elevate.rs:285: 
+src-tauri/src/core/elevate.rs:285:
 src-tauri/src/core/elevate.rs:286: /// OS 휴지통으로 이동 (복구 가능). 승격 프로세스라 보호 경로 파일도 가능.
 src-tauri/src/core/elevate.rs:287: fn trash_one(src: &Path) -> Result<(), String> {
 src-tauri/src/core/elevate.rs:288:     trash::delete(src).map_err(|e| e.to_string())
@@ -186,7 +186,7 @@ src-tauri/src/core/elevate.rs:326:     } else {
 src-tauri/src/core/elevate.rs:327:         std::fs::remove_file(p)
 src-tauri/src/core/elevate.rs:328:     }
 src-tauri/src/core/elevate.rs:329: }
-src-tauri/src/core/elevate.rs:330: 
+src-tauri/src/core/elevate.rs:330:
 
 fileops-12 — static source evidence
 src-tauri/src/core/sudo.rs:96:             "mv" // Move | Trash
@@ -263,7 +263,7 @@ src-tauri/src/core/ops.rs:4118:                 Resolved::NewName(p) => p.clone(
 src-tauri/src/core/ops.rs:4119:                 _ => crate::fs::posix_join(&plan.dst.path, &it.name),
 src-tauri/src/core/ops.rs:4120:             };
 src-tauri/src/core/ops.rs:4121:             let src_arg = shell_escape_path(&src_path)?;
-src-tauri/src/core/ops.rs:4122: 
+src-tauri/src/core/ops.rs:4122:
 src-tauri/src/core/ops.rs:4123:             let cmd = if use_rsync {
 src-tauri/src/core/ops.rs:4124:                 // rsync 는 SRC(trailing-slash 없음) 를 DEST *디렉토리* 안에 basename
 src-tauri/src/core/ops.rs:4125:                 // 으로 생성한다. 따라서 dst.path.join(name) (= 최종 경로) 을 주면
@@ -285,7 +285,7 @@ src-tauri/src/core/ops.rs:4140:                 // (Skip 은 위에서 항목째
 src-tauri/src/core/ops.rs:4141:                 let dst_arg = shell_escape_path(&dst_path)?;
 src-tauri/src/core/ops.rs:4142:                 format!("cp -a -- {src_arg} {dst_arg}")
 src-tauri/src/core/ops.rs:4143:             };
-src-tauri/src/core/ops.rs:4144: 
+src-tauri/src/core/ops.rs:4144:
 src-tauri/src/core/ops.rs:4145:             // progress emit throttle: 1초
 
 fileops-15 — static source evidence
@@ -335,7 +335,7 @@ src-tauri/src/core/ops.rs:4221:             outcome = Err(e);
 src-tauri/src/core/ops.rs:4222:             break;
 src-tauri/src/core/ops.rs:4223:         }
 src-tauri/src/core/ops.rs:4224:     }
-src-tauri/src/core/ops.rs:4225: 
+src-tauri/src/core/ops.rs:4225:
 src-tauri/src/core/ops.rs:4226:     // Replace 백업 정리 — 성공했을 때만 파일 백업을 영구 삭제한다(§4 예외, .bak 안 남김).
 src-tauri/src/core/ops.rs:4227:     // 폴더 백업은 남겨 journal 에 싣는다(§4 폴더 예외 — 폴더 교체는 되돌릴 수 있어야).
 src-tauri/src/core/ops.rs:4228:     // 실패했으면 종류와 무관하게 전부 journal 로 보내 undo 가 복원할 수 있게 한다.
@@ -346,7 +346,7 @@ src-tauri/src/core/ops.rs:4232:         } else {
 src-tauri/src/core/ops.rs:4233:             backups.push(b);
 src-tauri/src/core/ops.rs:4234:         }
 src-tauri/src/core/ops.rs:4235:     }
-src-tauri/src/core/ops.rs:4236: 
+src-tauri/src/core/ops.rs:4236:
 src-tauri/src/core/ops.rs:4237:     // §4 (A4): 충돌 backup + 부분 복사분이라도 journal 에 기록한 뒤 에러 전파 —
 src-tauri/src/core/ops.rs:4238:     // backup 후 copy 실패 시 .bak 고아 + undo 미기록(Ctrl+Z 복원 불가) 버그 수정.
 src-tauri/src/core/ops.rs:4239:     if copied.is_empty() && backups.is_empty() {
@@ -378,7 +378,7 @@ src-tauri/src/core/ops.rs:4264:     let entry = ctx.journal.push(op, undo).await
 src-tauri/src/core/ops.rs:4265:     outcome?;
 src-tauri/src/core/ops.rs:4266:     Ok(entry)
 src-tauri/src/core/ops.rs:4267: }
-src-tauri/src/core/ops.rs:4268: 
+src-tauri/src/core/ops.rs:4268:
 src-tauri/src/core/ops.rs:4269: #[cfg(test)]
 src-tauri/src/core/ops.rs:4270: mod tests {
 src-tauri/src/core/undo/cleanup.rs:200:         match restore_overwritten(fs, b, side.unknown_applied, batch).await? {
@@ -396,7 +396,7 @@ src-tauri/src/core/undo/cleanup.rs:211:         }
 src-tauri/src/core/undo/cleanup.rs:212:     }
 src-tauri/src/core/undo/cleanup.rs:213:     restore_trashed(t, fs, side.source, side.trashed).await
 src-tauri/src/core/undo/cleanup.rs:214: }
-src-tauri/src/core/undo/cleanup.rs:215: 
+src-tauri/src/core/undo/cleanup.rs:215:
 src-tauri/src/core/undo/cleanup.rs:216: /// 생성분 하나: 없음 → 할 일 없음, 지문 없음 → 건너뜀(확인 불가), 지문 다름 → 건너뜀(바뀜),
 src-tauri/src/core/undo/cleanup.rs:217: /// 같음 → 휴지통. 휴지통·확인 오류는 `Err`.
 src-tauri/src/core/undo/cleanup.rs:218: pub(crate) async fn trash_if_unchanged(
@@ -429,7 +429,7 @@ src-tauri/src/core/undo/cleanup.rs:267:         }
 src-tauri/src/core/undo/cleanup.rs:268:     }
 src-tauri/src/core/undo/cleanup.rs:269:     restore_backup(fs, &b.backup_path, &b.original_path).await
 src-tauri/src/core/undo/cleanup.rs:270: }
-src-tauri/src/core/undo/cleanup.rs:271: 
+src-tauri/src/core/undo/cleanup.rs:271:
 src-tauri/src/core/undo/cleanup.rs:272: /// 동기화가 만든 폴더를 깊은 것부터, 비어 있을 때만 지운다(SC-31). 이미 없거나 안 비었으면
 src-tauri/src/core/undo/cleanup.rs:273: /// 조용히 둔다(그 안에 남은 항목은 이미 건너뜀으로 보고됨). 빈 폴더인데 못 지운 경우
 src-tauri/src/core/undo/cleanup.rs:274: /// (권한·연결·I/O)는 `Err` — 재시도할 수 있게 확정하지 않는다.
@@ -501,11 +501,11 @@ src-tauri/src/ssh/remote_exec.rs:135:     channel
 src-tauri/src/ssh/remote_exec.rs:136:         .exec(true, cmd)
 src-tauri/src/ssh/remote_exec.rs:137:         .await
 src-tauri/src/ssh/remote_exec.rs:138:         .map_err(|e| exec_failed(cmd, e))?;
-src-tauri/src/ssh/remote_exec.rs:139: 
+src-tauri/src/ssh/remote_exec.rs:139:
 src-tauri/src/ssh/remote_exec.rs:140:     let mut stdout_buf = Vec::<u8>::new();
 src-tauri/src/ssh/remote_exec.rs:141:     let mut stderr = Vec::new();
 src-tauri/src/ssh/remote_exec.rs:142:     let mut exit_status: Option<u32> = None;
-src-tauri/src/ssh/remote_exec.rs:143: 
+src-tauri/src/ssh/remote_exec.rs:143:
 src-tauri/src/ssh/remote_exec.rs:144:     while let Some(msg) = channel.wait().await {
 src-tauri/src/ssh/remote_exec.rs:145:         match msg {
 src-tauri/src/ssh/remote_exec.rs:146:             ChannelMsg::Data { data } => {
@@ -626,7 +626,7 @@ src-tauri/src/fs/mod.rs:594:     }
 src-tauri/src/fs/mod.rs:595:     // 완성 — .part 를 최종 이름으로 교체.
 src-tauri/src/fs/mod.rs:596:     finalize_part(dst_fs, &part, dst).await
 src-tauri/src/fs/mod.rs:597: }
-src-tauri/src/fs/mod.rs:598: 
+src-tauri/src/fs/mod.rs:598:
 src-tauri/src/fs/mod.rs:599: /// `.part` 임시본을 최종 `dst` 로 교체. rename 이 기존 dst 를 못 덮는 경우(SFTP rename
 src-tauri/src/fs/mod.rs:600: /// 은 기존 파일에 실패 가능) dst 를 `.duet-old` 백업으로 비켜둔 뒤 교체하고 백업을 제거한다.
 
@@ -697,7 +697,7 @@ src-tauri/src/core/undo/cleanup.rs:235:     }
 src-tauri/src/core/undo/cleanup.rs:236:     fs.trash(path, batch).await?;
 src-tauri/src/core/undo/cleanup.rs:237:     Ok(Step::Done)
 src-tauri/src/core/undo/cleanup.rs:238: }
-src-tauri/src/core/undo/cleanup.rs:239: 
+src-tauri/src/core/undo/cleanup.rs:239:
 src-tauri/src/core/undo/cleanup.rs:240: /// 덮어쓴 자리 되돌리기. 백업이 이미 없으면 `None`(복원할 것 없음).
 src-tauri/src/core/undo/cleanup.rs:241: ///
 
@@ -709,7 +709,7 @@ src-tauri/src/lib.rs:396:         })
 src-tauri/src/lib.rs:397:         .run(context)
 src-tauri/src/lib.rs:398:         .expect("error while running tauri application");
 src-tauri/src/lib.rs:399: }
-src-tauri/src/lib.rs:400: 
+src-tauri/src/lib.rs:400:
 src-tauri/src/lib.rs:401: /// 저장 파일을 읽을 수 없어 시작할 수 없을 때 — 오류 창을 띄우고, 닫으면 종료한다.
 src/App.tsx:1155:       moveTabToOther: () => usePanes.getState().moveActiveTabToOther(),
 src/App.tsx:1156:       openSettings: () => openDialog({ kind: "settings" }),
@@ -723,7 +723,7 @@ src/App.tsx:1163:           });
 src/App.tsx:1164:         }
 src/App.tsx:1165:       },
 src/App.tsx:1166:       copy: () => void triggerCopy(openDialog, showToast),
-src-tauri/src/services/task_queue.rs:82: 
+src-tauri/src/services/task_queue.rs:82:
 src-tauri/src/services/task_queue.rs:83: impl TaskQueue {
 src-tauri/src/services/task_queue.rs:84:     pub fn new(app: AppHandle) -> Arc<Self> {
 src-tauri/src/services/task_queue.rs:85:         Arc::new(Self {
@@ -734,7 +734,7 @@ src-tauri/src/services/task_queue.rs:89:             }),
 src-tauri/src/services/task_queue.rs:90:             app,
 src-tauri/src/services/task_queue.rs:91:         })
 src-tauri/src/services/task_queue.rs:92:     }
-src-tauri/src/services/task_queue.rs:93: 
+src-tauri/src/services/task_queue.rs:93:
 src-tauri/src/services/task_queue.rs:94:     /// 새 task 등록 + worker 에게 송신. 즉시 TaskId 반환.
 src-tauri/src/services/task_queue.rs:95:     pub async fn enqueue(
 src-tauri/src/services/task_queue.rs:96:         self: &Arc<Self>,
@@ -745,7 +745,7 @@ src-tauri/src/services/task_queue.rs:100:         affected_locations: Vec<crate:
 
 fileops-24 — static source evidence
 src/lib/fileActions.ts:270: }
-src/lib/fileActions.ts:271: 
+src/lib/fileActions.ts:271:
 src/lib/fileActions.ts:272: /** 두 패널 폴더 비교 — 활성=left, 반대=right. 결과를 비교 다이얼로그로. */
 src/lib/fileActions.ts:273: export async function triggerCompare(
 src/lib/fileActions.ts:274:   open: OpenFn,
@@ -761,13 +761,13 @@ fileops-26 — static source evidence
 src-tauri/src/fs/mod.rs:525:     };
 src-tauri/src/fs/mod.rs:526:     let _ = f.set_times(std::fs::FileTimes::new().set_modified(mtime));
 src-tauri/src/fs/mod.rs:527: }
-src-tauri/src/fs/mod.rs:528: 
+src-tauri/src/fs/mod.rs:528:
 src-tauri/src/fs/mod.rs:529: /// `<dst>.duet-part` 임시 경로 — 완성 전까지 여기에 쓰고, 끝나면 dst 로 rename.
 src-tauri/src/fs/mod.rs:530: /// 중단되면 dst(최종 이름)는 안 생기고 .part 만 남아 재개에 쓰인다.
 src-tauri/src/fs/mod.rs:531: fn part_path(dst_fs: &dyn FileSystem, dst: &std::path::Path) -> std::path::PathBuf {
 src-tauri/src/fs/mod.rs:532:     sibling_with_suffix(dst_fs, dst, ".duet-part")
 src-tauri/src/fs/mod.rs:533: }
-src-tauri/src/fs/mod.rs:534: 
+src-tauri/src/fs/mod.rs:534:
 src-tauri/src/fs/mod.rs:535: /// 단일 파일을 고정 버퍼로 흘려 복사 — 전체를 메모리에 올리지 않음(대용량 안전).
 src-tauri/src/fs/mod.rs:536: /// `<dst>.duet-part` 에 쓴 뒤 dst 로 rename(중단 시 반쪽 파일을 최종 이름에 안 남김).
 src-tauri/src/fs/mod.rs:537: /// `resume=true` 면 기존 .part 크기부터 이어쓰기. chunk 경계마다 취소 검사 + `on_bytes`.
@@ -825,7 +825,7 @@ src-tauri/src/fs/local.rs:312:             .await
 src-tauri/src/fs/local.rs:313:             .map_err(DuetError::from)?;
 src-tauri/src/fs/local.rs:314:         Ok(Box::pin(file))
 src-tauri/src/fs/local.rs:315:     }
-src-tauri/src/fs/local.rs:316: 
+src-tauri/src/fs/local.rs:316:
 
 fileops-27 — static source evidence
 src-tauri/src/core/ops.rs:3695:             tos.push(fs.join(&location.path, new));
@@ -866,7 +866,7 @@ src-tauri/src/core/ops.rs:3729:         )
 
 fileops-28 — static source evidence
 src-tauri/src/services/task_queue.rs:118:         };
-src-tauri/src/services/task_queue.rs:119: 
+src-tauri/src/services/task_queue.rs:119:
 src-tauri/src/services/task_queue.rs:120:         // worker 보장 + state insert
 src-tauri/src/services/task_queue.rs:121:         let sender = {
 src-tauri/src/services/task_queue.rs:122:             let mut inner = self.state.lock().await;
@@ -877,26 +877,26 @@ src-tauri/src/services/task_queue.rs:126:                 .entry(host_key.clone(
 src-tauri/src/services/task_queue.rs:127:                 .or_insert_with(|| spawn_worker(self.clone()))
 src-tauri/src/services/task_queue.rs:128:                 .clone()
 src-tauri/src/services/task_queue.rs:129:         };
-src-tauri/src/services/task_queue.rs:130: 
+src-tauri/src/services/task_queue.rs:130:
 src-tauri/src/services/task_queue.rs:131:         let _ = TaskEvent {
 src-tauri/src/services/task_queue.rs:132:             task_id: task_id.clone(),
 src-tauri/src/services/task_queue.rs:133:             change: TaskChange::Enqueued { task: dto },
 src-tauri/src/services/task_queue.rs:134:         }
 src-tauri/src/services/task_queue.rs:135:         .emit(&self.app);
-src-tauri/src/services/task_queue.rs:136: 
+src-tauri/src/services/task_queue.rs:136:
 src-tauri/src/services/task_queue.rs:137:         let _ = sender.send(WorkItem {
 src-tauri/src/services/task_queue.rs:138:             task_id: task_id.clone(),
 src-tauri/src/services/task_queue.rs:139:             cancel_token,
 src-tauri/src/services/task_queue.rs:140:             run,
 src-tauri/src/services/task_queue.rs:141:         });
-src-tauri/src/services/task_queue.rs:142: 
+src-tauri/src/services/task_queue.rs:142:
 src-tauri/src/services/task_queue.rs:143:         task_id
 src-tauri/src/services/task_queue.rs:144:     }
-src-tauri/src/services/task_queue.rs:145: 
+src-tauri/src/services/task_queue.rs:145:
 src-tauri/src/services/task_queue.rs:146:     /// cancel — token cancel + (큐 안이면) status → Cancelled + emit.
 src-tauri/src/services/task_queue.rs:147:     /// 이미 종결된 task 는 no-op.
 src-tauri/src/services/task_queue.rs:244: }
-src-tauri/src/services/task_queue.rs:245: 
+src-tauri/src/services/task_queue.rs:245:
 src-tauri/src/services/task_queue.rs:246: fn spawn_worker(queue: Arc<TaskQueue>) -> mpsc::UnboundedSender<WorkItem> {
 src-tauri/src/services/task_queue.rs:247:     let (tx, mut rx) = mpsc::unbounded_channel::<WorkItem>();
 src-tauri/src/services/task_queue.rs:248:     tokio::spawn(async move {
@@ -930,7 +930,7 @@ src-tauri/src/services/task_queue.rs:275:         }
 src-tauri/src/services/task_queue.rs:276:     });
 src-tauri/src/services/task_queue.rs:277:     tx
 src-tauri/src/services/task_queue.rs:278: }
-src-tauri/src/services/task_queue.rs:279: 
+src-tauri/src/services/task_queue.rs:279:
 src-tauri/src/services/task_queue.rs:280: #[cfg(test)]
 src-tauri/src/services/task_queue.rs:281: mod tests {
 src-tauri/Cargo.toml:163: [profile.release]
@@ -939,19 +939,19 @@ src-tauri/Cargo.toml:165: codegen-units = 1
 src-tauri/Cargo.toml:166: lto = true
 src-tauri/Cargo.toml:167: opt-level = 3
 src-tauri/Cargo.toml:168: strip = true
-src-tauri/Cargo.toml:169: 
+src-tauri/Cargo.toml:169:
 src-tauri/Cargo.toml:170: [dev-dependencies]
 src-tauri/Cargo.toml:171: tempfile = "3"
-src-tauri/Cargo.toml:172: 
+src-tauri/Cargo.toml:172:
 
 fileops-29 — static source evidence
 src-tauri/src/commands/trash.rs:16: use crate::fs::LocalFs;
 src-tauri/src/commands/trash.rs:17: use crate::services::journal::{Journal, OpKind, UndoAction};
 src-tauri/src/commands/trash.rs:18: use crate::types::{DuetError, Location, SourceId, TrashItemDto};
-src-tauri/src/commands/trash.rs:19: 
+src-tauri/src/commands/trash.rs:19:
 src-tauri/src/commands/trash.rs:20: /// 가상 휴지통 location 의 path. 실제 경로가 아니다 — `list_directory` 등에 넘기면 안 됨.
 src-tauri/src/commands/trash.rs:21: pub const VIRTUAL_TRASH_PATH: &str = "shell:RecycleBinFolder";
-src-tauri/src/commands/trash.rs:22: 
+src-tauri/src/commands/trash.rs:22:
 src-tauri/src/commands/trash.rs:23: /// 가상 휴지통 `Location` (로컬 전용).
 src-tauri/src/commands/trash.rs:24: pub fn virtual_trash_location() -> Location {
 src-tauri/src/commands/trash.rs:25:     Location {
@@ -959,14 +959,14 @@ src-tauri/src/commands/trash.rs:26:         source: SourceId::Local,
 src-tauri/src/commands/trash.rs:27:         path: PathBuf::from(VIRTUAL_TRASH_PATH),
 src-tauri/src/commands/trash.rs:28:     }
 src-tauri/src/commands/trash.rs:29: }
-src-tauri/src/commands/trash.rs:30: 
+src-tauri/src/commands/trash.rs:30:
 src-tauri/src/commands/trash.rs:31: fn join_err(e: tokio::task::JoinError) -> DuetError {
 src-tauri/src/commands/trash.rs:32:     DuetError::Io(format!("trash task join: {e}"))
 src-tauri/src/commands/trash.rs:33: }
-src-tauri/src/commands/trash.rs:34: 
+src-tauri/src/commands/trash.rs:34:
 src-tauri/src/commands/trash.rs:35: fn check_confirm_word(word: &str) -> Result<(), DuetError> {
 src-tauri/src/commands/trash.rs:65: }
-src-tauri/src/commands/trash.rs:66: 
+src-tauri/src/commands/trash.rs:66:
 src-tauri/src/commands/trash.rs:67: /// 휴지통 항목을 원래 위치로 복원. 복원된 항목들의 **부모 폴더** location 을 반환 —
 src-tauri/src/commands/trash.rs:68: /// 프론트가 그 폴더를 보고 있는 패널을 새로고침한다.
 src-tauri/src/commands/trash.rs:69: #[tauri::command]
@@ -990,18 +990,18 @@ src-tauri/src/commands/trash.rs:115:         .map_err(join_err)??;
 src-tauri/src/commands/trash.rs:116:     record_purge(journal.inner(), &app, n).await;
 src-tauri/src/commands/trash.rs:117:     Ok(n)
 src-tauri/src/commands/trash.rs:118: }
-src-tauri/src/commands/trash.rs:119: 
+src-tauri/src/commands/trash.rs:119:
 src-tauri/src/commands/trash.rs:120: #[cfg(test)]
 src-tauri/src/commands/trash.rs:121: mod tests {
 src-tauri/src/commands/trash.rs:122:     use super::*;
-src-tauri/src/commands/trash.rs:123: 
+src-tauri/src/commands/trash.rs:123:
 src-tauri/src/commands/trash.rs:124:     #[test]
 src-tauri/src/commands/trash.rs:125:     fn confirm_word_must_match_exactly() {
 src-tauri/src/commands/trash.rs:126:         assert!(check_confirm_word("delete").is_ok());
 src-tauri/src/commands/trash.rs:127:         assert!(check_confirm_word("Delete").is_err());
 src-tauri/src/commands/trash.rs:128:         assert!(check_confirm_word("").is_err());
 src-tauri/src/commands/trash.rs:129:     }
-src-tauri/src/commands/trash.rs:130: 
+src-tauri/src/commands/trash.rs:130:
 src-tauri/src/commands/trash.rs:131:     #[test]
 src-tauri/src/commands/trash.rs:132:     fn virtual_location_is_local_sentinel() {
 src-tauri/src/commands/trash.rs:133:         let l = virtual_trash_location();
@@ -1010,7 +1010,7 @@ src/lib/trashView.ts:18:   return (
 src/lib/trashView.ts:19:     location.source.kind === "local" && location.path === VIRTUAL_TRASH_PATH
 src/lib/trashView.ts:20:   );
 src/lib/trashView.ts:21: }
-src/lib/trashView.ts:22: 
+src/lib/trashView.ts:22:
 src/lib/trashView.ts:23: export interface TrashEntries {
 src/lib/trashView.ts:24:   entries: Entry[];
 src/lib/trashView.ts:25:   /** 표시 이름 → 휴지통 항목. */
@@ -1036,7 +1036,7 @@ src-tauri/src/fs/local.rs:1395:         trash::os_limited::restore_all(picked)
 src-tauri/src/fs/local.rs:1396:             .map_err(|e| DuetError::Io(format!("restore: {e:?}")))?;
 src-tauri/src/fs/local.rs:1397:         Ok(parents)
 src-tauri/src/fs/local.rs:1398:     }
-src-tauri/src/fs/local.rs:1399: 
+src-tauri/src/fs/local.rs:1399:
 src-tauri/src/fs/local.rs:1400:     /// 선택 항목 영구 삭제. 지운 개수 반환.
 src-tauri/src/fs/local.rs:1401:     pub fn trash_view_purge(ids: &[String]) -> Result<u32, DuetError> {
 src-tauri/src/fs/local.rs:1402:         let picked = Self::trash_view_pick(ids)?;
@@ -1101,7 +1101,7 @@ src-tauri/src/core/ops.rs:3770:         .ok_or_else(|| DuetError::Io("no targets
 src-tauri/src/core/ops.rs:3771:     let source = first.location.source.clone();
 src-tauri/src/core/ops.rs:3772:     let location = first.location.clone();
 src-tauri/src/core/ops.rs:3773:     let mode = mode & 0o7777;
-src-tauri/src/core/ops.rs:3774: 
+src-tauri/src/core/ops.rs:3774:
 src-tauri/src/core/ops.rs:3775:     let mut items = Vec::with_capacity(targets.len());
 src-tauri/src/core/ops.rs:3776:     for t in &targets {
 src-tauri/src/core/ops.rs:3777:         let path = fs.join(&t.location.path, &t.name);
@@ -1112,7 +1112,7 @@ src-tauri/src/core/ops.rs:3781:         if let Some(old_mode) = old {
 src-tauri/src/core/ops.rs:3782:             items.push(ChmodItem { path, old_mode });
 src-tauri/src/core/ops.rs:3783:         }
 src-tauri/src/core/ops.rs:3784:     }
-src-tauri/src/core/ops.rs:3785: 
+src-tauri/src/core/ops.rs:3785:
 src-tauri/src/core/ops.rs:3786:     let undo = if recursive || items.is_empty() {
 src-tauri/src/core/ops.rs:3787:         UndoAction::Irreversible
 src-tauri/src/core/ops.rs:3788:     } else {
@@ -1133,7 +1133,7 @@ src-tauri/src/core/ops.rs:3802:             undo,
 src-tauri/src/core/ops.rs:3803:         )
 src-tauri/src/core/ops.rs:3804:         .await
 src-tauri/src/core/ops.rs:3805: }
-src-tauri/src/core/ops.rs:3806: 
+src-tauri/src/core/ops.rs:3806:
 src-tauri/src/core/ops.rs:3807: /// owner/group 이름 검증 — 영숫자 + `._-`, 선두 `-` 금지(명령 옵션 오인 방지).
 src-tauri/src/core/ops.rs:3808: /// (경로/spec 은 셸 quoting 되지만 chown 자체가 인자로 파싱하므로 별도 방어.)
 
@@ -1149,7 +1149,7 @@ src-tauri/src/core/copy_strategy.rs:77:     // Remote paths are already POSIX; b
 src-tauri/src/core/copy_strategy.rs:78:     let escaped = s.replace('\'', "'\\''");
 src-tauri/src/core/copy_strategy.rs:79:     Ok(format!("'{escaped}'"))
 src-tauri/src/core/copy_strategy.rs:80: }
-src-tauri/src/core/copy_strategy.rs:81: 
+src-tauri/src/core/copy_strategy.rs:81:
 src-tauri/src/core/copy_strategy.rs:82: /// 쉘 single-quote escape — 일반 문자열(암호 등)용. 경로와 마찬가지로
 src-tauri/src/commands/fs_ops.rs:635:     let outcome = outcome?;
 src-tauri/src/commands/fs_ops.rs:636:     // Local→Remote 이동: 원격 성공 시 로컬 원본을 휴지통으로(복구 가능, 비승격).
@@ -1178,21 +1178,21 @@ src-tauri/src/core/sudo.rs:202:     if let Some(root) = &staging {
 src-tauri/src/core/sudo.rs:203:         let esc = shell_escape_path(root)?;
 src-tauri/src/core/sudo.rs:204:         let _ = dst_ssh.exec_raw(&format!("rm -rf -- {esc}")).await;
 src-tauri/src/core/sudo.rs:205:     }
-src-tauri/src/core/sudo.rs:206: 
-CLAUDE.md:34: 
+src-tauri/src/core/sudo.rs:206:
+CLAUDE.md:34:
 CLAUDE.md:35: **앱 소유 임시 폴더 정리 (2026-11 예외, 사용자 승인):** 사용자 데이터가 아니라 앱이 작업용으로
 CLAUDE.md:36: 만든 임시 폴더는 휴지통·journal 없이 직접 지운다 (로컬 `remove_dir_all`, 원격 SSH `rm -rf`).
 CLAUDE.md:37: 대상은 아래 목록뿐이다.
 CLAUDE.md:38: - 로컬 압축 내부 보기: `<temp>/duet-archive/<token>/`
 CLAUDE.md:39: - 원격 압축 내부 보기: `~/.duet-tmp/browse-<token>/`
 CLAUDE.md:40: - 원격 sudo 업로드 준비: `~/.duet-sudo/<uuid>/`
-CLAUDE.md:41: 
+CLAUDE.md:41:
 CLAUDE.md:42: 조건:
 CLAUDE.md:43: - 경로는 앱 코드가 고정 접두사 + 생성한 토큰으로 조립한 것만 쓴다. 사용자 입력이나 목록에서 온 경로는 안 된다.
 CLAUDE.md:44: - 지우기 직전에 그 모양인지 검사한다 (예: `archive::is_safe_browse_root`).
 CLAUDE.md:45: - 셸 인자는 `shell_escape_path` 로 인용한다.
 CLAUDE.md:46: - 새 임시 위치를 추가하려면 이 목록을 먼저 고친다.
-CLAUDE.md:47: 
+CLAUDE.md:47:
 CLAUDE.md:48: ### 4. 모든 파괴적 작업은 undo 가능해야 함
 
 fileops-34 — static source evidence
@@ -1251,7 +1251,7 @@ src-tauri/src/fs/mod.rs:362:         src_fs, src, dst_fs, dst, skip, resume, can
 src-tauri/src/fs/mod.rs:363:     )
 src-tauri/src/fs/mod.rs:364:     .await
 src-tauri/src/fs/mod.rs:365: }
-src-tauri/src/fs/mod.rs:366: 
+src-tauri/src/fs/mod.rs:366:
 src-tauri/src/fs/mod.rs:367: #[allow(clippy::too_many_arguments)]
 src-tauri/src/fs/mod.rs:368: async fn copy_tree_inner(
 src-tauri/src/fs/mod.rs:369:     src_fs: &dyn FileSystem,
@@ -1282,5 +1282,5 @@ src-tauri/src/fs/local.rs:72:     async fn mkdir(&self, path: &Path) -> Result<(
 src-tauri/src/fs/local.rs:73:         // create_dir (not _all) — 부모 없으면 에러, 이미 있으면 에러
 src-tauri/src/fs/local.rs:74:         tokio::fs::create_dir(path).await.map_err(DuetError::from)
 src-tauri/src/fs/local.rs:75:     }
-src-tauri/src/fs/local.rs:76: 
+src-tauri/src/fs/local.rs:76:
 src-tauri/src/fs/local.rs:77:     async fn create_new_file(&self, path: &Path) -> Result<(), DuetError> {
