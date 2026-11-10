@@ -71,38 +71,99 @@ fn percent_encode_path(s: &str) -> String {
     out
 }
 
+/// duet 이 마지막으로 OS 클립보드에 파일을 올린 직후의 "클립보드 버전"(macOS `changeCount`,
+/// Windows `GetClipboardSequenceNumber`). 아직 그 버전이면 클립보드 내용은 우리 것이다.
+/// Linux 는 버전 번호를 얻을 수 없어 항상 None.
+static OWNED: std::sync::Mutex<Option<i64>> = std::sync::Mutex::new(None);
+
 /// 파일 경로들을 OS 클립보드에 올린다. 미지원 OS 는 `NotSupported`.
 pub fn set(paths: &[PathBuf]) -> Result<(), DuetError> {
     if paths.is_empty() {
         return Err(DuetError::Io("no paths to copy".into()));
     }
-    #[cfg(target_os = "macos")]
-    {
-        super::macos::set_file_clipboard(paths)
+    let owned = set_os(paths)?;
+    if let Ok(mut g) = OWNED.lock() {
+        *g = owned;
     }
-    #[cfg(windows)]
-    {
-        set_windows(paths)
+    Ok(())
+}
+
+/// OS 클립보드가 **아직 duet 이 마지막으로 올린 파일 목록이면** 비운다. 비웠으면 true.
+///
+/// 원격(SSH) 항목 Ctrl+C 처럼 OS 클립보드에 올릴 수 없는 복사가 일어났을 때 쓴다 — 안 그러면
+/// 예전 로컬 복사가 남아 Finder/탐색기 붙여넣기가 엉뚱한 파일을 붙인다(fileops-36). 그사이
+/// 사용자가 다른 앱에서 무언가를 복사했다면(버전이 바뀜) 건드리지 않는다.
+pub fn clear_if_owned() -> Result<bool, DuetError> {
+    let owned = OWNED.lock().ok().and_then(|mut g| g.take());
+    match owned {
+        Some(v) => clear_os_if(v),
+        None => Ok(false),
     }
-    #[cfg(target_os = "linux")]
-    {
-        set_linux(paths)
+}
+
+#[cfg(target_os = "macos")]
+fn set_os(paths: &[PathBuf]) -> Result<Option<i64>, DuetError> {
+    super::macos::set_file_clipboard(paths).map(Some)
+}
+#[cfg(target_os = "macos")]
+fn clear_os_if(owned: i64) -> Result<bool, DuetError> {
+    super::macos::clear_file_clipboard_if(owned)
+}
+
+#[cfg(windows)]
+fn set_os(paths: &[PathBuf]) -> Result<Option<i64>, DuetError> {
+    set_windows(paths).map(Some)
+}
+#[cfg(windows)]
+fn clear_os_if(owned: i64) -> Result<bool, DuetError> {
+    clear_windows_if(owned)
+}
+
+#[cfg(target_os = "linux")]
+fn set_os(paths: &[PathBuf]) -> Result<Option<i64>, DuetError> {
+    set_linux(paths).map(|()| None)
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
+fn clear_os_if(_owned: i64) -> Result<bool, DuetError> {
+    Ok(false)
+}
+
+#[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
+fn set_os(_paths: &[PathBuf]) -> Result<Option<i64>, DuetError> {
+    Err(DuetError::NotSupported("os file clipboard".into()))
+}
+
+/// Windows: 클립보드 시퀀스 번호가 `owned` 그대로일 때만 비운다.
+#[cfg(windows)]
+fn clear_windows_if(owned: i64) -> Result<bool, DuetError> {
+    use windows::Win32::System::DataExchange::{
+        CloseClipboard, EmptyClipboard, GetClipboardSequenceNumber, OpenClipboard,
+    };
+    // SAFETY(§8): 시퀀스 조회는 인자 없는 읽기. Open 성공 뒤에만 Empty 후 반드시 Close.
+    unsafe {
+        if i64::from(GetClipboardSequenceNumber()) != owned {
+            return Ok(false);
+        }
+        OpenClipboard(None).map_err(|e| DuetError::Io(format!("OpenClipboard: {e}")))?;
+        let emptied = EmptyClipboard();
+        let _ = CloseClipboard();
+        emptied.map_err(|e| DuetError::Io(format!("EmptyClipboard: {e}")))?;
     }
-    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
-    {
-        Err(DuetError::NotSupported("os file clipboard".into()))
-    }
+    Ok(true)
 }
 
 /// Windows `CF_HDROP` 쓰기.
 ///
 /// 클립보드는 전역 자원이라 열고 나면 반드시 닫아야 한다 — 실패 경로에서도 닫히도록 가드를 쓴다.
 /// `SetClipboardData` 성공 시 메모리 소유권이 시스템으로 넘어가므로 우리가 해제하지 않는다.
+/// 반환: 닫은 직후의 클립보드 시퀀스 번호(`clear_windows_if` 의 소유 판정용).
 #[cfg(windows)]
-fn set_windows(paths: &[PathBuf]) -> Result<(), DuetError> {
+fn set_windows(paths: &[PathBuf]) -> Result<i64, DuetError> {
     use windows::Win32::Foundation::HANDLE;
     use windows::Win32::System::DataExchange::{
-        CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
+        CloseClipboard, EmptyClipboard, GetClipboardSequenceNumber, OpenClipboard,
+        SetClipboardData,
     };
     use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
     use windows::Win32::System::Ole::CF_HDROP;
@@ -159,8 +220,10 @@ fn set_windows(paths: &[PathBuf]) -> Result<(), DuetError> {
 
         SetClipboardData(CF_HDROP.0 as u32, HANDLE(hmem.0))
             .map_err(|e| DuetError::Io(format!("SetClipboardData: {e}")))?;
+        // 가드를 먼저 풀어 CloseClipboard 한 뒤의 번호를 읽는다(닫을 때까지가 한 번의 변경).
+        drop(_guard);
+        Ok(i64::from(GetClipboardSequenceNumber()))
     }
-    Ok(())
 }
 
 /// Linux `text/uri-list` 쓰기 — Wayland `wl-copy`, X11 `xclip` 중 있는 것을 쓴다.

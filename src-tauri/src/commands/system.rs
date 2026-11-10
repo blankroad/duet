@@ -879,11 +879,27 @@ pub async fn local_abs_paths(items: Vec<EntryRef>) -> Result<Vec<PathBuf>, DuetE
 ///
 /// 경로는 프론트에서 받지 않고 백엔드가 EntryRef 에서 만든다(§1/§7). 원격(SSH) 항목은
 /// 로컬 경로가 없어 `NotSupported` — 호출부는 무시하고 인앱 복사만 유지하면 된다.
+/// 그때 OS 클립보드에 duet 의 **예전** 로컬 복사가 그대로 남아 있으면 비운다 — 안 그러면
+/// Finder/탐색기 붙여넣기가 방금 복사한 원격 항목이 아닌 옛 파일을 붙인다(fileops-36).
 #[tauri::command]
 #[specta::specta]
 pub async fn set_os_file_clipboard(items: Vec<EntryRef>) -> Result<(), DuetError> {
-    let paths = local_paths_of(&items, "os clipboard")?;
-    crate::platform::set_file_clipboard(&paths)
+    tokio::task::spawn_blocking(move || set_os_file_clipboard_blocking(&items))
+        .await
+        .map_err(|e| DuetError::Io(format!("clipboard task join: {e}")))?
+}
+
+/// `set_os_file_clipboard` 본체 — osascript·Win32 호출이 블로킹이라 분리.
+fn set_os_file_clipboard_blocking(items: &[EntryRef]) -> Result<(), DuetError> {
+    match local_paths_of(items, "os clipboard") {
+        Ok(paths) => crate::platform::set_file_clipboard(&paths),
+        Err(e) => {
+            if let Err(clear) = crate::platform::clear_file_clipboard_if_owned() {
+                tracing::warn!(error = %clear, "stale os file clipboard not cleared");
+            }
+            Err(e)
+        }
+    }
 }
 
 #[cfg(test)]

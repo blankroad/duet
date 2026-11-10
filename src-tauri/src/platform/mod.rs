@@ -29,6 +29,12 @@ pub fn set_file_clipboard(paths: &[std::path::PathBuf]) -> Result<(), DuetError>
     file_clipboard::set(paths)
 }
 
+/// OS 클립보드가 아직 duet 이 마지막으로 올린 파일 목록이면 비운다(비웠으면 true).
+/// 그사이 다른 앱에서 복사한 내용은 건드리지 않는다. Linux 는 판정 수단이 없어 항상 false.
+pub fn clear_file_clipboard_if_owned() -> Result<bool, DuetError> {
+    file_clipboard::clear_if_owned()
+}
+
 /// 셸 컨텍스트 메뉴 항목(재귀 트리) — IContextMenu 가 채운 HMENU 를 열거한 결과(Tier 2).
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct ShellMenuItem {
