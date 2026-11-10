@@ -510,7 +510,6 @@ async fn checksum_known_abc_all_supported_algorithms_and_directory_error() {
 }
 
 #[tokio::test]
-#[ignore = "sync-compare repro: F-sol-04 content metadata filters ignored"]
 async fn content_search_honors_metadata_filters() {
     let t = tempdir().unwrap();
     std::fs::write(t.path().join("a"), b"needle").unwrap();
@@ -532,7 +531,6 @@ async fn content_search_honors_metadata_filters() {
 }
 
 #[tokio::test]
-#[ignore = "sync-compare repro: F-sol-05 filename search misses NFD"]
 async fn filename_search_matches_canonically_equivalent_korean() {
     let t = tempdir().unwrap();
     std::fs::write(t.path().join("한글.txt".nfd().collect::<String>()), b"x").unwrap();
@@ -600,7 +598,6 @@ async fn filename_and_index_do_not_follow_symlink_cycle() {
 }
 
 #[tokio::test]
-#[ignore = "sync-compare repro: F-sol-05 indexed search misses NFD"]
 async fn index_matches_canonically_equivalent_korean() {
     let t = tempdir().unwrap();
     let cache = tempdir().unwrap();
@@ -625,7 +622,6 @@ async fn index_matches_canonically_equivalent_korean() {
 }
 
 #[tokio::test]
-#[ignore = "sync-compare repro: F-sol-11 index ignores hidden exclusion"]
 async fn index_respects_hidden_exclusion() {
     let t = tempdir().unwrap();
     std::fs::write(t.path().join(".hidden_needle"), b"x").unwrap();
@@ -756,7 +752,6 @@ async fn compare_ignore_glob_backend_matrix() {
 }
 
 #[tokio::test]
-#[ignore = "sync-compare repro: F-sol-08 cache filenames alias roots"]
 async fn index_cache_names_do_not_alias_different_roots() {
     let t = tempdir().unwrap();
     let cache = tempdir().unwrap();

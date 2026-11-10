@@ -163,7 +163,7 @@ pub async fn index_search(
     }
     // 로컬은 전역(전체 드라이브) 인덱스가 준비됐으면 그걸로 — 어디서 검색하든 전체 검색.
     if matches!(root.source, SourceId::Local) {
-        if let Some(hits) = index.query_global_local(&pattern, &opts).await {
+        if let Some(hits) = index.query_global_local(&root.path, &pattern, &opts).await {
             return Ok(hits);
         }
         // 전역 아직 빌드 전 → 현재 폴더 온디맨드로 폴백(즉시성 유지).

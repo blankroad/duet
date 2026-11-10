@@ -59,6 +59,16 @@ impl CompactIndex {
         self.kinds.len()
     }
 
+    /// i번째 항목의 전체 경로.
+    fn path_at(&self, i: usize) -> &str {
+        &self.paths[self.path_off[i] as usize..self.path_off[i + 1] as usize]
+    }
+
+    /// i번째 항목의 소문자 파일명.
+    fn name_lower_at(&self, i: usize) -> &str {
+        &self.names_lower[self.name_off[i] as usize..self.name_off[i + 1] as usize]
+    }
+
     /// 디스크 캐시에서 읽은 인덱스의 구조 검사 — 배열 길이·오프셋이 어긋나면 검색 중
     /// 범위 밖 인덱싱·문자 경계 slice 로 panic 한다(SC-26). 어긋나면 캐시를 버리고 새로 만든다.
     fn is_consistent(&self) -> bool {
@@ -114,6 +124,16 @@ impl CompactBuilder {
         self.sizes.push(p.size);
         self.mtimes.push(p.modified_ms.unwrap_or(i64::MIN));
     }
+    /// 다른 인덱스의 i번째 항목을 그대로 복사(경로·이름 재계산 없음).
+    fn push_from(&mut self, src: &CompactIndex, i: usize) {
+        self.paths.push_str(src.path_at(i));
+        self.path_off.push(self.paths.len() as u32);
+        self.names_lower.push_str(src.name_lower_at(i));
+        self.name_off.push(self.names_lower.len() as u32);
+        self.kinds.push(src.kinds[i]);
+        self.sizes.push(src.sizes[i]);
+        self.mtimes.push(src.mtimes[i]);
+    }
     /// 지금까지 push 된 항목으로 콤팩트 인덱스 스냅샷(빌더는 그대로 유지).
     /// 전체 드라이브 워크 도중 "부분 공개"용 — 검색이 빌드 완료를 안 기다려도 됨.
     fn snapshot(&self, built_at_ms: i64) -> CompactIndex {
@@ -160,12 +180,36 @@ pub fn index_key(source: &SourceId, root: &Path) -> String {
 }
 
 /// 키를 파일명 안전 형태로(슬래시/콜론 등 → `_`). 디스크 캐시 파일명용.
+/// `_` 치환은 `a-b`·`a_b` 같은 다른 root 를 같은 이름으로 만드므로 원래 키의 해시를 붙인다(SC-25).
+/// 읽기 좋은 앞부분은 길이를 잘라 파일명 길이 한도(255)를 넘지 않게 한다.
 fn key_to_filename(key: &str) -> String {
     let safe: String = key
         .chars()
         .map(|c| if c.is_alphanumeric() { c } else { '_' })
+        .take(120)
         .collect();
-    format!("{safe}.json")
+    format!("{safe}-{:016x}.json", fnv1a64(key.as_bytes()))
+}
+
+/// FNV-1a 64비트 — 앱 버전과 무관하게 같은 값(캐시 파일명이 재시작 뒤에도 같아야 한다).
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in bytes {
+        h ^= u64::from(*b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
+/// `path` 가 숨김 항목(점으로 시작하는 이름)이거나 그 아래에 있는지. `base` 아래 경로면 `base`
+/// 이후 부분만 본다 — 사용자가 이미 `~/.config` 안에서 검색하면 그 안의 항목은 숨김이 아니다.
+/// Windows 숨김 속성은 인덱스에 저장하지 않아 반영하지 않는다(점 이름만).
+fn is_hidden_below(path: &Path, base: &Path) -> bool {
+    let rel = path.strip_prefix(base).unwrap_or(path);
+    rel.components().any(|c| match c {
+        std::path::Component::Normal(n) => n.to_string_lossy().starts_with('.'),
+        _ => false,
+    })
 }
 
 fn now_ms() -> i64 {
@@ -261,8 +305,34 @@ impl FileIndex {
         })
         .await
         .map_err(|e| DuetError::Io(format!("index build join: {e}")))??;
+        let fresh = builder.finish(now_ms());
+        // 전역 인덱스가 있으면 그 root 아래 부분을 방금 읽은 목록으로 갈아 끼운다(SC-18).
+        // 로컬 검색은 전역 인덱스를 우선 쓰므로, 안 그러면 [재색인] 결과가 검색에 안 보인다.
+        self.splice_into_global(&root2, &fresh).await;
         let key = index_key(&SourceId::Local, &root2);
-        self.store_compact(key, builder.finish(now_ms())).await
+        self.store_compact(key, fresh).await
+    }
+
+    /// 전역 인덱스에서 `root` 아래 항목을 빼고 `fresh` 항목을 넣는다. 전역이 없으면 아무것도 안 한다.
+    /// 전역 빌드가 진행 중이면 다음 부분 공개가 이 결과를 덮을 수 있지만, 그 빌드도 같은 트리를 새로 읽는다.
+    async fn splice_into_global(&self, root: &Path, fresh: &CompactIndex) {
+        let mut guard = self.inner.write().await;
+        let Some(global) = guard.get(GLOBAL_LOCAL_KEY) else {
+            return;
+        };
+        let mut b = CompactBuilder::new();
+        for i in 0..global.count() {
+            let path = Path::new(global.path_at(i));
+            if path != root && path.starts_with(root) {
+                continue;
+            }
+            b.push_from(global, i);
+        }
+        for i in 0..fresh.count() {
+            b.push_from(fresh, i);
+        }
+        let built_at = global.built_at_ms;
+        guard.insert(GLOBAL_LOCAL_KEY.to_string(), b.finish(built_at));
     }
 
     /// 이미 수집된 경로 목록(원격 `find` 등)을 인덱스에 저장 + 디스크 캐시.
@@ -338,14 +408,16 @@ impl FileIndex {
     }
 
     /// 전역(전체 드라이브) 인덱스가 빌드돼 있으면 쿼리, 아니면 `None`.
+    /// `scope` 는 검색을 시작한 폴더 — 숨김 판정의 기준(그 아래는 상대 경로로 본다).
     pub async fn query_global_local(
         &self,
+        scope: &Path,
         pattern: &str,
         opts: &SearchOpts,
     ) -> Option<Vec<SearchHit>> {
         let g = self.inner.read().await;
         g.get(GLOBAL_LOCAL_KEY)
-            .map(|idx| run_query(idx, &SourceId::Local, pattern, opts))
+            .map(|idx| run_query(idx, &SourceId::Local, scope, pattern, opts))
     }
 
     async fn store_compact(
@@ -391,13 +463,13 @@ impl FileIndex {
         {
             let guard = self.inner.read().await;
             if let Some(idx) = guard.get(&key) {
-                return Ok(Some(run_query(idx, source, pattern, opts)));
+                return Ok(Some(run_query(idx, source, root, pattern, opts)));
             }
         }
         let Some(loaded) = self.load_from_disk(&key).await else {
             return Ok(None);
         };
-        let hits = run_query(&loaded, source, pattern, opts);
+        let hits = run_query(&loaded, source, root, pattern, opts);
         self.inner.write().await.insert(key, loaded);
         Ok(Some(hits))
     }
@@ -407,6 +479,7 @@ impl FileIndex {
 fn run_query(
     idx: &CompactIndex,
     source: &SourceId,
+    scope: &Path,
     pattern: &str,
     opts: &SearchOpts,
 ) -> Vec<SearchHit> {
@@ -417,19 +490,23 @@ fn run_query(
     let mut hits = Vec::new();
     let n = idx.count();
     for i in 0..n {
-        let path = &idx.paths[idx.path_off[i] as usize..idx.path_off[i + 1] as usize];
+        let path = idx.path_at(i);
         let matched = if opts.case_sensitive {
             // 대소문자 구분: 원본 파일명(경로 마지막 컴포넌트)으로 매칭.
             let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
             forms.iter().any(|p| name.contains(p.as_str()))
         } else {
-            let nl = &idx.names_lower[idx.name_off[i] as usize..idx.name_off[i + 1] as usize];
+            let nl = idx.name_lower_at(i);
             forms_lower.iter().any(|p| nl.contains(p.as_str()))
         };
         if !matched {
             continue;
         }
         let p = Path::new(path);
+        // 인덱스는 숨김까지 모두 담는다 — "숨김 포함" 이 꺼져 있으면 여기서 뺀다(SC-27).
+        if !opts.include_hidden && is_hidden_below(p, scope) {
+            continue;
+        }
         let name = match p.file_name().and_then(|x| x.to_str()) {
             Some(x) => x.to_string(),
             None => continue,
@@ -693,8 +770,15 @@ mod tests {
     async fn global_index_covers_all_roots_regardless_of_query_location() {
         // 두 개의 "드라이브"(임시 dir)를 전역 인덱스로 묶으면, 어느 위치 기준이든
         // 양쪽 모두 검색돼야 한다 — 폴더 단위가 아니라 호스트(PC) 단위.
-        let d1 = tempdir().unwrap();
-        let d2 = tempdir().unwrap();
+        // tempfile 기본 이름은 `.tmpXXXX`(숨김) — 숨김 제외 검색에 걸리지 않게 접두를 바꾼다.
+        let d1 = tempfile::Builder::new()
+            .prefix("duetidx")
+            .tempdir()
+            .unwrap();
+        let d2 = tempfile::Builder::new()
+            .prefix("duetidx")
+            .tempdir()
+            .unwrap();
         std::fs::write(d1.path().join("onlyone_alpha.txt"), b"x").unwrap();
         std::fs::write(d2.path().join("onlyone_beta.txt"), b"x").unwrap();
 
@@ -707,18 +791,18 @@ mod tests {
         assert!(n >= 2);
 
         let a = idx
-            .query_global_local("onlyone_alpha", &SearchOpts::default())
+            .query_global_local(Path::new("/"), "onlyone_alpha", &SearchOpts::default())
             .await
             .expect("global built");
         assert_eq!(a.len(), 1);
         let b = idx
-            .query_global_local("onlyone_beta", &SearchOpts::default())
+            .query_global_local(Path::new("/"), "onlyone_beta", &SearchOpts::default())
             .await
             .expect("global built");
         assert_eq!(b.len(), 1);
         // 공통 접두어 — 두 드라이브에 걸친 결과가 한 번에 나와야 함.
         let both = idx
-            .query_global_local("onlyone", &SearchOpts::default())
+            .query_global_local(Path::new("/"), "onlyone", &SearchOpts::default())
             .await
             .expect("global built");
         assert_eq!(both.len(), 2);
@@ -742,9 +826,21 @@ mod tests {
         let full = b.finish(0);
         assert_eq!(full.count(), 3);
 
-        let partial = run_query(&snap, &SourceId::Local, "a", &SearchOpts::default());
+        let partial = run_query(
+            &snap,
+            &SourceId::Local,
+            Path::new("/"),
+            "a",
+            &SearchOpts::default(),
+        );
         assert_eq!(partial.len(), 2);
-        let complete = run_query(&full, &SourceId::Local, "a", &SearchOpts::default());
+        let complete = run_query(
+            &full,
+            &SourceId::Local,
+            Path::new("/"),
+            "a",
+            &SearchOpts::default(),
+        );
         assert_eq!(complete.len(), 3);
     }
 
@@ -921,11 +1017,95 @@ mod tests {
 }
 
 #[cfg(test)]
+mod ux_smoke_browse {
+    use super::*;
+
+    #[tokio::test]
+    async fn reindex_splice_drops_deleted_and_keeps_other_roots() {
+        let a = tempfile::Builder::new()
+            .prefix("duetidx")
+            .tempdir()
+            .unwrap();
+        let b = tempfile::Builder::new()
+            .prefix("duetidx")
+            .tempdir()
+            .unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        std::fs::write(a.path().join("gone_needle"), b"x").unwrap();
+        std::fs::write(b.path().join("other_needle"), b"x").unwrap();
+        let idx = FileIndex::new(cache.path().into());
+        idx.build_global_from_roots(vec![a.path().into(), b.path().into()], |_| {})
+            .await
+            .unwrap();
+        std::fs::remove_file(a.path().join("gone_needle")).unwrap();
+        std::fs::write(a.path().join("fresh_needle"), b"x").unwrap();
+        idx.build_local(a.path()).await.unwrap();
+        let names = |hits: Vec<SearchHit>| -> Vec<String> {
+            let mut v: Vec<String> = hits.into_iter().map(|h| h.name).collect();
+            v.sort();
+            v
+        };
+        let hits = idx
+            .query_global_local(a.path(), "needle", &SearchOpts::default())
+            .await
+            .unwrap();
+        assert_eq!(names(hits), vec!["fresh_needle", "other_needle"]);
+    }
+
+    #[test]
+    fn hidden_is_judged_below_the_search_folder() {
+        let base = Path::new("/home/u/.config");
+        assert!(!is_hidden_below(Path::new("/home/u/.config/app/x"), base));
+        assert!(is_hidden_below(Path::new("/home/u/.config/.git/x"), base));
+        assert!(is_hidden_below(
+            Path::new("/home/u/.cache/x"),
+            Path::new("/home/u/p")
+        ));
+        assert!(!is_hidden_below(
+            Path::new("/home/u/p/x"),
+            Path::new("/home/u/p")
+        ));
+    }
+
+    #[tokio::test]
+    async fn global_query_hides_dot_entries_unless_asked() {
+        let d = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        std::fs::create_dir(d.path().join(".git")).unwrap();
+        std::fs::write(d.path().join(".git/needle_in_git"), b"x").unwrap();
+        std::fs::write(d.path().join("needle_plain"), b"x").unwrap();
+        let idx = FileIndex::new(cache.path().into());
+        idx.build_global_from_roots(vec![d.path().into()], |_| {})
+            .await
+            .unwrap();
+        let hits = idx
+            .query_global_local(d.path(), "needle", &SearchOpts::default())
+            .await
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        let opts = SearchOpts {
+            include_hidden: true,
+            ..Default::default()
+        };
+        let hits = idx
+            .query_global_local(d.path(), "needle", &opts)
+            .await
+            .unwrap();
+        assert_eq!(hits.len(), 2);
+    }
+
+    #[test]
+    fn cache_names_differ_for_lossy_equal_keys() {
+        assert_ne!(key_to_filename("local|/a-b"), key_to_filename("local|/a_b"));
+        assert!(key_to_filename(&"x".repeat(1000)).len() < 200);
+    }
+}
+
+#[cfg(test)]
 mod review_sync_compare {
     use super::*;
 
     #[tokio::test]
-    #[ignore = "sync-compare repro: F-sol-06 folder reindex leaves search-visible global index stale"]
     async fn global_results_reflect_folder_reindex() {
         let dir = tempfile::tempdir().unwrap();
         let cache = tempfile::tempdir().unwrap();
@@ -949,7 +1129,7 @@ mod review_sync_compare {
             .unwrap();
         assert_eq!(folder.len(), 1);
         let global = idx
-            .query_global_local("new_needle", &SearchOpts::default())
+            .query_global_local(dir.path(), "new_needle", &SearchOpts::default())
             .await
             .unwrap();
         assert_eq!(
