@@ -194,10 +194,12 @@ pub struct ExtractPlan {
     pub conflict: bool,
 }
 
-pub async fn extract_plan(
+/// 이 아카이브를 이 위치에서 풀 수 있는지 검사하고 포맷을 돌려준다 — 폴더로 풀기
+/// (`extract_plan`)와 여기에 풀기(`core::archive_here`)가 같은 규칙을 쓴다.
+pub(crate) async fn check_extractable(
     fs: &dyn FileSystem,
-    archive: EntryRef,
-) -> Result<ExtractPlan, DuetError> {
+    archive: &EntryRef,
+) -> Result<ArchiveFormat, DuetError> {
     let format = detect_format(&archive.name)
         .ok_or_else(|| DuetError::Io(format!("unsupported archive: {}", archive.name)))?;
     // 원격은 호스트 unzip/tar 로 풀리는 포맷만 — 충돌 백업 등 아무것도 건드리기 전에 거부.
@@ -211,6 +213,14 @@ pub async fn extract_plan(
     if meta.kind != EntryKind::File {
         return Err(DuetError::Io("not a regular file".into()));
     }
+    Ok(format)
+}
+
+pub async fn extract_plan(
+    fs: &dyn FileSystem,
+    archive: EntryRef,
+) -> Result<ExtractPlan, DuetError> {
+    let format = check_extractable(fs, &archive).await?;
     let stem = archive_stem(&archive.name);
     let dest_dir = fs.join(&archive.location.path, &stem);
     let conflict = fs.metadata(&dest_dir).await.is_ok();
@@ -270,12 +280,20 @@ pub async fn extract_execute(
 
         match &plan.source {
             SourceId::Local => {
-                let into = if single {
-                    plan.archive_dir.path.as_path()
+                // 단일 파일은 plan 이 정한 이름으로 쓴다 — 일괄 해제의 "둘 다 유지"가
+                // `log (2).txt` 를 고르면 그 이름이어야 한다(안 그러면 기존 `log.txt` 를 덮는다).
+                let (into, out_name) = if single {
+                    let name = plan
+                        .dest_dir
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .map(str::to_owned)
+                        .ok_or_else(|| DuetError::Io("invalid extract destination".into()))?;
+                    (plan.archive_dir.path.as_path(), Some(name))
                 } else {
-                    plan.dest_dir.as_path()
+                    (plan.dest_dir.as_path(), None)
                 };
-                extract_local(&archive_path, into, plan.format, password).await
+                extract_local(&archive_path, into, plan.format, password, out_name).await
             }
             SourceId::Ssh { connection_id, .. } => {
                 let pool = ctx.pool.as_ref().ok_or_else(|| {
@@ -332,26 +350,47 @@ pub async fn extract_execute(
 }
 
 /// 로컬 아카이브 해제 — blocking IO 라 spawn_blocking. `password` 는 암호 zip 용(없으면 None).
-async fn extract_local(
+/// `single_out` 은 단일 파일 압축의 출력 이름 (None = 아카이브 이름에서 도출).
+pub(crate) async fn extract_local(
     archive: &Path,
     dest: &Path,
     fmt: ArchiveFormat,
     password: Option<String>,
+    single_out: Option<String>,
 ) -> Result<UnpackReport, DuetError> {
     let archive = archive.to_path_buf();
     let dest = dest.to_path_buf();
     tokio::task::spawn_blocking(move || {
-        extract_local_blocking(&archive, &dest, fmt, password.as_deref())
+        extract_local_named(
+            &archive,
+            &dest,
+            fmt,
+            password.as_deref(),
+            single_out.as_deref(),
+        )
     })
     .await
     .map_err(|e| DuetError::Io(format!("extract task join: {e}")))?
 }
 
+/// 테스트용 동기 해제 (단일 파일 이름은 도출).
+#[cfg(test)]
 fn extract_local_blocking(
     archive: &Path,
     dest: &Path,
     fmt: ArchiveFormat,
     password: Option<&str>,
+) -> Result<UnpackReport, DuetError> {
+    extract_local_named(archive, dest, fmt, password, None)
+}
+
+/// 동기 해제 본체. `single_out` = 단일 파일 압축의 출력 이름 (None = 아카이브 이름에서 도출).
+fn extract_local_named(
+    archive: &Path,
+    dest: &Path,
+    fmt: ArchiveFormat,
+    password: Option<&str>,
+    single_out: Option<&str>,
 ) -> Result<UnpackReport, DuetError> {
     let file =
         std::fs::File::open(archive).map_err(|e| DuetError::Io(format!("open archive: {e}")))?;
@@ -363,12 +402,15 @@ fn extract_local_blocking(
         Layout::Zip => report = zip_unpack::unpack_zip(archive, dest, password)?,
         Layout::Tar(codec) => report = tar_unpack::unpack(decode_reader(file, codec)?, dest)?,
         Layout::Single(codec) => {
-            // 단일 파일 → dest/<압축 확장자 뗀 이름>.
-            let out_name = archive
-                .file_name()
-                .and_then(|s| s.to_str())
-                .map(archive_stem)
-                .ok_or_else(|| DuetError::Io("invalid archive name".into()))?;
+            // 단일 파일 → dest/<지정 이름 또는 압축 확장자 뗀 이름>.
+            let out_name = match single_out {
+                Some(name) => name.to_owned(),
+                None => archive
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .map(archive_stem)
+                    .ok_or_else(|| DuetError::Io("invalid archive name".into()))?,
+            };
             let mut reader = decode_reader(file, Some(codec))?;
             let mut out = std::fs::File::create(dest.join(out_name))
                 .map_err(|e| DuetError::Io(format!("create output: {e}")))?;
@@ -733,7 +775,7 @@ pub async fn open_for_browse(
             tokio::fs::create_dir_all(&dest)
                 .await
                 .map_err(|e| DuetError::Io(format!("create temp dir: {e}")))?;
-            let report = match extract_local(&archive_path, &dest, format, password).await {
+            let report = match extract_local(&archive_path, &dest, format, password, None).await {
                 Ok(report) => report,
                 Err(e) => {
                     let _ = tokio::fs::remove_dir_all(&token_dir).await;
