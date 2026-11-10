@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Filter, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { commands, type CompareRules } from "@/types/bindings";
@@ -27,16 +27,21 @@ export function CompareRulesBar({
   // 사용자가 허용오차를 직접 골랐는가. 원격 때문에 자동으로 올린 ±2s 를 다음 로컬 비교의
   // 기본값으로 저장하지 않으려고 — 직접 고른 값만 영속한다.
   const [tolTouched, setTolTouched] = useState(false);
+  // 늦게 도착한 설정 프리필이 사용자가 이미 고친 칸을 덮어쓰지 않게(비동기 응답이라 ref).
+  const tolTouchedRef = useRef(false);
+  const ignoreTouchedRef = useRef(false);
 
-  // 마운트 시 저장된 규칙으로 프리필.
+  // 마운트 시 저장된 규칙으로 프리필 — 사용자가 먼저 손댄 칸은 건너뛴다.
   useEffect(() => {
     void (async () => {
       const r = await commands.settingsGet();
       if (r.status === "ok") {
-        setIgnore((r.data.compare_ignore_globs ?? []).join(" "));
-        setTol(
-          initialTolerance(r.data.compare_mtime_tolerance_ms ?? 0, remote),
-        );
+        if (!ignoreTouchedRef.current)
+          setIgnore((r.data.compare_ignore_globs ?? []).join(" "));
+        if (!tolTouchedRef.current)
+          setTol(
+            initialTolerance(r.data.compare_mtime_tolerance_ms ?? 0, remote),
+          );
       }
     })();
   }, [remote]);
@@ -62,7 +67,10 @@ export function CompareRulesBar({
       <Filter size={11} className="text-fg-muted" />
       <input
         value={ignore}
-        onChange={(e) => setIgnore(e.target.value)}
+        onChange={(e) => {
+          ignoreTouchedRef.current = true;
+          setIgnore(e.target.value);
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !isImeComposing(e)) run();
         }}
@@ -72,6 +80,7 @@ export function CompareRulesBar({
       <select
         value={tol}
         onChange={(e) => {
+          tolTouchedRef.current = true;
           setTol(Number(e.target.value));
           setTolTouched(true);
         }}

@@ -175,3 +175,66 @@ describe("CompareDialog 머지 규칙 (SC-07)", () => {
     });
   });
 });
+
+describe("CompareRulesBar 늦은 설정 프리필 (SC-11 R2)", () => {
+  it("사용자가 먼저 고른 허용오차·무시 패턴을 늦게 온 설정이 덮지 않는다", async () => {
+    type SettingsResult = Awaited<ReturnType<typeof commands.settingsGet>>;
+    let resolveSettings!: (v: SettingsResult) => void;
+    vi.mocked(commands.settingsGet).mockReturnValueOnce(
+      new Promise<SettingsResult>((done) => {
+        resolveSettings = done;
+      }),
+    );
+    vi.mocked(commands.fsCompareDirs).mockResolvedValue({
+      status: "ok",
+      data: plan("same"),
+    });
+    const remotePlan: ComparePlan = {
+      ...plan("same"),
+      right: {
+        source: {
+          kind: "ssh",
+          connection_id: "c1",
+          host_ip: "10.0.0.2",
+          user: "u",
+        },
+        path: "/srv/r",
+      },
+    };
+    render(
+      <CompareDialog
+        plan={remotePlan}
+        onClose={() => {}}
+        onMerge={() => {}}
+        onApply={() => {}}
+      />,
+    );
+    const tol = screen.getByTitle(/mtime tolerance/) as HTMLSelectElement;
+    const ignore = screen.getByPlaceholderText(/ignore/i) as HTMLInputElement;
+    expect(tol.value).toBe("2000"); // 원격 기본값
+    fireEvent.change(tol, { target: { value: "0" } });
+    fireEvent.change(ignore, { target: { value: "dist" } });
+    await act(async () => {
+      resolveSettings({
+        status: "ok",
+        data: {
+          compare_ignore_globs: ["saved"],
+          compare_mtime_tolerance_ms: 0,
+        },
+      } as unknown as SettingsResult);
+    });
+    expect(tol.value).toBe("0");
+    expect(ignore.value).toBe("dist");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Re-compare/ }));
+    });
+    expect(vi.mocked(commands.fsCompareDirs).mock.calls.at(-1)?.[2]).toEqual({
+      ignore_globs: ["dist"],
+      mtime_tolerance_ms: 0,
+    });
+    expect(
+      vi.mocked(commands.settingsSet).mock.calls.at(-1)?.[0]
+        .compare_mtime_tolerance_ms,
+    ).toBe(0);
+  });
+});
