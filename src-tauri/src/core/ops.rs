@@ -2588,7 +2588,41 @@ async fn any_exists(fs: Option<&dyn FileSystem>, paths: &[PathBuf]) -> bool {
     false
 }
 
-/// 한 행을 relay 로 적용 — dst 존재면 백업 후 복사, 아니면 생성 기록 후 복사.
+/// 한 행 적용 결과. 비교 뒤 원본이 사라진 행은 받는 쪽을 건드리지 않고 건너뛴다(SC-08).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RowApplied {
+    Done,
+    SourceMissing,
+}
+
+/// 원본이 그새 사라져 건너뛴 행들을 한 오류로 보고한다(앞 몇 개 이름만).
+fn missing_sources_error(missing: &[String]) -> DuetError {
+    const SHOWN: usize = 5;
+    let mut names = missing
+        .iter()
+        .take(SHOWN)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
+    if missing.len() > SHOWN {
+        names.push_str(&format!(" (+{} more)", missing.len() - SHOWN));
+    }
+    DuetError::NotFound(format!(
+        "source no longer exists — skipped {} item(s), destination left as is: {names}",
+        missing.len()
+    ))
+}
+
+/// 원본이 있는지 먼저 본다 — 없으면(NotFound) `SourceMissing`, 다른 오류는 그대로 전파.
+async fn source_present(fs: &dyn FileSystem, src: &std::path::Path) -> Result<bool, DuetError> {
+    match fs.metadata(src).await {
+        Ok(_) => Ok(true),
+        Err(DuetError::NotFound(_)) => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+/// 한 행을 relay 로 적용 — 원본 확인 후, dst 존재면 백업 후 복사, 아니면 생성 기록 후 복사.
 #[allow(clippy::too_many_arguments)]
 async fn apply_one_relay(
     direction: &ApplyDirection,
@@ -2598,7 +2632,7 @@ async fn apply_one_relay(
     right_fs: &dyn FileSystem,
     right: &Location,
     st: &mut ApplyState,
-) -> Result<(), DuetError> {
+) -> Result<RowApplied, DuetError> {
     let (src_fs, src_path, dst_fs, dst_path, dst_is_left) = match direction {
         ApplyDirection::ToRight => (
             left_fs,
@@ -2634,8 +2668,13 @@ async fn apply_one_relay(
             ),
             true,
         ),
-        ApplyDirection::Skip => return Ok(()),
+        ApplyDirection::Skip => return Ok(RowApplied::Done),
     };
+    // 원본부터 확인 — 비교 뒤 원본이 사라졌으면 받는 쪽을 `.bak` 으로 치우기 전에
+    // 건너뛴다(SC-08). 예전엔 백업 rename 후 복사가 NotFound 로 실패해 원래 이름이 비었다.
+    if !source_present(src_fs, &src_path).await? {
+        return Ok(RowApplied::SourceMissing);
+    }
     let mut created = false;
     if dst_fs.metadata(&dst_path).await.is_ok() {
         let dst_source = if dst_is_left {
@@ -2680,7 +2719,7 @@ async fn apply_one_relay(
             st.right_pairs.push(pair);
         }
     }
-    res
+    res.map(|()| RowApplied::Done)
 }
 
 /// in-Rust relay 적용 (로컬·cross-host). 실패/취소여도 부분 진행분을 journal 에 기록(§4).
@@ -2699,22 +2738,30 @@ async fn apply_relay(
     let mut done = 0u64;
     let mut st = ApplyState::default();
     let mut outcome: Result<(), DuetError> = Ok(());
+    let mut missing: Vec<String> = Vec::new();
     for (direction, rel) in &work {
         if cancel_token.is_cancelled() {
             outcome = Err(DuetError::Cancelled);
             break;
         }
         let rel_path = std::path::Path::new(rel);
-        if let Err(e) = apply_one_relay(
+        match apply_one_relay(
             direction, rel_path, left_fs, &left, right_fs, &right, &mut st,
         )
         .await
         {
-            outcome = Err(e);
-            break;
+            Ok(RowApplied::Done) => {}
+            Ok(RowApplied::SourceMissing) => missing.push(rel.clone()),
+            Err(e) => {
+                outcome = Err(e);
+                break;
+            }
         }
         done += 1;
         emit_merge_progress(&progress, done, total);
+    }
+    if outcome.is_ok() && !missing.is_empty() {
+        outcome = Err(missing_sources_error(&missing));
     }
     if !apply_state_changed((Some(left_fs), Some(right_fs)), &st).await {
         if let Err(e) = outcome {
@@ -2759,22 +2806,30 @@ async fn apply_same_host(
     let mut done = 0u64;
     let mut st = ApplyState::default();
     let mut outcome: Result<(), DuetError> = Ok(());
+    let mut missing: Vec<String> = Vec::new();
     for (direction, rel) in &work {
         if cancel_token.is_cancelled() {
             outcome = Err(DuetError::Cancelled);
             break;
         }
         let rel_path = std::path::Path::new(rel);
-        if let Err(e) = apply_one_same_host(
+        match apply_one_same_host(
             direction, rel_path, &left, left_conn, &right, right_conn, pool, &mut st,
         )
         .await
         {
-            outcome = Err(e);
-            break;
+            Ok(RowApplied::Done) => {}
+            Ok(RowApplied::SourceMissing) => missing.push(rel.clone()),
+            Err(e) => {
+                outcome = Err(e);
+                break;
+            }
         }
         done += 1;
         emit_merge_progress(&progress, done, total);
+    }
+    if outcome.is_ok() && !missing.is_empty() {
+        outcome = Err(missing_sources_error(&missing));
     }
     let left_fs = ssh_fs_opt(pool, left_conn).await;
     let right_fs = ssh_fs_opt(pool, right_conn).await;
@@ -2803,7 +2858,7 @@ async fn apply_one_same_host(
     right_conn: &crate::types::ConnectionId,
     pool: &Arc<crate::services::connection_pool::ConnectionPool>,
     st: &mut ApplyState,
-) -> Result<(), DuetError> {
+) -> Result<RowApplied, DuetError> {
     let (src_path, src_conn, dst_path, dst_conn, dst_is_left) = match direction {
         ApplyDirection::ToRight => (
             remote_join(&left.path, rel),
@@ -2819,8 +2874,13 @@ async fn apply_one_same_host(
             left_conn,
             true,
         ),
-        ApplyDirection::Skip => return Ok(()),
+        ApplyDirection::Skip => return Ok(RowApplied::Done),
     };
+    // 원본부터 확인(SC-08) — 없으면 받는 쪽을 백업으로 치우지 않고 건너뛴다.
+    let src_fs = crate::fs::SshFs::new(pool.get(src_conn).await?);
+    if !source_present(&src_fs, &src_path).await? {
+        return Ok(RowApplied::SourceMissing);
+    }
     // dst 존재면 SFTP rename 으로 백업 → dst 부재화(이후 host_side_copy_one 이 복사).
     let dst_fs = crate::fs::SshFs::new(pool.get(dst_conn).await?);
     let mut created = false;
@@ -2861,7 +2921,7 @@ async fn apply_one_same_host(
             st.right_pairs.push(pair);
         }
     }
-    Ok(())
+    Ok(RowApplied::Done)
 }
 
 // === 3-way 자동 적용 (base 대비 변경/추가/삭제를 반대편에 반영) ===
@@ -2956,6 +3016,7 @@ pub async fn apply_three_way(
     let total = plan.auto as u64;
     let mut done = 0u64;
     let mut outcome: Result<(), DuetError> = Ok(());
+    let mut missing: Vec<String> = Vec::new();
 
     for entry in &plan.entries {
         if cancel_token.is_cancelled() {
@@ -2981,16 +3042,31 @@ pub async fn apply_three_way(
                 }
             }
             // 한쪽 삭제 → 반대편에서도 휴지통으로(삭제 전파).
-            S::LeftDeleted => trash_rel(right_fs, &right, rel, &batch, &mut trashed_right).await,
-            S::RightDeleted => trash_rel(left_fs, &left, rel, &batch, &mut trashed_left).await,
-            _ => Ok(()),
+            S::LeftDeleted => trash_rel(right_fs, &right, rel, &batch, &mut trashed_right)
+                .await
+                .map(|()| RowApplied::Done),
+            S::RightDeleted => trash_rel(left_fs, &left, rel, &batch, &mut trashed_left)
+                .await
+                .map(|()| RowApplied::Done),
+            _ => Ok(RowApplied::Done),
         };
-        if let Err(e) = res {
-            outcome = Err(e);
-            break;
+        match res {
+            Ok(RowApplied::Done) => {}
+            // 비교 뒤 원본이 사라짐 — 받는 쪽 그대로, 적용 수에서 제외(SC-08).
+            Ok(RowApplied::SourceMissing) => {
+                missing.push(entry.rel.clone());
+                continue;
+            }
+            Err(e) => {
+                outcome = Err(e);
+                break;
+            }
         }
         done += 1;
         emit_merge_progress(&progress, done, total);
+    }
+    if outcome.is_ok() && !missing.is_empty() {
+        outcome = Err(missing_sources_error(&missing));
     }
 
     // SC-40: 아무것도 바꾸지 않고 실패·취소했으면 빈 기록을 남기지 않는다.

@@ -355,7 +355,6 @@ async fn sc07_nested_log_ignore_survives_merge() {
 }
 
 #[tokio::test]
-#[ignore = "sync-compare repro: SC-08 independently confirmed in sol-2"]
 async fn sc08_missing_reverse_nested_source_keeps_destination() {
     let (t, l, r) = trees();
     std::fs::create_dir(l.join("Case")).unwrap();
@@ -377,7 +376,8 @@ async fn sc08_missing_reverse_nested_source_keeps_destination() {
     )
     .await;
     assert!(out.is_err());
-    assert!(c.journal.peek_undoable().await.unwrap().is_some());
+    // 건너뛴 행뿐이라 바뀐 것이 없다 — 빈 기록 없음(SC-40). 예전엔 .bak 로 치운 뒤라 기록이 있었다.
+    assert!(c.journal.peek_undoable().await.unwrap().is_none());
     assert_eq!(
         std::fs::read(l.join("Case/파일.txt")).ok().as_deref(),
         Some(&b"left original"[..]),

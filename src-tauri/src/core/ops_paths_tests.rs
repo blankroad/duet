@@ -206,17 +206,21 @@ async fn relay_apply_verify_trash_and_signatures_use_each_filesystem() {
     let r = right.loc("/R");
     for direction in [ApplyDirection::ToLeft, ApplyDirection::ToRight] {
         let mut st = ApplyState::default();
-        assert!(apply_one_relay(
-            &direction,
-            Path::new("sub/x"),
-            &left,
-            &l,
-            &right,
-            &r,
-            &mut st
-        )
-        .await
-        .is_err());
+        // 원본이 없는 fixture — SC-08 이후 받는 쪽을 건드리기 전에 "원본 없음"으로 건너뛴다.
+        // 원본 확인은 원본 쪽 fs 의 결합 규칙으로 한다(방향마다 한쪽씩 기록).
+        assert!(matches!(
+            apply_one_relay(
+                &direction,
+                Path::new("sub/x"),
+                &left,
+                &l,
+                &right,
+                &r,
+                &mut st
+            )
+            .await,
+            Ok(RowApplied::SourceMissing)
+        ));
     }
     assert!(left.saw(Path::new("/L/__fs/sub/x")));
     assert!(right.saw(Path::new("/R/__fs/sub/x")));

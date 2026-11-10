@@ -76,10 +76,9 @@ fn has_backup_sibling(dir: &Path, stem: &str) -> bool {
 // ─── C-10 비교 결과 적용 ────────────────────────────────────────────────
 
 /// 비교 뒤 소스 파일이 사라졌다(다른 프로그램이 지움 등). 그 행을 적용하면
-/// **받는 쪽 파일이 그대로 있어야** 한다. 현재는 받는 쪽을 먼저 `.bak` 으로 치운 뒤
-/// 복사가 NotFound 로 실패 — 원래 이름의 파일이 사라진 채 오류만 남는다.
+/// **받는 쪽 파일이 그대로 있어야** 한다(SC-08). 예전엔 받는 쪽을 먼저 `.bak` 으로 치운 뒤
+/// 복사가 NotFound 로 실패 — 원래 이름의 파일이 사라진 채 오류만 남았다.
 #[tokio::test]
-#[ignore = "sync-compare repro: apply_compare moves dst to .bak before checking src exists"]
 async fn apply_compare_missing_source_must_not_displace_destination() {
     let (dir, l, r) = sides();
     std::fs::write(r.join("a.txt"), b"keep-me").unwrap();
@@ -106,9 +105,10 @@ async fn apply_compare_missing_source_must_not_displace_destination() {
     );
 }
 
-/// 위 상황의 현재 동작 증거: 실패해도 journal 은 남아 Ctrl+Z 로 원래 이름이 돌아온다.
+/// 원본이 사라진 행만 적용하면 아무것도 바뀌지 않는다 — `.bak` 도, 빈 journal 기록도 없다
+/// (SC-08 + SC-40). 오류는 건너뛴 행 이름을 담는다.
 #[tokio::test]
-async fn apply_compare_missing_source_is_recoverable_by_undo() {
+async fn apply_compare_missing_source_leaves_no_backup_or_journal() {
     let (dir, l, r) = sides();
     std::fs::write(r.join("a.txt"), b"keep-me").unwrap();
     let fs = LocalFs::new();
@@ -124,27 +124,25 @@ async fn apply_compare_missing_source_is_recoverable_by_undo() {
         None,
     )
     .await;
-    assert!(res.is_err());
-    assert!(
-        !r.join("a.txt").exists(),
-        "current behaviour: dst displaced"
-    );
-    assert!(
-        has_backup_sibling(&r, "a.txt"),
-        "current behaviour: .bak left"
-    );
-    let entry = ctx
-        .journal
-        .peek_undoable()
-        .await
-        .unwrap()
-        .expect("journaled");
-    let out = undo_fixture::undo_tmp(&entry).await;
-    assert!(matches!(out.kind, UndoKind::Ok));
+    match res {
+        Err(duet_lib::types::DuetError::NotFound(msg)) => {
+            assert!(msg.contains("a.txt"), "skipped row named: {msg}")
+        }
+        other => panic!("expected NotFound for the skipped row, got {other:?}"),
+    }
     assert_eq!(std::fs::read(r.join("a.txt")).unwrap(), b"keep-me");
+    assert!(
+        !has_backup_sibling(&r, "a.txt"),
+        "no .bak for a skipped row"
+    );
+    assert!(
+        ctx.journal.peek_undoable().await.unwrap().is_none(),
+        "nothing changed → no journal entry"
+    );
 }
 
-/// 중간 실패(두 번째 행 소스 없음) — 첫 행 결과까지 journal 에 남아 Ctrl+Z 로 복원.
+/// 두 번째 행 소스 없음 — 그 행만 건너뛰고(SC-08) 나머지는 적용, 적용분은 journal 에 남아
+/// Ctrl+Z 로 복원. 결과는 건너뛴 행을 알리는 오류.
 #[tokio::test]
 async fn apply_compare_partial_failure_journals_and_undo_restores() {
     let (dir, l, r) = sides();
@@ -168,9 +166,18 @@ async fn apply_compare_partial_failure_journals_and_undo_restores() {
         None,
     )
     .await;
-    assert!(res.is_err());
+    match &res {
+        Err(duet_lib::types::DuetError::NotFound(msg)) => {
+            assert!(msg.contains("b-missing.txt"), "skipped row named: {msg}")
+        }
+        other => panic!("expected NotFound for the skipped row, got {other:?}"),
+    }
     assert_eq!(std::fs::read(r.join("a.txt")).unwrap(), b"L-a");
-    assert!(!r.join("c.txt").exists(), "stops at first failure");
+    assert_eq!(
+        std::fs::read(r.join("c.txt")).unwrap(),
+        b"L-c",
+        "rows after the skipped one are still applied"
+    );
     let entry = ctx
         .journal
         .peek_undoable()
@@ -181,6 +188,7 @@ async fn apply_compare_partial_failure_journals_and_undo_restores() {
     assert!(matches!(out.kind, UndoKind::Ok));
     assert_eq!(std::fs::read(r.join("a.txt")).unwrap(), b"R-a");
     assert!(!r.join("b-missing.txt").exists());
+    assert!(!r.join("c.txt").exists(), "undo removes the applied c.txt");
 }
 
 /// 타입 불일치(왼쪽 폴더 vs 오른쪽 파일) 행 적용 → 폴더로 교체, Ctrl+Z 로 파일 복원.
