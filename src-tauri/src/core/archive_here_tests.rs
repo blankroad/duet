@@ -19,6 +19,8 @@ struct HereFs {
     fail_rename_to: Option<String>,
     /// 이 이름을 예약(create_new_file)한 직후 다른 프로그램이 내용을 쓴 것처럼 흉내.
     scribble_after_reserve: Option<String>,
+    /// true 면 휴지통이 실패한다 (남은 준비 폴더 보고·부분 되돌림 확인용).
+    fail_trash: bool,
 }
 
 impl HereFs {
@@ -30,6 +32,7 @@ impl HereFs {
             trashed: Arc::default(),
             fail_rename_to: None,
             scribble_after_reserve: None,
+            fail_trash: false,
         }
     }
     fn trashed(&self) -> Vec<PathBuf> {
@@ -73,6 +76,9 @@ impl FileSystem for HereFs {
         LocalFs.remove_empty_dir(p).await
     }
     async fn trash(&self, p: &Path, _: &str) -> Result<TrashLocation, DuetError> {
+        if self.fail_trash {
+            return Err(DuetError::PermissionDenied("fixture: trash refused".into()));
+        }
         let mut log = self.trashed.lock().unwrap();
         let dest = self.trash_dir.join(format!("{}", log.len()));
         std::fs::rename(p, &dest).map_err(DuetError::from)?;
@@ -109,13 +115,26 @@ impl FileSystem for HereFs {
     }
 }
 
+/// journal 실패 때의 되돌림이 쓰는 fs — fixture 그대로 (OS 휴지통을 부르지 않는다).
+struct HereResolver(HereFs);
+
+#[async_trait]
+impl FsResolver for HereResolver {
+    async fn fs(&self, _: &SourceId) -> Result<Box<dyn FileSystem>, DuetError> {
+        Ok(Box::new(self.0.clone()))
+    }
+}
+
 // ---------- 도우미 ----------
 
 struct Env {
     _t: tempfile::TempDir,
     work: PathBuf,
+    ctx_dir: PathBuf,
     ctx: OpCtx,
     fs: HereFs,
+    /// 되돌림용 fs — 기본은 `fs` 와 같은 설정.
+    undo_fs: Option<HereFs>,
 }
 
 async fn env() -> Env {
@@ -138,8 +157,10 @@ async fn env() -> Env {
     Env {
         _t: t,
         work,
+        ctx_dir: c,
         ctx,
         fs,
+        undo_fs: None,
     }
 }
 
@@ -164,16 +185,55 @@ impl Env {
             },
             name: name.into(),
         };
+        self.run(archive, policy, pw.map(str::to_owned), &[]).await
+    }
+    /// 엔진 호출 — 성공이면 (entry, report, summary).
+    async fn run(
+        &self,
+        archive: EntryRef,
+        policy: ExtractConflict,
+        password: Option<String>,
+        protect: &[PathBuf],
+    ) -> Result<(JournalEntry, UnpackReport, ExtractHereSummary), DuetError> {
+        let out = self.outcome(archive, policy, password, protect).await;
+        out.result
+            .map(|(entry, report)| (entry, report, out.summary))
+    }
+    async fn outcome(
+        &self,
+        archive: EntryRef,
+        policy: ExtractConflict,
+        password: Option<String>,
+        protect: &[PathBuf],
+    ) -> HereOutcome {
+        let resolver = HereResolver(self.undo_fs.clone().unwrap_or_else(|| self.fs.clone()));
         extract_here_execute(
             &self.fs,
-            archive,
-            policy,
-            pw.map(str::to_owned),
-            &[],
+            HereRequest {
+                archive,
+                policy,
+                password,
+                protect,
+            },
             &self.ctx,
+            &resolver,
             CancellationToken::new(),
         )
         .await
+    }
+    /// journal 파일 자리를 폴더로 바꿔 다음 기록(push)이 실패하게 한다.
+    fn break_journal(&self) {
+        let j = self.ctx_dir.join("j.jsonl");
+        let _ = std::fs::remove_file(&j);
+        std::fs::create_dir(&j).unwrap();
+    }
+    fn work_names(&self) -> Vec<String> {
+        let mut v: Vec<String> = std::fs::read_dir(&self.work)
+            .unwrap()
+            .map(|x| x.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        v.sort();
+        v
     }
     fn p(&self, rel: &str) -> PathBuf {
         rel.split('/').fold(self.work.clone(), |acc, c| acc.join(c))
@@ -565,17 +625,10 @@ async fn remote_archive_is_refused_before_touching_anything() {
         },
         name: "r.zip".into(),
     };
-    let err = extract_here_execute(
-        &e.fs,
-        archive,
-        ExtractConflict::KeepBoth,
-        None,
-        &[],
-        &e.ctx,
-        CancellationToken::new(),
-    )
-    .await
-    .unwrap_err();
+    let err = e
+        .run(archive, ExtractConflict::KeepBoth, None, &[])
+        .await
+        .unwrap_err();
     assert!(matches!(err, DuetError::NotSupported(_)));
     assert_eq!(std::fs::read_dir(&e.work).unwrap().count(), 1);
 }
@@ -639,29 +692,15 @@ async fn password_retry_with_replace_never_moves_sibling_source_archives() {
     let batch = vec![a.clone(), b];
     // 1차: 암호 없음 → NeedPassword. 재시도는 같은 일괄 목록으로 보호 경로를 다시 만든다.
     let protect = protected_sources(&e.fs, &a, &batch).await;
-    let first = extract_here_execute(
-        &e.fs,
-        a.clone(),
-        ExtractConflict::Replace,
-        None,
-        &protect,
-        &e.ctx,
-        CancellationToken::new(),
-    )
-    .await;
+    let first = e
+        .run(a.clone(), ExtractConflict::Replace, None, &protect)
+        .await;
     assert!(matches!(first, Err(DuetError::NeedPassword)));
     let protect = protected_sources(&e.fs, &a, &batch).await;
-    let (_, _, s) = extract_here_execute(
-        &e.fs,
-        a,
-        ExtractConflict::Replace,
-        Some("pw".into()),
-        &protect,
-        &e.ctx,
-        CancellationToken::new(),
-    )
-    .await
-    .unwrap();
+    let (_, _, s) = e
+        .run(a, ExtractConflict::Replace, Some("pw".into()), &protect)
+        .await
+        .unwrap();
     assert_eq!(
         std::fs::read(e.p("b.zip")).unwrap(),
         sibling,
@@ -710,4 +749,99 @@ async fn placeholder_written_by_someone_else_is_not_overwritten() {
     assert_eq!(s.skipped.len(), 1);
     assert_eq!(s.skipped[0].name, "note.txt");
     assert_eq!(copied_of(&entry), vec![e.p("other.txt")]);
+}
+
+// ---------- 리뷰 반영 2: journal 실패 되돌림 · 남은 준비 폴더 보고 ----------
+
+/// journal 기록이 실패하면 놓은 것을 그 자리에서 되돌린다 — 교체한 원본은 제자리로,
+/// 새 항목은 (fixture) 휴지통으로. 에러 종류는 journal 오류 그대로.
+#[tokio::test]
+async fn journal_failure_rolls_the_extraction_back() {
+    let e = env().await;
+    write_zip(&e.p("r.zip"), &[("readme.txt", "new"), ("other.txt", "o")]);
+    std::fs::write(e.p("readme.txt"), "old").unwrap();
+    e.break_journal();
+
+    let out = e
+        .outcome(
+            EntryRef {
+                location: Location {
+                    source: SourceId::Local,
+                    path: e.work.clone(),
+                },
+                name: "r.zip".into(),
+            },
+            ExtractConflict::Replace,
+            None,
+            &[],
+        )
+        .await;
+    let err = out.result.unwrap_err();
+    let DuetError::Io(msg) = &err else {
+        panic!("journal error kind must be kept: {err:?}")
+    };
+    assert!(msg.contains("rolled back"), "{msg}");
+    assert_eq!(e.read("readme.txt"), "old", "original restored");
+    assert_eq!(e.work_names(), vec!["r.zip", "readme.txt"]);
+    // 만든 것 두 개(readme.txt 새것, other.txt)가 휴지통으로.
+    assert_eq!(e.fs.trashed().len(), 2);
+}
+
+/// 되돌림도 실패하면(휴지통 거부) 원본이 남은 백업 경로와 남은 생성물을 메시지에 적는다.
+#[tokio::test]
+async fn failed_rollback_names_backups_and_items_left_in_place() {
+    let mut e = env().await;
+    write_zip(&e.p("r.zip"), &[("readme.txt", "new"), ("other.txt", "o")]);
+    std::fs::write(e.p("readme.txt"), "old").unwrap();
+    let mut refusing = e.fs.clone();
+    refusing.fail_trash = true;
+    e.undo_fs = Some(refusing);
+    e.break_journal();
+
+    let err = e.here("r.zip", ExtractConflict::Replace).await.unwrap_err();
+    let DuetError::Io(msg) = &err else {
+        panic!("{err:?}")
+    };
+    let backup = e
+        .work_names()
+        .into_iter()
+        .find(|n| n.starts_with("readme.txt.bak."))
+        .expect("original kept in a backup");
+    assert!(msg.contains(&backup), "{msg}");
+    assert!(msg.contains("other.txt"), "{msg}");
+    assert!(msg.contains("partly"), "{msg}");
+    assert_eq!(std::fs::read_to_string(e.p(&backup)).unwrap(), "old");
+}
+
+/// 준비 폴더를 휴지통으로 못 보내면 — 실패한 실행에서도 — 그 경로가 요약에 실린다.
+#[tokio::test]
+async fn leftover_staging_is_reported_in_the_summary_even_on_error() {
+    let mut e = env().await;
+    write_zip(&e.p("m.zip"), &[("a.txt", "A"), ("b.txt", "B")]);
+    e.fs.fail_rename_to = Some("a.txt".into());
+    e.fs.fail_trash = true;
+
+    let out = e
+        .outcome(
+            EntryRef {
+                location: Location {
+                    source: SourceId::Local,
+                    path: e.work.clone(),
+                },
+                name: "m.zip".into(),
+            },
+            ExtractConflict::KeepBoth,
+            None,
+            &[],
+        )
+        .await;
+    assert!(out.result.is_err());
+    let left = out.summary.leftover_staging.expect("leftover reported");
+    assert!(left
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .starts_with(STAGING_PREFIX));
+    assert!(left.is_dir(), "left in place, not deleted");
+    assert!(out.summary.is_notable());
 }

@@ -18,7 +18,14 @@
 //! 이 작업이 만든 맨 위 경로와 백업은 journal 하나(`UndoCopy`)로 남는다 — 배치가 도중에
 //! 멈춰도 그때까지 놓은 것은 기록한 뒤 에러를 돌려준다(CLAUDE.md §4). 준비 폴더에 남은
 //! 것(건너뛴 항목·못 옮긴 항목)은 휴지통으로 보낸다(§3 — 영구 삭제하지 않음). 비었으면
-//! 빈 폴더만 지운다. 휴지통도 실패하면 그 자리에 두고 경로를 알린다.
+//! 빈 폴더만 지운다. 휴지통도 실패하면 그 자리에 두고 경로를 요약(`HereOutcome::summary`)
+//! 으로 알린다 — 에러가 나도 요약은 함께 오므로 에러 종류(NeedPassword 등)는 바꾸지 않는다.
+//!
+//! journal 기록 자체가 실패하면(디스크·권한) Ctrl+Z 로 되돌릴 길이 없으므로 그 자리에서
+//! 되돌린다 — 기록하려던 `UndoCopy` 를 undo 실행기로 실행(생성물은 지문이 같을 때 휴지통,
+//! 백업은 원래 자리로). 에러 종류는 journal 오류 그대로이고, 다 되돌리지 못했으면 원본이
+//! 남은 백업 경로와 남은 생성물을 메시지에 적는다. 쓰기 전 기록(write-ahead)은 아니다 —
+//! 기록 전에 앱이 죽는 경우는 다루지 않는다.
 //!
 //! ## 보장하는 것 / 아닌 것
 //!
@@ -28,8 +35,9 @@
 //! - **협력하는 duet 작업끼리**: 같은 호스트의 작업은 `TaskQueue` 가 한 줄로 세워 서로
 //!   끼어들지 않는다.
 //! - **최선 노력(보장 아님)**: 예약 *뒤에* 외부 프로그램이 같은 자리에 쓰는 경우.
-//!   파일은 rename 직전에 그 자리가 아직 우리 0바이트 자리인지 다시 확인하고, 아니면
-//!   덮지 않고 건너뛴다 — 확인과 rename 사이의 짧은 틈은 남는다. 새로 만든 폴더 안으로
+//!   파일은 rename 직전에 그 자리에 아직 0바이트 일반 파일이 있는지만 다시 확인하고(우리가
+//!   만든 것인지 — 소유 — 는 확인하지 않는다), 내용이 있으면 덮지 않고 건너뛴다. 확인과
+//!   rename 사이의 짧은 틈은 남는다. 새로 만든 폴더 안으로
 //!   자식을 옮길 때는 충돌을 다시 확인하지 않는다(방금 만든 빈 폴더라는 가정). 예약 뒤
 //!   상위 폴더가 링크로 바뀌는 경우도 막지 않는다.
 //!
@@ -40,8 +48,9 @@ use crate::core::archive;
 use crate::core::archive_names::{reserve_free, try_reserve, Reserve};
 use crate::core::ops::{self, OpCtx};
 use crate::core::tar_unpack::UnpackReport;
+use crate::core::undo::{undo_cleanup, FsResolver};
 use crate::fs::FileSystem;
-use crate::services::journal::{BackupRestore, JournalEntry, OpKind, UndoAction};
+use crate::services::journal::{BackupRestore, JournalEntry, JournalId, OpKind, UndoAction};
 use crate::types::{DuetError, EntryKind, EntryRef, Location, SourceId};
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -149,17 +158,58 @@ pub async fn protected_sources(
     out
 }
 
-/// 아카이브 하나를 그 폴더에 바로 푼다. `protect` = Replace 로도 건드리지 않을 경로
-/// (같은 일괄의 다른 아카이브). 이 아카이브 자신은 늘 보호된다.
+/// 아카이브 하나를 여기에 풀 요청.
+pub struct HereRequest<'a> {
+    pub archive: EntryRef,
+    pub policy: ExtractConflict,
+    /// 암호 zip 용 — 인자로만 지나간다 (CLAUDE.md §5).
+    pub password: Option<String>,
+    /// Replace 로도 건드리지 않을 경로 (같은 일괄의 원본 — [`protected_sources`]).
+    /// 이 아카이브 자신은 늘 보호된다.
+    pub protect: &'a [PathBuf],
+}
+
+/// 실행 결과. 실패해도 `summary`(놓은 것·건너뛴 것·남은 준비 폴더)는 함께 온다 — 에러
+/// 종류(NeedPassword 등)는 그대로 두고, 남은 경로 같은 정리 정보는 이 구조로 알린다.
+pub struct HereOutcome {
+    pub result: Result<(JournalEntry, UnpackReport), DuetError>,
+    pub summary: ExtractHereSummary,
+}
+
+/// 아카이브 하나를 그 폴더에 바로 푼다.
+///
+/// `rollback` 은 journal 기록이 실패했을 때 방금 한 변경을 되돌릴 파일시스템 —
+/// 기록하려던 `UndoCopy` 를 undo 실행기(`core::undo::undo_cleanup`)로 바로 실행한다
+/// (생성물은 지문이 같을 때 휴지통으로, 백업은 원래 자리로).
 pub async fn extract_here_execute(
     fs: &dyn FileSystem,
-    archive: EntryRef,
-    policy: ExtractConflict,
-    password: Option<String>,
-    protect: &[PathBuf],
+    req: HereRequest<'_>,
     ctx: &OpCtx,
+    rollback: &dyn FsResolver,
     cancel: CancellationToken,
-) -> Result<(JournalEntry, UnpackReport, ExtractHereSummary), DuetError> {
+) -> HereOutcome {
+    let mut summary = ExtractHereSummary {
+        archive_name: req.archive.name.clone(),
+        ..ExtractHereSummary::default()
+    };
+    let result = run_here(fs, req, ctx, rollback, &cancel, &mut summary).await;
+    HereOutcome { result, summary }
+}
+
+async fn run_here(
+    fs: &dyn FileSystem,
+    req: HereRequest<'_>,
+    ctx: &OpCtx,
+    rollback: &dyn FsResolver,
+    cancel: &CancellationToken,
+    summary: &mut ExtractHereSummary,
+) -> Result<(JournalEntry, UnpackReport), DuetError> {
+    let HereRequest {
+        archive,
+        policy,
+        password,
+        protect,
+    } = req;
     let format = check_here(fs, &archive).await?;
     let dir = archive.location.path.clone();
     let archive_path = fs.join(&dir, &archive.name);
@@ -178,8 +228,8 @@ pub async fn extract_here_execute(
     let report = match unpacked {
         Ok(r) => r,
         Err(e) => {
-            let leftover = cleanup_staging(fs, &staging, &[]).await;
-            return Err(with_leftover(e, leftover.as_deref()));
+            summary.leftover_staging = cleanup_staging(fs, &staging, &[]).await;
+            return Err(with_leftover(e, summary.leftover_staging.as_deref()));
         }
     };
 
@@ -189,34 +239,39 @@ pub async fn extract_here_execute(
     let mut placer = Placer {
         fs,
         policy,
-        cancel: &cancel,
+        cancel,
         protected,
         created: Vec::new(),
         backups: Vec::new(),
         merged: Vec::new(),
-        summary: ExtractHereSummary {
-            archive_name: archive.name.clone(),
-            ..ExtractHereSummary::default()
-        },
+        summary: std::mem::take(summary),
     };
     let placed = placer.run(&staging, &dir).await;
+    let Placer {
+        created,
+        backups,
+        merged,
+        summary: placed_summary,
+        ..
+    } = placer;
+    *summary = placed_summary;
 
     // 4. 준비 폴더 정리 (3 의 journal 보다 먼저 — 남은 경로를 요약에 싣는다).
-    let leftover = cleanup_staging(fs, &staging, &placer.merged).await;
-    placer.summary.leftover_staging = leftover.clone();
+    summary.leftover_staging = cleanup_staging(fs, &staging, &merged).await;
+    let leftover = summary.leftover_staging.clone();
 
     // 3. journal — 도중에 멈췄어도 놓은 것이 있으면 기록한 뒤 에러.
     if let Err(e) = &placed {
-        if placer.created.is_empty() && placer.backups.is_empty() {
+        if created.is_empty() && backups.is_empty() {
             return Err(with_leftover(e.clone(), leftover.as_deref()));
         }
     }
     let source = archive.location.source.clone();
-    let copied_stamps = crate::core::stamp::stamp_all(fs, &placer.created).await;
+    let copied_stamps = crate::core::stamp::stamp_all(fs, &created).await;
     let undo = UndoAction::UndoCopy {
         target_source: source.clone(),
-        copied: placer.created,
-        backups_to_restore: placer.backups,
+        copied: created,
+        backups_to_restore: backups,
         src_source: None,
         copied_from: Vec::new(),
         copied_stamps,
@@ -228,10 +283,93 @@ pub async fn extract_here_execute(
         },
         dest: Location { source, path: dir },
     };
-    let entry = ctx.journal.push(op, undo).await?;
-    match placed {
-        Ok(()) => Ok((entry, report, placer.summary)),
-        Err(e) => Err(with_leftover(e, leftover.as_deref())),
+    match ctx.journal.push(op.clone(), undo.clone()).await {
+        Ok(entry) => match placed {
+            Ok(()) => Ok((entry, report)),
+            Err(e) => Err(with_leftover(e, leftover.as_deref())),
+        },
+        // Ctrl+Z 로 되돌릴 기록이 없으면 변경을 남기지 않는다 — 그 자리에서 되돌린다.
+        Err(journal_err) => Err(roll_back(fs, rollback, op, undo, journal_err).await),
+    }
+}
+
+/// journal 에 남기지 못한 변경을 되돌린다 — 기록하려던 `UndoCopy` 를 undo 실행기로
+/// 바로 실행한다. 반환 에러는 journal 오류의 종류 그대로, 메시지에 되돌린 결과를 붙인다.
+/// 다 되돌리지 못했으면 원본이 아직 있는 백업 경로와 남은 생성물을 이름으로 알린다.
+async fn roll_back(
+    fs: &dyn FileSystem,
+    resolver: &dyn FsResolver,
+    op: OpKind,
+    undo: UndoAction,
+    journal_err: DuetError,
+) -> DuetError {
+    let (created, backups) = match &undo {
+        UndoAction::UndoCopy {
+            copied,
+            backups_to_restore,
+            ..
+        } => (copied.clone(), backups_to_restore.clone()),
+        _ => (Vec::new(), Vec::new()),
+    };
+    let entry = JournalEntry {
+        id: JournalId::new(),
+        timestamp: chrono::Utc::now(),
+        op,
+        undo,
+        undone: false,
+        stale: false,
+    };
+    let outcome = undo_cleanup(&entry, resolver).await;
+    // 결과는 실행기 보고 대신 디스크로 확인한다 — 아직 남은 백업(= 원본이 거기 있음)과
+    // 아직 남은 생성물. 백업이 원래 자리로 돌아간 경로는 생성물이 아니다.
+    let mut kept_backups = Vec::new();
+    let mut restored = Vec::new();
+    for b in &backups {
+        if fs.symlink_metadata(&b.backup_path).await.is_ok() {
+            kept_backups.push(b.backup_path.clone());
+        } else {
+            restored.push(b.original_path.clone());
+        }
+    }
+    let mut left_placed = Vec::new();
+    for p in created {
+        if !restored.contains(&p) && fs.symlink_metadata(&p).await.is_ok() {
+            left_placed.push(p);
+        }
+    }
+    let note = if kept_backups.is_empty() && left_placed.is_empty() {
+        "could not record this extraction for undo, so it was rolled back".to_string()
+    } else {
+        let list = |v: &[PathBuf]| {
+            v.iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        format!(
+            "could not record this extraction for undo and could only partly roll it back; \
+             originals still in backups: [{}]; extracted items still in place: [{}]",
+            list(&kept_backups),
+            list(&left_placed)
+        )
+    };
+    tracing::warn!(
+        rollback = ?outcome.map(|o| o.kind),
+        "extract-here: journal push failed; {note}"
+    );
+    annotate(journal_err, &note)
+}
+
+/// 메시지를 실을 수 있는 에러에 설명을 덧붙인다. 종류는 바꾸지 않는다.
+fn annotate(e: DuetError, note: &str) -> DuetError {
+    let add = |m: String| format!("{m} ({note})");
+    match e {
+        DuetError::Io(m) => DuetError::Io(add(m)),
+        DuetError::NotFound(m) => DuetError::NotFound(add(m)),
+        DuetError::PermissionDenied(m) => DuetError::PermissionDenied(add(m)),
+        DuetError::NotSupported(m) => DuetError::NotSupported(add(m)),
+        DuetError::CrossDevice(m) => DuetError::CrossDevice(add(m)),
+        other => other,
     }
 }
 
@@ -382,9 +520,9 @@ impl Placer<'_> {
             let _ = self.fs.remove_empty_dir(staged).await;
             return Ok(());
         }
-        // 파일·링크 — 우리가 만든 빈 자리 위로 rename. 그 사이 다른 프로그램이 그 자리에
-        // 썼으면(더는 0바이트 일반 파일이 아님) 덮지 않고 건너뛴다. 이 확인과 rename 사이의
-        // 짧은 틈은 남는다(최선 노력).
+        // 파일·링크 — 예약한 자리 위로 rename. 직전에 그 자리에 아직 0바이트 일반 파일이
+        // 있는지만 본다(누가 만든 것인지는 확인 못 함). 내용이 생겼으면 덮지 않고 건너뛴다.
+        // 이 확인과 rename 사이의 짧은 틈도 남는다(최선 노력).
         if !self.still_placeholder(target).await {
             self.summary.skipped.push(SkippedItem {
                 dir: target.parent().map(Path::to_path_buf).unwrap_or_default(),
@@ -410,7 +548,8 @@ impl Placer<'_> {
         }
     }
 
-    /// `target` 이 아직 우리가 예약한 빈 자리(0바이트 일반 파일)인가.
+    /// `target` 에 아직 0바이트 일반 파일이 있는가. 누가 만든 파일인지(우리 예약인지)는
+    /// 확인하지 않는다 — 그 사이 다른 프로그램이 지우고 새 빈 파일을 만들었어도 통과한다.
     async fn still_placeholder(&self, target: &Path) -> bool {
         matches!(
             self.fs.symlink_metadata(target).await,
@@ -440,7 +579,9 @@ async fn cleanup_staging(
     if fs.remove_empty_dir(staging).await.is_ok() {
         return None;
     }
-    if fs.symlink_metadata(staging).await.is_err() {
+    // 사라졌다고 확인된 경우(NotFound)만 끝. 권한 등으로 확인 못 하면 남은 것으로 보고
+    // 휴지통을 시도한다 — 실패하면 경로를 알린다.
+    if let Err(DuetError::NotFound(_)) = fs.symlink_metadata(staging).await {
         return None;
     }
     let batch_id = crate::services::trash::new_batch_id();
