@@ -53,4 +53,17 @@ describe("patternToMatcher", () => {
     expect(m("file[")).toBe(true);
     expect(m("file[1]")).toBe(false);
   });
+
+  it("supports ranges and both negation spellings in classes", () => {
+    expect(patternToMatcher("[a-c]*")("b1")).toBe(true);
+    expect(patternToMatcher("[a-c]*")("d1")).toBe(false);
+    expect(patternToMatcher("[!a-c]*")("d1")).toBe(true);
+    expect(patternToMatcher("[^a-c]*")("b1")).toBe(false);
+  });
+
+  it("treats an empty negated class [!] as literal text", () => {
+    const m = patternToMatcher("[!]x");
+    expect(m("[!]x")).toBe(true);
+    expect(m("ax")).toBe(false);
+  });
 });

@@ -21,7 +21,7 @@ function escapeRegexLiteral(ch: string): string {
  * glob 패턴 → 앵커드 RegExp 소스.
  * - `*` → `.*`  (구분자 무시 — 파일명 단위 매칭이라 경로 분리 불필요)
  * - `?` → `.`
- * - `[...]` 문자 클래스는 그대로 통과(빈/미완 클래스는 리터럴 처리)
+ * - `[...]` 문자 클래스, `[!...]`/`[^...]` 부정 클래스(빈/미완 클래스는 리터럴 처리)
  * - 그 외 정규식 메타는 escape
  */
 function globToRegexSource(pattern: string): string {
@@ -33,10 +33,14 @@ function globToRegexSource(pattern: string): string {
     } else if (ch === "?") {
       out += ".";
     } else if (ch === "[") {
-      // 닫는 ] 찾기 — 없으면 리터럴 [ 로 폴백.
-      const close = pattern.indexOf("]", i + 1);
-      if (close > i + 1) {
-        out += pattern.slice(i, close + 1);
+      // `[!..]`·`[^..]` 는 부정 클래스. 닫는 ] 가 없거나 본문이 비면 리터럴 [ 로 폴백.
+      const negate = pattern[i + 1] === "!" || pattern[i + 1] === "^";
+      const start = i + 1 + (negate ? 1 : 0);
+      const close = pattern.indexOf("]", start);
+      if (close > start) {
+        // 클래스 안 `\` 는 정규식 이스케이프(`\d` = 숫자)가 아니라 글자 그대로.
+        const body = pattern.slice(start, close).replace(/\\/g, "\\\\");
+        out += `[${negate ? "^" : ""}${body}]`;
         i = close;
       } else {
         out += "\\[";

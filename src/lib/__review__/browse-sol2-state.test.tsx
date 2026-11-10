@@ -208,22 +208,16 @@ it("browse-14: OS self-drop blocks descendants as well as direct self", () => {
   ).toBe("self");
 });
 
-it.fails(
-  "browse-25: exclamation-negated class selects names outside its set",
-  () => {
-    expect(patternToMatcher("[!ab]*.log")("c.log")).toBe(true);
-    expect(patternToMatcher("[!ab]*.log")("a.log")).toBe(false);
-  },
-);
+it("browse-25: exclamation-negated class selects names outside its set", () => {
+  expect(patternToMatcher("[!ab]*.log")("c.log")).toBe(true);
+  expect(patternToMatcher("[!ab]*.log")("a.log")).toBe(false);
+});
 
-it.fails(
-  "browse-25: a backslash inside a glob class is not a regex digit operator",
-  () => {
-    const matches = patternToMatcher("[\\d]*");
-    expect(matches("d-file")).toBe(true);
-    expect(matches("7-file")).toBe(false);
-  },
-);
+it("browse-25: a backslash inside a glob class is not a regex digit operator", () => {
+  const matches = patternToMatcher("[\\d]*");
+  expect(matches("d-file")).toBe(true);
+  expect(matches("7-file")).toBe(false);
+});
 
 it.each([
   ["^*.txt", "^note.txt", true],

@@ -316,14 +316,11 @@ describe("C-12 패턴 선택", () => {
     );
   });
 
-  it.fails(
-    "browse-25 (F-opus-07): glob 부정 클래스 [!a]* 가 부정으로 해석되지 않는다",
-    () => {
-      const m = patternToMatcher("[!a]*");
-      expect(m("b.txt")).toBe(true);
-      expect(m("a.txt")).toBe(false);
-    },
-  );
+  it("browse-25 (F-opus-07): glob 부정 클래스 [!a]* 가 부정으로 해석되지 않는다", () => {
+    const m = patternToMatcher("[!a]*");
+    expect(m("b.txt")).toBe(true);
+    expect(m("a.txt")).toBe(false);
+  });
 
   it("중괄호 {a,b} 는 지원하지 않고 부분문자열로 처리된다 (기록)", () => {
     const m = patternToMatcher("*.{jpg,png}");
