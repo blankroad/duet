@@ -27,7 +27,6 @@ import { showError } from "@/lib/errorToast";
 import { isSameOrInside } from "@/lib/nesting";
 import { sameDirForOps } from "@/lib/planItems";
 import { isVirtualTrash } from "@/lib/trashView";
-import { rememberExtract } from "@/lib/extractPending";
 import { basename } from "@/lib/paths";
 import { undoToast } from "@/lib/journalLabel";
 import { useClipboard } from "@/stores/clipboard";
@@ -795,36 +794,6 @@ export async function triggerMove(
     return;
   }
   await planTransferTo(targets, dst, "move", open, showToast);
-}
-
-/** 단일 아카이브 압축 해제 — plan 후 바로 task 로 실행 (진행은 TasksBar).
- * 커맨드는 TaskId 를 즉시 반환하므로 암호 zip 여부는 여기서 알 수 없다 —
- * task 가 NeedPassword 로 실패하면 `useTaskEvents` 가 여기서 기억해 둔 plan 으로
- * 암호 입력 다이얼로그를 열어 재시도한다. */
-export async function triggerExtract(showToast: ToastFn): Promise<void> {
-  const { targets } = resolveActiveTargets();
-  if (targets.length !== 1) {
-    showToast(i18n.t("toast.extractSelectOne"));
-    return;
-  }
-  const plan = await commands.fsExtractPlan(targets[0]!);
-  if (plan.status === "error") {
-    const why = explainError(plan.error);
-    showToast(i18n.t("toast.extractFailed", { err: why.text }), "error", {
-      detail: why.detail,
-    });
-    return;
-  }
-  // 1차 시도는 암호 없이 — 암호 zip 이면 task 가 NeedPassword 로 실패한다.
-  const exec = await commands.fsExtractExecute(plan.data, null);
-  if (exec.status === "error") {
-    const why = explainError(exec.error);
-    showToast(i18n.t("toast.extractFailed", { err: why.text }), "error", {
-      detail: why.detail,
-    });
-    return;
-  }
-  rememberExtract(exec.data, { plan: plan.data, attempted: false });
 }
 
 /** 선택 항목들을 압축 — 이름/포맷 선택 다이얼로그 오픈. */

@@ -26,6 +26,8 @@ import { ChecksumDialog } from "@/components/dialogs/ChecksumDialog";
 import { PermissionsDialog } from "@/components/dialogs/PermissionsDialog";
 import { SymlinkDialog } from "@/components/dialogs/SymlinkDialog";
 import { PasswordPromptDialog } from "@/components/dialogs/PasswordPromptDialog";
+import { ExtractConflictDialog } from "@/components/dialogs/ExtractConflictDialog";
+import { ExtractHereDialog } from "@/components/dialogs/ExtractHereDialog";
 import { ArgsDialog } from "@/components/dialogs/ArgsDialog";
 import { ConfirmDialog } from "@/components/dialogs/ConfirmDialog";
 import { CopyMoveConfirmDialog } from "@/components/dialogs/CopyMoveConfirmDialog";
@@ -38,7 +40,12 @@ import {
   elevatableDestPath,
   type ElevatablePlan,
 } from "@/lib/elevatePending";
-import { rememberExtract } from "@/lib/extractPending";
+import { retryArchiveName } from "@/lib/extractPending";
+import {
+  resolveExtractConflict,
+  retryExtract,
+  runExtractHere,
+} from "@/lib/extractActions";
 import { ProgressModal } from "@/components/dialogs/ProgressModal";
 import { ShortcutCheatsheet } from "@/components/dialogs/ShortcutCheatsheet";
 import { HistoryDialog } from "@/components/dialogs/HistoryDialog";
@@ -2285,21 +2292,43 @@ function App() {
       )}
       {dialog.kind === "extract-password" && (
         <PasswordPromptDialog
-          archiveName={dialog.plan.archive_name}
+          archiveName={retryArchiveName(dialog.retry)}
           wrongPassword={dialog.wrong}
+          // 닫히면(입력·취소) extractPending 의 대기열이 다음 아카이브의 창을 연다.
           onClose={closeDialog}
           submit={async (pw) => {
             // 커맨드는 task enqueue 후 TaskId 를 즉시 반환 — 암호가 틀리면 task 가
             // NeedPassword 로 실패하고 useTaskEvents 가 이 다이얼로그를 다시 연다.
-            const r = await commands.fsExtractExecute(dialog.plan, pw);
-            if (r.status === "error") {
+            const r = await retryExtract(dialog.retry, pw);
+            if (!r.ok)
               showError("toast.extractFailed", r.error, {
-                path: dialog.plan.archive_name,
+                path: retryArchiveName(dialog.retry),
               });
-              return "ok";
-            }
-            rememberExtract(r.data, { plan: dialog.plan, attempted: true });
             return "ok";
+          }}
+        />
+      )}
+      {dialog.kind === "extract-conflict" && (
+        <ExtractConflictDialog
+          items={dialog.items}
+          onCancel={closeDialog}
+          onReplace={() => {
+            closeDialog();
+            void resolveExtractConflict("replace", dialog.items, showToast);
+          }}
+          onKeepBoth={() => {
+            closeDialog();
+            void resolveExtractConflict("keepBoth", dialog.items, showToast);
+          }}
+        />
+      )}
+      {dialog.kind === "extract-here" && (
+        <ExtractHereDialog
+          archives={dialog.archives}
+          onCancel={closeDialog}
+          onConfirm={(policy) => {
+            closeDialog();
+            void runExtractHere(dialog.archives, policy, showToast);
           }}
         />
       )}

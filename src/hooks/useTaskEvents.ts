@@ -6,7 +6,8 @@ import { useTasks } from "@/stores/tasks";
 import { useToast } from "@/stores/toast";
 import { useUIDialogs, type DialogState } from "@/stores/ui-dialogs";
 import { takeElevatable, elevatableDestKind } from "@/lib/elevatePending";
-import { takeExtract } from "@/lib/extractPending";
+import { takeExtract, requestExtractPassword } from "@/lib/extractPending";
+import { settleHereTask } from "@/lib/extractNotices";
 import { explainError } from "@/lib/error";
 
 const isWindows = platform() === "windows";
@@ -85,6 +86,7 @@ export function useTaskEvents() {
           });
           takeElevatable(id); // 성공 → 승격/암호 재시도 후보 정리
           takeExtract(id);
+          settleHereTask(id);
           // 종결 즉시 목록에서 사라지므로 완료 확인 지점이 없던 문제 — 성공 토스트.
           // 단 눈 깜짝할 새 끝난 작업(파일 한두 개 복사)까지 알리면 토스트가 밀려
           // 정작 읽어야 할 에러를 밀어낸다. 오래 걸린 작업만 알린다.
@@ -111,6 +113,7 @@ export function useTaskEvents() {
           startedAt.delete(id);
           takeElevatable(id);
           takeExtract(id);
+          settleHereTask(id);
           const title = useTasks.getState().tasks.get(id)?.title;
           useToast
             .getState()
@@ -129,14 +132,15 @@ export function useTaskEvents() {
           setError(id, msg);
           setStatus(id, { kind: "failed", message: msg });
           // 암호 zip 해제가 NeedPassword 로 실패 → 실패 토스트 대신 암호 다이얼로그를
-          // 열어 재시도 (틀린 암호 재입력 포함).
+          // 열어 재시도 (틀린 암호 재입력 포함). 여러 개면 아카이브마다 차례로(FIFO).
+          settleHereTask(id);
           const extract = takeExtract(id);
           if (extract && payload.change.error.kind === "NeedPassword") {
-            openOrQueue({
-              kind: "extract-password",
-              plan: extract.plan,
+            const shown = requestExtractPassword({
+              retry: extract.retry,
               wrong: extract.attempted,
             });
+            if (!shown) useToast.getState().show(i18n.t("toast.dialogQueued"));
             remove(id);
             break;
           }

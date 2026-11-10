@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import i18n from "@/i18n";
 import { events, type ArchiveNoticeEvent } from "@/types/bindings";
 import { useToast } from "@/stores/toast";
+import { noteHereSummary } from "@/lib/extractNotices";
 
 /**
  * 백엔드 `archive-notice-event` 구독 — 해제(또는 내부 보기)는 끝났지만 일부 링크를
@@ -14,8 +15,13 @@ export function useArchiveNoticeEvents() {
       const { message, detail } = describeArchiveNotice(payload);
       useToast.getState().show(message, "warning", { detail });
     });
+    // "여기에 압축 풀기" 결과 — 일괄당 알림 하나로 모은다 (extractNotices).
+    const unlistenHereP = events.extractHereNoticeEvent.listen(({ payload }) =>
+      noteHereSummary(payload.archive_dir, payload.summary),
+    );
     return () => {
       unlistenP.then((fn) => fn());
+      unlistenHereP.then((fn) => fn());
     };
   }, []);
 }

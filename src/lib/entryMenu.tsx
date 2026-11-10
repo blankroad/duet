@@ -43,7 +43,12 @@ import { commands } from "@/types/bindings";
 import type { Entry, Location } from "@/types/bindings";
 import { showError } from "@/lib/errorToast";
 import { basename } from "@/lib/paths";
-import { canExtractArchive } from "@/lib/archive";
+import {
+  canExtractHereAt,
+  countExtractable,
+  triggerExtractHere,
+  triggerExtractToFolders,
+} from "@/lib/extractActions";
 import {
   usePanes,
   activeTab,
@@ -68,7 +73,6 @@ import {
   triggerMkdir,
   triggerNewFile,
   triggerDelete,
-  triggerExtract,
   triggerCompress,
   triggerChecksum,
   triggerPermissions,
@@ -280,14 +284,36 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
     items.push(sep());
   }
 
-  // 원격은 서버 unzip/tar 로 풀리는 포맷만 — 7z/rar 등은 눌러도 거부되니 숨긴다.
-  if (!isDir && !multi && canExtractArchive(entry.name, location.source)) {
+  // 압축 해제 — 선택 중 풀 수 있는 아카이브 수(k). 원격은 서버 unzip/tar 로 풀리는 포맷만
+  // 센다(7z/rar 등은 눌러도 거부되니). 아카이브가 없으면 두 항목 모두 숨긴다.
+  // "여기에 풀기" 는 로컬만(원격 SFTP rename 미검증 — 이번 범위 밖).
+  const extractable = multi
+    ? countExtractable(
+        activeTab(usePanes.getState(), paneId).selected,
+        activeTab(usePanes.getState(), paneId).entries,
+        location.source,
+      )
+    : countExtractable([entry.name], [entry], location.source);
+  if (extractable > 0) {
+    const many = extractable > 1;
+    if (canExtractHereAt(location.source)) {
+      items.push({
+        id: "extract-here",
+        label: many
+          ? i18n.t("menu.extractHereCount", { count: extractable })
+          : i18n.t("menu.extractHere"),
+        icon: <FileArchive size={ICON} />,
+        onSelect: () => triggerExtractHere(open, showToast),
+      });
+    }
     items.push(
       {
         id: "extract",
-        label: i18n.t("menu.extractHere"),
-        icon: <FileArchive size={ICON} />,
-        onSelect: () => void triggerExtract(showToast),
+        label: many
+          ? i18n.t("menu.extractEach", { count: extractable })
+          : i18n.t("menu.extractToFolder"),
+        icon: <FolderInput size={ICON} />,
+        onSelect: () => void triggerExtractToFolders(open, showToast),
       },
       sep(),
     );

@@ -10,10 +10,11 @@ import type {
   SyncPlan,
   ComparePlan,
   ThreeWayPlan,
-  ExtractPlan,
+  ExtractPlanItem,
 } from "@/types/bindings";
 import type { PaneId } from "@/stores/panes";
 import type { ElevatablePlan } from "@/lib/elevatePending";
+import type { ExtractRetry } from "@/lib/extractPending";
 
 export type DialogState =
   | { kind: "none" }
@@ -35,7 +36,11 @@ export type DialogState =
   | { kind: "move-confirm"; plan: MovePlan; clip?: number }
   | { kind: "compress"; items: EntryRef[]; defaultName: string }
   // wrong=true 는 직전 암호가 틀려 task 가 NeedPassword 로 실패한 재시도.
-  | { kind: "extract-password"; plan: ExtractPlan; wrong?: boolean }
+  | { kind: "extract-password"; retry: ExtractRetry; wrong?: boolean }
+  // 각각 폴더로 풀기 — 받을 이름이 이미 있음: 교체 / 둘 다 유지 / 취소 (일괄 1회).
+  | { kind: "extract-conflict"; items: ExtractPlanItem[] }
+  // 여기에 풀기 — 아카이브 목록 + 이미 있는 항목 정책 (늘 묻는다).
+  | { kind: "extract-here"; archives: EntryRef[] }
   | {
       kind: "browse-password";
       paneId: PaneId;
