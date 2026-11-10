@@ -1,6 +1,11 @@
 import { create } from "zustand";
 import type { Entry, Location } from "@/types/bindings";
-import { normalizePath, sameLocation } from "@/lib/entryDnd";
+import {
+  canonPath,
+  normalizePath,
+  sameLocation,
+  sameSource,
+} from "@/lib/entryDnd";
 import { pathSegments, splitRoot } from "@/lib/paths";
 import { patternToMatcher } from "@/lib/glob";
 import { pushClosedTabs, popClosedTab, type ClosedTab } from "./closedTabs";
@@ -30,6 +35,40 @@ export interface ArchiveBrowse {
   root: string;
   /** 아카이브가 원래 있던 위치 — "위로" 로 빠져나갈 대상. */
   exitTo: Location;
+  /**
+   * 아카이브 안의 아카이브를 열었으면 바깥 아카이브 문맥 — 안쪽 루트에서 나와
+   * 바깥 임시 폴더로 돌아가면 이 문맥(브레드크럼·"위로"·Update)이 되살아난다.
+   */
+  parent?: ArchiveBrowse | undefined;
+}
+
+/** 탭이 기억하는 아카이브 문맥 수 — 뒤로/앞으로로 임시 폴더에 돌아갈 때 쓴다. */
+const ARCHIVE_TRAIL_MAX = 20;
+
+/** `loc` 이 아카이브 임시 루트(또는 그 하위)인가 — 같은 소스 + 경로 접두(구분자 경계). */
+export function insideArchive(loc: Location, ctx: ArchiveBrowse): boolean {
+  if (!sameSource(loc.source, ctx.exitTo.source)) return false;
+  const p = canonPath(String(loc.path));
+  const r = canonPath(ctx.root);
+  return p === r || p.startsWith(r.endsWith("/") ? r : `${r}/`);
+}
+
+/**
+ * 이동한 위치에 맞는 아카이브 문맥 — 지금 문맥 → 바깥(parent) 문맥 → 이 탭이
+ * 열었던 문맥(뒤로/앞으로) 순서로 찾는다. 없으면 undefined (문맥 해제).
+ */
+function archiveFor(
+  loc: Location,
+  cur: ArchiveBrowse | undefined,
+  trail: ArchiveBrowse[] | undefined,
+): ArchiveBrowse | undefined {
+  for (let a = cur; a; a = a.parent) if (insideArchive(loc, a)) return a;
+  // 최근에 연 것부터 — 같은 임시 루트를 다시 열었으면 새 문맥이 이긴다.
+  for (let i = (trail?.length ?? 0) - 1; i >= 0; i--) {
+    const a = trail![i]!;
+    if (insideArchive(loc, a)) return a;
+  }
+  return undefined;
 }
 
 export interface TabState {
@@ -54,6 +93,8 @@ export interface TabState {
   history: { stack: Location[]; index: number };
   /** 아카이브 내부 탐색 중이면 set, 아니면 undefined. */
   archive?: ArchiveBrowse | undefined;
+  /** 이 탭에서 연 아카이브 문맥들(오래된 것부터) — 뒤로/앞으로로 돌아가면 복원. */
+  archiveTrail?: ArchiveBrowse[] | undefined;
   /** 휴지통 탐색 중이면 휴지통 루트 경로 — "Put back" 노출 + 떠나면 해제. */
   trashRoot?: string | undefined;
   /**
@@ -545,7 +586,12 @@ export const usePanes = create<PanesState>((set, get) => ({
       const pc = pinnedCount(p);
       // 아카이브 임시 추출 폴더는 그사이 정리됐을 수 있다 — 원래 폴더로 연다.
       const base = c.tab.archive
-        ? { ...c.tab, location: c.tab.archive.exitTo, archive: undefined }
+        ? {
+            ...c.tab,
+            location: c.tab.archive.exitTo,
+            archive: undefined,
+            archiveTrail: undefined,
+          }
         : c.tab;
       const tab: TabState = {
         ...base,
@@ -599,10 +645,10 @@ export const usePanes = create<PanesState>((set, get) => ({
           history = { ...history, index: opts.historyIndex };
       }
       // 아카이브/휴지통 루트 밖으로 이동하면 컨텍스트 해제 (내부 하위폴더면 유지).
-      const archive =
-        cur.archive && loc.path.startsWith(cur.archive.root)
-          ? cur.archive
-          : undefined;
+      // 바깥 아카이브로 돌아가거나(아카이브 속 아카이브) 뒤로/앞으로로 임시 폴더에
+      // 돌아오면 그 문맥을 되살린다 — 예전엔 임시 경로가 그대로 보이고 "위로"가
+      // 시스템 temp 로 올라갔으며 Update 버튼이 사라졌다 (archive-15·browse-32).
+      const archive = archiveFor(loc, cur.archive, cur.archiveTrail);
       const trashRoot =
         cur.trashRoot && loc.path.startsWith(cur.trashRoot)
           ? cur.trashRoot
@@ -964,10 +1010,25 @@ export const usePanes = create<PanesState>((set, get) => ({
     set((s) => ({
       panes: {
         ...s.panes,
-        [id]: withTab(s.panes[id], tabId, (t) => ({
-          ...t,
-          archive: ctx ?? undefined,
-        })),
+        [id]: withTab(s.panes[id], tabId, (t) => {
+          if (!ctx) return { ...t, archive: undefined };
+          // 아카이브 안에서 또 아카이브를 열었으면(나갈 곳이 바깥 임시 폴더) 바깥
+          // 문맥을 parent 로 잇는다 — 안쪽에서 나오면 바깥 문맥이 돌아온다.
+          const outer =
+            ctx.parent ?? archiveFor(ctx.exitTo, t.archive, t.archiveTrail);
+          const archive: ArchiveBrowse = outer
+            ? { ...ctx, parent: outer }
+            : ctx;
+          const trail = (t.archiveTrail ?? []).filter(
+            (a) => a.root !== archive.root,
+          );
+          trail.push(archive);
+          return {
+            ...t,
+            archive,
+            archiveTrail: trail.slice(-ARCHIVE_TRAIL_MAX),
+          };
+        }),
       },
     })),
   setDirSize: (id, tabId, name, bytes) =>

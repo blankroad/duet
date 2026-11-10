@@ -359,7 +359,7 @@ describe("C-21 압축 내부 보기 문맥", () => {
     expect(tabL().archive).toBeUndefined();
   });
 
-  it.fails(
+  it(
     "browse-32 (F-opus-201): 아카이브에서 나온 뒤 '뒤로' 가면 문맥 없이 임시 추출 폴더로 들어간다",
     async () => {
       await openZip();
@@ -375,7 +375,7 @@ describe("C-21 압축 내부 보기 문맥", () => {
     },
   );
 
-  it.fails(
+  it(
     "browse-34 (F-opus-202): 아카이브 루트에서 위로 나가면 커서가 아카이브 파일이 아니라 맨 위에 놓인다",
     async () => {
       await openZip();

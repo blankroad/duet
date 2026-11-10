@@ -34,7 +34,10 @@ export function snapshot(): RestoredLayout {
     return {
       activeTabIndex: idx >= 0 ? idx : 0,
       tabs: keep.map((t) => {
-        const location = t.archive ? t.archive.exitTo : t.location;
+        // 아카이브 속 아카이브면 안쪽 exitTo 도 (정리될) 바깥 임시 폴더 — 맨 바깥으로.
+        let outer = t.archive;
+        while (outer?.parent) outer = outer.parent;
+        const location = outer ? outer.exitTo : t.location;
         const src = location.source;
         const host =
           src.kind === "ssh"

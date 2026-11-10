@@ -311,6 +311,8 @@ function App() {
         current?: () => boolean;
         /** 뒤로/앞으로 — 성공하면 히스토리 index 를 이 칸으로 확정 (browse-23). */
         historyIndex?: number;
+        /** 도착한 목록에서 커서를 놓을 이름 (예: 아카이브에서 나오면 그 아카이브 파일). */
+        focusName?: string;
       } = {},
     ): Promise<boolean> => {
       const tabId = opts.tabId ?? activeTab(usePanes.getState(), id).id;
@@ -329,6 +331,9 @@ function App() {
           pushHistory: opts.pushHistory ?? true,
           ...(opts.historyIndex !== undefined
             ? { historyIndex: opts.historyIndex }
+            : {}),
+          ...(opts.focusName !== undefined
+            ? { focusName: opts.focusName }
             : {}),
         });
         // 그 탭이 닫혔으면 아무것도 적용되지 않았다.
@@ -479,7 +484,10 @@ function App() {
       const tab = activeTab(usePanes.getState(), id);
       // 아카이브 임시 루트에서 "위로" = 아카이브 빠져나가 원래 폴더로.
       if (tab.archive && tab.location.path === tab.archive.root) {
-        void navigateTo(id, tab.archive.exitTo);
+        // 나온 폴더에서 커서는 방금 연 아카이브 파일에 (browse-34) — 일반 "위로" 와 같게.
+        void navigateTo(id, tab.archive.exitTo, {
+          focusName: tab.archive.label,
+        });
         return;
       }
       // 부모 경로 — Windows(C:\)·POSIX·혼합 구분자 모두 처리(parentPath). 루트면 멈춤.

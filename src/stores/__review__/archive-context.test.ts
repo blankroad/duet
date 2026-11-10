@@ -43,7 +43,7 @@ describe("archive-opus: archive context in panes store", () => {
     expect(ctx()).toBeUndefined();
   });
 
-  it.fails(
+  it(
     "archive-15: 아카이브 안의 아카이브: 안쪽에서 '위로' 로 나오면 바깥 아카이브 문맥이 돌아와야 한다",
     () => {
       // 바깥 아카이브 열기.
