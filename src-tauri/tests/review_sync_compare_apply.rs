@@ -15,7 +15,7 @@ use duet_lib::core::compare::{compare_dirs_progress, CompareRules, CompareStatus
 use duet_lib::core::ops::{
     apply_compare, merge_bidir, merge_bidir_with_rules, ApplyDecision, ApplyDirection, OpCtx,
 };
-use duet_lib::core::three_way::{compare_three_way, ThreeWayStatus};
+use duet_lib::core::three_way::compare_three_way;
 use duet_lib::core::undo::UndoKind;
 use duet_lib::fs::LocalFs;
 use duet_lib::services::journal::{Journal, UndoAction};
@@ -464,6 +464,7 @@ async fn merge_cancelled_before_start_leaves_no_journal_entry() {
 #[cfg(unix)]
 #[tokio::test]
 async fn three_way_unreadable_subfolder_is_not_classified_as_deleted() {
+    use duet_lib::core::three_way::ThreeWayStatus;
     use std::os::unix::fs::PermissionsExt;
     let dir = TempDir::new().unwrap();
     let (b, l, r) = (
