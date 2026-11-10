@@ -78,27 +78,24 @@ const names = (es: Entry[]) => es.map((e) => e.name);
 beforeEach(() => clearClosedTabs());
 
 describe("C-12 빠른 필터 × 선택 — 보이지 않는 파일이 작업 대상이 되는가", () => {
-  it.fails(
-    "browse-03 (F-opus-01): 전체 선택 후 필터를 입력하면 가려진 항목이 작업 대상에 남는다",
-    () => {
-      seed([
-        {
-          path: "/w",
-          entries: [mk("keep.txt"), mk("secret.db"), mk("notes.txt")],
-        },
-      ]);
-      const st = usePanes.getState();
-      st.selectAll("left");
-      st.setFilter("left", ".txt"); // secret.db 는 화면에서 사라진다
-      const shown = names(
-        computeDisplayed(activeTab(usePanes.getState(), "left")),
-      );
-      expect(shown).not.toContain("secret.db");
-      // 사용자가 보는 것: keep.txt, notes.txt 두 개. Delete/F5/F6 대상은?
-      const targets = resolveActiveTargets().targets.map((t) => t.name);
-      expect(targets.sort()).toEqual(["keep.txt", "notes.txt"]);
-    },
-  );
+  it("browse-03 (F-opus-01): 전체 선택 후 필터를 입력하면 가려진 항목이 작업 대상에 남는다", () => {
+    seed([
+      {
+        path: "/w",
+        entries: [mk("keep.txt"), mk("secret.db"), mk("notes.txt")],
+      },
+    ]);
+    const st = usePanes.getState();
+    st.selectAll("left");
+    st.setFilter("left", ".txt"); // secret.db 는 화면에서 사라진다
+    const shown = names(
+      computeDisplayed(activeTab(usePanes.getState(), "left")),
+    );
+    expect(shown).not.toContain("secret.db");
+    // 사용자가 보는 것: keep.txt, notes.txt 두 개. Delete/F5/F6 대상은?
+    const targets = resolveActiveTargets().targets.map((t) => t.name);
+    expect(targets.sort()).toEqual(["keep.txt", "notes.txt"]);
+  });
 
   it("대조: 숨김 토글은 가려진 선택을 정리한다 (같은 문제를 이미 막아 둠)", () => {
     seed([

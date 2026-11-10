@@ -1016,11 +1016,16 @@ export const usePanes = create<PanesState>((set, get) => ({
     set((s) => ({
       panes: {
         ...s.panes,
-        [id]: withActiveTab(s.panes[id], (t) => ({
-          ...t,
-          filter,
-          cursorIndex: 0,
-        })),
+        [id]: withActiveTab(s.panes[id], (t) => {
+          const next = { ...t, filter, cursorIndex: 0 };
+          // 필터에 가려진 항목이 선택에 남으면 보이지 않는 파일이 복사·이동·삭제
+          // 대상이 된다 — 숨김 토글과 같은 정책으로 보이는 이름만 남긴다.
+          const visible = new Set(computeDisplayed(next).map((e) => e.name));
+          const selected = new Set(
+            [...t.selected].filter((n) => visible.has(n)),
+          );
+          return { ...next, selected };
+        }),
       },
     })),
   setFilterFocused: (id, focused) =>

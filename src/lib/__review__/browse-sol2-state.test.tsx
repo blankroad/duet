@@ -114,17 +114,14 @@ function filteredSelection() {
   ).toEqual(["visible.log"]);
 }
 
-it.fails(
-  "browse-03: filtering excludes concealed selections from operations",
-  () => {
-    filteredSelection();
-    expect(resolveActiveTargets().targets.map((e) => e.name)).toEqual([
-      "visible.log",
-    ]);
-  },
-);
+it("browse-03: filtering excludes concealed selections from operations", () => {
+  filteredSelection();
+  expect(resolveActiveTargets().targets.map((e) => e.name)).toEqual([
+    "visible.log",
+  ]);
+});
 
-it.fails("browse-03: clipboard copy excludes concealed selections", () => {
+it("browse-03: clipboard copy excludes concealed selections", () => {
   filteredSelection();
   clipCopy(vi.fn());
   expect(useClipboard.getState().entry?.targets.map((e) => e.name)).toEqual([
@@ -132,7 +129,7 @@ it.fails("browse-03: clipboard copy excludes concealed selections", () => {
   ]);
 });
 
-it.fails("browse-03: in-app drag excludes concealed selections", () => {
+it("browse-03: in-app drag excludes concealed selections", () => {
   filteredSelection();
   function DragButton() {
     const drag = useEntryDrag("left");
@@ -153,7 +150,7 @@ it.fails("browse-03: in-app drag excludes concealed selections", () => {
   ]);
 });
 
-it.fails("browse-03: context menu copy excludes concealed selections", () => {
+it("browse-03: context menu copy excludes concealed selections", () => {
   filteredSelection();
   const entries = buildEntryMenu({
     paneId: "left",
@@ -171,14 +168,11 @@ it.fails("browse-03: context menu copy excludes concealed selections", () => {
   ]);
 });
 
-it.fails(
-  "browse-03: visible-only selection count is shown in status bar",
-  () => {
-    filteredSelection();
-    const view = render(<StatusBar />);
-    expect(view.container.textContent).toContain("1 selected");
-  },
-);
+it("browse-03: visible-only selection count is shown in status bar", () => {
+  filteredSelection();
+  const view = render(<StatusBar />);
+  expect(view.container.textContent).toContain("1 selected");
+});
 
 it("browse-14: a grandchild destination is rejected before copy planning", async () => {
   useClipboard

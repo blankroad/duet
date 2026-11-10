@@ -826,4 +826,12 @@ describe("panes — 범위·전체·반전 선택", () => {
     const sel = activeTab(usePanes.getState(), "left").selected;
     expect([...sel].sort()).toEqual(["a", "b"]);
   });
+
+  it("빠른 필터는 가려진 선택을 정리하고, 필터를 풀어도 되살리지 않는다", () => {
+    usePanes.getState().setSelected("left", ["a", "c"]);
+    usePanes.getState().setFilter("left", "a");
+    expect([...activeTab(usePanes.getState(), "left").selected]).toEqual(["a"]);
+    usePanes.getState().setFilter("left", "");
+    expect([...activeTab(usePanes.getState(), "left").selected]).toEqual(["a"]);
+  });
 });
