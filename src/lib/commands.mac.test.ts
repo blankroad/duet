@@ -55,3 +55,62 @@ describe("commands — macOS 기본 키", () => {
     }
   });
 });
+
+// L1 independent review: exercise mac normalization and navigation coexistence.
+import { afterEach } from "vitest";
+import { cleanup, fireEvent, renderHook } from "@testing-library/react";
+import { resolveKeyCommand, useKeymap } from "@/stores/keymap";
+import { useCommands } from "@/stores/commands";
+import { useContextMenu } from "@/stores/contextMenu";
+import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
+import { useKeyboardNav } from "@/hooks/useKeyboardNav";
+afterEach(cleanup);
+
+it("L1: mac default and alternate keys have no collisions", () => {
+  const seen = new Set<string>();
+  for (const c of buildBuiltins(deps)) {
+    for (const key of [c.defaultKey, ...(c.altKeys ?? [])]) {
+      if (!key) continue;
+      expect(seen.has(key), `${c.id}: ${key}`).toBe(false);
+      seen.add(key);
+    }
+  }
+});
+
+it("L1: Cmd+Backspace dispatches trash once, not parent navigation; rebind disables it", () => {
+  const trash = vi.fn();
+  const up = vi.fn();
+  const builtins = buildBuiltins(
+    new Proxy(
+      { permanentDeleteEnabled: true, delete: trash },
+      {
+        get: (t, k) => (k in t ? Reflect.get(t, k) : () => {}),
+      },
+    ) as unknown as Parameters<typeof buildBuiltins>[0],
+  );
+  useCommands.setState({ builtins, dynamic: [] });
+  useKeymap.setState({ bindings: [] });
+  useContextMenu.setState({ open: false });
+  renderHook(() => {
+    useKeyboardNav(vi.fn(), up, vi.fn());
+    useGlobalShortcuts();
+  });
+  fireEvent.keyDown(window, { key: "Backspace", metaKey: true });
+  expect(trash).toHaveBeenCalledOnce();
+  expect(up).not.toHaveBeenCalled();
+  expect(
+    resolveKeyCommand(
+      "Ctrl+Backspace",
+      [{ key: "Ctrl+K", command_id: "file.delete" }],
+      builtins,
+    ),
+  ).toBeUndefined();
+  expect(
+    resolveKeyCommand(
+      "F8",
+      [{ key: "Ctrl+K", command_id: "file.delete" }],
+      builtins,
+    ),
+  ).toBeUndefined();
+  expect(resolveKeyCommand("F4", [], builtins)).toBe("file.edit");
+});

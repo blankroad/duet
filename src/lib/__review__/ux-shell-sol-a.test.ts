@@ -47,7 +47,7 @@ beforeEach(() => {
   );
 });
 
-it.fails("UX-SHL-01: F4 reaches the supplied edit-file action", () => {
+it("UX-SHL-07: F4 reaches the supplied edit-file action", () => {
   const editFile = vi.fn();
   const deps = new Proxy(
     { editFile, permanentDeleteEnabled: false },
@@ -62,7 +62,7 @@ it.fails("UX-SHL-01: F4 reaches the supplied edit-file action", () => {
   expect(editFile).toHaveBeenCalledOnce();
 });
 
-it.fails("UX-SHL-02: multi-file context menu offers external Open", () => {
+it.fails("UX-SHL-09: multi-file context menu offers external Open", () => {
   const menu = buildEntryMenu({
     paneId: "left",
     entry: entries[0]!,
