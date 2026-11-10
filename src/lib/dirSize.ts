@@ -7,7 +7,7 @@ import {
   type PaneId,
 } from "@/stores/panes";
 import { useToast } from "@/stores/toast";
-import { childLocation } from "@/lib/entryDnd";
+import { childLocation, sameLocation } from "@/lib/entryDnd";
 import { formatSize } from "@/lib/format";
 import { showError } from "@/lib/errorToast";
 
@@ -47,6 +47,12 @@ export async function calcDirSizes(
 
   for (const name of dirs) {
     const r = await commands.fsDirSize(childLocation(tab.location, name));
+    // 기다리는 사이 그 탭이 닫혔거나 다른 폴더로 갔으면 결과를 버린다 — 이름만
+    // 같은 새 폴더의 항목에 엉뚱한 크기가 붙지 않게. 남은 폴더도 계산하지 않는다.
+    const now = usePanes
+      .getState()
+      .panes[paneId].tabs.find((t) => t.id === tab.id);
+    if (!now || !sameLocation(now.location, tab.location)) return;
     if (r.status === "error") {
       showError("toast.dirSizeFailed", r.error, {
         path: String(childLocation(tab.location, name).path),

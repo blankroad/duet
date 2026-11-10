@@ -39,24 +39,35 @@ it("browse-09: cursor on the '..' row computes nothing", async () => {
   expect(commands.fsDirSize).not.toHaveBeenCalled();
 });
 
-it.fails(
-  "browse-20 (F-sol-03): late size response must not attach to same-named child in another folder",
-  async () => {
-    let resolve!: (result: { status: "ok"; data: number }) => void;
-    vi.mocked(commands.fsDirSize).mockReturnValue(
-      new Promise((done) => {
-        resolve = done;
-      }),
-    );
-    const pending = calcDirSizes("left", [dir.name]);
-    usePanes.getState().setEntries("left", loc("/different"), [dir]);
-    resolve({ status: "ok", data: 123456 });
-    await pending;
-    expect(activeTab(usePanes.getState(), "left").location.path).toBe(
-      "/different",
-    );
-    expect(
-      activeTab(usePanes.getState(), "left").dirSizes[dir.name],
-    ).toBeUndefined();
-  },
-);
+it("browse-20 (F-sol-03): late size response must not attach to same-named child in another folder", async () => {
+  let resolve!: (result: { status: "ok"; data: number }) => void;
+  vi.mocked(commands.fsDirSize).mockReturnValue(
+    new Promise((done) => {
+      resolve = done;
+    }),
+  );
+  const pending = calcDirSizes("left", [dir.name]);
+  usePanes.getState().setEntries("left", loc("/different"), [dir]);
+  resolve({ status: "ok", data: 123456 });
+  await pending;
+  expect(activeTab(usePanes.getState(), "left").location.path).toBe(
+    "/different",
+  );
+  expect(
+    activeTab(usePanes.getState(), "left").dirSizes[dir.name],
+  ).toBeUndefined();
+});
+
+it("browse-20: a same-folder refresh during calculation keeps the result", async () => {
+  let resolve!: (result: { status: "ok"; data: number }) => void;
+  vi.mocked(commands.fsDirSize).mockReturnValue(
+    new Promise((done) => {
+      resolve = done;
+    }),
+  );
+  const pending = calcDirSizes("left", [dir.name]);
+  usePanes.getState().setEntries("left", loc("/original"), [dir]);
+  resolve({ status: "ok", data: 42 });
+  await pending;
+  expect(activeTab(usePanes.getState(), "left").dirSizes[dir.name]).toBe(42);
+});
