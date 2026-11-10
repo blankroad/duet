@@ -3,7 +3,9 @@
 //! 해제(task)와 내부 보기(browse) 모두 이 이벤트로 알린다. 실패는 기존 오류 경로
 //! (`TaskChange::Failed` / command 오류)를 그대로 쓴다.
 
+use crate::core::archive_here::ExtractHereSummary;
 use crate::core::tar_unpack::UnpackReport;
+use crate::types::Location;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri_specta::Event;
@@ -39,6 +41,15 @@ impl ArchiveNoticeEvent {
             renamed_count: u32::try_from(report.renamed.len()).unwrap_or(u32::MAX),
         })
     }
+}
+
+/// "여기에 압축 풀기" 결과 — 이름을 바꿔 놓았거나 교체·건너뛴 항목, 남은 준비 폴더가
+/// 있을 때만 보낸다. 프론트가 같은 일괄의 결과를 모아 알림 하나로 보여준다.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct ExtractHereNoticeEvent {
+    /// 아카이브가 있는(= 풀린) 폴더.
+    pub archive_dir: Location,
+    pub summary: ExtractHereSummary,
 }
 
 #[cfg(test)]

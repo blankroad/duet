@@ -6,13 +6,15 @@
 use std::sync::Arc;
 
 use crate::core::archive::{self, CompressFormat, CompressPlan, ExtractPlan};
+use crate::core::archive_batch::{self, ExtractPlanItem};
+use crate::core::archive_here::{self, ExtractConflict};
 use crate::core::copy_strategy::{decide as decide_strategy, CopyStrategy};
 use crate::core::ops::{
     self, ApplyDecision, BatchRenamePlan, CopyPlan, DeletePlan, MovePlan, OpCtx, RenameRule,
     SyncPlan,
 };
 use crate::fs::{FileSystem, LocalFs, SshFs};
-use crate::services::archive_events::ArchiveNoticeEvent;
+use crate::services::archive_events::{ArchiveNoticeEvent, ExtractHereNoticeEvent};
 use crate::services::connection_pool::ConnectionPool;
 use crate::services::journal::{Journal, JournalEntry, JournalId};
 use crate::services::journal_events::JournalChangedEvent;
@@ -1540,6 +1542,36 @@ pub async fn fs_extract_plan(
     archive::extract_plan(&*fs, archive).await
 }
 
+/// 여러 아카이브를 각각 자기 폴더로 풀기 위한 계획 — 선택 순서대로, 항목별 성공/에러.
+/// 같은 일괄 안의 이름 중복은 `a (2)` 로 피하고, 디스크의 기존 이름은 `keep_both`
+/// (true = 빈 `a (2)`, false = 교체 = 실행 시 `.bak` 백업)로 갈린다 (`core::archive_batch`).
+/// 실행은 아카이브마다 `fs_extract_execute` (작업·journal 항목 하나씩).
+///
+/// 선택은 한 패널이라 source 가 하나다 — 첫 항목의 source 로 fs 를 잡고, 연결을 못 잡으면
+/// 모든 항목이 그 에러를 받는다. 일괄 전체를 실패시키는 Err 는 쓰지 않는다(항목별 에러).
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_extract_plan_batch(
+    archives: Vec<EntryRef>,
+    keep_both: bool,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+) -> Result<Vec<ExtractPlanItem>, DuetError> {
+    let Some(first) = archives.first() else {
+        return Ok(Vec::new());
+    };
+    match fs_for(&first.location.source, pool.inner()).await {
+        Ok(fs) => Ok(archive_batch::extract_plan_batch(&*fs, archives, keep_both).await),
+        Err(e) => Ok(archives
+            .into_iter()
+            .map(|archive| ExtractPlanItem {
+                archive,
+                plan: None,
+                error: Some(e.clone()),
+            })
+            .collect()),
+    }
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn fs_extract_execute(
@@ -1597,6 +1629,160 @@ pub async fn fs_extract_execute(
         )
         .await;
     Ok(task_id)
+}
+
+/// "여기에 압축 풀기" 일괄의 한 항목 — 작업을 걸었으면 `task_id`, 시작 전에 거부됐으면
+/// `error` (지원 안 함·원격·파일 아님 등). 하나가 거부돼도 나머지는 진행한다.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+pub struct ExtractDispatch {
+    pub archive: EntryRef,
+    pub task_id: Option<TaskId>,
+    pub error: Option<DuetError>,
+}
+
+/// 아카이브들을 각자 있는 폴더에 바로 푼다 — 아카이브마다 작업 하나(journal 하나).
+/// 충돌 정책은 일괄당 하나. 같은 일괄의 원본 아카이브는 서로의 Replace 에서 보호된다.
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_extract_here(
+    archives: Vec<EntryRef>,
+    policy: ExtractConflict,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+    settings: tauri::State<'_, Arc<SettingsStore>>,
+    journal: tauri::State<'_, Arc<Journal>>,
+    queue: tauri::State<'_, Arc<TaskQueue>>,
+    app: tauri::AppHandle,
+) -> Result<Vec<ExtractDispatch>, DuetError> {
+    let deps = HereDeps {
+        pool: pool.inner().clone(),
+        settings: settings.inner().clone(),
+        journal: journal.inner().clone(),
+        queue: queue.inner().clone(),
+        app,
+    };
+    // 원본 경로 — fs.join 으로 (§7). 확인 못 한 항목은 아래 검증에서 거부된다.
+    let mut protect = Vec::with_capacity(archives.len());
+    for a in &archives {
+        if let Ok(fs) = fs_for(&a.location.source, &deps.pool).await {
+            protect.push(fs.join(&a.location.path, &a.name));
+        }
+    }
+    let mut out = Vec::with_capacity(archives.len());
+    for archive in archives {
+        let checked = match fs_for(&archive.location.source, &deps.pool).await {
+            Ok(fs) => archive_here::check_extract_here(&*fs, &archive).await,
+            Err(e) => Err(e),
+        };
+        out.push(match checked {
+            Ok(()) => ExtractDispatch {
+                task_id: Some(
+                    enqueue_extract_here(&deps, archive.clone(), policy, None, protect.clone())
+                        .await,
+                ),
+                archive,
+                error: None,
+            },
+            Err(e) => ExtractDispatch {
+                archive,
+                task_id: None,
+                error: Some(e),
+            },
+        });
+    }
+    Ok(out)
+}
+
+/// 암호 아카이브의 "여기에 풀기" 재시도 — 같은 정책으로 작업 하나를 다시 건다.
+/// 암호는 command 인자로만 오가고 영구화하지 않는다 (CLAUDE.md §5).
+#[tauri::command]
+#[specta::specta]
+#[allow(clippy::too_many_arguments)]
+pub async fn fs_extract_here_retry(
+    archive: EntryRef,
+    policy: ExtractConflict,
+    password: Option<String>,
+    pool: tauri::State<'_, Arc<ConnectionPool>>,
+    settings: tauri::State<'_, Arc<SettingsStore>>,
+    journal: tauri::State<'_, Arc<Journal>>,
+    queue: tauri::State<'_, Arc<TaskQueue>>,
+    app: tauri::AppHandle,
+) -> Result<TaskId, DuetError> {
+    let deps = HereDeps {
+        pool: pool.inner().clone(),
+        settings: settings.inner().clone(),
+        journal: journal.inner().clone(),
+        queue: queue.inner().clone(),
+        app,
+    };
+    let fs = fs_for(&archive.location.source, &deps.pool).await?;
+    archive_here::check_extract_here(&*fs, &archive).await?;
+    Ok(enqueue_extract_here(&deps, archive, policy, password, Vec::new()).await)
+}
+
+/// extract-here 작업이 쓰는 앱 상태.
+struct HereDeps {
+    pool: Arc<ConnectionPool>,
+    settings: Arc<SettingsStore>,
+    journal: Arc<Journal>,
+    queue: Arc<TaskQueue>,
+    app: tauri::AppHandle,
+}
+
+async fn enqueue_extract_here(
+    deps: &HereDeps,
+    archive: EntryRef,
+    policy: ExtractConflict,
+    password: Option<String>,
+    protect: Vec<std::path::PathBuf>,
+) -> TaskId {
+    let source = archive.location.source.clone();
+    let host_key = host_key_for_op(&source, &source);
+    let title = format!("Extracting {} here", archive.name);
+    let affected = vec![archive.location.clone()];
+    let pool = deps.pool.clone();
+    let settings = deps.settings.clone();
+    let journal = deps.journal.clone();
+    let app = deps.app.clone();
+    deps.queue
+        .clone()
+        .enqueue(
+            TaskKind::Extract,
+            title,
+            host_key,
+            affected,
+            Box::new(move |cancel_token, _progress| {
+                Box::pin(async move {
+                    let fs = fs_for(&archive.location.source, &pool).await?;
+                    let ctx = OpCtx {
+                        settings,
+                        journal,
+                        pool: Some(pool.clone()),
+                        app: Some(app.clone()),
+                    };
+                    let archive_dir = archive.location.clone();
+                    let (entry, report, summary) = archive_here::extract_here_execute(
+                        &*fs,
+                        archive,
+                        policy,
+                        password,
+                        &protect,
+                        &ctx,
+                        cancel_token,
+                    )
+                    .await?;
+                    emit_archive_notice(&app, &summary.archive_name, &report);
+                    if summary.is_notable() {
+                        let _ = ExtractHereNoticeEvent {
+                            archive_dir,
+                            summary,
+                        }
+                        .emit(&app);
+                    }
+                    Ok(emit_pushed(&app, entry))
+                })
+            }),
+        )
+        .await
 }
 
 #[tauri::command]

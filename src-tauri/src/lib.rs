@@ -144,7 +144,10 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
             commands::fs_ops::fs_copy_plan_external,
             commands::fs_ops::fs_archive_open_for_browse,
             commands::fs_ops::fs_extract_plan,
+            commands::fs_ops::fs_extract_plan_batch,
             commands::fs_ops::fs_extract_execute,
+            commands::fs_ops::fs_extract_here,
+            commands::fs_ops::fs_extract_here_retry,
             commands::fs_ops::fs_compress_plan,
             commands::fs_ops::fs_repack_plan,
             commands::fs_ops::fs_compress_execute,
@@ -175,6 +178,7 @@ pub fn make_specta_builder() -> Builder<tauri::Wry> {
         ])
         .events(collect_events![
             services::archive_events::ArchiveNoticeEvent,
+            services::archive_events::ExtractHereNoticeEvent,
             services::connection_events::ConnectionStateEvent,
             services::compare_events::CompareProgressEvent,
             services::fs_events::FsChangedEvent,
