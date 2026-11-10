@@ -10,17 +10,25 @@ import type { EntryRef, Location, MovePlan, SourceId } from "@/types/bindings";
 
 const h = vi.hoisted(() => ({
   movePlan: null as unknown,
+  movePlans: 0,
   moveExecuted: 0,
   moveExec: null as unknown,
+  /** 설정하면 fsMoveExecute 응답이 이 promise 가 풀릴 때까지 늦게 온다. */
+  gate: null as Promise<void> | null,
 }));
 vi.mock("@tauri-apps/plugin-os", () => ({ platform: () => "windows" }));
 vi.mock("@/types/bindings", () => ({
   commands: {
-    fsMovePlan: () => Promise.resolve(h.movePlan),
-    fsCopyPlan: () => Promise.resolve(h.movePlan),
-    fsMoveExecute: () => {
+    // 실제 IPC 처럼 호출마다 새 plan 객체를 돌려준다.
+    fsMovePlan: () => {
+      h.movePlans += 1;
+      return Promise.resolve(structuredClone(h.movePlan));
+    },
+    fsCopyPlan: () => Promise.resolve(structuredClone(h.movePlan)),
+    fsMoveExecute: async () => {
       h.moveExecuted += 1;
-      return Promise.resolve(h.moveExec ?? { status: "ok", data: "task-1" });
+      if (h.gate) await h.gate;
+      return h.moveExec ?? { status: "ok", data: "task-1" };
     },
     setOsFileClipboard: () => Promise.resolve({ status: "ok", data: null }),
   },
@@ -29,7 +37,7 @@ vi.mock("@/types/bindings", () => ({
 import { clipPaste, executeTransfer } from "@/lib/fileActions";
 import { useClipboard } from "@/stores/clipboard";
 import { useAppSettings } from "@/stores/settings";
-import type { DialogState } from "@/stores/ui-dialogs";
+import { useUIDialogs, type DialogState } from "@/stores/ui-dialogs";
 
 const ssh: SourceId = {
   kind: "ssh",
@@ -68,12 +76,31 @@ async function pasteToDialog(
 }
 
 /** 확인창의 [이동] — App.onMoveConfirm 과 같은 호출. */
-const confirm = (d: Extract<DialogState, { kind: "move-confirm" }>) =>
-  executeTransfer("move", d.plan, "skip", vi.fn(), vi.fn(), vi.fn(), d.clip);
+const confirm = (
+  d: Extract<DialogState, { kind: "move-confirm" }>,
+  policy: "skip" | "replace" | "keepboth" = "replace",
+) => executeTransfer("move", d.plan, policy, vi.fn(), vi.fn(), vi.fn(), d.clip);
+
+/** 다음 fsMoveExecute 응답을 붙잡는다 — 반환 함수로 풀어 준다. */
+function holdExecute(): () => void {
+  let release = () => {};
+  h.gate = new Promise<void>((r) => {
+    release = r;
+  });
+  return () => {
+    h.gate = null;
+    release();
+  };
+}
+
+const flush = () => new Promise((r) => setTimeout(r, 0));
 
 beforeEach(() => {
+  h.movePlans = 0;
   h.moveExecuted = 0;
   h.moveExec = null;
+  h.gate = null;
+  useUIDialogs.getState().close();
   useClipboard.getState().set(cut, "move");
 });
 
@@ -196,6 +223,108 @@ describe("fileops-opus: 잘라내기 붙여넣기", () => {
     );
     expect(open.mock.calls[0]?.[0]?.kind).toBe("copy-confirm");
     expect(useClipboard.getState().entry?.mode).toBe("copy");
+  });
+
+  it("A1-R1-01: 전체 건너뛰기면 충돌 항목은 남고 나머지만 비운다", async () => {
+    const two: EntryRef[] = [...cut, { location: src, name: "notes.txt" }];
+    useClipboard.getState().set(two, "move");
+    h.movePlan = plan(1, two); // report.docx 만 충돌
+    const d = await pasteToDialog();
+    expect(await confirm(d, "skip")).toBe(true);
+    // 건너뛴 report.docx 는 원래 폴더에 남아 있다 — 다시 붙여넣을 수 있어야 한다.
+    expect(useClipboard.getState().entry?.targets).toEqual([two[0]]);
+  });
+
+  it("A1-R1-02: 접수 응답 전 두 번째 Ctrl+V 는 같은 잘라내기를 다시 보내지 않는다", async () => {
+    h.movePlan = plan(0);
+    const done = holdExecute();
+    const first = clipPaste(vi.fn(), vi.fn(), dst);
+    await flush(); // 첫 번째가 fsMoveExecute 응답을 기다리는 중
+    const second = clipPaste(vi.fn(), vi.fn(), dst);
+    await flush();
+    done();
+    await Promise.all([first, second]);
+    expect(h.movePlans).toBe(1);
+    expect(h.moveExecuted).toBe(1);
+    expect(useClipboard.getState().entry).toBeNull();
+  });
+
+  it("A1-R1-02: plan 응답 전 두 번째 Ctrl+V 도 무시된다(서로 다른 plan 객체)", async () => {
+    h.movePlan = plan(0);
+    const a = clipPaste(vi.fn(), vi.fn(), dst);
+    const b = clipPaste(vi.fn(), vi.fn(), dst);
+    await Promise.all([a, b]);
+    expect(h.movePlans).toBe(1);
+    expect(h.moveExecuted).toBe(1);
+  });
+
+  it("A1-R1-02: 확인 창이 떠 있는 동안 같은 잘라내기는 다시 plan 하지 않고, 취소(Esc)하면 다시 된다", async () => {
+    h.movePlan = plan(1);
+    const open = useUIDialogs.getState().open;
+    await clipPaste(open, vi.fn(), dst);
+    expect(useUIDialogs.getState().dialog.kind).toBe("move-confirm");
+    await clipPaste(open, vi.fn(), dst);
+    expect(h.movePlans).toBe(1);
+    // [취소]/Esc — App 은 closeDialog 만 부른다.
+    useUIDialogs.getState().close();
+    await clipPaste(open, vi.fn(), dst);
+    expect(h.movePlans).toBe(2);
+    expect(useClipboard.getState().entry?.targets).toEqual(cut);
+  });
+
+  it("A1-R1-02: 확인 창 [이동] 응답 대기 중에는 Ctrl+V 가 막히고, 접수 거부 후에는 다시 된다", async () => {
+    h.movePlan = plan(1);
+    const open = useUIDialogs.getState().open;
+    await clipPaste(open, vi.fn(), dst);
+    const d = useUIDialogs.getState().dialog;
+    if (d.kind !== "move-confirm") throw new Error("no dialog");
+    h.moveExec = {
+      status: "error",
+      error: { kind: "Io", message: "queue closed" },
+    };
+    const done = holdExecute();
+    // App.onMoveConfirm — 닫기는 executeTransfer 안에서.
+    const submit = executeTransfer(
+      "move",
+      d.plan,
+      "replace",
+      open,
+      useUIDialogs.getState().close,
+      vi.fn(),
+      d.clip,
+    );
+    await flush();
+    expect(useUIDialogs.getState().dialog.kind).toBe("none");
+    await clipPaste(open, vi.fn(), dst); // 응답 대기 중 — 무시
+    expect(h.movePlans).toBe(1);
+    done();
+    expect(await submit).toBe(false);
+    await clipPaste(open, vi.fn(), dst); // 거부됐으니 다시 시도 가능
+    expect(h.movePlans).toBe(2);
+    expect(useClipboard.getState().entry?.targets).toEqual(cut);
+  });
+
+  it("A1-R1-02: plan 실패 후 다시 Ctrl+V 하면 다시 시도한다", async () => {
+    h.movePlan = {
+      status: "error",
+      error: { kind: "PermissionDenied", data: "D:\\backup" },
+    };
+    await clipPaste(vi.fn(), vi.fn(), dst);
+    h.movePlan = plan(0);
+    await clipPaste(vi.fn(), vi.fn(), dst);
+    expect(h.movePlans).toBe(2);
+    expect(h.moveExecuted).toBe(1);
+  });
+
+  it("A1-R1-02: 복사 클립보드는 예약하지 않는다(동시 붙여넣기 둘 다 진행)", async () => {
+    useClipboard.getState().set(cut, "copy");
+    h.movePlan = plan(1);
+    const open = vi.fn();
+    await Promise.all([
+      clipPaste(open, vi.fn(), dst),
+      clipPaste(open, vi.fn(), dst),
+    ]);
+    expect(open).toHaveBeenCalledTimes(2);
   });
 
   it.each([

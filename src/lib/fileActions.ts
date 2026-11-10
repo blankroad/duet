@@ -283,7 +283,10 @@ export async function clipPaste(
   // 잘라내기는 이동 작업이 실제로 접수된 항목만 비운다(executeTransfer·파일별 실행).
   // 확인 창 취소·plan 실패·접수 실패면 그대로 남아 Ctrl+V 로 다시 시도할 수 있다.
   // 복사는 유지(여러 번 붙여넣기 가능, 탐색기와 동일).
-  await planTransferTo(
+  // 같은 잘라내기를 처리 중이면(plan·확인 창·접수 대기) 두 번째 Ctrl+V 는 무시한다 —
+  // 같은 원본을 두 번 옮기는 작업이 큐에 들어가지 않게.
+  if (clip.mode === "move" && !reserveCut(clip.id)) return;
+  const outcome = await planTransferTo(
     clip.targets,
     dst,
     clip.mode,
@@ -292,6 +295,8 @@ export async function clipPaste(
     undefined,
     clip.mode === "move" ? { clip: clip.id } : undefined,
   );
+  // 확인 창이 떴으면 예약은 그 창이 닫히거나 실행이 끝날 때 풀린다.
+  if (clip.mode === "move" && outcome !== "dialog") releaseCut(clip.id);
 }
 
 /** 두 패널 폴더 비교 — 활성=left, 반대=right. 결과를 비교 다이얼로그로. */
@@ -472,6 +477,57 @@ export function consumeCutClipboard(
 }
 
 /**
+ * 이 정책으로 실행하면 실제로 옮겨지는 항목 — 건너뛰기면 충돌 항목은 그대로 남는다.
+ * 잘라내기에서 이것만 빼야 건너뛴 항목을 다시 붙여넣을 수 있다.
+ */
+export function itemsActedOn(
+  plan: { items: EntryRef[]; conflicts: { name: string }[] },
+  policy: ConflictPolicy,
+): EntryRef[] {
+  if (policy !== "skip") return plan.items;
+  const skipped = new Set(plan.conflicts.map((c) => c.name));
+  return plan.items.filter((it) => !skipped.has(it.name));
+}
+
+/** 처리 중인 잘라내기 붙여넣기의 클립보드 번호 — plan·확인 창·접수 대기 동안. */
+const cutInFlight = new Set<number>();
+/** 확인 창에서 실행을 보내는 중인 번호 — 그 창이 닫혀도 예약을 풀지 않는다. */
+const cutSubmitting = new Set<number>();
+
+/** 이 잘라내기를 처리 중으로 잡는다. 이미 처리 중이면 false. */
+function reserveCut(clip: number): boolean {
+  if (cutInFlight.has(clip)) return false;
+  cutInFlight.add(clip);
+  return true;
+}
+
+/** 처리 중 표시를 푼다 — 실행을 보내는 중이면 그 실행이 끝날 때 푼다. */
+function releaseCut(clip: number): void {
+  if (!cutSubmitting.has(clip)) cutInFlight.delete(clip);
+}
+
+/** 잘라내기의 이동 실행을 보내기 시작 — 접수 응답까지 다른 Ctrl+V 를 막는다. */
+export function beginCutSubmit(clip: number | undefined): void {
+  if (clip === undefined) return;
+  cutInFlight.add(clip);
+  cutSubmitting.add(clip);
+}
+
+/** 이동 실행 요청이 끝났다(접수든 거부든) — 남은 항목은 다시 붙여넣을 수 있다. */
+export function endCutSubmit(clip: number | undefined): void {
+  if (clip === undefined) return;
+  cutSubmitting.delete(clip);
+  cutInFlight.delete(clip);
+}
+
+// 잘라내기 확인 창이 실행 없이 닫히면(취소·Esc·다른 창으로 교체) 예약을 푼다.
+useUIDialogs.subscribe((state, prev) => {
+  const d = prev.dialog;
+  if (d.kind !== "move-confirm" || d.clip === undefined) return;
+  if (state.dialog !== d) releaseCut(d.clip);
+});
+
+/**
  * 복사/이동 실행 — 확인 다이얼로그에서 확정했을 때와, 확인을 건너뛰는 설정에서
  * 바로 실행할 때가 같은 경로를 쓴다(승격 재시도용 plan 기억 + 진행 모달 규칙 공유).
  *
@@ -489,9 +545,29 @@ export async function executeTransfer(
   showToast: ToastFn,
   clip?: number,
 ): Promise<boolean> {
+  if (!claimPlan(plan)) {
+    close();
+    return false;
+  }
   // 확인 다이얼로그는 먼저 닫는다 — 진행 모달은 느린 작업에서만 뒤늦게 뜬다.
+  // 잘라내기 예약은 닫기 전에 실행 중으로 넘겨, 닫힘이 예약을 풀지 않게 한다.
+  if (mode === "move") beginCutSubmit(clip);
   close();
-  if (!claimPlan(plan)) return false;
+  try {
+    return await sendTransfer(mode, plan, policy, open, showToast, clip);
+  } finally {
+    if (mode === "move") endCutSubmit(clip);
+  }
+}
+
+async function sendTransfer(
+  mode: "copy" | "move",
+  plan: CopyPlan | MovePlan,
+  policy: ConflictPolicy,
+  open: OpenFn,
+  showToast: ToastFn,
+  clip: number | undefined,
+): Promise<boolean> {
   let r;
   try {
     r =
@@ -514,7 +590,7 @@ export async function executeTransfer(
     );
     return false;
   }
-  if (mode === "move") consumeCutClipboard(clip, plan.items);
+  if (mode === "move") consumeCutClipboard(clip, itemsActedOn(plan, policy));
   // 실패 시(보호 경로 권한 등) 승격 재시도를 위해 plan 을 기억.
   rememberElevatable(
     r.data,
@@ -547,6 +623,9 @@ export interface TransferOpts {
   clip?: number;
 }
 
+/** planTransferTo 결과 — 확인 창을 띄웠으면 "dialog", 그 밖(실행·거부·안내)은 "done". */
+export type TransferOutcome = "dialog" | "done";
+
 /** targets 를 dst 로 복사/이동 plan 호출 후 확인 다이얼로그. 키보드·툴바·DnD 공유. */
 export async function planTransferTo(
   targets: EntryRef[],
@@ -556,7 +635,7 @@ export async function planTransferTo(
   showToast: ToastFn,
   close?: () => void,
   opts: TransferOpts = {},
-): Promise<void> {
+): Promise<TransferOutcome> {
   // 선택/커서 대상이 없으면 조용히 끝나던 것 → 이유를 알린다 ("아무 일 없음" 방지).
   if (targets.length === 0) {
     showToast(
@@ -564,7 +643,7 @@ export async function planTransferTo(
         ? i18n.t("toast.moveNothingSelected")
         : i18n.t("toast.copyNothingSelected"),
     );
-    return;
+    return "done";
   }
   // 이미 그 폴더에 있는 항목을 같은 폴더로 이동 — 의미 없음. 잘라내기 붙여넣기·드래그와
   // 같은 규칙(F6 을 양쪽 패널이 같은 폴더일 때 누른 경우 등).
@@ -573,14 +652,14 @@ export async function planTransferTo(
     targets.every((t) => sameLocationDir(t.location, dst))
   ) {
     showToast(i18n.t("toast.alreadyInFolder"));
-    return;
+    return "done";
   }
   // 가상 휴지통으로/에서 — 드래그·사이드바 드롭·선반·붙여넣기가 모두 여기를 지난다.
   if (
     refuseInVirtualTrash(dst, showToast) ||
     targets.some((t) => refuseInVirtualTrash(t.location, showToast))
   )
-    return;
+    return "done";
   try {
     const closeFn = close ?? useUIDialogs.getState().close;
     if (mode === "move") {
@@ -590,24 +669,25 @@ export async function planTransferTo(
           path: targets.length === 1 ? targets[0]!.name : null,
           toast: showToast,
         });
-        return;
+        return "done";
       }
-      if (needsTransferConfirm(r.data.conflicts.length > 0))
+      if (needsTransferConfirm(r.data.conflicts.length > 0)) {
         open({
           kind: "move-confirm",
           plan: r.data,
           ...(opts.clip !== undefined ? { clip: opts.clip } : {}),
         });
-      else
-        await executeTransfer(
-          "move",
-          r.data,
-          initialConflictPolicy(),
-          open,
-          closeFn,
-          showToast,
-          opts.clip,
-        );
+        return "dialog";
+      }
+      await executeTransfer(
+        "move",
+        r.data,
+        initialConflictPolicy(),
+        open,
+        closeFn,
+        showToast,
+        opts.clip,
+      );
     } else {
       const r = await commands.fsCopyPlan(targets, dst);
       if (r.status !== "ok") {
@@ -615,19 +695,20 @@ export async function planTransferTo(
           path: targets.length === 1 ? targets[0]!.name : null,
           toast: showToast,
         });
-        return;
+        return "done";
       }
-      if (needsTransferConfirm(r.data.conflicts.length > 0))
+      if (needsTransferConfirm(r.data.conflicts.length > 0)) {
         open({ kind: "copy-confirm", plan: r.data });
-      else
-        await executeTransfer(
-          "copy",
-          r.data,
-          initialConflictPolicy(),
-          open,
-          closeFn,
-          showToast,
-        );
+        return "dialog";
+      }
+      await executeTransfer(
+        "copy",
+        r.data,
+        initialConflictPolicy(),
+        open,
+        closeFn,
+        showToast,
+      );
     }
   } catch (e) {
     // commands.* 가 구조화된 DuetError 대신 예외를 throw 한 경우(명령 미등록·직렬화
@@ -640,6 +721,7 @@ export async function planTransferTo(
       "error",
     );
   }
+  return "done";
 }
 
 // ── Drop Stack / Shelf ───────────────────────────────────────────────────────

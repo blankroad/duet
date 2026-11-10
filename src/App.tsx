@@ -84,6 +84,9 @@ import {
   triggerRenameSmart,
   claimPlan,
   consumeCutClipboard,
+  itemsActedOn,
+  beginCutSubmit,
+  endCutSubmit,
   triggerUndo,
   triggerRedo,
   copySelectionPaths,
@@ -1387,76 +1390,85 @@ function App() {
       decisions: Record<string, ConflictPolicy>,
       clip?: number,
     ) => {
-      closeDialog();
       // 확인 버튼을 두 번 눌러도 같은 그룹들이 두 번 들어가지 않게.
-      if (!claimPlan(plan)) return;
-      const conflictNames = new Set(plan.conflicts.map((c) => c.name));
-      const groups = new Map<ConflictPolicy, EntryRef[]>();
-      const rest: EntryRef[] = [];
-      for (const it of plan.items) {
-        if (!conflictNames.has(it.name)) {
-          rest.push(it);
-          continue;
-        }
-        const p = decisions[it.name] ?? "skip";
-        if (p === "skip") continue;
-        groups.set(p, [...(groups.get(p) ?? []), it]);
-      }
-      if (rest.length > 0) {
-        // 비충돌 항목은 정책과 무관 — 아무 그룹에나 합류. 전부 skip 이었으면
-        // 비충돌만 담은 그룹(정책값 무의미)으로 실행.
-        const first = groups.keys().next();
-        if (!first.done) groups.get(first.value)!.push(...rest);
-        else groups.set("skip", rest);
-      }
-      if (groups.size === 0) {
-        showToast(i18n.t("toast.nothingToDo"));
+      if (!claimPlan(plan)) {
+        closeDialog();
         return;
       }
-      let show: { taskId: string; count: number } | null = null;
-      for (const [policy, items] of groups) {
-        let taskId: string | null = null;
-        if (mode === "copy") {
-          const p = await commands.fsCopyPlan(items, plan.dst);
-          if (p.status === "error") {
-            showError("toast.copyPlanFailed", p.error);
+      // 잘라내기 예약은 닫기 전에 실행 중으로 넘긴다 — 모든 그룹을 보낼 때까지 Ctrl+V 를 막는다.
+      if (mode === "move") beginCutSubmit(clip);
+      closeDialog();
+      try {
+        const conflictNames = new Set(plan.conflicts.map((c) => c.name));
+        const groups = new Map<ConflictPolicy, EntryRef[]>();
+        const rest: EntryRef[] = [];
+        for (const it of plan.items) {
+          if (!conflictNames.has(it.name)) {
+            rest.push(it);
             continue;
           }
-          const r = await commands.fsCopyExecute(p.data, policy);
-          if (r.status === "error") {
-            showError("toast.copyFailed", r.error);
-            continue;
-          }
-          rememberElevatable(r.data, { op: "copy", plan: p.data, policy });
-          taskId = r.data;
-        } else {
-          const p = await commands.fsMovePlan(items, plan.dst);
-          if (p.status === "error") {
-            showError("toast.movePlanFailed", p.error);
-            continue;
-          }
-          const r = await commands.fsMoveExecute(p.data, policy);
-          if (r.status === "error") {
-            showError("toast.moveFailed", r.error);
-            continue;
-          }
-          rememberElevatable(r.data, { op: "move", plan: p.data, policy });
-          // 접수된 그룹만 잘라내기에서 뺀다 — 거부된 그룹·건너뛴 항목은 남아 다시 붙여넣을 수 있다.
-          consumeCutClipboard(clip, p.data.items);
-          taskId = r.data;
+          const p = decisions[it.name] ?? "skip";
+          if (p === "skip") continue;
+          groups.set(p, [...(groups.get(p) ?? []), it]);
         }
-        if (taskId && (!show || items.length > show.count))
-          show = { taskId, count: items.length };
-      }
-      if (show) {
-        openDialog({
-          kind: "progress",
-          title:
-            mode === "copy"
-              ? i18n.t("dialog.progress.copying")
-              : i18n.t("dialog.progress.moving"),
-          taskId: show.taskId,
-        });
+        if (rest.length > 0) {
+          // 비충돌 항목은 정책과 무관 — 아무 그룹에나 합류. 전부 skip 이었으면
+          // 비충돌만 담은 그룹(정책값 무의미)으로 실행.
+          const first = groups.keys().next();
+          if (!first.done) groups.get(first.value)!.push(...rest);
+          else groups.set("skip", rest);
+        }
+        if (groups.size === 0) {
+          showToast(i18n.t("toast.nothingToDo"));
+          return;
+        }
+        let show: { taskId: string; count: number } | null = null;
+        for (const [policy, items] of groups) {
+          let taskId: string | null = null;
+          if (mode === "copy") {
+            const p = await commands.fsCopyPlan(items, plan.dst);
+            if (p.status === "error") {
+              showError("toast.copyPlanFailed", p.error);
+              continue;
+            }
+            const r = await commands.fsCopyExecute(p.data, policy);
+            if (r.status === "error") {
+              showError("toast.copyFailed", r.error);
+              continue;
+            }
+            rememberElevatable(r.data, { op: "copy", plan: p.data, policy });
+            taskId = r.data;
+          } else {
+            const p = await commands.fsMovePlan(items, plan.dst);
+            if (p.status === "error") {
+              showError("toast.movePlanFailed", p.error);
+              continue;
+            }
+            const r = await commands.fsMoveExecute(p.data, policy);
+            if (r.status === "error") {
+              showError("toast.moveFailed", r.error);
+              continue;
+            }
+            rememberElevatable(r.data, { op: "move", plan: p.data, policy });
+            // 접수된 그룹의 실제 대상만 잘라내기에서 뺀다 — 거부된 그룹·건너뛴 항목은 남는다.
+            consumeCutClipboard(clip, itemsActedOn(p.data, policy));
+            taskId = r.data;
+          }
+          if (taskId && (!show || items.length > show.count))
+            show = { taskId, count: items.length };
+        }
+        if (show) {
+          openDialog({
+            kind: "progress",
+            title:
+              mode === "copy"
+                ? i18n.t("dialog.progress.copying")
+                : i18n.t("dialog.progress.moving"),
+            taskId: show.taskId,
+          });
+        }
+      } finally {
+        if (mode === "move") endCutSubmit(clip);
       }
     },
     [closeDialog, openDialog, showToast],
