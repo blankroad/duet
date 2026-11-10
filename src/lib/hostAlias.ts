@@ -39,6 +39,16 @@ export function parseAdHocAlias(alias: string): AdHocAliasParts | null {
 }
 
 /**
+ * 저장 호스트로 접속했을 때 연결이 갖는 alias — 백엔드 `connection_open_adhoc` 이
+ * `user@host:port` 로 만든다(저장 alias 가 "nas" 여도). `parseAdHocAlias` 의 역.
+ */
+export function adHocAliasOf(
+  h: Pick<SavedHost, "user" | "host" | "port">,
+): string {
+  return `${h.user}@${h.host}:${h.port}`;
+}
+
+/**
  * 이 alias 로 재접속할 저장된 호스트 찾기.
  *
  * 1. alias 그대로 일치 (사용자가 지정한 alias 로 저장한 경우)

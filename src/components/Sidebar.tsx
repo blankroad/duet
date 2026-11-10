@@ -81,6 +81,7 @@ import { useReorderable } from "@/hooks/useReorderable";
 import { ShelfSection } from "@/components/ShelfSection";
 import { useHostNicknames, setHostNickname } from "@/stores/hostNicknames";
 import { aliasLabel } from "@/lib/hostLabel";
+import { adHocAliasOf } from "@/lib/hostAlias";
 import { TagBar } from "@/components/TagBar";
 import {
   useTags,
@@ -546,6 +547,20 @@ function useHostState(alias: string): ConnectionState {
         best = c.state;
     return best;
   });
+}
+
+/** 두 대표 상태 중 더 "살아 있는" 쪽 (connected > connecting > error > disconnected). */
+function strongerState(
+  a: ConnectionState,
+  b: ConnectionState,
+): ConnectionState {
+  return STATE_RANK[b.kind] > STATE_RANK[a.kind] ? b : a;
+}
+
+/** 패널 배지 합치기 — "L"·"R" 중복 없이 L 먼저. */
+function mergeBadges(a: string, b: string): string {
+  const both = a + b;
+  return (both.includes("L") ? "L" : "") + (both.includes("R") ? "R" : "");
 }
 
 /**
@@ -1242,14 +1257,37 @@ function SavedHostItem({
     hostTagKey(host.alias),
   );
   const display = nickname ?? host.alias;
-  const pane = usePanesOnHost(host.alias);
-  const state = useHostState(host.alias);
+  // 저장 호스트로 연 연결의 alias 는 저장 alias 가 아니라 `user@host:port` 다 —
+  // 저장 alias 만 보면 연결돼 있어도 점·배지가 꺼져 있었다(remote-NEW-2).
+  const connAlias = adHocAliasOf(host);
+  const pane = mergeBadges(
+    usePanesOnHost(host.alias),
+    usePanesOnHost(connAlias),
+  );
+  const state = strongerState(
+    useHostState(host.alias),
+    useHostState(connAlias),
+  );
+  const live = state.kind === "connected" || state.kind === "connecting";
   const menu: MenuEntry[] = [
     {
       id: "connect",
       label: t("sidebar.connectEdit"),
       onSelect: () => onActivate(host),
     },
+    // 살아 있는 세션을 닫을 곳이 config 호스트에만 있었다(remote-NEW-2).
+    ...(live
+      ? [
+          {
+            id: "disconnect",
+            label: t("sidebar.disconnect"),
+            onSelect: () => {
+              void disconnectAlias(connAlias);
+              if (connAlias !== host.alias) void disconnectAlias(host.alias);
+            },
+          } as MenuEntry,
+        ]
+      : []),
     {
       id: "rename",
       label: t("sidebar.setDisplayName"),
