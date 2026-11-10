@@ -285,11 +285,11 @@ async fn endpoints_route_planning_and_read_only_operations_to_relay() {
         sync_plan(&left, &right, left.loc("/src"), right.loc("/dst")).await,
         Err(DuetError::NotSupported(_))
     ));
-    assert!(
-        sync_preview(&left, &left.loc("/src"), &right, &right.loc("/dst"), None)
-            .await
-            .is_ok()
-    );
+    // 다른 서버끼리(relay)는 sync 미지원 — preview 도 sync_plan 과 같은 오류(sync relay guard).
+    assert!(matches!(
+        sync_preview(&left, &left.loc("/src"), &right, &right.loc("/dst"), None).await,
+        Err(DuetError::NotSupported(_))
+    ));
     assert!(verify_compare(
         &left,
         &left.loc("/src"),

@@ -1185,21 +1185,30 @@ pub async fn sync_plan(
         return Err(DuetError::Io("sync: both sides must be directories".into()));
     }
     let strategy = decide_fs(src_fs, &src.source, dst_fs, &dst.source);
-    if !matches!(
-        strategy,
-        CopyStrategy::LocalToLocal | CopyStrategy::SshSameHost
-    ) {
-        return Err(DuetError::NotSupported(
-            "sync supports local↔local and same-host SSH only (cross-host relay is a follow-up)"
-                .into(),
-        ));
-    }
+    ensure_sync_supported(&strategy)?;
     Ok(SyncPlan {
         src,
         dst,
         strategy,
         prune: false,
     })
+}
+
+/// sync 가 지원하는 조합(local↔local·same-host SSH)만 통과 — 그 밖은 `sync_plan` 과 같은
+/// 오류(FE 가 쉬운 문장으로 안내하는 바로 그 문구).
+///
+/// plan·preview·execute 가 모두 이것을 부른다. raw IPC plan 이 원격 조합을 들고 와도
+/// in-Rust 미러(본인 PC 경유 + SshFs 위 mirror/prune)로 새지 않게(sync relay guard).
+fn ensure_sync_supported(strategy: &CopyStrategy) -> Result<(), DuetError> {
+    if matches!(
+        strategy,
+        CopyStrategy::LocalToLocal | CopyStrategy::SshSameHost
+    ) {
+        return Ok(());
+    }
+    Err(DuetError::NotSupported(
+        "sync supports local↔local and same-host SSH only (cross-host relay is a follow-up)".into(),
+    ))
 }
 
 /// src 트리의 파일 개수 (진행률 total 용). best-effort — 실패 시 0.
@@ -1238,12 +1247,21 @@ pub async fn sync_execute(
         dst_fs,
         &plan.dst.source,
     )?;
+    // plan 의 strategy 필드를 믿지 않고 지금 소스로 다시 판정한다 — 지원 밖(relay 등)이면
+    // sync_plan 과 같은 오류, plan 과 어긋나면(예: 원격인데 LocalToLocal 로 적힘) 새 plan 요구.
+    let current = decide_fs(src_fs, &plan.src.source, dst_fs, &plan.dst.source);
+    ensure_sync_supported(&current)?;
+    if current != plan.strategy {
+        return Err(DuetError::Io(
+            "sync plan no longer matches the current sources; create a new plan".into(),
+        ));
+    }
     crate::core::path_guard::ensure_roots_unrelated(src_fs, &plan.src, dst_fs, &plan.dst).await?;
     match plan.strategy {
         CopyStrategy::SshSameHost => {
             sync_execute_same_host(plan, ctx, cancel_token, progress).await
         }
-        // LocalToLocal (+ 방어적으로 Relay) — in-Rust 미러.
+        // LocalToLocal 만 남는다(위 가드) — in-Rust 미러.
         _ => sync_execute_local(src_fs, dst_fs, plan, ctx, cancel_token, progress).await,
     }
 }
@@ -1765,8 +1783,9 @@ fn remote_join(base: &std::path::Path, rel: impl AsRef<std::path::Path>) -> Path
     crate::fs::posix_join(base, &rel.as_ref().to_string_lossy())
 }
 
-/// 단방향 미러 dry-run — 복사/prune 목록. local/relay 는 in-Rust 워크(entry_differs
+/// 단방향 미러 dry-run — 복사/prune 목록. local 은 in-Rust 워크(entry_differs
 /// 로 실제 sync 와 동일 판정), same-host 는 `rsync -ain --delete` itemize.
+/// 지원 밖 조합(relay)은 sync_plan 과 같은 오류(sync relay guard).
 pub async fn sync_preview(
     src_fs: &dyn FileSystem,
     src: &Location,
@@ -1774,8 +1793,10 @@ pub async fn sync_preview(
     dst: &Location,
     pool: Option<&Arc<crate::services::connection_pool::ConnectionPool>>,
 ) -> Result<SyncPreview, DuetError> {
+    let strategy = decide_fs(src_fs, &src.source, dst_fs, &dst.source);
+    ensure_sync_supported(&strategy)?;
     crate::core::path_guard::ensure_roots_unrelated(src_fs, src, dst_fs, dst).await?;
-    match decide_fs(src_fs, &src.source, dst_fs, &dst.source) {
+    match strategy {
         crate::core::copy_strategy::CopyStrategy::SshSameHost => {
             let pool = pool
                 .ok_or_else(|| DuetError::Io("pool required for same-host sync preview".into()))?;
@@ -7952,5 +7973,148 @@ mod mirror_file_tests {
         );
         assert_eq!(st.created_from, vec![src.join("a.txt")]);
         assert!(st.backups.is_empty());
+    }
+}
+
+/// sync relay guard: 지원 밖 조합(relay)은 plan 필드와 무관하게 preview·execute 모두
+/// sync_plan 과 같은 오류로 거부되고, 받는 쪽 fs 에 닿지 않는다.
+#[cfg(test)]
+mod sync_relay_guard_tests {
+    use super::*;
+    use crate::fs::LocalFs;
+    use crate::types::{ConnectionId, Entry, EntryKind, EntryMeta};
+    use std::path::Path;
+    use std::pin::Pin;
+
+    /// 원격(SSH) 받는 쪽 — 존재 확인 외의 어떤 I/O 도 하면 panic(가드가 먼저 막아야 함).
+    struct UntouchableRemoteFs;
+
+    #[async_trait::async_trait]
+    impl FileSystem for UntouchableRemoteFs {
+        fn source_id(&self) -> SourceId {
+            remote_source()
+        }
+        async fn list(&self, _: &Path) -> Result<Vec<Entry>, DuetError> {
+            panic!("relay sync must not list the remote side")
+        }
+        async fn metadata(&self, _: &Path) -> Result<EntryMeta, DuetError> {
+            Ok(EntryMeta {
+                kind: EntryKind::Dir,
+                size: None,
+                modified_ms: None,
+                permissions: None,
+            })
+        }
+        async fn rename(&self, _: &Path, _: &Path) -> Result<(), DuetError> {
+            panic!("relay sync must not rename on the remote side")
+        }
+        async fn mkdir(&self, _: &Path) -> Result<(), DuetError> {
+            panic!("relay sync must not mkdir on the remote side")
+        }
+        async fn trash(&self, _: &Path, _: &str) -> Result<TrashLocation, DuetError> {
+            panic!("relay sync must not trash on the remote side")
+        }
+        async fn remove(&self, _: &Path) -> Result<(), DuetError> {
+            panic!("fixture: permanent removal forbidden")
+        }
+        async fn restore_from_trash(&self, _: &TrashLocation, _: &Path) -> Result<(), DuetError> {
+            panic!("fixture never restores from trash")
+        }
+        async fn read_full(&self, _: &Path) -> Result<Vec<u8>, DuetError> {
+            panic!("relay sync must not read the remote side")
+        }
+        async fn write_full(&self, _: &Path, _: &[u8]) -> Result<(), DuetError> {
+            panic!("relay sync must not write the remote side")
+        }
+        async fn open_read(
+            &self,
+            _: &Path,
+            _: u64,
+        ) -> Result<Pin<Box<dyn tokio::io::AsyncRead + Send>>, DuetError> {
+            panic!("relay sync must not read the remote side")
+        }
+        async fn open_write(
+            &self,
+            _: &Path,
+            _: u64,
+        ) -> Result<Pin<Box<dyn tokio::io::AsyncWrite + Send>>, DuetError> {
+            panic!("relay sync must not write the remote side")
+        }
+    }
+
+    fn remote_source() -> SourceId {
+        SourceId::Ssh {
+            connection_id: ConnectionId("fixture".into()),
+            host_ip: "127.0.0.1".parse().unwrap(),
+            user: "fixture".into(),
+        }
+    }
+
+    fn is_sync_unsupported(r: &Result<impl std::fmt::Debug, DuetError>) -> bool {
+        matches!(r, Err(DuetError::NotSupported(m)) if m.contains("sync supports local↔local"))
+    }
+
+    async fn ctx(dir: &Path) -> OpCtx {
+        OpCtx {
+            settings: crate::services::settings::SettingsStore::load_from(&dir.join("s.toml"))
+                .await
+                .unwrap(),
+            journal: crate::services::journal::Journal::load_from(&dir.join("j.jsonl"))
+                .await
+                .unwrap(),
+            pool: None,
+            app: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn sync_preview_rejects_local_to_remote_relay() {
+        let t = tempfile::TempDir::new().unwrap();
+        std::fs::write(t.path().join("a.txt"), b"a").unwrap();
+        let src = Location {
+            source: SourceId::Local,
+            path: t.path().to_path_buf(),
+        };
+        let dst = Location {
+            source: remote_source(),
+            path: PathBuf::from("/fixture/dst"),
+        };
+        let r = sync_preview(&LocalFs, &src, &UntouchableRemoteFs, &dst, None).await;
+        assert!(is_sync_unsupported(&r), "{r:?}");
+    }
+
+    #[tokio::test]
+    async fn sync_execute_rejects_relay_even_when_plan_claims_local() {
+        let t = tempfile::TempDir::new().unwrap();
+        let src_dir = t.path().join("src");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        std::fs::write(src_dir.join("a.txt"), b"a").unwrap();
+        let c = ctx(t.path()).await;
+        // raw IPC plan — 원격 받는 쪽인데 strategy 를 LocalToLocal·Relay 로 적어 보낸 경우 모두.
+        for strategy in [CopyStrategy::LocalToLocal, CopyStrategy::Relay] {
+            let plan = SyncPlan {
+                src: Location {
+                    source: SourceId::Local,
+                    path: src_dir.clone(),
+                },
+                dst: Location {
+                    source: remote_source(),
+                    path: PathBuf::from("/fixture/dst"),
+                },
+                strategy,
+                prune: true,
+            };
+            let r = sync_execute(
+                &LocalFs,
+                &UntouchableRemoteFs,
+                plan,
+                &c,
+                tokio_util::sync::CancellationToken::new(),
+                None,
+            )
+            .await;
+            assert!(is_sync_unsupported(&r), "{r:?}");
+        }
+        assert!(c.journal.history(10).await.is_empty(), "nothing journaled");
     }
 }
