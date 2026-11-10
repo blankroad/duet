@@ -237,7 +237,8 @@
         "addConflict": "Add conflict",
         "leftDeleted": "← Deleted",
         "rightDeleted": "Deleted →",
-        "deleteConflict": "Delete conflict"
+        "deleteConflict": "Delete conflict",
+        "unreadable": "Unreadable — skipped"
       },
       "desc": "Three-way comparison of left and right against a common base directory.",
       "basePrompt": "Base (common ancestor) directory path — relative to the left source:",

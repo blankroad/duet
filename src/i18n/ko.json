@@ -235,7 +235,8 @@
         "addConflict": "추가 충돌",
         "leftDeleted": "← 삭제",
         "rightDeleted": "삭제 →",
-        "deleteConflict": "삭제 충돌"
+        "deleteConflict": "삭제 충돌",
+        "unreadable": "읽지 못함 — 건너뜀"
       },
       "desc": "공통 base 디렉토리에 대한 좌/우 3-way 비교.",
       "basePrompt": "Base(공통 조상) 디렉토리 경로 — 왼쪽 소스 기준:",

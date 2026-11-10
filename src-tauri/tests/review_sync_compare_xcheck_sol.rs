@@ -294,7 +294,6 @@ async fn disconnected_three_way(changed: bool) -> duet_lib::core::three_way::Thr
         .unwrap()
 }
 #[tokio::test]
-#[ignore = "sync-compare repro: SC-05 independently confirmed in sol-2"]
 async fn sc05_connection_failure_is_not_automatic_deletion() {
     let p = disconnected_three_way(false).await;
     assert!(
@@ -307,7 +306,10 @@ async fn sc05_connection_failure_is_not_automatic_deletion() {
 #[tokio::test]
 async fn sc05_changed_survivor_becomes_conflict_instead_of_deletion() {
     let p = disconnected_three_way(true).await;
-    assert_eq!(p.entries[0].status, ThreeWayStatus::DeleteConflict);
+    // 읽지 못한 오른쪽 sub 는 통째로 Unreadable 한 줄(충돌) — 안의 파일은 판정하지 않는다.
+    assert_eq!(p.entries.len(), 1);
+    assert_eq!(p.entries[0].rel, "sub");
+    assert_eq!(p.entries[0].status, ThreeWayStatus::Unreadable);
     assert_eq!(p.auto, 0);
     assert_eq!(p.conflicts, 1);
 }

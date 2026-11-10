@@ -34,6 +34,9 @@ pub enum ThreeWayStatus {
     RightDeleted,
     /// 한쪽 삭제, 다른쪽 변경 → 충돌(삭제할지 살릴지 사용자 결정).
     DeleteConflict,
+    /// 이 폴더를 어느 한쪽에서 읽지 못함(권한·연결 끊김) — 서브트리 판정 불가.
+    /// 빈 폴더로 보면 반대쪽 파일이 전부 "삭제"로 분류된다(SC-05). 충돌로 세어 적용 제외.
+    Unreadable,
 }
 
 impl ThreeWayStatus {
@@ -44,6 +47,7 @@ impl ThreeWayStatus {
             ThreeWayStatus::BothChanged
                 | ThreeWayStatus::AddConflict
                 | ThreeWayStatus::DeleteConflict
+                | ThreeWayStatus::Unreadable
         )
     }
 }
@@ -189,11 +193,36 @@ async fn walk(
     // 이름 키는 비교와 같은 NFC 규칙(G-14/SC-17) — NFC/NFD 로만 다른 이름은 같은 항목.
     // 적용(apply_one_relay·trash_rel)은 각 쪽 실제 이름을 resolve_side_rel 로 되찾으므로,
     // 판정도 같은 규칙이어야 "새로 추가"로 본 것을 몰래 덮어쓰지 않는다.
-    let [base, left, right] = crate::core::compare::keyed_by_nfc([
-        base_fs.list(bpath).await.unwrap_or_default(),
-        left_fs.list(lpath).await.unwrap_or_default(),
-        right_fs.list(rpath).await.unwrap_or_default(),
-    ]);
+    //
+    // 그 쪽에 폴더가 없으면(NotFound) 빈 목록이 맞다. 그 밖의 나열 실패(권한·연결 끊김)는
+    // 빈 폴더로 위장하지 않는다(SC-05) — 2-way 비교처럼 이 서브트리를 Unreadable 한 줄로
+    // 남기고 들어가지 않는다. 예전엔 `unwrap_or_default` 라 반대쪽 파일이 전부 "삭제"였다.
+    let mut lists: [Vec<Entry>; 3] = Default::default();
+    let sides: [(&dyn FileSystem, &std::path::Path); 3] =
+        [(base_fs, bpath), (left_fs, lpath), (right_fs, rpath)];
+    for (slot, (fs, path)) in lists.iter_mut().zip(sides) {
+        match fs.list(path).await {
+            Ok(entries) => *slot = entries,
+            Err(DuetError::NotFound(_)) => {}
+            Err(_) => {
+                // 안전 경고라 상한이어도 행을 남긴다(compare 와 같음).
+                if out.len() >= MAX_ENTRIES {
+                    *truncated = true;
+                }
+                out.push(ThreeWayEntry {
+                    rel: if rel.is_empty() {
+                        ".".to_string()
+                    } else {
+                        rel.to_string()
+                    },
+                    kind: EntryKind::Dir,
+                    status: ThreeWayStatus::Unreadable,
+                });
+                return Ok(());
+            }
+        }
+    }
+    let [base, left, right] = crate::core::compare::keyed_by_nfc(lists);
 
     let mut keys: Vec<&String> = base.keys().chain(left.keys()).chain(right.keys()).collect();
     keys.sort();
@@ -349,6 +378,65 @@ mod tests {
         assert_eq!(by("gone.txt"), Some(ThreeWayStatus::LeftDeleted));
         assert_eq!(by("new.txt"), Some(ThreeWayStatus::LeftAdded));
         assert_eq!(plan.conflicts, 0);
+    }
+
+    /// SC-05: 한쪽 하위 폴더를 읽지 못하면 그 폴더는 Unreadable 한 줄(충돌)이고, 안의
+    /// 파일은 "삭제"로 분류되지 않는다. 없는 폴더(NotFound)는 예전처럼 빈 목록.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn compare_three_way_unreadable_subfolder_is_a_conflict_row() {
+        use crate::fs::LocalFs;
+        use crate::types::SourceId;
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::TempDir::new().unwrap();
+        let (b, l, r) = (
+            dir.path().join("B"),
+            dir.path().join("L"),
+            dir.path().join("R"),
+        );
+        for side in [&b, &l, &r] {
+            std::fs::create_dir_all(side.join("sub")).unwrap();
+            std::fs::write(side.join("sub/a.txt"), b"same").unwrap();
+        }
+        // 왼쪽에만 있는 폴더 — 다른 쪽 NotFound 는 빈 목록으로(추가로 분류).
+        std::fs::create_dir_all(l.join("only_l")).unwrap();
+        std::fs::write(l.join("only_l/n.txt"), b"n").unwrap();
+        // base·왼쪽에 같은 내용으로 있고 오른쪽에서 폴더째 지움 — NotFound 는 빈 목록이라
+        // 정상적인 "오른쪽 삭제"로 분류돼야 한다.
+        let fixed =
+            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        for side in [&b, &l] {
+            std::fs::create_dir_all(side.join("gone")).unwrap();
+            let p = side.join("gone/x.txt");
+            std::fs::write(&p, b"x").unwrap();
+            let f = std::fs::OpenOptions::new().append(true).open(&p).unwrap();
+            f.set_times(std::fs::FileTimes::new().set_modified(fixed))
+                .unwrap();
+        }
+        std::fs::set_permissions(r.join("sub"), std::fs::Permissions::from_mode(0o000)).unwrap();
+        let readable_anyway = std::fs::read_dir(r.join("sub")).is_ok();
+        let fs = LocalFs::new();
+        let loc = |p: &std::path::Path| Location {
+            source: SourceId::Local,
+            path: p.to_path_buf(),
+        };
+        let plan = compare_three_way(&fs, loc(&b), &fs, loc(&l), &fs, loc(&r)).await;
+        std::fs::set_permissions(r.join("sub"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        if readable_anyway {
+            return; // root 로 돌면 권한이 무시돼 재현 불가.
+        }
+        let plan = plan.unwrap();
+        let by = |rel: &str| plan.entries.iter().find(|e| e.rel == rel).map(|e| e.status);
+        assert_eq!(by("sub"), Some(ThreeWayStatus::Unreadable));
+        assert_eq!(
+            by("sub/a.txt"),
+            None,
+            "no row inside the unreadable subtree"
+        );
+        assert_eq!(by("only_l"), Some(ThreeWayStatus::LeftAdded));
+        assert_eq!(by("gone/x.txt"), Some(ThreeWayStatus::RightDeleted));
+        assert_eq!(plan.conflicts, 1);
+        assert_eq!(plan.auto, 2);
     }
 
     /// SC-16: base 가 left/right 와 같거나 상·하위면 비교 자체를 거부한다.

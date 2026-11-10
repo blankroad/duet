@@ -461,7 +461,6 @@ async fn merge_cancelled_before_start_leaves_no_journal_entry() {
 /// 분류된다. 2-way 비교는 같은 상황을 Unreadable 로 막는다(compare.rs:302).
 #[cfg(unix)]
 #[tokio::test]
-#[ignore = "sync-compare repro: three_way treats an unreadable folder as empty → RightDeleted"]
 async fn three_way_unreadable_subfolder_is_not_classified_as_deleted() {
     use std::os::unix::fs::PermissionsExt;
     let dir = TempDir::new().unwrap();

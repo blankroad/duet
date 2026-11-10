@@ -19,6 +19,7 @@ const LABEL_KEY: Record<ThreeWayStatus, string> = {
   left_deleted: "dialog.threeWay.status.leftDeleted",
   right_deleted: "dialog.threeWay.status.rightDeleted",
   delete_conflict: "dialog.threeWay.status.deleteConflict",
+  unreadable: "dialog.threeWay.status.unreadable",
 };
 
 const TONE: Record<ThreeWayStatus, string> = {
@@ -32,12 +33,14 @@ const TONE: Record<ThreeWayStatus, string> = {
   left_deleted: "text-warning",
   right_deleted: "text-warning",
   delete_conflict: "text-danger",
+  unreadable: "text-danger",
 };
 
 const CONFLICT_SET = new Set<ThreeWayStatus>([
   "both_changed",
   "add_conflict",
   "delete_conflict",
+  "unreadable",
 ]);
 
 /**
