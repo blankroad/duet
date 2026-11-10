@@ -1,17 +1,13 @@
 import { createElement } from "react";
 import i18n from "@/i18n";
 import { commands } from "@/types/bindings";
-import type {
-  Entry,
-  Location,
-  ShellMenuItem,
-  ShellScope,
-} from "@/types/bindings";
+import type { ShellMenuItem, ShellScope } from "@/types/bindings";
 import type { MenuEntry } from "@/stores/contextMenu";
 import { childLocation } from "@/lib/entryDnd";
 import { showError } from "@/lib/errorToast";
 import { isVirtualTrash } from "@/lib/trashView";
 import { useToast } from "@/stores/toast";
+import { computeDisplayed, type TabState } from "@/stores/panes";
 
 /** 셸 항목 아이콘 PNG 바이트 → data URL (.ts 라 JSX 없이 createElement). */
 function iconEl(it: ShellMenuItem) {
@@ -119,21 +115,24 @@ export interface ShellMenuTarget {
 /**
  * 항목 우클릭에 셸 메뉴를 붙일 대상을 고른다. 대상이 없으면 null.
  * - Windows 로컬 폴더만(원격·가상 휴지통·macOS/Linux 는 셸 메뉴가 없다).
- * - 선택된 항목 전부를 **화면 표시 순서로**. ".." 는 빼고, 필터로 안 보이는 항목도 뺀다.
+ * - 선택된 항목 **전부** — duet 자체 작업(`fileActions.resolveActiveTargets`)과 같은 집합.
+ *   필터나 숨김 설정으로 지금 안 보이는 선택 항목도 포함한다(선택은 필터 뒤에도 유지된다).
+ *   목록(`tab.entries`)에 없는 이름은 뺀다 — 종류를 모르고 셸이 찾지도 못한다.
+ * - 순서는 패널의 현재 정렬 기준(필터·숨김과 무관). ".." 는 뺀다.
  * - scope 는 전부 폴더면 "directory", 하나라도 파일이면 "file" (백엔드 빌드는 scope 를
  *   안 쓰고 캐시 키로만 쓴다).
  */
 export function shellMenuTarget(
   os: string,
-  location: Location,
-  displayed: readonly Entry[],
+  tab: TabState,
   selected: ReadonlySet<string>,
 ): ShellMenuTarget | null {
+  const location = tab.location;
   if (os !== "windows") return null;
   if (location.source.kind !== "local" || isVirtualTrash(location)) return null;
-  const items = displayed.filter(
-    (e) => e.name !== ".." && selected.has(e.name),
-  );
+  // 패널 정렬 그대로, 필터·숨김만 끈 전체 목록 — 표시 규칙과 같은 정렬 함수를 쓴다.
+  const ordered = computeDisplayed({ ...tab, filter: "", showHidden: true });
+  const items = ordered.filter((e) => e.name !== ".." && selected.has(e.name));
   if (items.length === 0) return null;
   return {
     paths: items.map((e) => String(childLocation(location, e.name).path)),
@@ -148,11 +147,10 @@ export function shellMenuTarget(
  */
 export function entryMoreOptions(
   os: string,
-  location: Location,
-  displayed: readonly Entry[],
+  tab: TabState,
   selected: ReadonlySet<string>,
 ): MenuEntry[] {
-  const target = shellMenuTarget(os, location, displayed, selected);
+  const target = shellMenuTarget(os, tab, selected);
   if (!target) return [];
   const shellPromise = openShellMenu(target.paths, target.scope);
   return [

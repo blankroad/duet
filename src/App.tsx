@@ -784,13 +784,13 @@ function App() {
         onPutBack,
       });
       // Windows 로컬: 실제 셸 메뉴(Tier 2)를 "More options ▸" 지연 항목으로 — 선택 전부를
-      // 표시 순서로 한 메뉴에(Explorer 처럼; 7-Zip/Bandizip "각각 압축 풀기" 등). 펼칠 때만
-      // 조회 → 메뉴가 갑자기 커지지도 않음(Win11 방식). 세션 수명은 백엔드 캐시가 관리.
+      // (필터로 가려진 것 포함) 패널 정렬 순서로 한 메뉴에(Explorer 처럼; 7-Zip/Bandizip
+      // "각각 압축 풀기" 등). 펼칠 때만 조회 → 메뉴가 갑자기 커지지도 않음(Win11 방식).
+      // 세션 수명은 백엔드 캐시가 관리.
       items.push(
         ...entryMoreOptions(
           platform(),
-          tab.location,
-          computeDisplayed(tab),
+          tab,
           wasSelected ? tab.selected : new Set([entry.name]),
         ),
       );
