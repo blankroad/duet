@@ -24,8 +24,9 @@
 //! journal 기록 자체가 실패하면(디스크·권한) Ctrl+Z 로 되돌릴 길이 없으므로 그 자리에서
 //! 되돌린다 — 기록하려던 `UndoCopy` 를 undo 실행기로 실행(생성물은 지문이 같을 때 휴지통,
 //! 백업은 원래 자리로). 에러 종류는 journal 오류 그대로이고, 다 되돌리지 못했으면 원본이
-//! 남은 백업 경로와 남은 생성물을 메시지에 적는다. 쓰기 전 기록(write-ahead)은 아니다 —
-//! 기록 전에 앱이 죽는 경우는 다루지 않는다.
+//! 남은 백업 경로, 남은 생성물, 확인하지 못한 경로(NotFound 가 아닌 조회 오류)와 undo 실행기의
+//! 결과를 메시지에 적는다 — 확인 못 하면 "되돌렸다"고 하지 않는다. 쓰기 전 기록
+//! (write-ahead)은 아니다 — 기록 전에 앱이 죽는 경우는 다루지 않는다.
 //!
 //! ## 보장하는 것 / 아닌 것
 //!
@@ -48,7 +49,7 @@ use crate::core::archive;
 use crate::core::archive_names::{reserve_free, try_reserve, Reserve};
 use crate::core::ops::{self, OpCtx};
 use crate::core::tar_unpack::UnpackReport;
-use crate::core::undo::{undo_cleanup, FsResolver};
+use crate::core::undo::{undo_cleanup, FsResolver, UndoKind};
 use crate::fs::FileSystem;
 use crate::services::journal::{BackupRestore, JournalEntry, JournalId, OpKind, UndoAction};
 use crate::types::{DuetError, EntryKind, EntryRef, Location, SourceId};
@@ -320,43 +321,62 @@ async fn roll_back(
         stale: false,
     };
     let outcome = undo_cleanup(&entry, resolver).await;
-    // 결과는 실행기 보고 대신 디스크로 확인한다 — 아직 남은 백업(= 원본이 거기 있음)과
-    // 아직 남은 생성물. 백업이 원래 자리로 돌아간 경로는 생성물이 아니다.
+    let rollback_ok = matches!(&outcome, Some(o) if o.kind == UndoKind::Ok);
+    // 결과는 실행기 보고만 믿지 않고 디스크로도 확인한다. **NotFound 만** "없음"으로 본다 —
+    // 권한 등으로 확인 못 한 경로는 "확인 불가"로 남겨 알린다(되돌렸다고 말하지 않는다).
     let mut kept_backups = Vec::new();
     let mut restored = Vec::new();
+    let mut unknown = Vec::new();
     for b in &backups {
-        if fs.symlink_metadata(&b.backup_path).await.is_ok() {
-            kept_backups.push(b.backup_path.clone());
-        } else {
-            restored.push(b.original_path.clone());
+        match fs.symlink_metadata(&b.backup_path).await {
+            Ok(_) => kept_backups.push(b.backup_path.clone()),
+            Err(DuetError::NotFound(_)) => restored.push(b.original_path.clone()),
+            Err(_) => unknown.push(b.backup_path.clone()),
         }
     }
     let mut left_placed = Vec::new();
     for p in created {
-        if !restored.contains(&p) && fs.symlink_metadata(&p).await.is_ok() {
-            left_placed.push(p);
+        // 백업이 원래 자리로 돌아간 경로는 생성물이 아니다.
+        if restored.contains(&p) {
+            continue;
+        }
+        match fs.symlink_metadata(&p).await {
+            Ok(_) => left_placed.push(p),
+            Err(DuetError::NotFound(_)) => {}
+            Err(_) => unknown.push(p),
         }
     }
-    let note = if kept_backups.is_empty() && left_placed.is_empty() {
-        "could not record this extraction for undo, so it was rolled back".to_string()
-    } else {
-        let list = |v: &[PathBuf]| {
-            v.iter()
-                .map(|p| p.display().to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-        format!(
-            "could not record this extraction for undo and could only partly roll it back; \
-             originals still in backups: [{}]; extracted items still in place: [{}]",
-            list(&kept_backups),
-            list(&left_placed)
-        )
+    let list = |v: &[PathBuf]| {
+        v.iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
     };
-    tracing::warn!(
-        rollback = ?outcome.map(|o| o.kind),
-        "extract-here: journal push failed; {note}"
-    );
+    let note =
+        if rollback_ok && kept_backups.is_empty() && left_placed.is_empty() && unknown.is_empty() {
+            "could not record this extraction for undo, so it was rolled back".to_string()
+        } else {
+            let undo_said = match &outcome {
+                Some(o) => format!(
+                    "{:?}{}",
+                    o.kind,
+                    o.message
+                        .as_deref()
+                        .map(|m| format!(": {m}"))
+                        .unwrap_or_default()
+                ),
+                None => "no result".to_string(),
+            };
+            format!(
+            "could not record this extraction for undo and could not confirm it was rolled back \
+             (undo: {undo_said}); originals still in backups: [{}]; extracted items still in \
+             place: [{}]; could not check: [{}]",
+            list(&kept_backups),
+            list(&left_placed),
+            list(&unknown)
+        )
+        };
+    tracing::warn!("extract-here: journal push failed; {note}");
     annotate(journal_err, &note)
 }
 

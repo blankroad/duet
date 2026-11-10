@@ -21,6 +21,10 @@ struct HereFs {
     scribble_after_reserve: Option<String>,
     /// true 면 휴지통이 실패한다 (남은 준비 폴더 보고·부분 되돌림 확인용).
     fail_trash: bool,
+    /// 휴지통이 실패한 뒤부터 lstat 이 권한 오류 — 복제본끼리 공유(되돌림 확인 불가 흉내).
+    deny_lstat_after_trash_failure: Arc<std::sync::atomic::AtomicBool>,
+    /// 위 흉내를 켤지.
+    lstat_denied_on_trash_failure: bool,
 }
 
 impl HereFs {
@@ -33,6 +37,8 @@ impl HereFs {
             fail_rename_to: None,
             scribble_after_reserve: None,
             fail_trash: false,
+            deny_lstat_after_trash_failure: Arc::default(),
+            lstat_denied_on_trash_failure: false,
         }
     }
     fn trashed(&self) -> Vec<PathBuf> {
@@ -52,6 +58,12 @@ impl FileSystem for HereFs {
         LocalFs.metadata(p).await
     }
     async fn symlink_metadata(&self, p: &Path) -> Result<EntryMeta, DuetError> {
+        if self
+            .deny_lstat_after_trash_failure
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(DuetError::PermissionDenied("fixture: lstat refused".into()));
+        }
         LocalFs.symlink_metadata(p).await
     }
     async fn rename(&self, f: &Path, t: &Path) -> Result<(), DuetError> {
@@ -77,6 +89,10 @@ impl FileSystem for HereFs {
     }
     async fn trash(&self, p: &Path, _: &str) -> Result<TrashLocation, DuetError> {
         if self.fail_trash {
+            if self.lstat_denied_on_trash_failure {
+                self.deny_lstat_after_trash_failure
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+            }
             return Err(DuetError::PermissionDenied("fixture: trash refused".into()));
         }
         let mut log = self.trashed.lock().unwrap();
@@ -809,7 +825,8 @@ async fn failed_rollback_names_backups_and_items_left_in_place() {
         .expect("original kept in a backup");
     assert!(msg.contains(&backup), "{msg}");
     assert!(msg.contains("other.txt"), "{msg}");
-    assert!(msg.contains("partly"), "{msg}");
+    assert!(msg.contains("could not confirm"), "{msg}");
+    assert!(!msg.contains("so it was rolled back"), "{msg}");
     assert_eq!(std::fs::read_to_string(e.p(&backup)).unwrap(), "old");
 }
 
@@ -848,4 +865,43 @@ async fn leftover_staging_is_reported_in_the_summary_even_on_error() {
         .to_string_lossy()
         .starts_with(STAGING_PREFIX));
     assert!(left.is_dir(), "left in place, not deleted");
+}
+
+/// 되돌림이 실패하고 확인(lstat)도 권한 오류면 "되돌렸다"고 말하지 않는다 — 확인 못 한
+/// 경로와 undo 실행기 자신의 결과를 메시지에 남긴다. NotFound 만 "없음"으로 본다.
+#[tokio::test]
+async fn rollback_check_errors_are_reported_as_unknown_not_restored() {
+    let mut e = env().await;
+    write_zip(&e.p("r.zip"), &[("readme.txt", "new"), ("other.txt", "o")]);
+    std::fs::write(e.p("readme.txt"), "old").unwrap();
+    let mut refusing = e.fs.clone();
+    refusing.fail_trash = true;
+    refusing.lstat_denied_on_trash_failure = true;
+    e.undo_fs = Some(refusing);
+    e.break_journal();
+
+    let err = e.here("r.zip", ExtractConflict::Replace).await.unwrap_err();
+    let DuetError::Io(msg) = &err else {
+        panic!("journal error kind must be kept: {err:?}")
+    };
+    assert!(!msg.contains("so it was rolled back"), "{msg}");
+    assert!(msg.contains("could not confirm"), "{msg}");
+    assert!(
+        msg.contains("undo: Error"),
+        "undo's own result is surfaced: {msg}"
+    );
+    // 확인 못 한 경로 — 백업과 남은 생성물이 "could not check" 에 이름으로.
+    let unknown = msg.split("could not check: ").nth(1).unwrap_or_default();
+    assert!(unknown.contains("readme.txt.bak."), "{msg}");
+    assert!(unknown.contains("other.txt"), "{msg}");
+    // 실제로는 아무것도 되돌려지지 않았다 — 원본은 백업에 그대로.
+    e.fs.deny_lstat_after_trash_failure
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    let backup = e
+        .work_names()
+        .into_iter()
+        .find(|n| n.starts_with("readme.txt.bak."))
+        .expect("original still in its backup");
+    assert_eq!(std::fs::read_to_string(e.p(&backup)).unwrap(), "old");
+    assert_eq!(e.read("other.txt"), "o");
 }
