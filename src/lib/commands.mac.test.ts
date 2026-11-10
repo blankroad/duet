@@ -39,7 +39,7 @@ describe("commands — macOS 기본 키", () => {
     expect(byId.get("pane.editPath")?.altKeys).toContain("Ctrl+Shift+G");
   });
 
-  it("⌘⌫(Ctrl+Backspace)도 휴지통으로 — 파인더 관례 (fileops-04)", () => {
+  it("⌘⌫(Ctrl+Backspace)도 휴지통으로 — 파인더 관례 (UX-SHL-12)", () => {
     expect(byId.get("file.delete")?.altKeys).toContain("Ctrl+Backspace");
   });
 

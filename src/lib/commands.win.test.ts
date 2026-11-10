@@ -48,7 +48,7 @@ describe("commands — F4 편집 (UX-SHL-07)", () => {
   });
 });
 
-describe("commands — DESIGN.md 보조 키 (fileops-03)", () => {
+describe("commands — DESIGN.md 보조 키 (UX-SHL-11)", () => {
   it("F8·Shift+F8·Ctrl+Shift+N·Shift+F6 가 삭제·영구 삭제·새 폴더·이름 바꾸기", () => {
     const byId = new Map(buildBuiltins(deps).map((c) => [c.id, c]));
     expect(byId.get("file.delete")?.altKeys).toContain("F8");
