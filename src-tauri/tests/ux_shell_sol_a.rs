@@ -2,7 +2,7 @@
 
 #[cfg(target_os = "macos")]
 #[test]
-#[ignore = "UX-SHL-03 repro: missing configured app must report launch failure"]
+#[ignore = "UX-SHL-10 repro: missing configured app must report launch failure"]
 fn missing_open_with_app_reports_failure() {
     let temp = tempfile::tempdir().unwrap();
     let file = temp.path().join("document.txt");
