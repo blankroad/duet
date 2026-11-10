@@ -36,6 +36,9 @@ export function FrecencyJumper({
   const close = useFrecency((s) => s.close);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<FrecencyEntry[]>([]);
+  // results 가 어느 검색어의 결과인지 — 새 검색어 조회가 끝나기 전 Enter 가
+  // 옛 결과의 강조 항목으로 이동하지 않게.
+  const [resultsQuery, setResultsQuery] = useState<string | null>(null);
   const [cursor, setCursor] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -49,6 +52,7 @@ export function FrecencyJumper({
     if (isOpen) {
       setQuery("");
       setResults([]); // 지난번 결과로 Enter 가 먹지 않게 — 새 조회가 채운다.
+      setResultsQuery(null);
       setCursor(0);
       const timer = setTimeout(() => inputRef.current?.focus(), 0);
       return () => clearTimeout(timer);
@@ -65,6 +69,7 @@ export function FrecencyJumper({
       void commands.frecencyQuery(query, 50).then((r) => {
         if (live && r.status === "ok") {
           setResults(r.data);
+          setResultsQuery(query);
           setCursor(0);
         }
       });
@@ -128,7 +133,7 @@ export function FrecencyJumper({
                 } else if (e.key === "Enter") {
                   e.preventDefault();
                   const entry = results[cursor];
-                  if (entry) jump(entry);
+                  if (entry && resultsQuery === query) jump(entry);
                 } else if (e.key === "Escape") {
                   e.preventDefault();
                   close();

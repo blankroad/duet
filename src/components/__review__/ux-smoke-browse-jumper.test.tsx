@@ -50,22 +50,37 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-it.fails(
-  "ux-smoke browse-s04 typing a new jumper query must not Enter into the previous result",
-  async () => {
-    const open = vi.fn();
-    render(<FrecencyJumper onOpenLocation={open} onOpenHostPath={vi.fn()} />);
-    await tick();
-    expect(screen.getByText("/fixture/old")).toBeTruthy();
-    vi.mocked(commands.frecencyQuery).mockReturnValue(new Promise(() => {}));
-    fireEvent.change(screen.getByRole("textbox"), {
-      target: { value: "missing" },
-    });
-    await tick();
-    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
-    expect(open).not.toHaveBeenCalled();
-  },
-);
+it("ux-smoke browse-s04 typing a new jumper query must not Enter into the previous result", async () => {
+  const open = vi.fn();
+  render(<FrecencyJumper onOpenLocation={open} onOpenHostPath={vi.fn()} />);
+  await tick();
+  expect(screen.getByText("/fixture/old")).toBeTruthy();
+  vi.mocked(commands.frecencyQuery).mockReturnValue(new Promise(() => {}));
+  fireEvent.change(screen.getByRole("textbox"), {
+    target: { value: "missing" },
+  });
+  await tick();
+  fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+  expect(open).not.toHaveBeenCalled();
+});
+
+it("browse-s04: Enter opens the highlighted folder once the new query has answered", async () => {
+  const open = vi.fn();
+  render(<FrecencyJumper onOpenLocation={open} onOpenHostPath={vi.fn()} />);
+  await tick();
+  const fresh: FrecencyEntry = {
+    ...entry,
+    location: { source: { kind: "local" }, path: "/fixture/new" },
+  };
+  vi.mocked(commands.frecencyQuery).mockResolvedValue({
+    status: "ok",
+    data: [fresh],
+  });
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "new" } });
+  await tick();
+  fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+  expect(open).toHaveBeenCalledWith(fresh.location, expect.anything());
+});
 
 it.fails(
   "ux-smoke browse-s05 SC-19 StrictMode starts only one global index build",
