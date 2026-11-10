@@ -32,7 +32,15 @@ export function previewStreamUrl(location: Location): string {
   return `${protoPrefix("duet-preview")}/${targetSeg(location)}`;
 }
 
-/** `duet-thumb://` 썸네일 URL — 그리드/타일 뷰 이미지용. 백엔드가 디코드→축소→JPEG 캐시. */
-export function thumbUrl(location: Location): string {
-  return `${protoPrefix("duet-thumb")}/${targetSeg(location)}`;
+/**
+ * `duet-thumb://` 썸네일 URL — 그리드/타일 뷰 이미지용. 백엔드가 디코드→축소→JPEG 캐시.
+ *
+ * `version`(수정 시각·크기 등)을 주면 `?v=` 로 붙인다 — 파일이 바뀌면 URL 이 달라져
+ * webview 의 이미지 캐시(max-age)를 건너뛴다. 백엔드는 경로 부분만 해석해 영향 없다.
+ */
+export function thumbUrl(location: Location, version?: string): string {
+  const base = `${protoPrefix("duet-thumb")}/${targetSeg(location)}`;
+  return version === undefined
+    ? base
+    : `${base}?v=${encodeURIComponent(version)}`;
 }

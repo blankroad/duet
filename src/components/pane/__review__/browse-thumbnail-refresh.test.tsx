@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render } from "@testing-library/react";
 import { EntryGrid } from "@/components/pane/EntryGrid";
 import { usePanes } from "@/stores/panes";
 import { useAppSettings } from "@/stores/settings";
@@ -66,14 +66,21 @@ const grid = (file: Entry) => (
   />
 );
 
-it.fails(
-  "browse-16 (F-sol-06): changed image metadata should invalidate the rendered thumbnail URL",
-  () => {
-    const view = render(grid(entry));
-    const before = view.container.querySelector("img")?.getAttribute("src");
-    expect(before).toBeTruthy();
-    view.rerender(grid({ ...entry, size: 200, modified_ms: 2000 }));
-    const after = view.container.querySelector("img")?.getAttribute("src");
-    expect(after).not.toBe(before);
-  },
-);
+it("browse-16 (F-sol-06): changed image metadata should invalidate the rendered thumbnail URL", () => {
+  const view = render(grid(entry));
+  const before = view.container.querySelector("img")?.getAttribute("src");
+  expect(before).toBeTruthy();
+  view.rerender(grid({ ...entry, size: 200, modified_ms: 2000 }));
+  const after = view.container.querySelector("img")?.getAttribute("src");
+  expect(after).not.toBe(before);
+});
+
+it("browse-16: a failed thumbnail is retried once the file changes", () => {
+  const view = render(grid(entry));
+  fireEvent.error(view.container.querySelector("img")!);
+  expect(view.container.querySelector("img")).toBeNull();
+  view.rerender(grid(entry));
+  expect(view.container.querySelector("img")).toBeNull();
+  view.rerender(grid({ ...entry, size: 200, modified_ms: 2000 }));
+  expect(view.container.querySelector("img")).not.toBeNull();
+});
