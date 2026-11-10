@@ -31,7 +31,8 @@ export type DialogState =
   | { kind: "elevate-op"; pending: ElevatablePlan }
   | { kind: "sudo-op"; pending: ElevatablePlan }
   | { kind: "sudo-password"; pending: ElevatablePlan; error?: boolean }
-  | { kind: "move-confirm"; plan: MovePlan }
+  // clip = 잘라내기 붙여넣기의 클립보드 번호 — 실행이 접수되면 그 항목을 클립보드에서 뺀다.
+  | { kind: "move-confirm"; plan: MovePlan; clip?: number }
   | { kind: "compress"; items: EntryRef[]; defaultName: string }
   // wrong=true 는 직전 암호가 틀려 task 가 NeedPassword 로 실패한 재시도.
   | { kind: "extract-password"; plan: ExtractPlan; wrong?: boolean }

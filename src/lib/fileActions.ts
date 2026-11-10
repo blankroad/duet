@@ -264,9 +264,18 @@ export async function clipPaste(
     showToast(i18n.t("toast.pasteIntoSelf"), "error");
     return;
   }
-  await planTransferTo(clip.targets, dst, clip.mode, open, showToast);
-  // 잘라내기는 한 번 붙여넣으면 소비. 복사는 유지(여러 번 붙여넣기 가능, 탐색기와 동일).
-  if (clip.mode === "move") useClipboard.getState().clear();
+  // 잘라내기는 이동 작업이 실제로 접수된 항목만 비운다(executeTransfer·파일별 실행).
+  // 확인 창 취소·plan 실패·접수 실패면 그대로 남아 Ctrl+V 로 다시 시도할 수 있다.
+  // 복사는 유지(여러 번 붙여넣기 가능, 탐색기와 동일).
+  await planTransferTo(
+    clip.targets,
+    dst,
+    clip.mode,
+    open,
+    showToast,
+    undefined,
+    clip.mode === "move" ? { clip: clip.id } : undefined,
+  );
 }
 
 /** 두 패널 폴더 비교 — 활성=left, 반대=right. 결과를 비교 다이얼로그로. */
@@ -417,9 +426,43 @@ function showProgressWhenSlow(
   }, PROGRESS_MODAL_DELAY_MS);
 }
 
+/** 이미 실행을 보낸 plan — 확인 버튼을 두 번 눌러도 같은 작업이 두 번 들어가지 않게. */
+const submittedPlans = new WeakSet<object>();
+
+/**
+ * 이 plan 의 실행을 처음 요청하는 것이면 true(그리고 표시), 이미 보냈으면 false.
+ * 실행이 거부되면 `releasePlan` 으로 풀어 다시 시도할 수 있게 한다.
+ */
+export function claimPlan(plan: object): boolean {
+  if (submittedPlans.has(plan)) return false;
+  submittedPlans.add(plan);
+  return true;
+}
+
+/** `claimPlan` 표시를 푼다 — 실행 요청이 거부됐을 때. */
+export function releasePlan(plan: object): void {
+  submittedPlans.delete(plan);
+}
+
+/**
+ * 잘라내기 붙여넣기에서 온 이동이 접수됐을 때 그 항목을 클립보드에서 뺀다.
+ * `clip` 은 붙여넣기 시점의 클립보드 번호 — 그 사이 새로 담았으면 건드리지 않는다.
+ */
+export function consumeCutClipboard(
+  clip: number | undefined,
+  moved: EntryRef[],
+): void {
+  if (clip !== undefined) useClipboard.getState().consume(clip, moved);
+}
+
 /**
  * 복사/이동 실행 — 확인 다이얼로그에서 확정했을 때와, 확인을 건너뛰는 설정에서
  * 바로 실행할 때가 같은 경로를 쓴다(승격 재시도용 plan 기억 + 진행 모달 규칙 공유).
+ *
+ * `clip` 은 잘라내기 붙여넣기의 클립보드 번호 — 작업이 접수되면 그 항목만 비운다.
+ * 접수 = 백엔드가 task 를 받았다는 뜻이고 완료가 아니다. 뒤에 실패·취소돼도 클립보드는
+ * 되살리지 않는다(이미 옮겨진 항목을 다시 옮기지 않게). 남은 원본은 원래 폴더에 있다.
+ * 반환값: 작업이 접수됐으면 true.
  */
 export async function executeTransfer(
   mode: "copy" | "move",
@@ -428,14 +471,23 @@ export async function executeTransfer(
   open: OpenFn,
   close: () => void,
   showToast: ToastFn,
-): Promise<void> {
+  clip?: number,
+): Promise<boolean> {
   // 확인 다이얼로그는 먼저 닫는다 — 진행 모달은 느린 작업에서만 뒤늦게 뜬다.
   close();
-  const r =
-    mode === "move"
-      ? await commands.fsMoveExecute(plan as MovePlan, policy)
-      : await commands.fsCopyExecute(plan as CopyPlan, policy);
+  if (!claimPlan(plan)) return false;
+  let r;
+  try {
+    r =
+      mode === "move"
+        ? await commands.fsMoveExecute(plan as MovePlan, policy)
+        : await commands.fsCopyExecute(plan as CopyPlan, policy);
+  } catch (e) {
+    releasePlan(plan);
+    throw e;
+  }
   if (r.status !== "ok") {
+    releasePlan(plan);
     showError(
       mode === "move" ? "toast.moveFailed" : "toast.copyFailed",
       r.error,
@@ -444,8 +496,9 @@ export async function executeTransfer(
         toast: showToast,
       },
     );
-    return;
+    return false;
   }
+  if (mode === "move") consumeCutClipboard(clip, plan.items);
   // 실패 시(보호 경로 권한 등) 승격 재시도를 위해 plan 을 기억.
   rememberElevatable(
     r.data,
@@ -460,6 +513,7 @@ export async function executeTransfer(
     ),
     open,
   );
+  return true;
 }
 
 /**
@@ -471,6 +525,12 @@ function needsTransferConfirm(hasConflicts: boolean): boolean {
   return useAppSettings.getState().confirmTransfer === "always";
 }
 
+/** planTransferTo 의 추가 옵션. */
+export interface TransferOpts {
+  /** 잘라내기 붙여넣기의 클립보드 번호 — 이동이 접수되면 그 항목을 클립보드에서 뺀다. */
+  clip?: number;
+}
+
 /** targets 를 dst 로 복사/이동 plan 호출 후 확인 다이얼로그. 키보드·툴바·DnD 공유. */
 export async function planTransferTo(
   targets: EntryRef[],
@@ -479,6 +539,7 @@ export async function planTransferTo(
   open: OpenFn,
   showToast: ToastFn,
   close?: () => void,
+  opts: TransferOpts = {},
 ): Promise<void> {
   // 선택/커서 대상이 없으면 조용히 끝나던 것 → 이유를 알린다 ("아무 일 없음" 방지).
   if (targets.length === 0) {
@@ -501,7 +562,11 @@ export async function planTransferTo(
         return;
       }
       if (needsTransferConfirm(r.data.conflicts.length > 0))
-        open({ kind: "move-confirm", plan: r.data });
+        open({
+          kind: "move-confirm",
+          plan: r.data,
+          ...(opts.clip !== undefined ? { clip: opts.clip } : {}),
+        });
       else
         await executeTransfer(
           "move",
@@ -510,6 +575,7 @@ export async function planTransferTo(
           open,
           closeFn,
           showToast,
+          opts.clip,
         );
     } else {
       const r = await commands.fsCopyPlan(targets, dst);

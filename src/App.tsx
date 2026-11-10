@@ -82,6 +82,8 @@ import {
   triggerMkdir,
   triggerNewFile,
   triggerRenameSmart,
+  claimPlan,
+  consumeCutClipboard,
   triggerUndo,
   triggerRedo,
   copySelectionPaths,
@@ -1383,8 +1385,11 @@ function App() {
       mode: "copy" | "move",
       plan: CopyPlan | MovePlan,
       decisions: Record<string, ConflictPolicy>,
+      clip?: number,
     ) => {
       closeDialog();
+      // 확인 버튼을 두 번 눌러도 같은 그룹들이 두 번 들어가지 않게.
+      if (!claimPlan(plan)) return;
       const conflictNames = new Set(plan.conflicts.map((c) => c.name));
       const groups = new Map<ConflictPolicy, EntryRef[]>();
       const rest: EntryRef[] = [];
@@ -1436,6 +1441,8 @@ function App() {
             continue;
           }
           rememberElevatable(r.data, { op: "move", plan: p.data, policy });
+          // 접수된 그룹만 잘라내기에서 뺀다 — 거부된 그룹·건너뛴 항목은 남아 다시 붙여넣을 수 있다.
+          consumeCutClipboard(clip, p.data.items);
           taskId = r.data;
         }
         if (taskId && (!show || items.length > show.count))
@@ -1591,6 +1598,7 @@ function App() {
         openDialog,
         closeDialog,
         showToast,
+        dialog.clip,
       );
     },
     [dialog, openDialog, closeDialog, showToast],
@@ -2506,7 +2514,7 @@ function App() {
           onCancel={closeDialog}
           onConfirm={onMoveConfirm}
           onConfirmPerFile={(d) =>
-            void onTransferPerFile("move", dialog.plan, d)
+            void onTransferPerFile("move", dialog.plan, d, dialog.clip)
           }
         />
       )}

@@ -1,8 +1,17 @@
 import { create } from "zustand";
 import type { EntryRef } from "@/types/bindings";
+import { sameLocationDir } from "@/lib/entryDnd";
 
 /** 붙여넣기 모드 — copy(원본 유지) / move(잘라내기, 붙여넣으면 원본 제거). */
 export type ClipMode = "copy" | "move";
+
+/** Ctrl+C/Ctrl+X 한 번이 만든 클립보드 내용. `id` 는 그 한 번을 가리킨다. */
+export interface ClipEntry {
+  /** 담을 때마다 새로 받는 번호 — 늦게 끝난 붙여넣기가 새 내용을 지우지 않게 비교한다. */
+  id: number;
+  targets: EntryRef[];
+  mode: ClipMode;
+}
 
 /**
  * 인앱 파일 클립보드 — Ctrl+C/Ctrl+X 로 담고 Ctrl+V 로 붙여넣는다.
@@ -14,13 +23,31 @@ export type ClipMode = "copy" | "move";
  * 진실이고, OS 클립보드는 그 미러다.
  */
 interface ClipboardState {
-  entry: { targets: EntryRef[]; mode: ClipMode } | null;
+  entry: ClipEntry | null;
   set: (targets: EntryRef[], mode: ClipMode) => void;
   clear: () => void;
+  /**
+   * 잘라내기 붙여넣기에서 이동 작업이 **실제로 접수된** 항목만 클립보드에서 뺀다.
+   * `id` 가 지금 내용과 다르면(그 사이 새로 Ctrl+C/Ctrl+X) 아무것도 하지 않는다.
+   * 복사 클립보드는 여러 번 붙여넣을 수 있게 그대로 둔다.
+   */
+  consume: (id: number, moved: EntryRef[]) => void;
 }
 
-export const useClipboard = create<ClipboardState>((set) => ({
+let nextId = 1;
+
+const sameRef = (a: EntryRef, b: EntryRef) =>
+  a.name === b.name && sameLocationDir(a.location, b.location);
+
+export const useClipboard = create<ClipboardState>((set, get) => ({
   entry: null,
-  set: (targets, mode) => set({ entry: { targets, mode } }),
+  set: (targets, mode) => set({ entry: { id: nextId++, targets, mode } }),
   clear: () => set({ entry: null }),
+  consume: (id, moved) => {
+    const cur = get().entry;
+    if (!cur || cur.id !== id || cur.mode !== "move") return;
+    const left = cur.targets.filter((t) => !moved.some((m) => sameRef(t, m)));
+    if (left.length === cur.targets.length) return;
+    set({ entry: left.length > 0 ? { ...cur, targets: left } : null });
+  },
 }));
