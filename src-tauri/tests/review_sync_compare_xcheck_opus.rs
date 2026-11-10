@@ -8,14 +8,17 @@ use std::pin::Pin;
 
 use async_trait::async_trait;
 use duet_lib::core::ops::{merge_bidir, sync_execute, sync_plan, OpCtx};
-use duet_lib::core::undo::execute_undo;
+use duet_lib::core::undo::{execute_undo, UndoKind};
 use duet_lib::fs::{FileSystem, LocalFs};
 use duet_lib::services::connection_pool::ConnectionPool;
-use duet_lib::services::journal::{Journal, UndoAction};
+use duet_lib::services::journal::{Journal, JournalEntry, UndoAction};
 use duet_lib::services::settings::SettingsStore;
 use duet_lib::types::{DuetError, Entry, EntryMeta, Location, SourceId, TrashLocation};
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
+
+#[path = "support/undo_fixture.rs"]
+mod undo_fixture;
 
 async fn mk_ctx(dir: &Path) -> OpCtx {
     std::fs::create_dir_all(dir).unwrap();
@@ -148,10 +151,37 @@ impl FileSystem for Fixture {
 
 // ─── SC-01: 취소 경로 ────────────────────────────────────────────────────
 
-/// 사용자가 동기화 도중 [취소]. 취소 전에 a 는 새로 생기고 b 는 덮어써졌다(.bak 생성).
-/// 기대: 이미 반영된 변경이 journal 에 남아 Ctrl+Z 로 되돌릴 수 있다.
-#[tokio::test]
-async fn sync_cancel_midway_journals_what_was_already_applied() {
+// 로컬 동기화 취소·실패 복구 계약(Round 3):
+// (1) 각 파일은 손대지 않은 원본이거나, 새 내용 전체 + 원본이 journal 된 `.bak` — 반쪽 상태 없음.
+// (2) 이번 실행이 바꾼 것은 전부 **한** journal 항목(생성분+지문, 백업)에, 안 바꾼 것은 없음.
+// (3) journal 이 모르는 `.bak` 이 남지 않음.
+// (4) 그 항목의 Ctrl+Z 는 dst 를 동기화 전과 똑같이(이름+바이트) 되돌린다.
+//
+// 항목은 이름순으로 처리된다(a_new → b_changed → c_later). Fixture 는 dst 의 **모든** rename 을
+// 센다: 파일 복사는 `.duet-part` → 최종 이름 rename 으로 끝나고, 덮어쓰기는 그 전에 백업
+// rename 을 한다. 그래서 rename #1 = a_new 최종 rename, #2 = b 의 백업 rename.
+
+/// dst 의 (이름, 바이트) 스냅샷 — 이 fixture 는 하위 폴더 없음.
+fn snapshot(dir: &Path) -> Vec<(String, Vec<u8>)> {
+    names(dir)
+        .into_iter()
+        .map(|n| {
+            let bytes = std::fs::read(dir.join(&n)).unwrap();
+            (n, bytes)
+        })
+        .collect()
+}
+
+/// a(새 파일)·b(덮어쓰기 대상)·c(새 파일) 를 동기화하다 dst 의 n 번째 rename 직후 취소.
+async fn sync_cancelled_at_nth_rename(
+    nth: usize,
+) -> (
+    TempDir,
+    PathBuf,
+    Vec<(String, Vec<u8>)>,
+    Result<JournalEntry, DuetError>,
+    OpCtx,
+) {
     let t = TempDir::new().unwrap();
     let (src, dst) = (t.path().join("src"), t.path().join("dst"));
     std::fs::create_dir_all(&src).unwrap();
@@ -160,30 +190,125 @@ async fn sync_cancel_midway_journals_what_was_already_applied() {
     std::fs::write(src.join("b_changed.txt"), b"NEW-content").unwrap();
     std::fs::write(dst.join("b_changed.txt"), b"old").unwrap();
     std::fs::write(src.join("c_later.txt"), b"later").unwrap();
+    let before = snapshot(&dst);
     let tok = CancellationToken::new();
     let mut dst_fs = Fixture::new();
-    // b_changed 의 백업 rename 직후 취소 → b 복사는 끝나고 c 앞에서 Cancelled.
-    dst_fs.cancel_on_nth_rename = Some((1, tok.clone()));
+    dst_fs.cancel_on_nth_rename = Some((nth, tok.clone()));
     let ctx = mk_ctx(&t.path().join("ctx")).await;
     let plan = sync_plan(&LocalFs, &dst_fs, loc(&src), loc(&dst))
         .await
         .unwrap();
     let r = sync_execute(&LocalFs, &dst_fs, plan, &ctx, tok, None).await;
-    assert!(matches!(r, Err(DuetError::Cancelled)), "got {r:?}");
-    let after = names(&dst);
-    // list 순서는 OS 의존 — 순서와 무관하게 "b 는 덮어써졌고(.bak 생성) 일부는 안 됐다" 만 고정.
+    (t, dst, before, r, ctx)
+}
+
+/// 계약 (2): 정확히 한 항목, 그 항목의 (생성분, 백업). 생성분마다 지문이 있다.
+async fn only_sync_entry(
+    ctx: &OpCtx,
+) -> (
+    JournalEntry,
+    Vec<PathBuf>,
+    Vec<duet_lib::services::journal::BackupRestore>,
+) {
+    assert_eq!(ctx.journal.history(10).await.len(), 1, "exactly one entry");
+    let entry = ctx
+        .journal
+        .peek_undoable()
+        .await
+        .unwrap()
+        .expect("partial sync must be journaled");
+    let UndoAction::UndoSync {
+        created,
+        backups_to_restore,
+        created_stamps,
+        pruned,
+        ..
+    } = &entry.undo
+    else {
+        panic!("expected UndoSync, got {:?}", entry.undo)
+    };
+    assert!(pruned.is_empty());
+    assert_eq!(created_stamps.len(), created.len());
+    assert!(
+        created_stamps.iter().all(Option::is_some),
+        "every created file is stamped so undo can verify it"
+    );
+    let (created, backups) = (created.clone(), backups_to_restore.clone());
+    (entry, created, backups)
+}
+
+fn bak_names(dst: &Path) -> Vec<String> {
+    names(dst)
+        .into_iter()
+        .filter(|n| n.contains(".bak"))
+        .collect()
+}
+
+/// 계약 (4): 실제 undo(임시 폴더 휴지통) 후 dst 가 동기화 전 스냅샷과 같다.
+async fn undo_restores_snapshot(entry: &JournalEntry, dst: &Path, before: &[(String, Vec<u8>)]) {
+    let out = undo_fixture::undo_tmp(entry).await;
+    assert!(
+        matches!(out.kind, UndoKind::Ok),
+        "undo outcome {:?}",
+        out.kind
+    );
     assert_eq!(
-        std::fs::read(dst.join("b_changed.txt")).unwrap(),
-        b"NEW-content"
+        snapshot(dst),
+        before,
+        "undo must return dst to the exact pre-sync state"
     );
-    assert!(after.iter().any(|n| n.starts_with("b_changed.txt.bak")));
-    assert!(
-        !(after.contains(&"a_new.txt".to_string()) && after.contains(&"c_later.txt".to_string()))
-    );
-    assert!(
-        !ctx.journal.history(10).await.is_empty(),
-        "cancelled sync already created/overwrote files but left no journal entry; dst = {after:?}"
-    );
+}
+
+/// 취소가 a_new 의 최종 rename 직후(#1)에 걸림 — a 는 끝난 새 파일, b·c 는 손대지 않음.
+#[tokio::test]
+async fn sync_cancel_midway_journals_what_was_already_applied() {
+    let (_t, dst, before, r, ctx) = sync_cancelled_at_nth_rename(1).await;
+    assert!(matches!(r, Err(DuetError::Cancelled)), "got {r:?}");
+    // (1)
+    assert_eq!(std::fs::read(dst.join("a_new.txt")).unwrap(), b"fresh");
+    assert_eq!(std::fs::read(dst.join("b_changed.txt")).unwrap(), b"old");
+    assert!(!dst.join("c_later.txt").exists());
+    // (3)
+    assert!(bak_names(&dst).is_empty(), "b untouched → no backup");
+    // (2)
+    let (entry, created, backups) = only_sync_entry(&ctx).await;
+    assert_eq!(created, vec![dst.join("a_new.txt")]);
+    assert!(backups.is_empty());
+    // (4)
+    undo_restores_snapshot(&entry, &dst, &before).await;
+}
+
+/// 취소가 b 의 백업 rename 직후(#2)에 걸림 — 가장 위험한 지점(원본이 `.bak` 이름으로만 있음).
+#[tokio::test]
+async fn sync_cancel_right_after_backup_rename_keeps_contract() {
+    let (_t, dst, before, r, ctx) = sync_cancelled_at_nth_rename(2).await;
+    assert!(matches!(r, Err(DuetError::Cancelled)), "got {r:?}");
+    let (entry, created, backups) = only_sync_entry(&ctx).await;
+    assert_eq!(std::fs::read(dst.join("a_new.txt")).unwrap(), b"fresh");
+    assert!(!dst.join("c_later.txt").exists(), "c is after the cancel");
+    assert_eq!(created, vec![dst.join("a_new.txt")], "only a was created");
+    let b_now = std::fs::read(dst.join("b_changed.txt")).unwrap();
+    let baks = bak_names(&dst);
+    // (1)+(3) 허용 상태 둘 중 하나: b 원본 그대로·백업 없음, 또는 b 새 내용 전체 + 원본이
+    // journal 된 `.bak` 하나.
+    if b_now == b"old" {
+        assert!(
+            backups.is_empty() && baks.is_empty(),
+            "{backups:?} {baks:?}"
+        );
+    } else {
+        assert_eq!(b_now, b"NEW-content", "never a partial b");
+        assert_eq!(backups.len(), 1);
+        assert_eq!(backups[0].original_path, dst.join("b_changed.txt"));
+        assert_eq!(std::fs::read(&backups[0].backup_path).unwrap(), b"old");
+        assert_eq!(baks.len(), 1, "no orphan .bak: {baks:?}");
+        assert_eq!(dst.join(&baks[0]), backups[0].backup_path);
+    }
+    // 지금 구현이 실제로 탄 경로를 고정: 복사는 파일 하나 안에서는 취소되지 않으므로, 백업 직후
+    // 취소돼도 b 는 끝까지 복사되고 백업이 기록된 뒤 다음 항목(c) 앞에서 멈춘다.
+    assert_eq!(b_now, b"NEW-content");
+    // (4)
+    undo_restores_snapshot(&entry, &dst, &before).await;
 }
 
 // ─── SC-02: 삭제 전파 켜고 동기화 → Ctrl+Z (사용자 흐름 끝까지) ──────────
