@@ -187,14 +187,35 @@ describe("entryMoreOptions — 다중 선택 셸 메뉴 (mocked IPC, live 아님
   });
 });
 
-// Sol L2 repro (shell-sol src/lib/shellMenu.test.ts:149), it.fails → it.
-// Adapted for the R2 API: shellMenuTarget now takes the tab, not a displayed list.
-it("UX-SHL-01 L2: native More keeps filtered-out selected items like duet actions", () => {
+// UX-SHL-01 L2 (Sol) — native More must target exactly what duet's own actions target.
+// Since browse03 (1ebad57) setFilter prunes filter-hidden names from the selection, so after
+// a filter both sides see only the visible pick. The helper itself still honors whatever
+// selection it is given (see "필터로 가려진 선택 항목도…" above and the second case below).
+it("UX-SHL-01 L2: after setFilter prunes the selection, native More agrees with duet actions", () => {
   const state = usePanes.getState();
   state.setActivePane("left");
   state.setEntries("left", loc, [e("a.zip"), e("b.zip"), e("c.zip")]);
   state.setSelected("left", ["c.zip", "a.zip", "b.zip"]);
   state.setFilter("left", "a.zip");
+  const tab = activeTab(usePanes.getState(), "left");
+  const ownNames = resolveActiveTargets()
+    .targets.map((t) => t.name)
+    .sort();
+  expect(ownNames).toEqual(["a.zip"]);
+  const target = shellMenuTarget("windows", tab, tab.selected);
+  const nativeNames = target?.paths
+    .map((p) => p.replaceAll("\\", "/").split("/").pop())
+    .sort();
+  expect(nativeNames).toEqual(ownNames);
+});
+
+it("UX-SHL-01 L2: a selection that still holds filter-hidden names goes to native More whole, like duet actions", () => {
+  const state = usePanes.getState();
+  state.setActivePane("left");
+  state.setEntries("left", loc, [e("a.zip"), e("b.zip"), e("c.zip")]);
+  state.setFilter("left", "a.zip");
+  // Selection set after the filter (no pruning on this path) keeps hidden names.
+  state.setSelected("left", ["c.zip", "a.zip", "b.zip"]);
   const tab = activeTab(usePanes.getState(), "left");
   const ownNames = resolveActiveTargets()
     .targets.map((t) => t.name)

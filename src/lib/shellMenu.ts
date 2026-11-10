@@ -116,7 +116,9 @@ export interface ShellMenuTarget {
  * 항목 우클릭에 셸 메뉴를 붙일 대상을 고른다. 대상이 없으면 null.
  * - Windows 로컬 폴더만(원격·가상 휴지통·macOS/Linux 는 셸 메뉴가 없다).
  * - 선택된 항목 **전부** — duet 자체 작업(`fileActions.resolveActiveTargets`)과 같은 집합.
- *   필터나 숨김 설정으로 지금 안 보이는 선택 항목도 포함한다(선택은 필터 뒤에도 유지된다).
+ *   받은 `selected` 를 그대로 존중한다 — 지금 안 보이는 이름이 들어 있어도 뺀다/보탠다 하지 않는다.
+ *   (패널 store 는 필터·숨김 토글 때 안 보이는 이름을 선택에서 걷어내므로(browse03) 보통은 보이는
+ *   항목만 온다. 어느 쪽이든 duet 자체 작업과 같은 집합이 셸에 간다.)
  *   목록(`tab.entries`)에 없는 이름은 뺀다 — 종류를 모르고 셸이 찾지도 못한다.
  * - 순서는 패널의 현재 정렬 기준(필터·숨김과 무관). ".." 는 뺀다.
  * - scope 는 전부 폴더면 "directory", 하나라도 파일이면 "file" (백엔드 빌드는 scope 를
@@ -131,6 +133,7 @@ export function shellMenuTarget(
   if (os !== "windows") return null;
   if (location.source.kind !== "local" || isVirtualTrash(location)) return null;
   // 패널 정렬 그대로, 필터·숨김만 끈 전체 목록 — 표시 규칙과 같은 정렬 함수를 쓴다.
+  // (선택을 걸러 내는 건 store 의 몫 — 여기선 받은 선택을 정렬만 한다.)
   const ordered = computeDisplayed({ ...tab, filter: "", showHidden: true });
   const items = ordered.filter((e) => e.name !== ".." && selected.has(e.name));
   if (items.length === 0) return null;
