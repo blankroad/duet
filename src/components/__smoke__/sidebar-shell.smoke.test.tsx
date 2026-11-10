@@ -424,8 +424,15 @@ describe("사이드바 — 상태 표시", () => {
         { alias: "lab", host: "10.0.0.9", port: 22, user: "u", key_path: null },
       ],
     });
+    // 저장 호스트 접속은 ad-hoc 이라 연결 alias 는 `user@host:port` 다(저장 alias 는 표시 이름).
     useConnections.setState({
-      active: { "lab:1": conn("lab:1", "lab", "connected") },
+      active: {
+        "u@10.0.0.9:22:1": conn(
+          "u@10.0.0.9:22:1",
+          "u@10.0.0.9:22",
+          "connected",
+        ),
+      },
     });
     await renderSidebar();
     expect(

@@ -553,20 +553,6 @@ function useHostState(alias: string): ConnectionState {
   });
 }
 
-/** 두 대표 상태 중 더 "살아 있는" 쪽 (connected > connecting > error > disconnected). */
-function strongerState(
-  a: ConnectionState,
-  b: ConnectionState,
-): ConnectionState {
-  return STATE_RANK[b.kind] > STATE_RANK[a.kind] ? b : a;
-}
-
-/** 패널 배지 합치기 — "L"·"R" 중복 없이 L 먼저. */
-function mergeBadges(a: string, b: string): string {
-  const both = a + b;
-  return (both.includes("L") ? "L" : "") + (both.includes("R") ? "R" : "");
-}
-
 /**
  * 이 행을 파일 드롭 대상으로 만든다. `data-drop-*` 만 달면 되고 해석은 lib/dropTarget
  * 이 DOM 에서 직접 한다(등록 레지스트리 없음). 반환값을 행에 스프레드.
@@ -1266,16 +1252,11 @@ function SavedHostItem({
   );
   const display = nickname ?? host.alias;
   // 저장 호스트로 연 연결의 alias 는 저장 alias 가 아니라 `user@host:port` 다 —
-  // 저장 alias 만 보면 연결돼 있어도 점·배지가 꺼져 있었다(remote-NEW-2).
+  // 저장 alias 만 보면 연결돼 있어도 점·배지가 꺼져 있었다(remote-NEW-2). 저장 alias 는
+  // 표시 이름일 뿐이라 같은 이름의 다른 연결(config 호스트 등)과 섞지 않는다.
   const connAlias = adHocAliasOf(host);
-  const pane = mergeBadges(
-    usePanesOnHost(host.alias),
-    usePanesOnHost(connAlias),
-  );
-  const state = strongerState(
-    useHostState(host.alias),
-    useHostState(connAlias),
-  );
+  const pane = usePanesOnHost(connAlias);
+  const state = useHostState(connAlias);
   const live = state.kind === "connected" || state.kind === "connecting";
   const menu: MenuEntry[] = [
     {
@@ -1289,10 +1270,7 @@ function SavedHostItem({
           {
             id: "disconnect",
             label: t("sidebar.disconnect"),
-            onSelect: () => {
-              void disconnectAlias(connAlias);
-              if (connAlias !== host.alias) void disconnectAlias(host.alias);
-            },
+            onSelect: () => void disconnectAlias(connAlias),
           } as MenuEntry,
         ]
       : []),
