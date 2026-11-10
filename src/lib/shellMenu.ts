@@ -1,7 +1,15 @@
 import { createElement } from "react";
+import i18n from "@/i18n";
 import { commands } from "@/types/bindings";
-import type { ShellMenuItem, ShellScope } from "@/types/bindings";
+import type {
+  Entry,
+  Location,
+  ShellMenuItem,
+  ShellScope,
+} from "@/types/bindings";
 import type { MenuEntry } from "@/stores/contextMenu";
+import { childLocation } from "@/lib/entryDnd";
+import { isVirtualTrash } from "@/lib/trashView";
 
 /** 셸 항목 아이콘 PNG 바이트 → data URL (.ts 라 JSX 없이 createElement). */
 function iconEl(it: ShellMenuItem) {
@@ -22,8 +30,9 @@ function iconEl(it: ShellMenuItem) {
  * 트리를 duet 컨텍스트 메뉴 항목으로 변환한다.
  *
  * 세션 수명은 **백엔드(경로 캐시)가 관리**한다 — FE 는 close 를 보내지 않는다.
- * - 우클릭 = shell_menu_open(path) → 캐시 있으면 즉시, 없으면 빌드. {token, items} 반환.
- * - 커서 멈춤/폴더 변경 = shell_menu_warm(path) → 백그라운드로 캐시 채움(useShellWarm).
+ * - 우클릭 = shell_menu_open(paths) → 캐시 있으면 즉시, 없으면 빌드. {token, items} 반환.
+ *   paths 는 한 폴더 안의 선택 전부(표시 순서) — Explorer 처럼 한 메뉴로 묶는다.
+ * - 커서 멈춤/폴더 변경 = shell_menu_warm([path]) → 백그라운드로 캐시 채움(useShellWarm).
  * - 잎 항목 클릭 = shell_menu_invoke(token, id) → 백엔드가 그 파일의 IContextMenu 로 실행.
  */
 
@@ -51,12 +60,15 @@ function toEntries(items: ShellMenuItem[], token: number): MenuEntry[] {
   });
 }
 
-/** 우클릭 — 셸 메뉴를 연다(캐시 있으면 즉시). 항목이 있으면 {token, entries}, 없으면 null. */
+/**
+ * 우클릭 — 셸 메뉴를 연다(캐시 있으면 즉시). 항목이 있으면 {token, entries}, 없으면 null.
+ * `paths` 는 한 폴더 안의 선택(표시 순서). 같은 폴더인지는 백엔드가 검증한다.
+ */
 export async function openShellMenu(
-  path: string,
+  paths: string[],
   scope: ShellScope,
 ): Promise<{ token: number; entries: MenuEntry[] } | null> {
-  const r = await commands.shellMenuOpen(path, scope);
+  const r = await commands.shellMenuOpen(paths, scope);
   if (r.status !== "ok" || r.data.items.length === 0) return null;
   return {
     token: r.data.token,
@@ -64,7 +76,65 @@ export async function openShellMenu(
   };
 }
 
-/** 백그라운드 예열 — 그 경로의 셸 메뉴를 미리 빌드해 캐시(fire-and-forget). */
+/** 백그라운드 예열 — 그 경로 한 항목의 셸 메뉴를 미리 빌드해 캐시(fire-and-forget). */
 export function warmShellMenu(path: string, scope: ShellScope): void {
-  void commands.shellMenuWarm(path, scope);
+  void commands.shellMenuWarm([path], scope);
+}
+
+/** 항목 우클릭의 "More options" 대상 — 선택된 실제 항목들(표시 순서)과 scope. */
+export interface ShellMenuTarget {
+  paths: string[];
+  scope: ShellScope;
+}
+
+/**
+ * 항목 우클릭에 셸 메뉴를 붙일 대상을 고른다. 대상이 없으면 null.
+ * - Windows 로컬 폴더만(원격·가상 휴지통·macOS/Linux 는 셸 메뉴가 없다).
+ * - 선택된 항목 전부를 **화면 표시 순서로**. ".." 는 빼고, 필터로 안 보이는 항목도 뺀다.
+ * - scope 는 전부 폴더면 "directory", 하나라도 파일이면 "file" (백엔드 빌드는 scope 를
+ *   안 쓰고 캐시 키로만 쓴다).
+ */
+export function shellMenuTarget(
+  os: string,
+  location: Location,
+  displayed: readonly Entry[],
+  selected: ReadonlySet<string>,
+): ShellMenuTarget | null {
+  if (os !== "windows") return null;
+  if (location.source.kind !== "local" || isVirtualTrash(location)) return null;
+  const items = displayed.filter(
+    (e) => e.name !== ".." && selected.has(e.name),
+  );
+  if (items.length === 0) return null;
+  return {
+    paths: items.map((e) => String(childLocation(location, e.name).path)),
+    scope: items.every((e) => e.kind === "dir") ? "directory" : "file",
+  };
+}
+
+/**
+ * 항목 우클릭 메뉴 끝에 붙일 "More options ▸" (구분선 포함). 대상이 없으면 빈 배열.
+ * 셸 메뉴는 지금 요청해 두고(캐시 있으면 즉시), 하위 메뉴를 펼칠 때 결과를 쓴다 —
+ * duet 메뉴는 셸 빌드를 기다리지 않고 바로 열린다(Win11 방식).
+ */
+export function entryMoreOptions(
+  os: string,
+  location: Location,
+  displayed: readonly Entry[],
+  selected: ReadonlySet<string>,
+): MenuEntry[] {
+  const target = shellMenuTarget(os, location, displayed, selected);
+  if (!target) return [];
+  const shellPromise = openShellMenu(target.paths, target.scope);
+  return [
+    { kind: "separator" },
+    {
+      id: "win-more",
+      label: i18n.t("menu.moreOptions"),
+      loadChildren: async () => {
+        const shell = await shellPromise;
+        return shell ? shell.entries : [];
+      },
+    },
+  ];
 }

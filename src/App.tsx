@@ -55,7 +55,7 @@ import { FrecencyJumper } from "@/components/FrecencyJumper";
 import { useFrecency } from "@/stores/frecency";
 import { ContextMenu } from "@/components/ContextMenu";
 import { useContextMenu, type MenuEntry } from "@/stores/contextMenu";
-import { openShellMenu } from "@/lib/shellMenu";
+import { entryMoreOptions, openShellMenu } from "@/lib/shellMenu";
 import { buildEntryMenu, buildEmptyMenu, folderName } from "@/lib/entryMenu";
 import { calcDirSizes } from "@/lib/dirSize";
 import { beginTabNav, peekTabNav } from "@/lib/tabNav";
@@ -192,7 +192,6 @@ import type {
   Location,
   SavedHost,
   SearchHit,
-  ShellScope,
   UserAlias,
   Volume,
 } from "@/types/bindings";
@@ -784,30 +783,17 @@ function App() {
         onOpenInOtherPane,
         onPutBack,
       });
-      // Windows 로컬 단일 선택: 실제 셸 메뉴(Tier 2)를 "More options ▸" 지연 항목으로.
-      // 펼칠 때만 조회 → 메뉴가 갑자기 커지지도 않음(Win11 방식).
-      if (
-        platform() === "windows" &&
-        tab.location.source.kind === "local" &&
-        selectedCount === 1
-      ) {
-        const child = childLocation(tab.location, entry.name);
-        const scope: ShellScope = entry.kind === "dir" ? "directory" : "file";
-        // 커서-멈춤 예열(useShellWarm)이 이미 캐시해 뒀으면 백엔드가 즉시 서빙, 아니면
-        // 그때 빌드. 세션 수명은 백엔드 캐시가 관리 — FE close 불필요.
-        const shellPromise = openShellMenu(String(child.path), scope);
-        items.push(
-          { kind: "separator" },
-          {
-            id: "win-more",
-            label: i18n.t("menu.moreOptions"),
-            loadChildren: async () => {
-              const shell = await shellPromise;
-              return shell ? shell.entries : [];
-            },
-          },
-        );
-      }
+      // Windows 로컬: 실제 셸 메뉴(Tier 2)를 "More options ▸" 지연 항목으로 — 선택 전부를
+      // 표시 순서로 한 메뉴에(Explorer 처럼; 7-Zip/Bandizip "각각 압축 풀기" 등). 펼칠 때만
+      // 조회 → 메뉴가 갑자기 커지지도 않음(Win11 방식). 세션 수명은 백엔드 캐시가 관리.
+      items.push(
+        ...entryMoreOptions(
+          platform(),
+          tab.location,
+          computeDisplayed(tab),
+          wasSelected ? tab.selected : new Set([entry.name]),
+        ),
+      );
       useContextMenu.getState().openAt(cx, cy, items);
     },
     [onActivate, onOpenInOtherPane, onPutBack, onUp, showToast],
@@ -843,7 +829,7 @@ function App() {
       ) {
         const bgPath = String(tab.location.path);
         // 캐시 있으면 백엔드가 즉시 서빙, 아니면 그때 빌드. 세션 수명은 백엔드 캐시가 관리.
-        const shellPromise = openShellMenu(bgPath, "background");
+        const shellPromise = openShellMenu([bgPath], "background");
         items.push(
           { kind: "separator" },
           {
