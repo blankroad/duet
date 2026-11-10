@@ -60,6 +60,29 @@ export function sameLocationDir(a: Location, b: Location): boolean {
   );
 }
 
+/** POSIX 비교용 정규화 — `/` 만 구분자. 중복 `/` 합치고 끝 `/` 제거(루트 제외). `\` 는 글자. */
+function posixCanon(p: string): string {
+  let s = p.replace(/\/+/g, "/");
+  if (s.length > 1) s = s.replace(/\/$/, "");
+  return s;
+}
+
+/**
+ * 작업을 막거나 바꾸는 결정용 "같은 폴더" 판정 — `sameLocationDir` 보다 엄격하다.
+ * `\` 를 구분자로 보는 것은 Windows 로컬(`backslashIsSeparator`)뿐이다. SSH·로컬 POSIX
+ * 에서 `\` 는 이름의 한 글자라 `/srv/a\b` 와 `/srv/a/b` 는 다른 폴더다.
+ */
+export function sameDirStrict(
+  a: Location,
+  b: Location,
+  backslashIsSeparator: boolean,
+): boolean {
+  if (!sameSource(a.source, b.source)) return false;
+  if (backslashIsSeparator && a.source.kind === "local")
+    return canonPath(a.path) === canonPath(b.path);
+  return posixCanon(a.path) === posixCanon(b.path);
+}
+
 /**
  * fs:changed 이벤트(`eventSource`/`eventPath`)가 `pane` 디렉토리에 영향을 주나.
  * 같은 source + (경로가 같거나 그 직속 자식). notify 가 디렉토리 자체를 보내는

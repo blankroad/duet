@@ -7,7 +7,8 @@
  * 파일 아이콘으로 폴백한다. 표시 전용 — 경로 결합/검증은 하지 않는다 (CLAUDE.md §7).
  */
 import { usePanes } from "@/stores/panes";
-import { sameLocationDir } from "@/lib/entryDnd";
+import { sameDirStrict } from "@/lib/entryDnd";
+import { isWindows } from "@/lib/fileIcon";
 import type { Entry, EntryRef, Location, SourceId } from "@/types/bindings";
 
 export interface PlanItem {
@@ -54,6 +55,14 @@ export function resolvePlanItems(refs: EntryRef[]): PlanItem[] {
 }
 
 /**
+ * 같은 폴더 판정(작업 결정용) — Windows 로컬만 `\`·`/` 를 같게 보고, SSH·로컬 POSIX 는
+ * `\` 를 이름의 글자로 둔다. 같은 폴더 이동 거부와 같은 폴더 사본 미리 선택에 쓴다.
+ */
+export function sameDirForOps(a: Location, b: Location): boolean {
+  return sameDirStrict(a, b, isWindows());
+}
+
+/**
  * 충돌이 전부 "항목 자기 자신"인가 — 같은 폴더로 복사(F5 양쪽 같은 폴더, 같은 폴더에서
  * Ctrl+C → Ctrl+V)해서 원본이 곧 받는 위치의 기존 항목인 경우. 이때 사용자가 바라는 것은
  * 탐색기/파인더처럼 사본 만들기라 확인 창이 "둘 다 유지"를 미리 고른다.
@@ -66,7 +75,7 @@ export function selfConflictsOnly(plan: {
   if (plan.conflicts.length === 0) return false;
   return plan.conflicts.every((c) =>
     plan.items.some(
-      (it) => it.name === c.name && sameLocationDir(it.location, plan.dst),
+      (it) => it.name === c.name && sameDirForOps(it.location, plan.dst),
     ),
   );
 }

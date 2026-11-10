@@ -4,6 +4,9 @@
 // The dialog still shows; the user can pick another policy. The global default and the
 // remembered session choice are not changed by this preselect.
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+// Windows client: local `\` and `/` are the same separator. SSH paths stay POSIX.
+vi.mock("@tauri-apps/plugin-os", () => ({ platform: () => "windows" }));
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type {
   Conflict,
@@ -15,6 +18,7 @@ import type {
 import { CopyMoveConfirmDialog } from "@/components/dialogs/CopyMoveConfirmDialog";
 import { useAppSettings } from "@/stores/settings";
 import { selfConflictsOnly } from "@/lib/planItems";
+import { sameDirStrict } from "@/lib/entryDnd";
 import "@/i18n";
 
 const here: Location = { source: { kind: "local" }, path: "C:\\work" };
@@ -117,11 +121,42 @@ describe("selfConflictsOnly", () => {
   it("false without conflicts", () => {
     expect(selfConflictsOnly(plan([ref(here, "a.txt")], here, []))).toBe(false);
   });
+  it("A-R2-01: on SSH a backslash is part of a name — /srv/a\\b is not /srv/a/b", () => {
+    const literal: Location = { ...remote, path: "/srv/a\\b" };
+    const nested: Location = { ...remote, path: "/srv/a/b" };
+    expect(
+      selfConflictsOnly(
+        plan([ref(literal, "report.docx")], nested, ["report.docx"]),
+      ),
+    ).toBe(false);
+  });
+  it("same-connection SSH self-copy is still recognised (trailing slash ignored)", () => {
+    const withSlash: Location = { ...remote, path: "/srv/data/" };
+    expect(
+      selfConflictsOnly(plan([ref(remote, "a.txt")], withSlash, ["a.txt"])),
+    ).toBe(true);
+  });
   it("same path on another source is not the same item", () => {
     const remoteSame: Location = { ...remote, path: "C:\\work" };
     expect(
       selfConflictsOnly(plan([ref(here, "a.txt")], remoteSame, ["a.txt"])),
     ).toBe(false);
+  });
+});
+
+describe("sameDirStrict", () => {
+  const loc = (path: string): Location => ({ source: { kind: "local" }, path });
+  it("local POSIX keeps backslash literal", () => {
+    expect(sameDirStrict(loc("/srv/a\\b"), loc("/srv/a/b"), false)).toBe(false);
+    expect(sameDirStrict(loc("/srv/a//b/"), loc("/srv/a/b"), false)).toBe(true);
+  });
+  it("local Windows treats backslash and slash alike", () => {
+    expect(sameDirStrict(loc("C:\\work"), loc("C:/work/"), true)).toBe(true);
+  });
+  it("SSH keeps backslash literal even on a Windows client", () => {
+    const a: Location = { ...remote, path: "/srv/a\\b" };
+    const b: Location = { ...remote, path: "/srv/a/b" };
+    expect(sameDirStrict(a, b, true)).toBe(false);
   });
 });
 
@@ -154,6 +189,18 @@ describe("copy confirm dialog — same-folder duplicate", () => {
     fireEvent.click(screen.getByRole("radio", { name: "Replace" }));
     fireEvent.click(screen.getByRole("button", { name: /^Copy/ }));
     expect(onConfirm).toHaveBeenCalledWith("replace");
+  });
+
+  it("A-R2-01: SSH /srv/a\\b → /srv/a/b conflict keeps the configured default", () => {
+    useAppSettings.setState({ conflictDefault: "replace" });
+    const literal: Location = { ...remote, path: "/srv/a\\b" };
+    const nested: Location = { ...remote, path: "/srv/a/b" };
+    expect(
+      selectedPolicy(
+        "copy",
+        plan([ref(literal, "report.docx")], nested, ["report.docx"]),
+      ),
+    ).toBe("Replace");
   });
 
   it("keeps the configured default when a conflict is a different item", () => {

@@ -267,6 +267,27 @@ describe("both panes show the same folder", () => {
   });
 });
 
+describe("A-R2-01: SSH backslash is a name character, not a separator", () => {
+  it("F6 from /srv/a\\b to /srv/a/b on one connection reaches fsMovePlan", async () => {
+    const ssh = {
+      kind: "ssh" as const,
+      connection_id: "c1",
+      host_ip: "10.0.0.5",
+      user: "u",
+    };
+    seed({
+      left: { source: ssh, path: "/srv/a\\b" },
+      right: { source: ssh, path: "/srv/a/b" },
+      entries: [file("report.docx")],
+      selected: ["report.docx"],
+    });
+    const toast = vi.fn();
+    await triggerMove(vi.fn(), toast);
+    expect(h.calls.find(([n]) => n === "fsMovePlan")).toBeDefined();
+    expect(toast).not.toHaveBeenCalledWith(i18n.t("toast.alreadyInFolder"));
+  });
+});
+
 describe("both panes show the same folder — copy", () => {
   const here = local("/w");
   const conflictPlan = {

@@ -21,15 +21,11 @@ import { useTasks } from "@/stores/tasks";
 import { useAppSettings, initialConflictPolicy } from "@/stores/settings";
 import { rememberElevatable } from "@/lib/elevatePending";
 import i18n from "@/i18n";
-import {
-  childLocation,
-  sameLocation,
-  sameLocationDir,
-  sourceKey,
-} from "@/lib/entryDnd";
+import { childLocation, sameLocation, sourceKey } from "@/lib/entryDnd";
 import { explainError } from "@/lib/error";
 import { showError } from "@/lib/errorToast";
 import { isSameOrInside } from "@/lib/nesting";
+import { sameDirForOps } from "@/lib/planItems";
 import { isVirtualTrash } from "@/lib/trashView";
 import { rememberExtract } from "@/lib/extractPending";
 import { basename } from "@/lib/paths";
@@ -647,10 +643,7 @@ export async function planTransferTo(
   }
   // 이미 그 폴더에 있는 항목을 같은 폴더로 이동 — 의미 없음. 잘라내기 붙여넣기·드래그와
   // 같은 규칙(F6 을 양쪽 패널이 같은 폴더일 때 누른 경우 등).
-  if (
-    mode === "move" &&
-    targets.every((t) => sameLocationDir(t.location, dst))
-  ) {
+  if (mode === "move" && targets.every((t) => sameDirForOps(t.location, dst))) {
     showToast(i18n.t("toast.alreadyInFolder"));
     return "done";
   }
