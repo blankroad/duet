@@ -154,6 +154,24 @@ export function initSessionPersist(): void {
   subscribed = true;
   usePanes.subscribe(() => {
     if (timer) clearTimeout(timer);
-    timer = setTimeout(saveSession, 500);
+    timer = setTimeout(() => {
+      timer = null;
+      saveSession();
+    }, 500);
   });
+  // 창이 닫히며 페이지가 내려갈 때 대기 중인 저장을 놓치지 않게(보조 경로).
+  if (typeof window !== "undefined")
+    window.addEventListener("pagehide", flushSessionSave);
+}
+
+/**
+ * 대기 중인 디바운스 저장을 즉시 실행 — 창 닫기 직전에 부른다. 탭을 바꾼 지
+ * 500ms 안에 닫으면 마지막 변경이 저장되지 않던 문제(browse-26). 대기 중인 게
+ * 없으면 아무것도 안 한다(복원 전 빈 레이아웃을 덮어쓰지 않게).
+ */
+export function flushSessionSave(): void {
+  if (!timer) return;
+  clearTimeout(timer);
+  timer = null;
+  saveSession();
 }

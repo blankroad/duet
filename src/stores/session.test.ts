@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { usePanes, isRestoredRemote, type RestoredLayout } from "./panes";
-import { loadSession, snapshot } from "./session";
+import {
+  loadSession,
+  snapshot,
+  initSessionPersist,
+  flushSessionSave,
+} from "./session";
 
 // 이 jsdom 환경의 localStorage 는 기능이 없어(=recents 가 try/catch 로 감싸는 이유)
 // 인메모리로 stub.
@@ -333,5 +338,38 @@ describe("session — 손상 탭 앞에 있는 활성 탭", () => {
     expect(v.panes.left.tabs[v.panes.left.activeTabIndex]!.path).toBe(
       "/wanted",
     );
+  });
+});
+
+describe("session — 닫기 직전 저장 (browse-26)", () => {
+  it("flush 는 대기 중인 저장을 즉시 쓰고, 대기 중인 게 없으면 아무것도 안 쓴다", () => {
+    vi.useFakeTimers();
+    try {
+      initSessionPersist();
+      mem.clear();
+      flushSessionSave();
+      expect(mem.has("duet.session.v1")).toBe(false);
+
+      usePanes
+        .getState()
+        .openTab("left", { source: { kind: "local" }, path: "/flush-me" });
+      expect(mem.has("duet.session.v1")).toBe(false); // 아직 디바운스 대기
+      flushSessionSave();
+      expect(mem.get("duet.session.v1")).toContain("/flush-me");
+
+      // 이미 비웠으니 타이머가 다시 쓰지 않는다.
+      mem.clear();
+      vi.advanceTimersByTime(1000);
+      expect(mem.has("duet.session.v1")).toBe(false);
+
+      // pagehide 도 같은 flush 를 탄다.
+      usePanes
+        .getState()
+        .openTab("left", { source: { kind: "local" }, path: "/on-pagehide" });
+      window.dispatchEvent(new Event("pagehide"));
+      expect(mem.get("duet.session.v1")).toContain("/on-pagehide");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

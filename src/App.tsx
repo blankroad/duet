@@ -137,7 +137,11 @@ import { bootstrapUserAliases } from "@/stores/userAliases";
 import { bootstrapAppLaunchers, setAppArgs } from "@/stores/appLaunchers";
 import { bootstrapPlaces, refreshVolumes } from "@/stores/places";
 import { recordRecent } from "@/stores/recents";
-import { loadSession, initSessionPersist } from "@/stores/session";
+import {
+  loadSession,
+  initSessionPersist,
+  flushSessionSave,
+} from "@/stores/session";
 import { bootstrapHostGroups } from "@/stores/sidebarGroups";
 import { bootstrapHostNicknames } from "@/stores/hostNicknames";
 import { bootstrapTags } from "@/stores/tags";
@@ -1181,6 +1185,7 @@ function App() {
       quit: () => {
         const isMac = navigator.userAgent.includes("Mac");
         if (!isMac) {
+          flushSessionSave();
           void import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
             void getCurrentWindow().close();
           });

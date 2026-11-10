@@ -15,6 +15,7 @@ import { useTranslation } from "react-i18next";
 import clsx from "clsx";
 import { useUI } from "@/stores/ui";
 import { usePanes, activeTab } from "@/stores/panes";
+import { flushSessionSave } from "@/stores/session";
 import { usePalette } from "@/stores/palette";
 import { useSearch } from "@/stores/search";
 import { useUIDialogs } from "@/stores/ui-dialogs";
@@ -280,7 +281,12 @@ function WindowControls() {
       <WinBtn
         label={t("topbar.closeWindow")}
         danger
-        onClick={() => run((w) => w.close())}
+        onClick={() =>
+          run((w) => {
+            flushSessionSave();
+            return w.close();
+          })
+        }
       >
         <svg
           width="11"

@@ -49,39 +49,36 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it.fails(
-  "browse-26: the actual title-bar close action flushes the pending session",
-  async () => {
-    const memory = new Map<string, string>();
-    vi.stubGlobal("localStorage", {
-      getItem: (key: string) => memory.get(key) ?? null,
-      setItem: (key: string, value: string) => memory.set(key, value),
-    });
-    initSessionPersist();
-    act(() =>
-      usePanes.getState().openTab("left", {
-        source: { kind: "local" },
-        path: "/r2-before-close",
-      }),
-    );
-    act(() => vi.advanceTimersByTime(500));
-    const saved = memory.get("duet.session.v1");
-    expect(saved).toContain("/r2-before-close");
-    act(() =>
-      usePanes.getState().openTab("left", {
-        source: { kind: "local" },
-        path: "/r2-unsaved-last-tab",
-      }),
-    );
-    render(<TopBar />);
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(api.close).toHaveBeenCalledOnce();
-    expect(memory.get("duet.session.v1")).toContain("/r2-unsaved-last-tab");
-  },
-);
+it("browse-26: the actual title-bar close action flushes the pending session", async () => {
+  const memory = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => memory.get(key) ?? null,
+    setItem: (key: string, value: string) => memory.set(key, value),
+  });
+  initSessionPersist();
+  act(() =>
+    usePanes.getState().openTab("left", {
+      source: { kind: "local" },
+      path: "/r2-before-close",
+    }),
+  );
+  act(() => vi.advanceTimersByTime(500));
+  const saved = memory.get("duet.session.v1");
+  expect(saved).toContain("/r2-before-close");
+  act(() =>
+    usePanes.getState().openTab("left", {
+      source: { kind: "local" },
+      path: "/r2-unsaved-last-tab",
+    }),
+  );
+  render(<TopBar />);
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(api.close).toHaveBeenCalledOnce();
+  expect(memory.get("duet.session.v1")).toContain("/r2-unsaved-last-tab");
+});
 
 it("browse-31: hovering a long error keeps it visible past its initial deadline", () => {
   act(() => useToast.getState().show("R2 error that needs reading", "error"));
