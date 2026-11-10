@@ -904,7 +904,7 @@ function App() {
   useKeyboardNav(onKeyboardActivate, onUp, onQuickLook);
   useGlobalShortcuts();
   useSshHosts();
-  useConnectionEvents();
+  useConnectionEvents(onRefresh);
   useFsChangedEvents(onRefresh);
   useOpenPathEvents(navigateTo);
   useOsFileDrop();
