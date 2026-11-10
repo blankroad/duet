@@ -62,6 +62,8 @@ export interface PasswordPrompt {
 
 const waiting: PasswordPrompt[] = [];
 let watching = false;
+/** 프롬프트마다 새 id — 같은 이름의 아카이브 둘도 서로 다른 창(React key)이 된다. */
+let promptSeq = 0;
 
 /** 암호 창이 지금 떠 있거나 대화상자 대기열에 들어가 있는가. */
 function promptInFlight(): boolean {
@@ -76,11 +78,23 @@ function promptInFlight(): boolean {
 function showNext(): boolean {
   const next = waiting.shift();
   if (!next) return true;
+  promptSeq += 1;
   return useUIDialogs.getState().openWhenFree({
     kind: "extract-password",
+    promptId: `extract-password-${promptSeq}`,
     retry: next.retry,
     wrong: next.wrong,
   });
+}
+
+/**
+ * 그 프롬프트가 아직 떠 있을 때만 닫는다. 이미 닫히고 다음 아카이브의 창이 떴는데
+ * 늦게 끝난 제출(암호 재시도)이 닫기를 부르면, 다음 창을 닫지 않게 한다.
+ */
+export function closeExtractPrompt(promptId: string): void {
+  const s = useUIDialogs.getState();
+  if (s.dialog.kind === "extract-password" && s.dialog.promptId === promptId)
+    s.close();
 }
 
 /**

@@ -28,6 +28,7 @@ import { SymlinkDialog } from "@/components/dialogs/SymlinkDialog";
 import { PasswordPromptDialog } from "@/components/dialogs/PasswordPromptDialog";
 import { ExtractConflictDialog } from "@/components/dialogs/ExtractConflictDialog";
 import { ExtractHereDialog } from "@/components/dialogs/ExtractHereDialog";
+import { ExtractPasswordPrompt } from "@/components/dialogs/ExtractPasswordPrompt";
 import { ArgsDialog } from "@/components/dialogs/ArgsDialog";
 import { ConfirmDialog } from "@/components/dialogs/ConfirmDialog";
 import { CopyMoveConfirmDialog } from "@/components/dialogs/CopyMoveConfirmDialog";
@@ -40,11 +41,9 @@ import {
   elevatableDestPath,
   type ElevatablePlan,
 } from "@/lib/elevatePending";
-import { retryArchiveName } from "@/lib/extractPending";
 import {
   resolveExtractConflict,
   triggerExtractToFolders,
-  retryExtract,
   runExtractHere,
 } from "@/lib/extractActions";
 import { ProgressModal } from "@/components/dialogs/ProgressModal";
@@ -2295,22 +2294,8 @@ function App() {
         />
       )}
       {dialog.kind === "extract-password" && (
-        <PasswordPromptDialog
-          archiveName={retryArchiveName(dialog.retry)}
-          wrongPassword={dialog.wrong}
-          // 닫히면(입력·취소) extractPending 의 대기열이 다음 아카이브의 창을 연다.
-          onClose={closeDialog}
-          submit={async (pw) => {
-            // 커맨드는 task enqueue 후 TaskId 를 즉시 반환 — 암호가 틀리면 task 가
-            // NeedPassword 로 실패하고 useTaskEvents 가 이 다이얼로그를 다시 연다.
-            const r = await retryExtract(dialog.retry, pw);
-            if (!r.ok)
-              showError("toast.extractFailed", r.error, {
-                path: retryArchiveName(dialog.retry),
-              });
-            return "ok";
-          }}
-        />
+        // 프롬프트마다 새 key — 다음 아카이브로 넘어가면 입력 상태가 남지 않는다.
+        <ExtractPasswordPrompt key={dialog.promptId} prompt={dialog} />
       )}
       {dialog.kind === "extract-conflict" && (
         <ExtractConflictDialog
