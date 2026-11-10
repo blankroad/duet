@@ -13,6 +13,7 @@ use crate::core::ops::{
     self, ApplyDecision, BatchRenamePlan, CopyPlan, DeletePlan, MovePlan, OpCtx, RenameRule,
     SyncPlan,
 };
+use crate::core::undo::PoolFs;
 use crate::fs::{FileSystem, LocalFs, SshFs};
 use crate::services::archive_events::{ArchiveNoticeEvent, ExtractHereNoticeEvent};
 use crate::services::connection_pool::ConnectionPool;
@@ -1760,24 +1761,31 @@ async fn enqueue_extract_here(
                         app: Some(app.clone()),
                     };
                     let archive_dir = archive.location.clone();
-                    let (entry, report, summary) = archive_here::extract_here_execute(
+                    // journal 기록이 실패하면 엔진이 이 fs 들로 그 자리에서 되돌린다.
+                    let rollback = PoolFs(&pool);
+                    let out = archive_here::extract_here_execute(
                         &*fs,
-                        archive,
-                        policy,
-                        password,
-                        &protect,
+                        archive_here::HereRequest {
+                            archive,
+                            policy,
+                            password,
+                            protect: &protect,
+                        },
                         &ctx,
+                        &rollback,
                         cancel_token,
                     )
-                    .await?;
-                    emit_archive_notice(&app, &summary.archive_name, &report);
-                    if summary.is_notable() {
+                    .await;
+                    // 실패해도 남은 준비 폴더 등은 알린다 — 에러 종류는 그대로 둔다.
+                    if out.summary.is_notable() {
                         let _ = ExtractHereNoticeEvent {
                             archive_dir,
-                            summary,
+                            summary: out.summary.clone(),
                         }
                         .emit(&app);
                     }
+                    let (entry, report) = out.result?;
+                    emit_archive_notice(&app, &out.summary.archive_name, &report);
                     Ok(emit_pushed(&app, entry))
                 })
             }),
