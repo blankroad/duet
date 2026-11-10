@@ -183,6 +183,8 @@ describe("extract menu items", () => {
     const m = menuFor("a.zip", 1);
     expect(m.here?.label).toBe("Extract here");
     expect(m.folder?.label).toBe("Extract to folder");
+    // 팔레트 file.extract 와 같은 동작 — 메뉴가 그 단축키를 보여준다.
+    expect(m.folder?.commandId).toBe("file.extract");
   });
 
   it("several archives: counted labels", () => {

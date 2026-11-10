@@ -43,6 +43,7 @@ import {
 import { retryArchiveName } from "@/lib/extractPending";
 import {
   resolveExtractConflict,
+  triggerExtractToFolders,
   retryExtract,
   runExtractHere,
 } from "@/lib/extractActions";
@@ -104,6 +105,7 @@ import {
   addSelectionToShelf,
   applyShelfTo,
   executeTransfer,
+  triggerCompress,
 } from "@/lib/fileActions";
 import { useCommands } from "@/stores/commands";
 import { usePalette } from "@/stores/palette";
@@ -1200,6 +1202,8 @@ function App() {
       copyPath: () => void copySelectionPaths(showToast),
       copyName: () => void copySelectionNames(showToast),
       calcDirSize: () => void calcDirSizes(usePanes.getState().activePane),
+      extract: () => void triggerExtractToFolders(openDialog, showToast),
+      compress: () => triggerCompress(openDialog, showToast),
       clipCopy: () => clipCopy(showToast),
       clipCut: () => clipCut(showToast),
       clipPaste: () => void clipPaste(openDialog, showToast),

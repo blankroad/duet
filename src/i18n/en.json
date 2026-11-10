@@ -1328,6 +1328,8 @@
       "clipPaste": "Paste",
       "copyPath": "Copy path",
       "copyName": "Copy name",
+      "extract": "Extract to folder",
+      "compress": "Compress",
       "calcSize": "Calculate folder size",
       "contextMenu": "Open context menu",
       "edit": "Edit file"

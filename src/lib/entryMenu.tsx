@@ -313,6 +313,7 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
           ? i18n.t("menu.extractEach", { count: extractable })
           : i18n.t("menu.extractToFolder"),
         icon: <FolderInput size={ICON} />,
+        commandId: "file.extract",
         onSelect: () => void triggerExtractToFolders(open, showToast),
       },
       sep(),
@@ -440,6 +441,7 @@ export function buildEntryMenu(deps: EntryMenuDeps): MenuEntry[] {
     id: "compress",
     label: i18n.t("menu.compress"),
     icon: <Package size={ICON} />,
+    commandId: "file.compress",
     onSelect: () => triggerCompress(open, showToast),
   });
   // 폴더(또는 다중 선택에 폴더 포함 가능성) — 재귀 크기 계산해 크기 컬럼에 표시.

@@ -138,6 +138,10 @@ export interface BuiltinDeps {
   copyPath: () => void;
   copyName: () => void;
   calcDirSize: () => void;
+  /** 선택한 아카이브를 각각 자기 폴더로 압축 풀기 (우클릭 "폴더로 압축 풀기"와 같음). */
+  extract: () => void;
+  /** 선택 항목 압축 — 이름/포맷 다이얼로그. */
+  compress: () => void;
   clipCopy: () => void;
   clipCut: () => void;
   clipPaste: () => void;
@@ -685,6 +689,19 @@ export function buildBuiltins(deps: BuiltinDeps): Command[] {
         category: "File",
         defaultKey: "Shift+Space",
         action: deps.calcDirSize,
+      },
+      {
+        // 기본 키 없음 — 팔레트·사용자 지정 키로만.
+        id: "file.extract",
+        label: "Extract to folder",
+        category: "File",
+        action: deps.extract,
+      },
+      {
+        id: "file.compress",
+        label: "Compress",
+        category: "File",
+        action: deps.compress,
       },
       {
         id: "edit.undo",
