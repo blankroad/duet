@@ -447,12 +447,12 @@ async fn remote_unsupported_formats_fail_per_item() {
     )
     .await;
     assert!(items[0].plan.is_some());
-    for i in 1..=3 {
+    for it in &items[1..=3] {
         assert!(
-            matches!(items[i].error, Some(DuetError::NotSupported(_))),
+            matches!(it.error, Some(DuetError::NotSupported(_))),
             "{}: {:?}",
-            items[i].archive.name,
-            items[i].error
+            it.archive.name,
+            it.error
         );
     }
     assert!(items[4].plan.is_some());
